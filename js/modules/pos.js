@@ -980,23 +980,27 @@ export const POS = (() => {
 
     const enterSaleMode = () => {
       if (!state.sesionActiva) { showModalApertura(); return; }
-      // Check if there's an active cart in sessionStorage with items
-      let hasActiveCart = false;
-      try {
-        const saved = sessionStorage.getItem('pos_cart');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            hasActiveCart = true;
+      // Check if there's an active cart in sessionStorage with items (skip if editing)
+      if (!state.editingVentaId) {
+        let hasActiveCart = false;
+        try {
+          const saved = sessionStorage.getItem('pos_cart');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              hasActiveCart = true;
+            }
           }
+        } catch(e) {}
+        if (hasActiveCart) {
+          if (!confirm('¿Abandonar la venta actual?')) return;
         }
-      } catch(e) {}
-      if (hasActiveCart) {
-        if (!confirm('¿Abandonar la venta actual?')) return;
       }
-      // Always start with empty cart
-      state.cart = [];
-      saveCart();
+      // Start with empty cart unless editing
+      if (!state.editingVentaId) {
+        state.cart = [];
+        saveCart();
+      }
       state.mode = 'sale';
       const dash = ge('pos-dashboard');
       const sale = ge('pos-sale');
