@@ -517,6 +517,9 @@ export const POS = (() => {
   function init(params = []) {
     console.log('💳 POS module initialized');
 
+    // Always clear sessionStorage cart on init
+    sessionStorage.removeItem('pos_cart');
+
     // ── STATE ──────────────────────────────────────────────────────
     const state = {
       mode: 'dashboard',       // 'dashboard' | 'sale'
@@ -976,6 +979,8 @@ export const POS = (() => {
       if (dash) dash.style.display = 'flex';
       if (sale) sale.classList.add('hidden');
       loadDashboard();
+      // Clear sessionStorage cart on exit from sale mode
+      sessionStorage.removeItem('pos_cart');
     };
 
     const enterSaleMode = () => {
@@ -1075,6 +1080,24 @@ export const POS = (() => {
 
       ge('ventas-count-badge').textContent = ventas.filter(v => v.estado === 'completada').length;
       updateSummaryBar(state.sesionActiva);
+
+      // Add dev clear button if in dev mode
+      if (localStorage.getItem('dev_mode') === 'true') {
+        const dashBody = ge('pos-dashboard').querySelector('.dashboard-body');
+        const existingBtn = dashBody.querySelector('.dev-clear-btn');
+        if (existingBtn) existingBtn.remove();
+        const btn = document.createElement('button');
+        btn.className = 'dev-clear-btn';
+        btn.style.cssText = 'position:absolute;bottom:10px;right:10px;padding:8px 12px;background:#f44336;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.85em;';
+        btn.textContent = '🗑️ Limpiar ventas pendientes';
+        btn.addEventListener('click', () => {
+          sessionStorage.clear();
+          window.SGA_DB.run('DELETE FROM pedidos_abiertos');
+          showToast('Ventas pendientes eliminadas');
+          loadDashboard();
+        });
+        dashBody.appendChild(btn);
+      }
     };
 
     const updateSummaryBar = (sesion) => {
