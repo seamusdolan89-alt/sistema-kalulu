@@ -156,6 +156,9 @@ const EditorProducto = (() => {
     const margenActual = p.precio_venta > 0
       ? ((p.precio_venta - p.costo) / p.precio_venta * 100).toFixed(2)
       : '0.00';
+    const markupActual = p.costo > 0
+      ? (p.precio_venta / p.costo).toFixed(2)
+      : '0.00';
 
     const esMadre   = p.es_madre === 1 || p.es_madre === '1';
     const tieneMadre = !!p.producto_madre_id;
@@ -243,27 +246,48 @@ const EditorProducto = (() => {
   <div id="section-precios" class="editor-section" style="display:none">
     <h3 class="ed-section-title">💰 Precios y Costos</h3>
 
-    <div class="form-row">
+    <div class="ed-precios-grid">
       <div class="form-group">
-        <label for="ed-costo">Costo actual</label>
-        <input type="number" id="ed-costo" class="input-full" step="0.01" min="0" value="${p.costo || 0}">
+        <label for="ed-costo">Costo</label>
+        <div class="ed-input-prefix-wrap">
+          <span class="ed-input-affix">$</span>
+          <input type="number" id="ed-costo" class="input-full" step="0.01" min="0" value="${p.costo || 0}">
+        </div>
       </div>
       <div class="form-group">
         <label for="ed-precio-venta">Precio de venta</label>
-        <input type="number" id="ed-precio-venta" class="input-full" step="0.01" min="0" value="${p.precio_venta || 0}">
+        <div class="ed-input-prefix-wrap">
+          <span class="ed-input-affix">$</span>
+          <input type="number" id="ed-precio-venta" class="input-full" step="0.01" min="0" value="${p.precio_venta || 0}">
+        </div>
       </div>
       <div class="form-group">
-        <label for="ed-margen">Margen %</label>
-        <input type="number" id="ed-margen" class="input-full" value="${margenActual}" readonly style="background:var(--color-background-secondary)">
+        <label for="ed-margen">Margen</label>
+        <div class="ed-input-suffix-wrap">
+          <input type="number" id="ed-margen" class="input-full" step="0.01" value="${margenActual}">
+          <span class="ed-input-affix">%</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="ed-markup">Markup</label>
+        <input type="number" id="ed-markup" class="input-full" step="0.01" min="0" value="${markupActual}">
       </div>
     </div>
 
     <div class="ed-calculadora">
-      <h4 style="margin:0 0 12px;font-size:14px;color:var(--color-text-secondary)">Calculadora de precio</h4>
+      <h4 style="margin:0 0 10px;font-size:14px;color:var(--color-text-secondary)">Calculadora de precio</h4>
+      <div style="display:flex;gap:20px;margin-bottom:12px">
+        <label class="ed-radio-label">
+          <input type="radio" name="ed-calc-mode" value="margen" checked> Quiero margen %
+        </label>
+        <label class="ed-radio-label">
+          <input type="radio" name="ed-calc-mode" value="markup"> Quiero markup
+        </label>
+      </div>
       <div class="form-row">
         <div class="form-group">
-          <label for="ed-margen-objetivo">Quiero % de margen</label>
-          <input type="number" id="ed-margen-objetivo" class="input-full" placeholder="ej: 40" min="0" max="100">
+          <label id="ed-calc-valor-label" for="ed-calc-valor">Margen objetivo %</label>
+          <input type="number" id="ed-calc-valor" class="input-full" placeholder="ej: 40" min="0">
         </div>
         <div class="form-group">
           <label for="ed-precio-sugerido">Precio sugerido</label>
@@ -341,10 +365,24 @@ const EditorProducto = (() => {
         <small class="ed-text-muted">Alerta cuando el stock cae por debajo de este valor</small>
       </div>
       <div class="form-group">
-        <label for="ed-cant-pedido">Cant. pedido sugerida</label>
-        <input type="number" id="ed-cant-pedido" class="input-full" step="1" min="0" value="${cantPedido}">
-        <small class="ed-text-muted">Cantidad a pedir al reponer stock</small>
+        <label for="ed-cant-pedido">Pedido sugerido</label>
+        <div style="display:flex;gap:8px">
+          <input type="number" id="ed-cant-pedido" class="input-full" step="1" min="0" value="${cantPedido}">
+          <select id="ed-pedido-unidad" class="select-full" style="flex:0 0 auto;min-width:130px">
+            <option value="unidad"        ${(p.pedido_unidad || 'unidad') === 'unidad'        ? 'selected' : ''}>Unidad</option>
+            <option value="kg"            ${(p.pedido_unidad || '') === 'kg'            ? 'selected' : ''}>Kg</option>
+            <option value="bulto_cerrado" ${(p.pedido_unidad || '') === 'bulto_cerrado' ? 'selected' : ''}>Bulto cerrado</option>
+            <option value="pack"          ${(p.pedido_unidad || '') === 'pack'          ? 'selected' : ''}>Pack</option>
+            <option value="display"       ${(p.pedido_unidad || '') === 'display'       ? 'selected' : ''}>Display</option>
+            <option value="bolsa"         ${(p.pedido_unidad || '') === 'bolsa'         ? 'selected' : ''}>Bolsa</option>
+          </select>
+        </div>
+        <small class="ed-text-muted">Cantidad y unidad a pedir al reponer stock</small>
       </div>
+    </div>
+
+    <div id="ed-stock-stats" class="ed-text-sm" style="margin-top:14px;padding:10px 14px;background:var(--color-background-secondary);border-radius:6px;color:var(--color-text-secondary)">
+      Cargando estadísticas...
     </div>
   </div>
 
@@ -355,16 +393,14 @@ const EditorProducto = (() => {
 
     <div id="ed-sustitutos-list" style="margin-bottom:12px"></div>
 
-    <div class="form-row">
-      <div class="form-group">
-        <label for="ed-sustituto-select">Agregar sustituto</label>
-        <select id="ed-sustituto-select" class="select-full">
-          <option value="">-- Seleccionar producto --</option>
-        </select>
+    <div class="form-group">
+      <label>Agregar sustituto</label>
+      <div style="position:relative">
+        <input type="text" id="ed-sustituto-search" class="input-full"
+               placeholder="🔍 Buscar por nombre o escanear código..." autocomplete="off">
+        <div id="ed-sustituto-dropdown" class="ed-search-dropdown" style="display:none"></div>
       </div>
-      <div class="form-group" style="padding-top:22px">
-        <button id="ed-btn-add-sustituto" class="btn btn-secondary btn-sm">+ Agregar</button>
-      </div>
+      <small class="ed-text-muted">Escribí el nombre o escaneá un código (Enter para seleccionar)</small>
     </div>
   </div>
 
@@ -467,6 +503,30 @@ const EditorProducto = (() => {
 }
 .ed-toggle-switch input:checked + .ed-toggle-slider { background: var(--color-success); }
 .ed-toggle-switch input:checked + .ed-toggle-slider:before { transform: translateX(20px); }
+.ed-precios-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;
+}
+.ed-input-prefix-wrap,
+.ed-input-suffix-wrap {
+  display: flex; align-items: stretch;
+  border: 1px solid var(--color-border, #ddd); border-radius: 6px; overflow: hidden; background: white;
+}
+.ed-input-prefix-wrap .input-full,
+.ed-input-suffix-wrap .input-full {
+  border: none; border-radius: 0; flex: 1; min-width: 0;
+  background: transparent; box-shadow: none;
+}
+.ed-input-prefix-wrap .input-full:focus,
+.ed-input-suffix-wrap .input-full:focus { outline: none; box-shadow: none; }
+.ed-input-prefix-wrap:focus-within,
+.ed-input-suffix-wrap:focus-within { border-color: var(--color-primary, #2196F3); }
+.ed-input-affix {
+  padding: 0 8px; background: var(--color-background-secondary, #f5f5f5);
+  border-right: 1px solid var(--color-border, #ddd);
+  color: var(--color-text-secondary); font-size: 13px;
+  display: flex; align-items: center; white-space: nowrap; flex-shrink: 0;
+}
+.ed-input-suffix-wrap .ed-input-affix { border-right: none; border-left: 1px solid var(--color-border, #ddd); }
 .ed-calculadora {
   background: var(--color-background-secondary); border: 1px solid var(--color-border);
   border-radius: 8px; padding: 16px; margin: 16px 0;
@@ -552,7 +612,7 @@ const EditorProducto = (() => {
       a.style.fontWeight = isActive ? '600' : '';
     });
 
-    if (sectionId === 'stock')          renderStock();
+    if (sectionId === 'stock')          { renderStock(); renderStockStats(); }
     if (sectionId === 'sustitutos')     renderSustitutos();
     if (sectionId === 'familia')        renderFamilia();
     if (sectionId === 'transacciones')  renderTransacciones();
@@ -623,6 +683,30 @@ const EditorProducto = (() => {
         renderStock();
       });
     });
+  };
+
+  const renderStockStats = () => {
+    const statsDiv = ge('ed-stock-stats');
+    if (!statsDiv) return;
+    try {
+      const res = window.SGA_DB.query(`
+        SELECT COALESCE(SUM(vi.cantidad), 0) AS total_cant
+        FROM venta_items vi
+        JOIN ventas v ON v.id = vi.venta_id
+        WHERE vi.producto_id = ? AND v.fecha >= date('now', '-6 months')
+      `, [state.productoId]);
+      const total = res.length ? (parseFloat(res[0].total_cant) || 0) : 0;
+      if (total === 0) {
+        statsDiv.textContent = 'Sin datos de ventas en los últimos 6 meses.';
+        return;
+      }
+      const promedio = (total / 6).toFixed(1);
+      statsDiv.innerHTML =
+        `📊 Promedio mensual: <strong>${promedio} unidades</strong>` +
+        `&nbsp;&nbsp;|&nbsp;&nbsp;⚠️ Quiebres: <span title="Requiere historial de movimientos de stock">Sin historial</span>`;
+    } catch (e) {
+      statsDiv.textContent = 'Sin datos suficientes.';
+    }
   };
 
   const saveStockImmediate = (sucursalId, cantidad) => {
@@ -700,20 +784,64 @@ const EditorProducto = (() => {
       });
     }
 
-    // Populate add-sustituto select
-    const sel = ge('ed-sustituto-select');
-    if (sel) {
-      const existingIds = new Set(sustitutos.map(s => s.sustituto_id));
-      existingIds.add(state.productoId);
-      const available = window.SGA_DB.query(
-        'SELECT id, nombre FROM productos WHERE activo = 1 ORDER BY nombre'
-      );
-      sel.innerHTML = '<option value="">-- Seleccionar producto --</option>' +
-        available
-          .filter(pr => !existingIds.has(pr.id))
-          .map(pr => `<option value="${escapeHtml(pr.id)}">${escapeHtml(pr.nombre)}</option>`)
-          .join('');
+  };
+
+  const addSustituto = (sustitutoId) => {
+    if (!sustitutoId) return;
+    const now = window.SGA_Utils.formatISODate(new Date());
+    window.SGA_DB.run(
+      'INSERT OR IGNORE INTO producto_sustitutos (producto_id, sustituto_id, activo, fecha_asignacion) VALUES (?, ?, 1, ?)',
+      [state.productoId, sustitutoId, now]
+    );
+    renderSustitutos();
+  };
+
+  const renderSustitutoDropdown = (q) => {
+    const dropdown = ge('ed-sustituto-dropdown');
+    if (!dropdown) return;
+    if (!q || q.length < 2) { dropdown.style.display = 'none'; return; }
+
+    const existingIds = new Set(
+      window.SGA_DB.query(
+        'SELECT sustituto_id FROM producto_sustitutos WHERE producto_id = ?',
+        [state.productoId]
+      ).map(r => r.sustituto_id)
+    );
+    existingIds.add(state.productoId);
+
+    const results = window.SGA_DB.query(`
+      SELECT p.id, p.nombre, cat.nombre AS categoria_nombre,
+        cb.codigo AS codigo_barras
+      FROM productos p
+      LEFT JOIN categorias cat ON cat.id = p.categoria_id
+      LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
+      WHERE p.activo = 1 AND (LOWER(p.nombre) LIKE ? OR cb.codigo LIKE ?)
+      ORDER BY p.nombre LIMIT 10
+    `, ['%' + q.toLowerCase() + '%', '%' + q + '%'])
+    .filter(pr => !existingIds.has(pr.id));
+
+    if (!results.length) {
+      dropdown.innerHTML = '<div class="ed-search-result-item ed-text-muted">Sin resultados</div>';
+      dropdown.style.display = '';
+      return;
     }
+
+    dropdown.innerHTML = results.map(pr => `
+      <div class="ed-search-result-item" data-id="${escapeHtml(pr.id)}">
+        <strong>${escapeHtml(pr.nombre)}</strong>
+        ${pr.categoria_nombre ? `<span class="ed-sust-code">${escapeHtml(pr.categoria_nombre)}</span>` : ''}
+      </div>
+    `).join('');
+    dropdown.style.display = '';
+
+    dropdown.querySelectorAll('.ed-search-result-item[data-id]').forEach(item => {
+      item.addEventListener('click', () => {
+        addSustituto(item.dataset.id);
+        const si = ge('ed-sustituto-search');
+        if (si) si.value = '';
+        dropdown.style.display = 'none';
+      });
+    });
   };
 
   // ── FAMILIA SECTION ───────────────────────────────────────────────────────
@@ -1233,7 +1361,16 @@ const EditorProducto = (() => {
     // Precio calculator
     ge('ed-costo') && ge('ed-costo').addEventListener('input', recalcMargen);
     ge('ed-precio-venta') && ge('ed-precio-venta').addEventListener('input', recalcMargen);
-    ge('ed-margen-objetivo') && ge('ed-margen-objetivo').addEventListener('input', recalcPrecioSugerido);
+    ge('ed-margen') && ge('ed-margen').addEventListener('input', recalcFromMargen);
+    ge('ed-markup') && ge('ed-markup').addEventListener('input', recalcFromMarkup);
+    ge('ed-calc-valor') && ge('ed-calc-valor').addEventListener('input', recalcPrecioSugerido);
+    document.querySelectorAll('input[name="ed-calc-mode"]').forEach(r => {
+      r.addEventListener('change', () => {
+        const lbl = ge('ed-calc-valor-label');
+        if (lbl) lbl.textContent = r.value === 'margen' ? 'Margen objetivo %' : 'Markup objetivo';
+        recalcPrecioSugerido();
+      });
+    });
     ge('ed-btn-aplicar-precio') && ge('ed-btn-aplicar-precio').addEventListener('click', () => {
       const val = ge('ed-precio-sugerido') && ge('ed-precio-sugerido').value;
       if (val) {
@@ -1277,18 +1414,43 @@ const EditorProducto = (() => {
       openAgregarHijoModal();
     });
 
-    // Sustitutos
-    ge('ed-btn-add-sustituto') && ge('ed-btn-add-sustituto').addEventListener('click', () => {
-      const sel = ge('ed-sustituto-select');
-      const id  = sel && sel.value;
-      if (!id) return;
-      const now = window.SGA_Utils.formatISODate(new Date());
-      window.SGA_DB.run(
-        'INSERT OR IGNORE INTO producto_sustitutos (producto_id, sustituto_id, activo, fecha_asignacion) VALUES (?, ?, 1, ?)',
-        [state.productoId, id, now]
-      );
-      renderSustitutos();
-    });
+    // Sustitutos — predictive search
+    const sustitutoSearch = ge('ed-sustituto-search');
+    if (sustitutoSearch) {
+      sustitutoSearch.addEventListener('input', () => {
+        renderSustitutoDropdown(sustitutoSearch.value.trim());
+      });
+      sustitutoSearch.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          sustitutoSearch.value = '';
+          const dd = ge('ed-sustituto-dropdown');
+          if (dd) dd.style.display = 'none';
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const q = sustitutoSearch.value.trim();
+          // Barcode scanner: mostly digits → search by exact barcode and auto-select
+          if (/^\d{6,}$/.test(q)) {
+            const hit = window.SGA_DB.query(
+              'SELECT p.id FROM productos p JOIN codigos_barras cb ON cb.producto_id = p.id WHERE cb.codigo = ? AND p.activo = 1 LIMIT 1',
+              [q]
+            );
+            if (hit.length) {
+              addSustituto(hit[0].id);
+              sustitutoSearch.value = '';
+              const dd = ge('ed-sustituto-dropdown');
+              if (dd) dd.style.display = 'none';
+            }
+          }
+        }
+      });
+      document.addEventListener('click', (e) => {
+        if (!sustitutoSearch.contains(e.target)) {
+          const dd = ge('ed-sustituto-dropdown');
+          if (dd) dd.style.display = 'none';
+        }
+      });
+    }
 
     // Transacciones tabs
     document.querySelectorAll('.ed-tab-btn').forEach(btn => {
@@ -1377,20 +1539,53 @@ const EditorProducto = (() => {
     const costo  = parseFloat((ge('ed-costo') || {}).value) || 0;
     const precio = parseFloat((ge('ed-precio-venta') || {}).value) || 0;
     const margen = precio > 0 ? ((precio - costo) / precio * 100).toFixed(2) : '0.00';
-    const el = ge('ed-margen');
-    if (el) el.value = margen;
+    const markup = costo  > 0 ? (precio / costo).toFixed(2) : '0.00';
+    const elMargen = ge('ed-margen');
+    if (elMargen) elMargen.value = margen;
+    const elMarkup = ge('ed-markup');
+    if (elMarkup) elMarkup.value = markup;
     recalcPrecioSugerido();
   };
 
+  const recalcFromMargen = () => {
+    const costo  = parseFloat((ge('ed-costo') || {}).value) || 0;
+    const margen = parseFloat((ge('ed-margen') || {}).value);
+    if (isNaN(margen) || margen >= 100 || margen < 0) return;
+    const nuevoPrecio = costo > 0 ? costo / (1 - margen / 100) : 0;
+    const elPrecio = ge('ed-precio-venta');
+    const elMarkup = ge('ed-markup');
+    if (elPrecio) elPrecio.value = nuevoPrecio.toFixed(2);
+    if (elMarkup) elMarkup.value = costo > 0 ? (nuevoPrecio / costo).toFixed(2) : '0.00';
+    recalcPrecioSugerido();
+    markDirty();
+  };
+
+  const recalcFromMarkup = () => {
+    const costo  = parseFloat((ge('ed-costo') || {}).value) || 0;
+    const markup = parseFloat((ge('ed-markup') || {}).value);
+    if (isNaN(markup) || markup <= 0) return;
+    const nuevoPrecio = costo * markup;
+    const elPrecio = ge('ed-precio-venta');
+    const elMargen = ge('ed-margen');
+    if (elPrecio) elPrecio.value = nuevoPrecio.toFixed(2);
+    if (elMargen) elMargen.value = nuevoPrecio > 0 ? ((nuevoPrecio - costo) / nuevoPrecio * 100).toFixed(2) : '0.00';
+    recalcPrecioSugerido();
+    markDirty();
+  };
+
   const recalcPrecioSugerido = () => {
-    const costo      = parseFloat((ge('ed-costo') || {}).value) || 0;
-    const margenObj  = parseFloat((ge('ed-margen-objetivo') || {}).value);
-    const el = ge('ed-precio-sugerido');
+    const costo    = parseFloat((ge('ed-costo') || {}).value) || 0;
+    const el       = ge('ed-precio-sugerido');
     if (!el) return;
-    if (!isNaN(margenObj) && margenObj >= 0 && margenObj < 100 && costo > 0) {
-      el.value = (costo / (1 - margenObj / 100)).toFixed(2);
+    const calcMode = document.querySelector('input[name="ed-calc-mode"]:checked');
+    const modeVal  = calcMode ? calcMode.value : 'margen';
+    const valor    = parseFloat((ge('ed-calc-valor') || {}).value);
+    if (modeVal === 'margen') {
+      el.value = (!isNaN(valor) && valor >= 0 && valor < 100 && costo > 0)
+        ? (costo / (1 - valor / 100)).toFixed(2) : '';
     } else {
-      el.value = '';
+      el.value = (!isNaN(valor) && valor > 0 && costo > 0)
+        ? (costo * valor).toFixed(2) : '';
     }
   };
 
@@ -1413,7 +1608,7 @@ const EditorProducto = (() => {
         categoria_id = ?, proveedor_principal_id = ?, proveedor_alternativo_id = ?,
         unidad_medida = ?,
         costo = ?, precio_venta = ?,
-        stock_minimo = ?, stock_alerta = ?, cant_pedido = ?,
+        stock_minimo = ?, stock_alerta = ?, cant_pedido = ?, pedido_unidad = ?,
         activo = ?,
         es_madre = ?, producto_madre_id = ?, precio_independiente = ?,
         imagen = ?,
@@ -1431,6 +1626,7 @@ const EditorProducto = (() => {
       stockAlerta,   // keep stock_minimo in sync for backward compat
       stockAlerta,
       cantPedido,
+      (ge('ed-pedido-unidad') || {}).value || 'unidad',
       (ge('ed-activo') || {}).checked ? 1 : 0,
       state.producto.es_madre ? 1 : 0,
       state.producto.es_madre ? null : (state.producto.producto_madre_id || null),

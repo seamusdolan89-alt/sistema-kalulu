@@ -227,6 +227,7 @@
         stock_minimo REAL DEFAULT 0,
         stock_alerta REAL DEFAULT 0,
         cant_pedido REAL DEFAULT 0,
+        pedido_unidad TEXT DEFAULT 'unidad',
         hereda_costo INTEGER DEFAULT 1,
         hereda_precio INTEGER DEFAULT 1,
         imagen TEXT,
@@ -468,6 +469,7 @@
     const columnAlterations = [
       'ALTER TABLE productos ADD COLUMN stock_alerta REAL DEFAULT 0',
       'ALTER TABLE productos ADD COLUMN cant_pedido REAL DEFAULT 0',
+      "ALTER TABLE productos ADD COLUMN pedido_unidad TEXT DEFAULT 'unidad'",
       'ALTER TABLE productos ADD COLUMN hereda_costo INTEGER DEFAULT 1',
       'ALTER TABLE productos ADD COLUMN hereda_precio INTEGER DEFAULT 1',
       'ALTER TABLE productos ADD COLUMN imagen TEXT',
