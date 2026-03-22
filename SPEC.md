@@ -1,7 +1,7 @@
 # SPEC.md — Sistema de Gestión de Almacén (SGA)
 
 > **Versión:** 1.0  
-> **Fecha:** 2025  
+> **Fecha:** 2026  
 > **Stack:** HTML5 + CSS3 + JavaScript ES6 + IndexedDB (offline-first) + SQLite via OPFS  
 > **Arquitectura:** Single Page Application (SPA) sin frameworks, sin build system, 100% local
 
@@ -69,6 +69,27 @@ Sistema de gestión integral para almacén con soporte multi-sucursal. Diseñado
   - Si acepta: actualiza la madre y todos los hijos
   - Si rechaza: actualiza solo ese producto
 
+#### Editor de productos
+- Abre como página completa, no modal
+- Sidebar izquierdo con navegación por secciones:
+  - Datos Básicos
+  - Precios y Costos
+  - Familia
+  - Stock
+  - Sustitutos
+  - Promociones
+  - Vencimientos
+  - Transacciones
+  - Imagen
+- Campos actualizados: stock_minimo renombrado a stock_alerta
+- Nuevo campo: cant_pedido (cantidad sugerida para reposición)
+- Nuevos campos para familia: hereda_costo, hereda_precio (booleanos para herencia)
+
+#### Importación desde Excel
+- Formato esperado: columnas `codigo_barras | nombre | cantidad`
+- Preview antes de confirmar importación
+- Columna barcode formateada como texto en template de exportación
+
 **Campos de producto:**
 ```
 id (UUID)
@@ -80,11 +101,12 @@ proveedor_principal_id
 proveedor_alternativo_id
 producto_madre_id (null si es madre o independiente)
 es_madre (boolean)
+hereda_costo (boolean, default true)
+hereda_precio (boolean, default true)
 costo
 precio_venta
 margen (calculado)
 stock_actual (por sucursal, tabla stock)
-stock_minimo (backward compat, igual a stock_alerta)
 stock_alerta (dispara alerta cuando stock cae por debajo)
 cant_pedido (cantidad sugerida para reposición)
 imagen (base64, almacenada en productos.imagen)
@@ -113,34 +135,63 @@ Al crear un producto, el sistema pregunta:
 1. ¿Es producto madre, hijo de otro, o independiente?
 2. ¿Es sustituto de algún producto existente?
 3. ¿Tiene proveedor principal y alternativo?
-4. ¿Cuál es el stock mínimo?
+4. ¿Cuál es el stock alerta?
 
 ---
 
 ### 5.2 MÓDULO: PUNTO DE VENTA (POS)
 
+#### Modos de operación
+- **DASHBOARD MODE:** Pantalla principal, muestra ventas del turno actual. Es el punto de entrada siempre.
+- **SALE MODE:** Modo de venta activa, con búsqueda de productos, carrito, cliente y pagos.
+
 #### Flujo de venta
-1. Apertura de caja (saldo inicial en efectivo)
-2. Escaneo de productos (código de barras o búsqueda)
-3. Visualización de carrito con cantidades, precios y subtotales
-4. Selección de cliente (opcional, para cuenta corriente)
-5. Selección de medio(s) de pago (puede ser pago mixto)
-6. Confirmación y emisión de ticket
+1. Desde dashboard, presionar F3 o "Nueva Venta" para entrar a SALE MODE
+2. Escaneo/búsqueda de productos (código de barras o búsqueda por nombre/código)
+3. Carrito persiste en sessionStorage; si hay carrito activo, pregunta "¿Abandonar la venta actual?" al iniciar nueva
+4. Selección de cliente opcional (para cuenta corriente)
+5. Selección de medio(s) de pago (pago mixto soportado)
+6. Confirmación con preview de ticket, luego impresión y retorno a dashboard
 
 #### Medios de pago soportados
-- **Efectivo** (con cálculo de vuelto; el vuelto puede quedar como saldo a favor del cliente)
-- **Mercado Pago** (QR o link; registro manual de confirmación)
-- **Tarjeta de crédito/débito** (posnet externo; registro manual)
-- **Transferencia bancaria** (registro manual)
-- **Cuenta corriente** (registra deuda del cliente)
+- **Efectivo** (con cálculo de vuelto; vuelto puede quedar como saldo a favor si cliente seleccionado)
+- **Mercado Pago** (registro manual de confirmación)
+- **Tarjeta** (posnet externo, registro manual)
+- **Transferencia** (registro manual)
+- **Cuenta corriente** NO es un medio de pago, es una sección separada para gestionar deudas
+
+#### Sección Cuenta Corriente
+- Aparece solo cuando un cliente está seleccionado
+- Muestra saldo actual (deuda/a favor)
+- Toggle "Aplicar deuda" (por defecto ON) para netear pagos con deuda existente
+- Toggle "Registrar diferencia como deuda" (si pago insuficiente, registra como deuda del cliente)
+- Vuelto a favor toggle solo visible si cliente seleccionado
 
 #### Pago mixto
-Una venta puede dividirse entre múltiples medios de pago. Ejemplo: $3.000 en efectivo + $2.000 en Mercado Pago.
+Una venta puede dividirse entre múltiples medios. Cada medio muestra:
+- "Total a cobrar: $X"
+- "Monto recibido: $___" (editable, defaults to total)
 
-#### Descuentos
+#### Descuentos y promociones
 - Descuento por ítem (porcentaje o monto fijo)
 - Descuento global sobre el total
-- Aplicación de promociones/combos automáticos
+- Aplicación automática de promociones activas
+
+#### Confirmación y ticket
+- Modal de preview antes de confirmar
+- Botones: "✓ Confirmar y finalizar venta", "← Volver a editar", "🖨️ Imprimir ticket"
+- Después de confirmar: toast "Venta registrada ✓", limpiar carrito, retornar a dashboard
+
+#### Teclado shortcuts
+- F2: Focus en búsqueda de productos
+- F3: Nueva venta (desde dashboard)
+- F4: Pedidos abiertos
+- F10: Confirmar venta
+- ESC: Cerrar dropdown/modal, o salir de sale mode si búsqueda vacía y sin modal
+
+#### Estados y persistencia
+- Carrito persiste en sessionStorage
+- Paused orders (pedidos abiertos) guardados en DB para retomar luego
 
 ---
 
@@ -354,7 +405,7 @@ activo
 | Comisiones | Período, vendedor | Calcula comisiones según % configurado por producto/categoría |
 | Cuenta corriente | Cliente | Historial completo de movimientos |
 | Stock actual | Sucursal, categoría | Stock actual vs. mínimo |
-| Productos bajo mínimo | Sucursal | Lista de productos a reponer |
+| Productos bajo alerta | Sucursal | Lista de productos a reponer |
 | Compras del período | Período, proveedor | Total de compras registradas |
 | Cierre de caja | Fecha, sucursal | Resumen de cada sesión de caja |
 | Rentabilidad | Período | Costo vs. precio de venta por producto |
@@ -465,11 +516,14 @@ CREATE TABLE productos (
   producto_madre_id TEXT REFERENCES productos(id),
   es_madre INTEGER DEFAULT 0,
   precio_independiente INTEGER DEFAULT 0,
+  hereda_costo INTEGER DEFAULT 1,
+  hereda_precio INTEGER DEFAULT 1,
   costo REAL NOT NULL DEFAULT 0,
   precio_venta REAL NOT NULL DEFAULT 0,
   comision_pct_override REAL,
   unidad_medida TEXT DEFAULT 'unidad',
-  stock_minimo REAL DEFAULT 0,
+  stock_alerta REAL DEFAULT 0,
+  cant_pedido REAL DEFAULT 0,
   activo INTEGER DEFAULT 1,
   fecha_alta TEXT,
   fecha_modificacion TEXT
@@ -686,8 +740,8 @@ stock_disponible(producto_id) =
   stock(producto_id) +
   SUM(stock(sustituto_id)) WHERE activo = 1
   
-Para alerta de stock mínimo:
-  IF stock_disponible < stock_minimo → alertar reposición
+Para alerta de stock alerta:
+  IF stock_disponible < stock_alerta → alertar reposición
 ```
 
 ### Flujo: Vuelto como saldo a favor
@@ -778,43 +832,52 @@ Respondé SOLO con el JSON, sin texto adicional.
 | Precios globales | El dueño decide precios centralmente |
 | Stock por sucursal | Cada sucursal maneja su inventario físico |
 | Firebase Auth | Reutilizar conocimiento del equipo, robusto y gratuito en este volumen |
+| Electron packaging | Para distribución como aplicación desktop nativa |
+| Auto-update via GitHub Releases | Actualizaciones automáticas por sucursal |
+| DB backup before update | Seguridad de datos durante actualizaciones |
+| Rollback on update failure | Recuperación automática si falla la actualización |
 
 ---
 
 ## 13. FASES DE DESARROLLO SUGERIDAS
 
-### Fase 1 — Base (MVP)
+### Fase 1 — Base (MVP) ✅ Completed
 - Setup del proyecto, estructura de archivos, DB SQLite
 - Auth (Firebase)
 - ABM de productos (con familia y sustitutos)
 - ABM de proveedores y clientes
 - Punto de venta básico (efectivo)
 
-### Fase 2 — Operaciones
+### Fase 2 — Operaciones 🔄 In progress
 - Todos los medios de pago
 - Cuenta corriente completa
 - Caja (apertura, cierre, arqueo)
 - Combos y promociones
+- POS active, caja pending full testing
 
-### Fase 3 — Compras
+### Fase 3 — Compras ⏳ Pending
 - Órdenes de compra (manual + importación Excel)
 - Recepción de mercadería
 - Módulo de compras manual
 
-### Fase 4 — OCR de facturas
+### Fase 4 — OCR de facturas ⏳ Pending
 - Integración Tesseract.js
 - Integración API de Claude
 - Sistema de templates por proveedor
 
-### Fase 5 — Informes y etiquetas
+### Fase 5 — Informes y etiquetas ⏳ Pending
 - Todos los informes
 - Módulo de etiquetas
 - Impresión de tickets
 
-### Fase 6 — Multi-sucursal y sync
+### Fase 6 — Multi-sucursal, Electron, sync ⏳ Pending
 - Lógica de sincronización con Firestore
 - Gestión de conflictos
 - Dashboard multi-sucursal
+- Electron packaging para distribución desktop
+- Auto-update via GitHub Releases (uno por sucursal)
+- Automatic DB backup before each update, identified by sucursal ID + timestamp
+- Rollback available if update fails
 
 ---
 
