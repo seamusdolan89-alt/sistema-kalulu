@@ -1022,46 +1022,6 @@ export const POS = (() => {
         return;
       }
 
-      // Check for unfinished cart
-      let unfinishedCart = null;
-      try {
-        const saved = sessionStorage.getItem('pos_cart');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            unfinishedCart = parsed;
-          }
-        }
-      } catch(e) {}
-
-      const dashBody = ge('pos-dashboard').querySelector('.dashboard-body');
-      const existingBanner = dashBody.querySelector('.unfinished-banner');
-      if (existingBanner) existingBanner.remove();
-
-      if (unfinishedCart) {
-        const banner = document.createElement('div');
-        banner.className = 'unfinished-banner';
-        banner.style.cssText = 'background:#fff3e0;border:1px solid #ff9800;border-radius:8px;padding:12px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;';
-        banner.innerHTML = `
-          <div><strong>⚠️ Venta sin confirmar</strong> — ${unfinishedCart.length} artículo(s) en el carrito</div>
-          <div>
-            <button class="mbtn mbtn-secondary" id="btn-retomar-cart" style="margin-right:8px;">Retomar</button>
-            <button class="mbtn mbtn-danger" id="btn-descartar-cart">Descartar</button>
-          </div>
-        `;
-        dashBody.insertBefore(banner, dashBody.firstChild);
-
-        ge('btn-retomar-cart').addEventListener('click', () => {
-          state.cart = unfinishedCart;
-          saveCart();
-          enterSaleMode();
-        });
-        ge('btn-descartar-cart').addEventListener('click', () => {
-          sessionStorage.removeItem('pos_cart');
-          banner.remove();
-        });
-      }
-
       const sid = state.sesionActiva.id;
 
       // Get ventas for this session
@@ -1476,9 +1436,10 @@ export const POS = (() => {
         // Revert status
         window.SGA_DB.run('UPDATE ventas SET estado = ? WHERE id = ?', ['completada', state.editingVentaId]);
         state.editingVentaId = null;
-      } else if (state.cart.length > 0) {
-        if (!confirm('¿Volver al dashboard? El carrito se mantendrá.')) return;
       }
+      // Clear cart and sessionStorage silently
+      state.cart = [];
+      saveCart();
       enterDashboard();
     });
 
@@ -1872,9 +1833,10 @@ export const POS = (() => {
             // Revert status
             window.SGA_DB.run('UPDATE ventas SET estado = ? WHERE id = ?', ['completada', state.editingVentaId]);
             state.editingVentaId = null;
-          } else if (state.cart.length > 0) {
-            if (!confirm('¿Volver al dashboard? El carrito se mantendrá.')) return;
           }
+          // Clear cart and sessionStorage silently
+          state.cart = [];
+          saveCart();
           enterDashboard();
         }
       }
