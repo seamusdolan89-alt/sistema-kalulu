@@ -982,6 +982,28 @@ export const POS = (() => {
       loadDashboard();
     };
 
+    const finalizeSaleAndGoDashboard = () => {
+      // Finaliza la venta luego del ticket y siempre vuelve al dashboard real de ventas.
+      hideModal('modal-ticket');
+      closeDetailPanel();
+      sessionStorage.removeItem('pos_cart');
+      sessionStorage.removeItem('sga_cart');
+      sessionStorage.removeItem('sga_sale_mode');
+      state.cart = [];
+      state.pagosAmounts = { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0, cuenta_corriente: 0 };
+      state.activeMedios = new Set(['efectivo']);
+      state.recibeEfectivo = 0;
+      state.ccCobrarDeuda = false;
+      state.ccAplicarFavor = false;
+      clearCliente();
+      saveCart();
+      checkSesion();
+      enterDashboard();
+      loadDashboard();
+      updateHeaderStatus();
+      showToast('Venta registrada ✓');
+    };
+
     const enterSaleMode = () => {
       if (!state.sesionActiva) { showModalApertura(); return; }
       // Check if there's an active cart in sessionStorage with items
@@ -1474,25 +1496,7 @@ export const POS = (() => {
     ge('btn-ticket-imprimir')?.addEventListener('click', () => window.print());
     ge('btn-ticket-close')?.addEventListener('click',   () => hideModal('modal-ticket'));
     ge('btn-ticket-volver')?.addEventListener('click',  () => hideModal('modal-ticket'));
-    ge('btn-ticket-confirmar')?.addEventListener('click', () => {
-      hideModal('modal-ticket');
-      closeDetailPanel();
-      sessionStorage.removeItem('pos_cart');
-      sessionStorage.removeItem('sga_cart');
-      sessionStorage.removeItem('sga_sale_mode');
-      showToast('Venta registrada ✓');
-      state.cart = [];
-      state.pagosAmounts = { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0 };
-      state.activeMedios = new Set(['efectivo']);
-      state.recibeEfectivo = 0;
-      state.ccCobrarDeuda = false;
-      state.ccAplicarFavor = false;
-      clearCliente();
-      saveCart();
-      checkSesion();
-      enterDashboard();
-      loadDashboard();
-    });
+    ge('btn-ticket-confirmar')?.addEventListener('click', finalizeSaleAndGoDashboard);
 
     // Cierre
     ge('btn-cierre-close')?.addEventListener('click',   () => hideModal('modal-cierre'));
