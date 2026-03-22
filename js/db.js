@@ -465,6 +465,24 @@
       }
     }
 
+    // stock_ajustes — manual stock movements ledger
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS stock_ajustes (
+          id TEXT PRIMARY KEY,
+          producto_id TEXT REFERENCES productos(id),
+          sucursal_id TEXT REFERENCES sucursales(id),
+          tipo TEXT CHECK(tipo IN ('ajuste_positivo','ajuste_negativo','consumo_interno','rotura')),
+          cantidad REAL,
+          motivo TEXT,
+          usuario_id TEXT,
+          fecha TEXT,
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
+        )
+      `);
+    } catch(e) { console.warn('stock_ajustes:', e.message); }
+
     // Add new columns to existing databases (safe: fails silently if column exists)
     const columnAlterations = [
       'ALTER TABLE productos ADD COLUMN stock_alerta REAL DEFAULT 0',

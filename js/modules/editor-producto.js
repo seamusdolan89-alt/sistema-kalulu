@@ -44,9 +44,6 @@ const EditorProducto = (() => {
       .replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-  const fmtCurrency = (v) =>
-    new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2 }).format(v || 0);
-
   // ── INIT ───────────────────────────────────────────────────────────────────
 
   const init = (params) => {
@@ -437,20 +434,61 @@ const EditorProducto = (() => {
   <!-- ── TRANSACCIONES ──────────────────────────────────────────── -->
   <div id="section-transacciones" class="editor-section" style="display:none">
     <h3 class="ed-section-title">📊 Transacciones</h3>
-    <div class="ed-tabs-bar">
-      <button class="ed-tab-btn active" data-tab="ed-tab-ventas">Ventas</button>
-      <button class="ed-tab-btn" data-tab="ed-tab-compras">Compras</button>
+
+    <!-- Stock actual + action -->
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:12px 16px;background:var(--color-background-secondary);border-radius:8px">
+      <span style="font-size:14px;color:var(--color-text-secondary)">Stock actual:</span>
+      <strong id="ed-tx-stock-actual" style="font-size:18px">—</strong>
+      <button id="ed-btn-registrar-movimiento" class="btn btn-secondary btn-sm" style="margin-left:auto">+ Registrar movimiento</button>
     </div>
-    <div id="ed-tab-ventas">
-      <table class="table">
-        <thead><tr><th>Fecha</th><th>Cant.</th><th>Precio</th><th>Cliente</th><th>Vendedor</th></tr></thead>
-        <tbody id="ed-ventas-tbody"></tbody>
-      </table>
+
+    <!-- Filters -->
+    <div class="form-row" style="margin-bottom:12px;align-items:flex-end">
+      <div class="form-group">
+        <label>Desde</label>
+        <input type="date" id="ed-tx-desde" class="input-full">
+      </div>
+      <div class="form-group">
+        <label>Hasta</label>
+        <input type="date" id="ed-tx-hasta" class="input-full">
+      </div>
+      <div class="form-group">
+        <label>Tipo</label>
+        <select id="ed-tx-tipo" class="select-full">
+          <option value="">Todos</option>
+          <option value="venta">Ventas</option>
+          <option value="compra">Compras</option>
+          <option value="ajuste">Ajustes</option>
+          <option value="devolucion">Devoluciones</option>
+        </select>
+      </div>
+      <div id="ed-tx-sucursal-group" class="form-group" style="display:none">
+        <label>Sucursal</label>
+        <select id="ed-tx-sucursal" class="select-full">
+          <option value="">Todas</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <button id="ed-btn-tx-filtrar" class="btn btn-secondary btn-sm" style="width:100%">Filtrar</button>
+      </div>
     </div>
-    <div id="ed-tab-compras" style="display:none">
-      <table class="table">
-        <thead><tr><th>Fecha</th><th>Cant.</th><th>Costo</th><th>Proveedor</th></tr></thead>
-        <tbody id="ed-compras-tbody"></tbody>
+
+    <!-- Ledger table -->
+    <div style="overflow-x:auto">
+      <table class="ed-tx-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Fecha</th>
+            <th>Tipo</th>
+            <th>Descripción</th>
+            <th style="text-align:right;color:#388E3C">Debe (+)</th>
+            <th style="text-align:right;color:#d32f2f">Haber (-)</th>
+            <th style="text-align:right">Saldo</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ed-tx-tbody"></tbody>
       </table>
     </div>
   </div>
@@ -589,6 +627,14 @@ const EditorProducto = (() => {
   animation: ed-slidein 0.25s ease;
 }
 @keyframes ed-slidein { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.ed-tx-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ed-tx-table th {
+  background: var(--color-background-secondary); padding: 8px 10px;
+  text-align: left; font-weight: 600; font-size: 12px;
+  border-bottom: 2px solid var(--color-border); white-space: nowrap;
+}
+.ed-tx-table td { padding: 7px 10px; border-bottom: 1px solid var(--color-border); vertical-align: middle; }
+.ed-tx-table tr:hover td { background: var(--color-primary-light, #e3f2fd); }
 </style>
 `;
   };
@@ -1245,55 +1291,302 @@ const EditorProducto = (() => {
     });
   };
 
+  // ── TRANSACCIONES LEDGER ───────────────────────────────────────────────────
+
+  const TX_BADGE = {
+    venta:             'background:#1565C0;color:white',
+    compra:            'background:#2E7D32;color:white',
+    ajuste:            'background:#616161;color:white',
+    ajuste_positivo:   'background:#616161;color:white',
+    ajuste_negativo:   'background:#616161;color:white',
+    devolucion_venta:  'background:#E65100;color:white',
+    devolucion_compra: 'background:#E65100;color:white',
+    consumo_interno:   'background:#6A1B9A;color:white',
+    rotura:            'background:#B71C1C;color:white',
+  };
+
+  const TX_LABEL = {
+    venta:             'Venta',
+    compra:            'Compra',
+    ajuste:            'Ajuste',
+    ajuste_positivo:   'Ajuste +',
+    ajuste_negativo:   'Ajuste -',
+    devolucion_venta:  'Dev. Venta',
+    devolucion_compra: 'Dev. Compra',
+    consumo_interno:   'Consumo',
+    rotura:            'Rotura',
+  };
+
+  const fmtFecha = (str) => {
+    if (!str) return '-';
+    const d = new Date(str);
+    if (isNaN(d)) return str;
+    const p = n => String(n).padStart(2, '0');
+    return `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+
   const renderTransacciones = () => {
-    const ventas = window.SGA_DB.query(`
-      SELECT vi.cantidad, vi.precio_unitario, v.fecha,
-        COALESCE(c.nombre || ' ' || COALESCE(c.apellido,''), 'Consumidor final') AS cliente,
-        COALESCE(u.nombre, '-') AS vendedor
-      FROM venta_items vi
-      JOIN ventas v ON v.id = vi.venta_id
-      LEFT JOIN clientes c ON c.id = v.cliente_id
-      LEFT JOIN usuarios u ON u.id = v.usuario_id
-      WHERE vi.producto_id = ?
-      ORDER BY v.fecha DESC
-      LIMIT 20
-    `, [state.productoId]);
+    // Populate sucursal filter
+    const sucSel = ge('ed-tx-sucursal');
+    if (sucSel) {
+      sucSel.innerHTML = '<option value="">Todas</option>' +
+        state.sucursales.map(s =>
+          `<option value="${escapeHtml(s.id)}">${escapeHtml(s.nombre)}</option>`
+        ).join('');
+      const grp = ge('ed-tx-sucursal-group');
+      if (grp) grp.style.display = state.sucursales.length > 1 ? '' : 'none';
+    }
+    // Show current stock
+    const currentUser = window.SGA_Auth.getCurrentUser();
+    const sucId = currentUser?.sucursal_id || '1';
+    const stockRow = window.SGA_DB.query(
+      'SELECT COALESCE(cantidad,0) AS cant FROM stock WHERE producto_id=? AND sucursal_id=?',
+      [state.productoId, sucId]
+    );
+    const el = ge('ed-tx-stock-actual');
+    if (el) el.textContent = (stockRow.length ? stockRow[0].cant : 0) + ' unidades';
 
-    const vtbody = ge('ed-ventas-tbody');
-    if (vtbody) {
-      vtbody.innerHTML = ventas.length
-        ? ventas.map(v => `<tr>
-            <td>${(v.fecha || '').substring(0, 10)}</td>
-            <td>${v.cantidad}</td>
-            <td>${fmtCurrency(v.precio_unitario)}</td>
-            <td>${escapeHtml(v.cliente)}</td>
-            <td>${escapeHtml(v.vendedor)}</td>
-          </tr>`).join('')
-        : '<tr><td colspan="5" class="ed-text-muted" style="text-align:center">Sin ventas registradas</td></tr>';
+    loadLedger();
+  };
+
+  const loadLedger = () => {
+    const desde   = (ge('ed-tx-desde')    || {}).value || '';
+    const hasta   = (ge('ed-tx-hasta')    || {}).value || '';
+    const tipoFlt = (ge('ed-tx-tipo')     || {}).value || '';
+    const sucFlt  = (ge('ed-tx-sucursal') || {}).value || '';
+
+    const inDateRange = (fecha) => {
+      if (!fecha) return true;
+      if (desde && fecha < desde) return false;
+      if (hasta && fecha.substring(0,10) > hasta) return false;
+      return true;
+    };
+
+    let movements = [];
+
+    // 1. Ventas
+    if (!tipoFlt || tipoFlt === 'venta') {
+      try {
+        window.SGA_DB.query(`
+          SELECT v.id AS venta_id, v.fecha, vi.cantidad, v.sucursal_id,
+            COALESCE(c.nombre || ' ' || COALESCE(c.apellido,''), 'Consumidor final') AS cliente,
+            COALESCE(u.nombre, '-') AS vendedor
+          FROM venta_items vi
+          JOIN ventas v ON v.id = vi.venta_id
+          LEFT JOIN clientes c ON c.id = v.cliente_id
+          LEFT JOIN usuarios u ON u.id = v.usuario_id
+          WHERE vi.producto_id = ?
+          ORDER BY v.fecha ASC
+        `, [state.productoId]).forEach(r => {
+          if (!inDateRange(r.fecha)) return;
+          if (sucFlt && r.sucursal_id !== sucFlt) return;
+          movements.push({
+            id: r.venta_id, tipo: 'venta', fecha: r.fecha,
+            descripcion: `Venta a ${r.cliente} — Vendedor: ${r.vendedor}`,
+            debe: 0, haber: r.cantidad, ref_id: r.venta_id,
+          });
+        });
+      } catch(e) { /* no ventas */ }
     }
 
-    const compras = window.SGA_DB.query(`
-      SELECT ci.cantidad, ci.costo_unitario, c.fecha,
-        COALESCE(pr.razon_social, '-') AS proveedor
-      FROM compra_items ci
-      JOIN compras c ON c.id = ci.compra_id
-      LEFT JOIN proveedores pr ON pr.id = c.proveedor_id
-      WHERE ci.producto_id = ?
-      ORDER BY c.fecha DESC
-      LIMIT 20
-    `, [state.productoId]);
-
-    const ctbody = ge('ed-compras-tbody');
-    if (ctbody) {
-      ctbody.innerHTML = compras.length
-        ? compras.map(c => `<tr>
-            <td>${(c.fecha || '').substring(0, 10)}</td>
-            <td>${c.cantidad}</td>
-            <td>${fmtCurrency(c.costo_unitario)}</td>
-            <td>${escapeHtml(c.proveedor)}</td>
-          </tr>`).join('')
-        : '<tr><td colspan="4" class="ed-text-muted" style="text-align:center">Sin compras registradas</td></tr>';
+    // 2. Compras
+    if (!tipoFlt || tipoFlt === 'compra') {
+      try {
+        window.SGA_DB.query(`
+          SELECT c.id AS compra_id, c.fecha, ci.cantidad, c.sucursal_id,
+            COALESCE(pr.razon_social, '-') AS proveedor,
+            c.numero_factura
+          FROM compra_items ci
+          JOIN compras c ON c.id = ci.compra_id
+          LEFT JOIN proveedores pr ON pr.id = c.proveedor_id
+          WHERE ci.producto_id = ?
+          ORDER BY c.fecha ASC
+        `, [state.productoId]).forEach(r => {
+          if (!inDateRange(r.fecha)) return;
+          if (sucFlt && r.sucursal_id !== sucFlt) return;
+          movements.push({
+            id: r.compra_id, tipo: 'compra', fecha: r.fecha,
+            descripcion: `Compra a ${r.proveedor}${r.numero_factura ? ' — Factura: ' + r.numero_factura : ''}`,
+            debe: r.cantidad, haber: 0, ref_id: r.compra_id,
+          });
+        });
+      } catch(e) { /* no compras */ }
     }
+
+    // 3. Ajustes manuales (stock_ajustes)
+    if (!tipoFlt || tipoFlt === 'ajuste') {
+      try {
+        window.SGA_DB.query(`
+          SELECT sa.id, sa.fecha, sa.tipo, sa.cantidad, sa.motivo, sa.sucursal_id
+          FROM stock_ajustes sa
+          WHERE sa.producto_id = ?
+          ORDER BY sa.fecha ASC
+        `, [state.productoId]).forEach(r => {
+          if (!inDateRange(r.fecha)) return;
+          if (sucFlt && r.sucursal_id !== sucFlt) return;
+          const isPos = r.tipo === 'ajuste_positivo';
+          movements.push({
+            id: r.id, tipo: r.tipo, fecha: r.fecha,
+            descripcion: `Ajuste manual — ${r.motivo || 'Sin motivo'}`,
+            debe: isPos ? r.cantidad : 0,
+            haber: isPos ? 0 : r.cantidad,
+            ref_id: r.id,
+          });
+        });
+      } catch(e) { /* table may not exist yet */ }
+    }
+
+    // Sort chronologically, calculate running saldo
+    movements.sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
+    let saldo = 0;
+    movements.forEach(m => { saldo += m.debe - m.haber; m.saldo = saldo; });
+
+    renderLedger(movements);
+  };
+
+  const renderLedger = (movements) => {
+    const tbody = ge('ed-tx-tbody');
+    if (!tbody) return;
+
+    if (!movements.length) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--color-text-secondary);padding:28px">
+        Sin movimientos registrados</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = movements.map(m => {
+      const badge  = TX_BADGE[m.tipo] || 'background:#9E9E9E;color:white';
+      const label  = escapeHtml(TX_LABEL[m.tipo] || m.tipo);
+      const shortId = String(m.ref_id || m.id).slice(-8).toUpperCase();
+      const debeStr  = m.debe  > 0 ? `<span style="color:#388E3C;font-weight:600">+${m.debe}</span>` : '–';
+      const haberStr = m.haber > 0 ? `<span style="color:#d32f2f;font-weight:600">-${m.haber}</span>` : '–';
+      const saldoClr = m.saldo >= 0 ? 'inherit' : '#d32f2f';
+      return `<tr>
+        <td>
+          <a href="#" class="ed-tx-link" data-tipo="${escapeHtml(m.tipo)}" data-ref="${escapeHtml(m.ref_id)}"
+             style="font-family:monospace;font-size:11px;color:var(--color-primary)">${shortId}</a>
+        </td>
+        <td style="font-size:12px;white-space:nowrap">${fmtFecha(m.fecha)}</td>
+        <td><span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;${badge}">${label}</span></td>
+        <td style="font-size:12px">${escapeHtml(m.descripcion)}</td>
+        <td style="text-align:right">${debeStr}</td>
+        <td style="text-align:right">${haberStr}</td>
+        <td style="text-align:right;font-weight:600;color:${saldoClr}">${m.saldo}</td>
+        <td>
+          <button class="btn btn-sm btn-secondary ed-tx-link" style="padding:2px 6px"
+            data-tipo="${escapeHtml(m.tipo)}" data-ref="${escapeHtml(m.ref_id)}" title="Ver detalle">🔍</button>
+        </td>
+      </tr>`;
+    }).join('');
+
+    tbody.querySelectorAll('.ed-tx-link').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        navegarAOperacion(el.dataset.tipo, el.dataset.ref);
+      });
+    });
+  };
+
+  const navegarAOperacion = (tipo, refId) => {
+    if (tipo === 'venta') {
+      sessionStorage.setItem('highlight_venta', refId);
+      sessionStorage.setItem('highlight_back_producto', state.productoId);
+      window.location.hash = '#pos';
+    } else if (tipo === 'compra') {
+      sessionStorage.setItem('highlight_compra', refId);
+      sessionStorage.setItem('highlight_back_producto', state.productoId);
+      window.location.hash = '#compras';
+    } else {
+      showAjusteDetalle(refId);
+    }
+  };
+
+  const showAjusteDetalle = (ajusteId) => {
+    try {
+      const rows = window.SGA_DB.query(`
+        SELECT sa.*, COALESCE(u.nombre, '-') AS usuario_nombre
+        FROM stock_ajustes sa LEFT JOIN usuarios u ON u.id = sa.usuario_id
+        WHERE sa.id = ?
+      `, [ajusteId]);
+      if (!rows.length) { showToast('Ajuste no encontrado'); return; }
+      const r = rows[0];
+      openFamiliaModal(`
+        <h4 style="margin:0 0 16px;font-size:16px">🔍 Detalle de ajuste</h4>
+        <table style="width:100%;font-size:13px;border-collapse:collapse">
+          <tr><td style="padding:5px 0;color:#666;width:90px">Tipo</td><td style="padding:5px 0;font-weight:600">${escapeHtml(TX_LABEL[r.tipo] || r.tipo)}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Cantidad</td><td style="padding:5px 0;font-weight:600">${r.cantidad}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Motivo</td><td style="padding:5px 0">${escapeHtml(r.motivo || '–')}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Usuario</td><td style="padding:5px 0">${escapeHtml(r.usuario_nombre)}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Fecha</td><td style="padding:5px 0">${fmtFecha(r.fecha)}</td></tr>
+        </table>
+        <div style="margin-top:16px">
+          <button id="fam-btn-cancel" class="btn btn-outline btn-sm">Cerrar</button>
+        </div>
+      `, () => {});
+    } catch (e) { showToast('Error al cargar detalle'); }
+  };
+
+  const openRegistrarMovimientoModal = () => {
+    const currentUser = window.SGA_Auth.getCurrentUser();
+    const sucId = currentUser?.sucursal_id || '1';
+    openFamiliaModal(`
+      <h4 style="margin:0 0 16px;font-size:16px">+ Registrar movimiento</h4>
+      <div class="form-group" style="margin-bottom:12px">
+        <label style="font-size:13px;color:var(--color-text-secondary)">Tipo *</label>
+        <select id="fam-ajuste-tipo" class="select-full">
+          <option value="ajuste_positivo">Ajuste positivo (+ stock)</option>
+          <option value="ajuste_negativo">Ajuste negativo (− stock)</option>
+          <option value="consumo_interno">Consumo interno (− stock)</option>
+          <option value="rotura">Rotura / merma (− stock)</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:12px">
+        <label style="font-size:13px;color:var(--color-text-secondary)">Cantidad *</label>
+        <input type="number" id="fam-ajuste-cantidad" class="input-full" min="0.01" step="0.01" placeholder="0">
+      </div>
+      <div class="form-group" style="margin-bottom:20px">
+        <label style="font-size:13px;color:var(--color-text-secondary)">Motivo *</label>
+        <input type="text" id="fam-ajuste-motivo" class="input-full" placeholder="Ej: inventario mensual">
+      </div>
+      <div style="display:flex;gap:8px">
+        <button id="fam-btn-confirm" class="btn btn-primary btn-sm">Guardar</button>
+        <button id="fam-btn-cancel" class="btn btn-outline btn-sm">Cancelar</button>
+      </div>
+    `, () => {
+      const tipo     = (ge('fam-ajuste-tipo')     || {}).value || 'ajuste_positivo';
+      const cantidad = parseFloat((ge('fam-ajuste-cantidad') || {}).value) || 0;
+      const motivo   = ((ge('fam-ajuste-motivo')  || {}).value || '').trim();
+      if (cantidad <= 0) { alert('La cantidad debe ser mayor a 0'); return; }
+      if (!motivo)       { alert('El motivo es obligatorio'); return; }
+
+      const now = window.SGA_Utils.formatISODate(new Date());
+      const id  = window.SGA_Utils.generateUUID();
+      window.SGA_DB.run(`
+        INSERT INTO stock_ajustes
+          (id,producto_id,sucursal_id,tipo,cantidad,motivo,usuario_id,fecha,sync_status,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,'pending',?)
+      `, [id, state.productoId, sucId, tipo, cantidad, motivo, currentUser?.id || null, now, now]);
+
+      const delta = tipo === 'ajuste_positivo' ? cantidad : -cantidad;
+      const exists = window.SGA_DB.query(
+        'SELECT 1 FROM stock WHERE producto_id=? AND sucursal_id=?',
+        [state.productoId, sucId]
+      );
+      if (exists.length) {
+        window.SGA_DB.run(
+          "UPDATE stock SET cantidad=cantidad+?,fecha_modificacion=?,sync_status='pending',updated_at=? WHERE producto_id=? AND sucursal_id=?",
+          [delta, now, now, state.productoId, sucId]
+        );
+      } else {
+        window.SGA_DB.run(
+          "INSERT INTO stock (producto_id,sucursal_id,cantidad,fecha_modificacion,sync_status,updated_at) VALUES (?,?,?,?,'pending',?)",
+          [state.productoId, sucId, Math.max(0, delta), now, now]
+        );
+      }
+      closeFamiliaModal();
+      showToast('Movimiento registrado');
+      renderTransacciones();
+    });
   };
 
   const renderPromociones = () => {
@@ -1452,18 +1745,9 @@ const EditorProducto = (() => {
       });
     }
 
-    // Transacciones tabs
-    document.querySelectorAll('.ed-tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.ed-tab-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        const tabId = btn.dataset.tab;
-        ['ed-tab-ventas', 'ed-tab-compras'].forEach(id => {
-          const el = ge(id);
-          if (el) el.style.display = id === tabId ? '' : 'none';
-        });
-      });
-    });
+    // Transacciones ledger
+    ge('ed-btn-tx-filtrar') && ge('ed-btn-tx-filtrar').addEventListener('click', loadLedger);
+    ge('ed-btn-registrar-movimiento') && ge('ed-btn-registrar-movimiento').addEventListener('click', openRegistrarMovimientoModal);
 
     // Vencimientos toggle
     ge('ed-tiene-vencimiento') && ge('ed-tiene-vencimiento').addEventListener('change', () => {
