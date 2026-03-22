@@ -975,6 +975,7 @@ export const POS = (() => {
       const sale = ge('pos-sale');
       if (dash) dash.style.display = 'flex';
       if (sale) sale.classList.add('hidden');
+      closeDetailPanel();
       sessionStorage.removeItem('pos_cart');
       sessionStorage.removeItem('sga_cart');
       sessionStorage.removeItem('sga_sale_mode');
@@ -1475,6 +1476,7 @@ export const POS = (() => {
     ge('btn-ticket-volver')?.addEventListener('click',  () => hideModal('modal-ticket'));
     ge('btn-ticket-confirmar')?.addEventListener('click', () => {
       hideModal('modal-ticket');
+      closeDetailPanel();
       sessionStorage.removeItem('pos_cart');
       sessionStorage.removeItem('sga_cart');
       sessionStorage.removeItem('sga_sale_mode');
@@ -1486,11 +1488,10 @@ export const POS = (() => {
       state.ccCobrarDeuda = false;
       state.ccAplicarFavor = false;
       clearCliente();
-      enterDashboard();
-      loadDashboard();
       saveCart();
       checkSesion();
       enterDashboard();
+      loadDashboard();
     });
 
     // Cierre
