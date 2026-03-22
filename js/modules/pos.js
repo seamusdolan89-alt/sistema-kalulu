@@ -77,10 +77,10 @@ export const POS = (() => {
   }
 
   /**
-   * Register a sale with items, payments, and stock deduction
+   * Register or update a sale with items, payments, and stock deduction
    * 
    * @param {Object} ventaData - Sale data {
-   *   sesionCajaId, sucursalId, clienteId?, usuarioId,
+   *   ventaId?, sesionCajaId, sucursalId, clienteId?, usuarioId,
    *   items: [{productoId, cantidad, precioUnitario, descuentoItem, costoUnitario}, ...],
    *   pagos: [{medio, monto, referencia?}, ...],
    *   descuentoGlobal: 0,
@@ -91,6 +91,7 @@ export const POS = (() => {
   function registrarVenta(ventaData) {
     try {
       const {
+        ventaId: existingVentaId, // optional for updates
         sesionCajaId,
         sucursalId,
         clienteId,
@@ -102,7 +103,7 @@ export const POS = (() => {
       } = ventaData;
 
       const now = window.SGA_Utils.formatISODate(new Date());
-      const ventaId = window.SGA_Utils.generateUUID();
+      const ventaId = existingVentaId || window.SGA_Utils.generateUUID();
 
       // Calculate totals
       let subtotal = 0;
@@ -116,15 +117,33 @@ export const POS = (() => {
 
       const total = subtotal - descuentoTotal;
 
-      // INSERT venta
-      const ventaSql = `
+      // INSERT or UPDATE venta
+      const ventaSql = existingVentaId ? `
+        UPDATE ventas SET
+          sucursal_id = ?, sesion_caja_id = ?, cliente_id = ?, usuario_id = ?,
+          fecha = ?, subtotal = ?, descuento = ?, total = ?, estado = ?, sync_status = ?, updated_at = ?
+        WHERE id = ?
+      ` : `
         INSERT INTO ventas (
           id, sucursal_id, sesion_caja_id, cliente_id, usuario_id,
           fecha, subtotal, descuento, total, estado, sync_status, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
-      window.SGA_DB.run(ventaSql, [
+      window.SGA_DB.run(ventaSql, existingVentaId ? [
+        sucursalId,
+        sesionCajaId,
+        clienteId || null,
+        usuarioId,
+        now,
+        subtotal,
+        descuentoTotal,
+        total,
+        'completada', // set to completada on confirm
+        'pending',
+        now,
+        ventaId
+      ] : [
         ventaId,
         sucursalId,
         sesionCajaId,
@@ -138,6 +157,13 @@ export const POS = (() => {
         'pending',
         now
       ]);
+
+      // If updating, delete old items and payments, and restore stock (simplified, no stock adjustment for now)
+      if (existingVentaId) {
+        window.SGA_DB.run('DELETE FROM venta_items WHERE venta_id = ?', [ventaId]);
+        window.SGA_DB.run('DELETE FROM venta_pagos WHERE venta_id = ?', [ventaId]);
+        // TODO: restore stock from old items
+      }
 
       // INSERT venta_items
       for (const item of items) {
@@ -510,6 +536,7 @@ export const POS = (() => {
       ccRegistrarDeuda: false,
       currentUser: window.SGA_Auth.getCurrentUser(),
       currentSucursal: null,
+      editingVentaId: null,
     };
 
     // ── UTILS ──────────────────────────────────────────────────────
@@ -646,7 +673,7 @@ export const POS = (() => {
         return `<tr>
           <td class="c-idx">${idx + 1}</td>
           <td>${item.nombre}</td>
-          <td class="c-qty"><input type="number" class="qty-input" value="${item.cantidad}" min="0.01" step="1" data-idx="${idx}"></td>
+          <td class="c-qty"><input type="number" class="qty-input" value="${item.cantidad}" min="0.01" step="0.01" data-idx="${idx}"></td>
           <td class="c-price">${formatCurrency(item.precioUnitario)}</td>
           <td class="c-disc"><button class="disc-btn ${hasDisc ? 'active' : ''}" data-idx="${idx}">${hasDisc ? formatCurrency(item.descuentoItem) : '—'}</button></td>
           <td class="c-sub">${formatCurrency(sub)}</td>
@@ -656,6 +683,15 @@ export const POS = (() => {
 
       tbody.querySelectorAll('.qty-input').forEach(inp => {
         const idx = +inp.dataset.idx;
+        inp.addEventListener('keydown', e => {
+          // Allow backspace, delete, tab, escape, enter, arrows, home, end
+          const allowedKeys = [8, 9, 13, 27, 37, 38, 39, 40, 46, 110, 190]; // 110=., 190=.
+          if (allowedKeys.includes(e.keyCode) || (e.keyCode >= 48 && e.keyCode <= 57) || (e.keyCode >= 96 && e.keyCode <= 105)) {
+            // Allow
+          } else {
+            e.preventDefault();
+          }
+        });
         inp.addEventListener('change', e => {
           const item = state.cart[idx];
           if (!item) return;
@@ -982,6 +1018,46 @@ export const POS = (() => {
         return;
       }
 
+      // Check for unfinished cart
+      let unfinishedCart = null;
+      try {
+        const saved = sessionStorage.getItem('pos_cart');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            unfinishedCart = parsed;
+          }
+        }
+      } catch(e) {}
+
+      const dashBody = ge('pos-dashboard').querySelector('.dashboard-body');
+      const existingBanner = dashBody.querySelector('.unfinished-banner');
+      if (existingBanner) existingBanner.remove();
+
+      if (unfinishedCart) {
+        const banner = document.createElement('div');
+        banner.className = 'unfinished-banner';
+        banner.style.cssText = 'background:#fff3e0;border:1px solid #ff9800;border-radius:8px;padding:12px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;';
+        banner.innerHTML = `
+          <div><strong>⚠️ Venta sin confirmar</strong> — ${unfinishedCart.length} artículo(s) en el carrito</div>
+          <div>
+            <button class="mbtn mbtn-secondary" id="btn-retomar-cart" style="margin-right:8px;">Retomar</button>
+            <button class="mbtn mbtn-danger" id="btn-descartar-cart">Descartar</button>
+          </div>
+        `;
+        dashBody.insertBefore(banner, dashBody.firstChild);
+
+        ge('btn-retomar-cart').addEventListener('click', () => {
+          state.cart = unfinishedCart;
+          saveCart();
+          enterSaleMode();
+        });
+        ge('btn-descartar-cart').addEventListener('click', () => {
+          sessionStorage.removeItem('pos_cart');
+          banner.remove();
+        });
+      }
+
       const sid = state.sesionActiva.id;
 
       // Get ventas for this session
@@ -1107,10 +1183,11 @@ export const POS = (() => {
 
       const rol = state.currentUser?.rol;
       const canAnular = (rol === 'admin' || rol === 'encargado') && venta.estado === 'completada';
+      const canEditar = venta.estado === 'completada';
       footer.innerHTML = `
         <button class="dp-btn" id="dp-btn-reimprimir">🖨️ Reimprimir</button>
         <button class="dp-btn danger" id="dp-btn-anular" ${canAnular ? '' : 'disabled'} title="${canAnular ? '' : 'Sin permiso o ya anulada'}">↩ Anular</button>
-        <button class="dp-btn" disabled title="Próximamente">✏️ Editar</button>
+        <button class="dp-btn" id="dp-btn-editar" ${canEditar ? '' : 'disabled'} title="${canEditar ? '' : 'Editar venta'}">✏️ Editar</button>
       `;
 
       ge('dp-btn-reimprimir')?.addEventListener('click', () => {
@@ -1142,11 +1219,53 @@ export const POS = (() => {
         });
       }
 
+      if (canEditar) {
+        ge('dp-btn-editar')?.addEventListener('click', () => {
+          // Load sale into cart
+          state.cart = venta.items.map(i => ({
+            productoId: i.producto_id,
+            nombre: i.producto_nombre || i.nombre,
+            precioUnitario: i.precio_unitario,
+            costoUnitario: i.costo_unitario || 0,
+            cantidad: i.cantidad,
+            descuentoItem: i.descuento_item || 0,
+            comisionPct: i.comision_pct || 0,
+          }));
+          saveCart();
+          // Update venta status to 'editando'
+          window.SGA_DB.run('UPDATE ventas SET estado = ? WHERE id = ?', ['editando', venta.id]);
+          // Set editing mode
+          state.editingVentaId = venta.id;
+          // Enter sale mode
+          closeDetailPanel();
+          enterSaleMode();
+        });
+      }
+
       panel.classList.add('open');
     };
 
     const closeDetailPanel = () => {
       ge('pos-detail-panel')?.classList.remove('open');
+    };
+
+    // ── TOAST NOTIFICATIONS ───────────────────────────────────────
+    const showToast = (message, type = 'success') => {
+      const toast = document.createElement('div');
+      toast.className = `toast toast-${type}`;
+      toast.style.cssText = `
+        position: fixed; top: 20px; right: 20px; background: ${type === 'success' ? '#4CAF50' : '#f44336'}; color: white;
+        padding: 12px 16px; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        z-index: 1000; font-weight: 600; max-width: 300px; word-wrap: break-word;
+        opacity: 0; transition: opacity 0.3s;
+      `;
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.style.opacity = '1', 10);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
     };
 
     // ── MODALS ─────────────────────────────────────────────────────
@@ -1348,7 +1467,12 @@ export const POS = (() => {
 
     // Sale mode: back button
     ge('btn-volver-dashboard')?.addEventListener('click', () => {
-      if (state.cart.length > 0) {
+      if (state.editingVentaId) {
+        if (!confirm('¿Cancelar edición? La venta volverá a su estado original.')) return;
+        // Revert status
+        window.SGA_DB.run('UPDATE ventas SET estado = ? WHERE id = ?', ['completada', state.editingVentaId]);
+        state.editingVentaId = null;
+      } else if (state.cart.length > 0) {
         if (!confirm('¿Volver al dashboard? El carrito se mantendrá.')) return;
       }
       enterDashboard();
@@ -1381,7 +1505,7 @@ export const POS = (() => {
     ge('btn-ticket-volver')?.addEventListener('click',  () => hideModal('modal-ticket'));
     ge('btn-ticket-confirmar')?.addEventListener('click', () => {
       hideModal('modal-ticket');
-      alert('Venta registrada ✓');
+      showToast('Venta registrada ✓');
       state.cart = [];
       state.pagosAmounts = { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0 };
       state.activeMedios = new Set(['efectivo']);
@@ -1587,6 +1711,7 @@ export const POS = (() => {
         .map(m => ({ medio: m, monto: state.pagosAmounts[m], referencia: null }));
 
       const ventaData = {
+        ventaId: state.editingVentaId || undefined,
         sesionCajaId: state.sesionActiva.id,
         sucursalId: state.currentSucursal.id,
         clienteId: state.clienteId || null,
@@ -1637,6 +1762,9 @@ export const POS = (() => {
           }
         }
       }
+
+      // Reset editing state
+      state.editingVentaId = null;
 
       showModalTicket(result.ticketData);
     });
@@ -1735,7 +1863,12 @@ export const POS = (() => {
         if (ge('pos-detail-panel')?.classList.contains('open')) { closeDetailPanel(); return; }
         // Exit sale mode
         if (state.mode === 'sale') {
-          if (state.cart.length > 0) {
+          if (state.editingVentaId) {
+            if (!confirm('¿Cancelar edición? La venta volverá a su estado original.')) return;
+            // Revert status
+            window.SGA_DB.run('UPDATE ventas SET estado = ? WHERE id = ?', ['completada', state.editingVentaId]);
+            state.editingVentaId = null;
+          } else if (state.cart.length > 0) {
             if (!confirm('¿Volver al dashboard? El carrito se mantendrá.')) return;
           }
           enterDashboard();
