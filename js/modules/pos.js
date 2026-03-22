@@ -517,9 +517,6 @@ export const POS = (() => {
   function init(params = []) {
     console.log('💳 POS module initialized');
 
-    // Always clear sessionStorage cart on init
-    sessionStorage.removeItem('pos_cart');
-
     // ── STATE ──────────────────────────────────────────────────────
     const state = {
       mode: 'dashboard',       // 'dashboard' | 'sale'
@@ -979,33 +976,27 @@ export const POS = (() => {
       if (dash) dash.style.display = 'flex';
       if (sale) sale.classList.add('hidden');
       loadDashboard();
-      // Clear sessionStorage cart on exit from sale mode
-      sessionStorage.removeItem('pos_cart');
     };
 
     const enterSaleMode = () => {
       if (!state.sesionActiva) { showModalApertura(); return; }
-      // Check if there's an active cart in sessionStorage with items (skip if editing)
-      if (!state.editingVentaId) {
-        let hasActiveCart = false;
-        try {
-          const saved = sessionStorage.getItem('pos_cart');
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              hasActiveCart = true;
-            }
+      // Check if there's an active cart in sessionStorage with items
+      let hasActiveCart = false;
+      try {
+        const saved = sessionStorage.getItem('pos_cart');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            hasActiveCart = true;
           }
-        } catch(e) {}
-        if (hasActiveCart) {
-          if (!confirm('¿Abandonar la venta actual?')) return;
         }
+      } catch(e) {}
+      if (hasActiveCart) {
+        if (!confirm('¿Abandonar la venta actual?')) return;
       }
-      // Start with empty cart unless editing
-      if (!state.editingVentaId) {
-        state.cart = [];
-        saveCart();
-      }
+      // Always start with empty cart
+      state.cart = [];
+      saveCart();
       state.mode = 'sale';
       const dash = ge('pos-dashboard');
       const sale = ge('pos-sale');
@@ -1025,6 +1016,46 @@ export const POS = (() => {
         updateSummaryBar(null);
         ge('ventas-count-badge').textContent = '0';
         return;
+      }
+
+      // Check for unfinished cart
+      let unfinishedCart = null;
+      try {
+        const saved = sessionStorage.getItem('pos_cart');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            unfinishedCart = parsed;
+          }
+        }
+      } catch(e) {}
+
+      const dashBody = ge('pos-dashboard').querySelector('.dashboard-body');
+      const existingBanner = dashBody.querySelector('.unfinished-banner');
+      if (existingBanner) existingBanner.remove();
+
+      if (unfinishedCart) {
+        const banner = document.createElement('div');
+        banner.className = 'unfinished-banner';
+        banner.style.cssText = 'background:#fff3e0;border:1px solid #ff9800;border-radius:8px;padding:12px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;';
+        banner.innerHTML = `
+          <div><strong>⚠️ Venta sin confirmar</strong> — ${unfinishedCart.length} artículo(s) en el carrito</div>
+          <div>
+            <button class="mbtn mbtn-secondary" id="btn-retomar-cart" style="margin-right:8px;">Retomar</button>
+            <button class="mbtn mbtn-danger" id="btn-descartar-cart">Descartar</button>
+          </div>
+        `;
+        dashBody.insertBefore(banner, dashBody.firstChild);
+
+        ge('btn-retomar-cart').addEventListener('click', () => {
+          state.cart = unfinishedCart;
+          saveCart();
+          enterSaleMode();
+        });
+        ge('btn-descartar-cart').addEventListener('click', () => {
+          sessionStorage.removeItem('pos_cart');
+          banner.remove();
+        });
       }
 
       const sid = state.sesionActiva.id;
@@ -1080,24 +1111,6 @@ export const POS = (() => {
 
       ge('ventas-count-badge').textContent = ventas.filter(v => v.estado === 'completada').length;
       updateSummaryBar(state.sesionActiva);
-
-      // Add dev clear button if in dev mode
-      if (localStorage.getItem('dev_mode') === 'true') {
-        const dashBody = ge('pos-dashboard').querySelector('.dashboard-body');
-        const existingBtn = dashBody.querySelector('.dev-clear-btn');
-        if (existingBtn) existingBtn.remove();
-        const btn = document.createElement('button');
-        btn.className = 'dev-clear-btn';
-        btn.style.cssText = 'position:absolute;bottom:10px;right:10px;padding:8px 12px;background:#f44336;color:white;border:none;border-radius:4px;cursor:pointer;font-size:0.85em;';
-        btn.textContent = '🗑️ Limpiar ventas pendientes';
-        btn.addEventListener('click', () => {
-          sessionStorage.clear();
-          window.SGA_DB.run('DELETE FROM pedidos_abiertos');
-          showToast('Ventas pendientes eliminadas');
-          loadDashboard();
-        });
-        dashBody.appendChild(btn);
-      }
     };
 
     const updateSummaryBar = (sesion) => {
@@ -1291,18 +1304,8 @@ export const POS = (() => {
         <hr class="ticket-hr">
         <div class="ticket-center"><small>¡Gracias por su compra!</small></div>
       `;
-      // For reimprimir, change footer buttons
-      const footer = ge('modal-ticket').querySelector('.pmodal-ftr');
-      if (footer) {
-        footer.innerHTML = `
-          <button class="mbtn mbtn-secondary" id="btn-ticket-cerrar">Cerrar</button>
-          <button class="mbtn mbtn-secondary" id="btn-ticket-imprimir">🖨️ Imprimir ticket</button>
-        `;
-        // Add listener for cerrar
-        ge('btn-ticket-cerrar')?.addEventListener('click', () => hideModal('modal-ticket'), { once: true });
-      }
       showModal('modal-ticket');
-      setTimeout(() => ge('btn-ticket-imprimir')?.focus(), 80);
+      setTimeout(() => ge('btn-ticket-nueva-venta')?.focus(), 80);
     };
 
     const showModalCierre = () => {
@@ -1469,10 +1472,9 @@ export const POS = (() => {
         // Revert status
         window.SGA_DB.run('UPDATE ventas SET estado = ? WHERE id = ?', ['completada', state.editingVentaId]);
         state.editingVentaId = null;
+      } else if (state.cart.length > 0) {
+        if (!confirm('¿Volver al dashboard? El carrito se mantendrá.')) return;
       }
-      // Clear cart and sessionStorage silently
-      state.cart = [];
-      saveCart();
       enterDashboard();
     });
 
@@ -1764,18 +1766,7 @@ export const POS = (() => {
       // Reset editing state
       state.editingVentaId = null;
 
-      // Show success toast and return to dashboard
-      showToast('Venta registrada ✓');
-      state.cart = [];
-      state.pagosAmounts = { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0 };
-      state.activeMedios = new Set(['efectivo']);
-      state.recibeEfectivo = 0;
-      state.ccCobrarDeuda = false;
-      state.ccAplicarFavor = false;
-      clearCliente();
-      saveCart();
-      checkSesion();
-      enterDashboard();
+      showModalTicket(result.ticketData);
     });
 
     // Discount modal
@@ -1877,10 +1868,9 @@ export const POS = (() => {
             // Revert status
             window.SGA_DB.run('UPDATE ventas SET estado = ? WHERE id = ?', ['completada', state.editingVentaId]);
             state.editingVentaId = null;
+          } else if (state.cart.length > 0) {
+            if (!confirm('¿Volver al dashboard? El carrito se mantendrá.')) return;
           }
-          // Clear cart and sessionStorage silently
-          state.cart = [];
-          saveCart();
           enterDashboard();
         }
       }
