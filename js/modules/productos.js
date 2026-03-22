@@ -28,6 +28,18 @@
       stockMax: null,
       soloBajoMinimo: false
     },
+    columnFilters: {
+      codigo:   { type: 'contiene', value: '' },
+      nombre:   { type: 'contiene', value: '' },
+      categoria: { values: [] },
+      costo:    { mode: 'rango', exact: null, min: null, max: null },
+      precio:   { mode: 'rango', exact: null, min: null, max: null },
+      margen:   { mode: 'rango', exact: null, min: null, max: null },
+      stock:    { mode: 'rango', exact: null, min: null, max: null },
+      minimo:   { mode: 'rango', exact: null, min: null, max: null },
+      madre:    { type: 'contiene', value: '' },
+      estado:   { values: [] }
+    },
     sort: { field: 'nombre', dir: 'asc' },
     editingProduct: null,
     barcodes: [],
@@ -52,16 +64,16 @@
     }
 
 
-    const filterCategoria = getElement('filter-categoria');
-    const productCategoria = getElement('product-categoria');
-    if (!filterCategoria || !productCategoria) return;
-
-
     const createOption = (cat) => `<option value="${cat.id}">${cat.nombre}</option>`;
 
-
-    filterCategoria.innerHTML = '<option value="">Todas las categorías</option>' + state.categorias.map(createOption).join('');
-    productCategoria.innerHTML = '<option value="">-- Seleccionar --</option>' + state.categorias.map(createOption).join('');
+    const productCategoria = getElement('product-categoria');
+    if (productCategoria) {
+      productCategoria.innerHTML = '<option value="">-- Seleccionar --</option>' + state.categorias.map(createOption).join('');
+    }
+    const editCategoria = getElement('edit-categoria');
+    if (editCategoria) {
+      editCategoria.innerHTML = '<option value="">-- Ninguna --</option>' + state.categorias.map(createOption).join('');
+    }
   };
 
 
@@ -94,12 +106,14 @@
           cb.codigo AS codigo_barras,
           cat.nombre AS categoria_nombre,
           prov.razon_social AS proveedor_nombre,
-          COALESCE(st.cantidad, 0) AS stock_actual
+          COALESCE(st.cantidad, 0) AS stock_actual,
+          pm.nombre AS madre_nombre
         FROM productos p
         LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
         LEFT JOIN categorias cat ON cat.id = p.categoria_id
         LEFT JOIN proveedores prov ON prov.id = p.proveedor_principal_id
         LEFT JOIN stock st ON st.producto_id = p.id AND st.sucursal_id = ?
+        LEFT JOIN productos pm ON pm.id = p.producto_madre_id
         ORDER BY p.nombre
       `, [sucursal_id]);
     } catch (error) {
@@ -123,7 +137,7 @@
   const applyFilters = () => {
     let filtered = [...state.productos];
 
-
+    // Main search bar (FIX 1)
     const q = state.filters.query.trim().toLowerCase();
     if (q) {
       filtered = filtered.filter(p =>
@@ -132,21 +146,67 @@
       );
     }
 
+    // Column filters (FIX 3)
+    const cf = state.columnFilters;
 
-    if (state.filters.categoria) {
-      filtered = filtered.filter(p => String(p.categoria_id) === String(state.filters.categoria));
+    if (cf.codigo.value) {
+      const v = cf.codigo.value.toLowerCase();
+      filtered = filtered.filter(p =>
+        cf.codigo.type === 'igual'
+          ? (p.codigo_barras || '').toLowerCase() === v
+          : (p.codigo_barras || '').toLowerCase().includes(v)
+      );
     }
 
-
-    if (state.filters.soloMadres) {
-      filtered = filtered.filter(p => p.es_madre === 1 || p.es_madre === '1');
+    if (cf.nombre.value) {
+      const v = cf.nombre.value.toLowerCase();
+      filtered = filtered.filter(p =>
+        cf.nombre.type === 'igual'
+          ? (p.nombre || '').toLowerCase() === v
+          : (p.nombre || '').toLowerCase().includes(v)
+      );
     }
 
-
-    if (state.filters.activo !== '') {
-      filtered = filtered.filter(p => String(p.activo) === String(state.filters.activo));
+    if (cf.categoria.values.length > 0) {
+      filtered = filtered.filter(p => cf.categoria.values.includes(String(p.categoria_id)));
     }
 
+    const applyNumericCF = (items, f, getValue) => {
+      if (f.mode === 'exacto' && f.exact != null) return items.filter(p => getValue(p) === f.exact);
+      if (f.mode === 'rango') {
+        if (f.min != null || f.max != null) {
+          return items.filter(p => {
+            const v = getValue(p);
+            if (f.min != null && v < f.min) return false;
+            if (f.max != null && v > f.max) return false;
+            return true;
+          });
+        }
+      }
+      return items;
+    };
+
+    filtered = applyNumericCF(filtered, cf.costo,  p => p.costo || 0);
+    filtered = applyNumericCF(filtered, cf.precio, p => p.precio_venta || 0);
+    filtered = applyNumericCF(filtered, cf.margen, p => p.precio_venta > 0 ? (p.precio_venta - p.costo) / p.precio_venta * 100 : 0);
+    filtered = applyNumericCF(filtered, cf.stock,  p => p.stock_actual || 0);
+    filtered = applyNumericCF(filtered, cf.minimo, p => p.stock_minimo || 0);
+
+    if (cf.madre.value) {
+      const v = cf.madre.value.toLowerCase();
+      filtered = filtered.filter(p => {
+        const madreText = p.producto_madre_id ? (p.madre_nombre || '') : (p.nombre || '');
+        return cf.madre.type === 'igual'
+          ? madreText.toLowerCase() === v
+          : madreText.toLowerCase().includes(v);
+      });
+    }
+
+    if (cf.estado.values.length > 0) {
+      filtered = filtered.filter(p => cf.estado.values.includes(String(p.activo)));
+    }
+
+    // Advanced modal filters
     if (state.filters.proveedor) {
       filtered = filtered.filter(p => String(p.proveedor_principal_id) === String(state.filters.proveedor));
     }
@@ -191,9 +251,9 @@
       if (field === 'margen') {
         av = a.precio_venta > 0 ? (a.precio_venta - a.costo) / a.precio_venta * 100 : 0;
         bv = b.precio_venta > 0 ? (b.precio_venta - b.costo) / b.precio_venta * 100 : 0;
-      } else if (field === 'familia') {
-        av = a.es_madre === 1 || a.es_madre === '1' ? 'Madre' : (a.producto_madre_id ? 'Hijo' : 'Independiente');
-        bv = b.es_madre === 1 || b.es_madre === '1' ? 'Madre' : (b.producto_madre_id ? 'Hijo' : 'Independiente');
+      } else if (field === 'madre_nombre') {
+        av = a.producto_madre_id ? (a.madre_nombre || '') : (a.nombre || '');
+        bv = b.producto_madre_id ? (b.madre_nombre || '') : (b.nombre || '');
       } else {
         av = a[field] ?? '';
         bv = b[field] ?? '';
@@ -210,6 +270,8 @@
 
     renderProductosTable(pageItems, total);
     updateSortHeaders();
+    updateColumnFilterIndicators();
+    updateLimpiarFiltrosBtn();
   };
 
 
@@ -225,7 +287,16 @@
       const categoria = producto.categoria_nombre || '-';
       const stock = producto.stock_actual != null ? producto.stock_actual : 0;
       const margen = producto.precio_venta > 0 ? ((producto.precio_venta - producto.costo) / producto.precio_venta * 100).toFixed(2) : '0.00';
-      const familia = producto.es_madre === 1 || producto.es_madre === '1' ? 'Madre' : (producto.producto_madre_id ? 'Hijo' : 'Independiente');
+
+      // FIX 4: Madre column — show mother's name if child, own name if madre/independent
+      const esMadrePorId = !!producto.producto_madre_id;
+      const madreDisplay = esMadrePorId ? (producto.madre_nombre || '-') : (producto.nombre || '-');
+      const madreStyle   = esMadrePorId
+        ? 'color:#888;font-style:italic;'
+        : 'font-weight:bold;';
+
+      const estadoLabel  = producto.activo == 1 ? '<span style="color:#388E3C">Activo</span>' : '<span style="color:#d32f2f">Inactivo</span>';
+
       return `
         <tr data-id="${producto.id}">
           <td>${producto.codigo_barras || ''}</td>
@@ -236,10 +307,12 @@
           <td>${margen}%</td>
           <td>${stock}</td>
           <td>${producto.stock_minimo || 0}</td>
-          <td>${familia}</td>
+          <td style="${madreStyle}">${madreDisplay}</td>
+          <td>${estadoLabel}</td>
           <td>
-            <button data-id="${producto.id}" class="btn btn-small btn-secondary btn-edit-product">✏️</button>
-            <button data-id="${producto.id}" class="btn btn-small btn-danger btn-delete-product">🗑️</button>
+            <button data-id="${producto.id}" class="btn btn-small btn-secondary btn-edit-product" title="Editar">✏️</button>
+            <button data-id="${producto.id}" class="btn btn-small btn-danger btn-delete-product" title="Eliminar">🗑️</button>
+            <button data-id="${producto.id}" class="btn btn-small btn-secondary btn-assign-madre" title="Asignar producto madre">👨‍👩‍👧</button>
           </td>
         </tr>
       `;
@@ -263,19 +336,24 @@
       });
     });
 
-
     document.querySelectorAll('.btn-delete-product').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
         const id = btn.dataset.id;
         if (!confirm('¿Seguro que desea eliminar este producto?')) return;
-
-
         try {
           window.SGA_DB.run('DELETE FROM productos WHERE id = ?', [id]);
           loadProductos();
         } catch (error) {
           alert('Error al eliminar producto: ' + error.message);
         }
+      });
+    });
+
+    document.querySelectorAll('.btn-assign-madre').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openAssignMadreModal(btn.dataset.id);
       });
     });
   };
@@ -1107,6 +1185,430 @@
     applyFilters();
   };
 
+  // ── SEARCH DROPDOWN (FIX 1) ──────────────────────────────────────────────
+
+  let searchDropdownIndex = -1;
+
+  const renderSearchDropdown = (q) => {
+    const dropdown = getElement('search-dropdown');
+    if (!dropdown) return;
+    const lower = q.toLowerCase();
+    const results = state.productos.filter(p =>
+      (p.nombre || '').toLowerCase().includes(lower) ||
+      (p.codigo_barras || '').toLowerCase().includes(lower)
+    ).slice(0, 10);
+
+    if (!results.length) { dropdown.classList.add('hidden'); return; }
+
+    searchDropdownIndex = -1;
+    dropdown.innerHTML = results.map((p, i) => `
+      <div class="search-dropdown-item" data-index="${i}" data-nombre="${(p.nombre || '').replace(/"/g, '&quot;')}">
+        ${p.nombre || ''}
+        ${p.codigo_barras ? `<span class="item-code">${p.codigo_barras}</span>` : ''}
+      </div>
+    `).join('');
+    dropdown.classList.remove('hidden');
+
+    dropdown.querySelectorAll('.search-dropdown-item').forEach(item => {
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        selectSearchItem(item.dataset.nombre);
+      });
+    });
+  };
+
+  const closeSearchDropdown = () => {
+    const dropdown = getElement('search-dropdown');
+    if (dropdown) dropdown.classList.add('hidden');
+    searchDropdownIndex = -1;
+  };
+
+  const selectSearchItem = (nombre) => {
+    const input = getElement('search-productos');
+    if (input) input.value = nombre;
+    state.filters.query = nombre;
+    state.page = 1;
+    applyFilters();
+    closeSearchDropdown();
+  };
+
+  const onSearchKeyDown = (e) => {
+    const dropdown = getElement('search-dropdown');
+    if (!dropdown || dropdown.classList.contains('hidden')) return;
+    const items = dropdown.querySelectorAll('.search-dropdown-item');
+    if (!items.length) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      searchDropdownIndex = Math.min(searchDropdownIndex + 1, items.length - 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      searchDropdownIndex = Math.max(searchDropdownIndex - 1, -1);
+    } else if (e.key === 'Enter' && searchDropdownIndex >= 0) {
+      e.preventDefault();
+      selectSearchItem(items[searchDropdownIndex].dataset.nombre);
+      return;
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeSearchDropdown();
+      return;
+    } else {
+      return;
+    }
+    items.forEach((item, i) => item.classList.toggle('active', i === searchDropdownIndex));
+    if (searchDropdownIndex >= 0) items[searchDropdownIndex].scrollIntoView({ block: 'nearest' });
+  };
+
+  // ── COLUMN FILTERS (FIX 3) ────────────────────────────────────────────────
+
+  let activeColFilterCol = null;
+
+  const hasActiveColumnFilters = () => {
+    const cf = state.columnFilters;
+    return cf.codigo.value || cf.nombre.value ||
+      cf.categoria.values.length > 0 ||
+      cf.costo.min != null || cf.costo.max != null || cf.costo.exact != null ||
+      cf.precio.min != null || cf.precio.max != null || cf.precio.exact != null ||
+      cf.margen.min != null || cf.margen.max != null || cf.margen.exact != null ||
+      cf.stock.min != null || cf.stock.max != null || cf.stock.exact != null ||
+      cf.minimo.min != null || cf.minimo.max != null || cf.minimo.exact != null ||
+      cf.madre.value || cf.estado.values.length > 0;
+  };
+
+  const updateLimpiarFiltrosBtn = () => {
+    const btn = getElement('btn-limpiar-filtros');
+    if (!btn) return;
+    if (hasActiveColumnFilters() || state.filters.query) {
+      btn.classList.remove('hidden');
+    } else {
+      btn.classList.add('hidden');
+    }
+  };
+
+  const resetColumnFilters = () => {
+    const cf = state.columnFilters;
+    cf.codigo   = { type: 'contiene', value: '' };
+    cf.nombre   = { type: 'contiene', value: '' };
+    cf.categoria = { values: [] };
+    cf.costo    = { mode: 'rango', exact: null, min: null, max: null };
+    cf.precio   = { mode: 'rango', exact: null, min: null, max: null };
+    cf.margen   = { mode: 'rango', exact: null, min: null, max: null };
+    cf.stock    = { mode: 'rango', exact: null, min: null, max: null };
+    cf.minimo   = { mode: 'rango', exact: null, min: null, max: null };
+    cf.madre    = { type: 'contiene', value: '' };
+    cf.estado   = { values: [] };
+    updateColumnFilterIndicators();
+    updateLimpiarFiltrosBtn();
+    state.page = 1;
+    applyFilters();
+  };
+
+  const updateColumnFilterIndicators = () => {
+    document.querySelectorAll('.col-filter-icon').forEach(icon => {
+      const col = icon.dataset.col;
+      const cf = state.columnFilters[col];
+      let active = false;
+      if (cf) {
+        if (cf.value)             active = true;
+        if (cf.values && cf.values.length > 0) active = true;
+        if (cf.exact != null)     active = true;
+        if (cf.min   != null)     active = true;
+        if (cf.max   != null)     active = true;
+      }
+      icon.classList.toggle('active', active);
+    });
+  };
+
+  const openColumnFilter = (col, anchorEl) => {
+    const dropdown = getElement('col-filter-dropdown');
+    if (!dropdown) return;
+
+    // If same col already open, close it
+    if (activeColFilterCol === col && !dropdown.classList.contains('hidden')) {
+      dropdown.classList.add('hidden');
+      activeColFilterCol = null;
+      return;
+    }
+
+    activeColFilterCol = col;
+    dropdown.innerHTML = buildColumnFilterUI(col);
+    dropdown.classList.remove('hidden');
+
+    // Position below the icon
+    const rect = anchorEl.getBoundingClientRect();
+    dropdown.style.top  = (rect.bottom + 4) + 'px';
+    dropdown.style.left = Math.min(rect.left, window.innerWidth - 270) + 'px';
+
+    // Wire up type radios toggling visibility
+    const typeRadios = dropdown.querySelectorAll('input[name="cft-mode"]');
+    typeRadios.forEach(r => r.addEventListener('change', () => {
+      const exactWrap = dropdown.querySelector('#cft-exact-wrap');
+      const rangeWrap = dropdown.querySelector('#cft-range-wrap');
+      if (exactWrap) exactWrap.style.display = r.value === 'exacto' ? '' : 'none';
+      if (rangeWrap) rangeWrap.style.display = r.value === 'rango'  ? '' : 'none';
+    }));
+
+    dropdown.querySelector('#cft-apply')?.addEventListener('click', () => applyColumnFilter(col));
+    dropdown.querySelector('#cft-clear')?.addEventListener('click', () => {
+      clearSingleColumnFilter(col);
+      dropdown.classList.add('hidden');
+      activeColFilterCol = null;
+    });
+  };
+
+  const buildColumnFilterUI = (col) => {
+    const cf = state.columnFilters[col];
+
+    if (col === 'codigo' || col === 'nombre' || col === 'madre') {
+      const igualChecked    = cf.type === 'igual'    ? 'checked' : '';
+      const contieneChecked = cf.type === 'contiene' ? 'checked' : '';
+      return `
+        <div class="col-filter-type">
+          <label><input type="radio" name="cft-type" value="igual" ${igualChecked}> Es igual a</label>
+          <label><input type="radio" name="cft-type" value="contiene" ${contieneChecked}> Contiene</label>
+        </div>
+        <input type="text" id="cft-text" value="${cf.value || ''}" placeholder="Texto...">
+        <div class="col-filter-actions">
+          <button id="cft-clear">Limpiar</button>
+          <button id="cft-apply" class="btn-cf-apply">Aplicar</button>
+        </div>`;
+    }
+
+    if (col === 'categoria') {
+      const items = state.categorias.map(cat => {
+        const checked = cf.values.includes(String(cat.id)) ? 'checked' : '';
+        return `<label><input type="checkbox" value="${cat.id}" ${checked}> ${cat.nombre}</label>`;
+      }).join('');
+      return `
+        <div style="font-size:12px;color:#666;margin-bottom:6px;">Categorías (vacío = todas)</div>
+        <div class="col-filter-checklist" id="cft-checklist">${items}</div>
+        <div class="col-filter-actions">
+          <button id="cft-clear">Limpiar</button>
+          <button id="cft-apply" class="btn-cf-apply">Aplicar</button>
+        </div>`;
+    }
+
+    if (col === 'estado') {
+      const act = cf.values.includes('1') ? 'checked' : '';
+      const ina = cf.values.includes('0') ? 'checked' : '';
+      return `
+        <div style="font-size:12px;color:#666;margin-bottom:6px;">Estado (vacío = todos)</div>
+        <div class="col-filter-checklist" id="cft-checklist">
+          <label><input type="checkbox" value="1" ${act}> Activo</label>
+          <label><input type="checkbox" value="0" ${ina}> Inactivo</label>
+        </div>
+        <div class="col-filter-actions">
+          <button id="cft-clear">Limpiar</button>
+          <button id="cft-apply" class="btn-cf-apply">Aplicar</button>
+        </div>`;
+    }
+
+    // Numeric columns: costo, precio, margen, stock, minimo
+    const exactoChecked = cf.mode === 'exacto' ? 'checked' : '';
+    const rangoChecked  = cf.mode === 'rango'  ? 'checked' : '';
+    const showExacto = cf.mode === 'exacto' ? '' : 'display:none';
+    const showRango  = cf.mode === 'rango'  ? '' : 'display:none';
+    return `
+      <div class="col-filter-type">
+        <label><input type="radio" name="cft-mode" value="exacto" ${exactoChecked}> Exacto</label>
+        <label><input type="radio" name="cft-mode" value="rango"  ${rangoChecked}>  Rango</label>
+      </div>
+      <div id="cft-exact-wrap" style="${showExacto}">
+        <input type="number" id="cft-exact" value="${cf.exact ?? ''}" placeholder="Número exacto" step="any">
+      </div>
+      <div id="cft-range-wrap" style="${showRango}">
+        <div class="col-filter-range">
+          <input type="number" id="cft-min" value="${cf.min ?? ''}" placeholder="Mín" step="any">
+          <span>—</span>
+          <input type="number" id="cft-max" value="${cf.max ?? ''}" placeholder="Máx" step="any">
+        </div>
+      </div>
+      <div class="col-filter-actions">
+        <button id="cft-clear">Limpiar</button>
+        <button id="cft-apply" class="btn-cf-apply">Aplicar</button>
+      </div>`;
+  };
+
+  const applyColumnFilter = (col) => {
+    const dropdown = getElement('col-filter-dropdown');
+    const cf = state.columnFilters[col];
+
+    if (col === 'codigo' || col === 'nombre' || col === 'madre') {
+      const typeEl = dropdown.querySelector('input[name="cft-type"]:checked');
+      cf.type  = typeEl ? typeEl.value : 'contiene';
+      cf.value = dropdown.querySelector('#cft-text')?.value.trim() || '';
+    } else if (col === 'categoria' || col === 'estado') {
+      const checkboxes = dropdown.querySelectorAll('#cft-checklist input[type="checkbox"]:checked');
+      cf.values = Array.from(checkboxes).map(c => c.value);
+    } else {
+      // numeric
+      const modeEl = dropdown.querySelector('input[name="cft-mode"]:checked');
+      cf.mode = modeEl ? modeEl.value : 'rango';
+      const exactVal = dropdown.querySelector('#cft-exact')?.value;
+      cf.exact = exactVal !== '' && exactVal != null ? parseFloat(exactVal) : null;
+      const minVal = dropdown.querySelector('#cft-min')?.value;
+      const maxVal = dropdown.querySelector('#cft-max')?.value;
+      cf.min = minVal !== '' && minVal != null ? parseFloat(minVal) : null;
+      cf.max = maxVal !== '' && maxVal != null ? parseFloat(maxVal) : null;
+    }
+
+    dropdown.classList.add('hidden');
+    activeColFilterCol = null;
+    updateColumnFilterIndicators();
+    updateLimpiarFiltrosBtn();
+    state.page = 1;
+    applyFilters();
+  };
+
+  const clearSingleColumnFilter = (col) => {
+    const cf = state.columnFilters;
+    if (col === 'codigo' || col === 'nombre' || col === 'madre') {
+      cf[col] = { type: 'contiene', value: '' };
+    } else if (col === 'categoria' || col === 'estado') {
+      cf[col] = { values: [] };
+    } else {
+      cf[col] = { mode: 'rango', exact: null, min: null, max: null };
+    }
+    updateColumnFilterIndicators();
+    updateLimpiarFiltrosBtn();
+    state.page = 1;
+    applyFilters();
+  };
+
+  // ── ASSIGN MADRE MODAL (FIX 5) ───────────────────────────────────────────
+
+  const assignMadreState = {
+    targetProductId: null,
+    targetProductName: null,
+    selectedProductId: null,
+    selectedProductName: null,
+    soloMadres: false,
+    convertToMadre: false
+  };
+
+  const openAssignMadreModal = (productId) => {
+    const product = state.productos.find(p => p.id === productId);
+    if (!product) return;
+
+    assignMadreState.targetProductId   = productId;
+    assignMadreState.targetProductName = product.nombre;
+    assignMadreState.selectedProductId = null;
+    assignMadreState.selectedProductName = null;
+    assignMadreState.soloMadres = false;
+    assignMadreState.convertToMadre = false;
+
+    const targetEl = getElement('assign-madre-target');
+    if (targetEl) targetEl.textContent = `Asignar madre para: ${product.nombre}`;
+
+    const searchEl = getElement('assign-madre-search');
+    if (searchEl) searchEl.value = '';
+
+    const dropdownEl = getElement('assign-madre-dropdown');
+    if (dropdownEl) { dropdownEl.innerHTML = ''; dropdownEl.classList.add('hidden'); }
+
+    const alertEl = getElement('assign-madre-alert');
+    if (alertEl) alertEl.classList.add('hidden');
+
+    const confirmBtn = getElement('btn-assign-madre-confirm');
+    if (confirmBtn) confirmBtn.disabled = true;
+
+    const soloMadresEl = getElement('assign-madre-solo-madres');
+    if (soloMadresEl) soloMadresEl.checked = false;
+
+    getElement('assign-madre-modal').classList.remove('hidden');
+    getElement('modal-backdrop').classList.remove('hidden');
+  };
+
+  const closeAssignMadreModal = () => {
+    getElement('assign-madre-modal').classList.add('hidden');
+    getElement('modal-backdrop').classList.add('hidden');
+  };
+
+  const renderAssignMadreDropdown = (q) => {
+    const dropdown = getElement('assign-madre-dropdown');
+    if (!dropdown) return;
+    const lower = q.toLowerCase();
+    const results = state.productos.filter(p => {
+      if (p.id === assignMadreState.targetProductId) return false;
+      if (assignMadreState.soloMadres && !(p.es_madre === 1 || p.es_madre === '1')) return false;
+      return (p.nombre || '').toLowerCase().includes(lower) ||
+             (p.codigo_barras || '').toLowerCase().includes(lower);
+    }).slice(0, 15);
+
+    if (!results.length) { dropdown.classList.add('hidden'); return; }
+
+    dropdown.innerHTML = results.map(p => {
+      const esMadre = p.es_madre === 1 || p.es_madre === '1';
+      return `<div class="assign-madre-item ${esMadre ? 'is-madre' : ''}" data-id="${p.id}" data-nombre="${(p.nombre || '').replace(/"/g, '&quot;')}">
+        ${p.nombre || ''}${esMadre ? ' ★' : ''}
+        ${p.codigo_barras ? `<span style="font-size:11px;color:#888;margin-left:6px">${p.codigo_barras}</span>` : ''}
+      </div>`;
+    }).join('');
+    dropdown.classList.remove('hidden');
+
+    dropdown.querySelectorAll('.assign-madre-item').forEach(item => {
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        selectAssignMadreProd(item.dataset.id, item.dataset.nombre);
+      });
+    });
+  };
+
+  const selectAssignMadreProd = (productId, productName) => {
+    const product = state.productos.find(p => p.id === productId);
+    if (!product) return;
+    const esMadre = product.es_madre === 1 || product.es_madre === '1';
+    const esHijo  = !!product.producto_madre_id;
+
+    const searchEl = getElement('assign-madre-search');
+    if (searchEl) searchEl.value = productName;
+    getElement('assign-madre-dropdown').classList.add('hidden');
+
+    const alertEl   = getElement('assign-madre-alert');
+    const confirmBtn = getElement('btn-assign-madre-confirm');
+    alertEl.classList.remove('hidden');
+    assignMadreState.convertToMadre = false;
+
+    if (esHijo) {
+      const madreName = product.madre_nombre || '(desconocida)';
+      alertEl.innerHTML = `<strong>${productName}</strong> es hijo de <strong>${madreName}</strong>. ¿Deseas asignar <strong>${madreName}</strong> como madre en su lugar?`;
+      assignMadreState.selectedProductId   = product.producto_madre_id;
+      assignMadreState.selectedProductName = madreName;
+    } else if (!esMadre) {
+      alertEl.innerHTML = `¿Convertir <strong>${productName}</strong> en producto madre?`;
+      assignMadreState.selectedProductId   = productId;
+      assignMadreState.selectedProductName = productName;
+      assignMadreState.convertToMadre = true;
+    } else {
+      alertEl.classList.add('hidden');
+      assignMadreState.selectedProductId   = productId;
+      assignMadreState.selectedProductName = productName;
+    }
+
+    confirmBtn.disabled = false;
+  };
+
+  const confirmAssignMadre = () => {
+    if (!assignMadreState.targetProductId || !assignMadreState.selectedProductId) return;
+    try {
+      const now = window.SGA_Utils.formatISODate(new Date());
+      if (assignMadreState.convertToMadre) {
+        window.SGA_DB.run(
+          `UPDATE productos SET es_madre = 1, fecha_modificacion = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
+          [now, now, assignMadreState.selectedProductId]
+        );
+      }
+      window.SGA_DB.run(
+        `UPDATE productos SET producto_madre_id = ?, fecha_modificacion = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
+        [assignMadreState.selectedProductId, now, now, assignMadreState.targetProductId]
+      );
+      closeAssignMadreModal();
+      loadProductos();
+    } catch (error) {
+      alert('Error al asignar madre: ' + error.message);
+    }
+  };
+
   // ── EVENTS ────────────────────────────────────────────────────────────────
 
   const setUpEvents = () => {
@@ -1150,16 +1652,12 @@
     getElement('btn-nuevo-producto')?.addEventListener('click', () => openProductModal());
     getElement('btn-importar-excel')?.addEventListener('click', () => openImportModal());
     getElement('btn-bajo-minimo')?.addEventListener('click', () => {
-      state.filters.soloMadres = false;
-      state.filters.activo = '';
-      state.filters.categoria = '';
+      // Clear all filters and show only below-minimum products
       state.filters.query = '';
-      getElement('search-productos').value = '';
-      getElement('filter-categoria').value = '';
-      getElement('filter-solo-madres').checked = false;
-      getElement('filter-activo').value = '';
-
-
+      const searchEl = getElement('search-productos');
+      if (searchEl) searchEl.value = '';
+      resetColumnFilters();
+      clearAdvancedFilters();
       const bajos = state.productos.filter(p => {
         const stock = p.stock_actual != null ? p.stock_actual : 0;
         return stock < (p.stock_minimo || 0);
@@ -1186,31 +1684,51 @@
     });
 
 
-    getElement('search-productos')?.addEventListener('input', (e) => {
-      state.filters.query = e.target.value;
-      state.page = 1;
-      applyFilters();
+    // FIX 1: Search bar with predictive dropdown
+    const searchInput = getElement('search-productos');
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        state.filters.query = e.target.value;
+        state.page = 1;
+        applyFilters();
+        const q = e.target.value.trim();
+        if (q.length >= 2) {
+          renderSearchDropdown(q);
+        } else {
+          closeSearchDropdown();
+        }
+      });
+      searchInput.addEventListener('keydown', onSearchKeyDown);
+      searchInput.addEventListener('blur', () => {
+        setTimeout(closeSearchDropdown, 150);
+      });
+    }
+
+    // FIX 3: Column filter icons
+    document.querySelectorAll('.col-filter-icon').forEach(icon => {
+      icon.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const col = icon.dataset.col;
+        openColumnFilter(col, icon);
+      });
     });
 
-
-    getElement('filter-categoria')?.addEventListener('change', (e) => {
-      state.filters.categoria = e.target.value;
-      state.page = 1;
-      applyFilters();
+    // Close column filter on outside click
+    document.addEventListener('click', (e) => {
+      const dropdown = getElement('col-filter-dropdown');
+      if (dropdown && !dropdown.contains(e.target)) {
+        dropdown.classList.add('hidden');
+      }
     });
 
-
-    getElement('filter-solo-madres')?.addEventListener('change', (e) => {
-      state.filters.soloMadres = e.target.checked;
-      state.page = 1;
-      applyFilters();
-    });
-
-
-    getElement('filter-activo')?.addEventListener('change', (e) => {
-      state.filters.activo = e.target.value;
-      state.page = 1;
-      applyFilters();
+    // Limpiar filtros button
+    getElement('btn-limpiar-filtros')?.addEventListener('click', () => {
+      state.filters.query = '';
+      const searchEl = getElement('search-productos');
+      if (searchEl) searchEl.value = '';
+      resetColumnFilters();
+      clearAdvancedFilters();
+      updateLimpiarFiltrosBtn();
     });
 
 
@@ -1271,6 +1789,21 @@
     getElement('btn-family-cancel')?.addEventListener('click', () => getElement('family-modal').classList.add('hidden'));
     getElement('btn-family-confirm')?.addEventListener('click', () => getElement('family-modal').classList.add('hidden'));
 
+    // FIX 5: Assign madre modal
+    getElement('btn-close-assign-madre')?.addEventListener('click', closeAssignMadreModal);
+    getElement('btn-assign-madre-cancel')?.addEventListener('click', closeAssignMadreModal);
+    getElement('btn-assign-madre-confirm')?.addEventListener('click', confirmAssignMadre);
+    getElement('assign-madre-solo-madres')?.addEventListener('change', () => {
+      assignMadreState.soloMadres = getElement('assign-madre-solo-madres').checked;
+      const q = getElement('assign-madre-search').value.trim();
+      if (q.length >= 2) renderAssignMadreDropdown(q);
+    });
+    getElement('assign-madre-search')?.addEventListener('input', (e) => {
+      const q = e.target.value.trim();
+      if (q.length >= 2) renderAssignMadreDropdown(q);
+      else getElement('assign-madre-dropdown').classList.add('hidden');
+    });
+
 
     // Close modal when clicking backdrop area; a very simple implementation
     document.querySelectorAll('.modal').forEach(modal => {
@@ -1314,6 +1847,11 @@
 
 
   const init = () => {
+    // FIX 2: Clear any selected product state when returning to the list
+    state.editingProduct = null;
+    const detailPanel = getElement('detail-panel');
+    if (detailPanel) detailPanel.classList.add('hidden');
+
     setUpEvents();
     loadCategorias();
     loadProveedores();

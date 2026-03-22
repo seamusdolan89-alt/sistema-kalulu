@@ -11,35 +11,24 @@
 
   <!-- FILTERS SECTION -->
   <div class="filters-section">
-    <div class="search-box">
-      <input,
+    <div class="search-box" style="position:relative">
+      <input
         type="text"
         id="search-productos"
         placeholder="🔍 Buscar por nombre o código..."
         class="search-input"
+        autocomplete="off"
       >
+      <div id="search-dropdown" class="search-dropdown hidden"></div>
       <a href="#" id="btn-busqueda-avanzada" class="link-advanced">búsqueda avanzada <span id="adv-badge" class="adv-badge" style="display:none">0</span> ▾</a>
     </div>
 
     <div class="filter-group">
-      <select id="filter-categoria" class="select-filter">
-        <option value="">Todas las categorías</option>
-        <!-- populated dynamically -->
-      </select>
-
-      <label class="checkbox-label">
-        <input type="checkbox" id="filter-solo-madres">
-        Solo productos madre
-      </label>
-
-      <select id="filter-activo" class="select-filter">
-        <option value="">Todos los estados</option>
-        <option value="1">Activos</option>
-        <option value="0">Inactivos</option>
-      </select>
-
       <button id="btn-bajo-minimo" class="btn btn-secondary btn-small">
         ⚠️ Bajo Mínimo
+      </button>
+      <button id="btn-limpiar-filtros" class="btn btn-outline btn-small hidden">
+        ✕ Limpiar filtros
       </button>
     </div>
   </div>
@@ -49,15 +38,16 @@
     <table class="productos-table">
       <thead>
         <tr>
-          <th data-sort="codigo_barras">Código</th>
-          <th data-sort="nombre">Nombre</th>
-          <th data-sort="categoria_nombre">Categoría</th>
-          <th data-sort="costo">Costo</th>
-          <th data-sort="precio_venta">Precio</th>
-          <th data-sort="margen">Margen %</th>
-          <th data-sort="stock_actual">Stock</th>
-          <th data-sort="stock_minimo">Mín.</th>
-          <th data-sort="familia">Familia</th>
+          <th data-sort="codigo_barras">Código <span class="col-filter-icon" data-col="codigo">▼</span></th>
+          <th data-sort="nombre">Nombre <span class="col-filter-icon" data-col="nombre">▼</span></th>
+          <th data-sort="categoria_nombre">Categoría <span class="col-filter-icon" data-col="categoria">▼</span></th>
+          <th data-sort="costo">Costo <span class="col-filter-icon" data-col="costo">▼</span></th>
+          <th data-sort="precio_venta">Precio <span class="col-filter-icon" data-col="precio">▼</span></th>
+          <th data-sort="margen">Margen % <span class="col-filter-icon" data-col="margen">▼</span></th>
+          <th data-sort="stock_actual">Stock <span class="col-filter-icon" data-col="stock">▼</span></th>
+          <th data-sort="stock_minimo">Mín. <span class="col-filter-icon" data-col="minimo">▼</span></th>
+          <th data-sort="madre_nombre">Madre <span class="col-filter-icon" data-col="madre">▼</span></th>
+          <th data-sort="activo">Estado <span class="col-filter-icon" data-col="estado">▼</span></th>
           <th>Acciones</th>
         </tr>
       </thead>
@@ -72,6 +62,42 @@
     <button id="btn-prev-page" class="btn btn-secondary btn-small">← Anterior</button>
     <span id="pagination-info">Página 1</span>
     <button id="btn-next-page" class="btn btn-secondary btn-small">Siguiente →</button>
+  </div>
+</div>
+
+<!-- COLUMN FILTER DROPDOWN (shared, repositioned on open) -->
+<div id="col-filter-dropdown" class="col-filter-dropdown hidden"></div>
+
+<!-- ASSIGN MADRE MODAL -->
+<div id="assign-madre-modal" class="modal hidden">
+  <div class="modal-content modal-medium">
+    <div class="modal-header">
+      <h3>👨‍👩‍👧 Asignar producto madre</h3>
+      <button id="btn-close-assign-madre" class="btn-close" aria-label="Cerrar">✕</button>
+    </div>
+    <div style="padding: 20px;">
+      <p id="assign-madre-target" style="margin-bottom:12px;font-size:14px;color:#555;"></p>
+
+      <div class="form-group" style="margin-bottom:12px;">
+        <label class="checkbox-label">
+          <input type="checkbox" id="assign-madre-solo-madres">
+          Ver solo productos madre
+        </label>
+      </div>
+
+      <div class="form-group" style="position:relative;">
+        <input type="text" id="assign-madre-search" class="input-full"
+               placeholder="🔍 Buscar producto..." autocomplete="off">
+        <div id="assign-madre-dropdown" class="assign-madre-dropdown hidden"></div>
+      </div>
+
+      <div id="assign-madre-alert" class="hidden"
+           style="margin-top:12px;padding:10px;background:#fff3cd;border-radius:4px;font-size:13px;"></div>
+    </div>
+    <div class="form-actions" style="padding:0 20px 20px;border-top:1px solid #eee;margin-top:0;">
+      <button id="btn-assign-madre-cancel" class="btn btn-secondary">Cancelar</button>
+      <button id="btn-assign-madre-confirm" class="btn btn-primary" disabled>Confirmar</button>
+    </div>
   </div>
 </div>
 
@@ -1411,6 +1437,157 @@
   background: #28a745;
   transition: width 0.3s;
 }
+
+/* Search predictive dropdown */
+.search-dropdown {
+  position: absolute;
+  top: calc(100% - 22px);
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #ccc;
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  z-index: 500;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.search-dropdown-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  border-bottom: 1px solid #f0f0f0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.search-dropdown-item:last-child { border-bottom: none; }
+.search-dropdown-item:hover,
+.search-dropdown-item.active { background: #eef2f7; }
+.search-dropdown-item .item-code {
+  font-size: 11px;
+  color: #888;
+  margin-left: auto;
+}
+
+/* Column filter icon */
+.col-filter-icon {
+  font-size: 9px;
+  opacity: 0.5;
+  cursor: pointer;
+  vertical-align: middle;
+  margin-left: 2px;
+  display: inline-block;
+}
+.col-filter-icon:hover { opacity: 1; }
+.col-filter-icon.active {
+  opacity: 1;
+  color: #0066cc;
+}
+
+/* Column filter dropdown */
+.col-filter-dropdown {
+  position: fixed;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  z-index: 2000;
+  min-width: 210px;
+  max-width: 260px;
+  padding: 12px;
+  font-size: 13px;
+}
+.col-filter-dropdown.hidden { display: none; }
+.col-filter-type {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.col-filter-type label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.col-filter-dropdown input[type="text"],
+.col-filter-dropdown input[type="number"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.col-filter-range {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.col-filter-range input { flex: 1; }
+.col-filter-checklist {
+  max-height: 140px;
+  overflow-y: auto;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+.col-filter-checklist label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  cursor: pointer;
+  font-size: 13px;
+}
+.col-filter-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+.col-filter-actions button {
+  flex: 1;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  border: 1px solid #ddd;
+  background: #f5f5f5;
+}
+.col-filter-actions .btn-cf-apply {
+  background: #0066cc;
+  color: white;
+  border-color: #0066cc;
+}
+
+/* Assign madre dropdown */
+.assign-madre-dropdown {
+  background: white;
+  border: 1px solid #ddd;
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  max-height: 200px;
+  overflow-y: auto;
+}
+.assign-madre-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.assign-madre-item:last-child { border-bottom: none; }
+.assign-madre-item:hover { background: #eef2f7; }
+.assign-madre-item.is-madre { font-weight: bold; }
+
+.btn-outline {
+  background: transparent;
+  color: #555;
+  border: 1px solid #ccc;
+}
+.btn-outline:hover { background: #f5f5f5; }
 </style>
 
 <!-- IMPORT EXCEL MODAL -->
