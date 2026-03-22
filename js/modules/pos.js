@@ -1268,8 +1268,18 @@ export const POS = (() => {
         <hr class="ticket-hr">
         <div class="ticket-center"><small>¡Gracias por su compra!</small></div>
       `;
+      // For reimprimir, change footer buttons
+      const footer = ge('modal-ticket').querySelector('.pmodal-ftr');
+      if (footer) {
+        footer.innerHTML = `
+          <button class="mbtn mbtn-secondary" id="btn-ticket-cerrar">Cerrar</button>
+          <button class="mbtn mbtn-secondary" id="btn-ticket-imprimir">🖨️ Imprimir ticket</button>
+        `;
+        // Add listener for cerrar
+        ge('btn-ticket-cerrar')?.addEventListener('click', () => hideModal('modal-ticket'), { once: true });
+      }
       showModal('modal-ticket');
-      setTimeout(() => ge('btn-ticket-nueva-venta')?.focus(), 80);
+      setTimeout(() => ge('btn-ticket-imprimir')?.focus(), 80);
     };
 
     const showModalCierre = () => {
@@ -1731,7 +1741,18 @@ export const POS = (() => {
       // Reset editing state
       state.editingVentaId = null;
 
-      showModalTicket(result.ticketData);
+      // Show success toast and return to dashboard
+      showToast('Venta registrada ✓');
+      state.cart = [];
+      state.pagosAmounts = { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0 };
+      state.activeMedios = new Set(['efectivo']);
+      state.recibeEfectivo = 0;
+      state.ccCobrarDeuda = false;
+      state.ccAplicarFavor = false;
+      clearCliente();
+      saveCart();
+      checkSesion();
+      enterDashboard();
     });
 
     // Discount modal
