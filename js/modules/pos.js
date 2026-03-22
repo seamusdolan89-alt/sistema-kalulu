@@ -944,11 +944,23 @@ export const POS = (() => {
 
     const enterSaleMode = () => {
       if (!state.sesionActiva) { showModalApertura(); return; }
-      if (state.cart.length > 0) {
+      // Check if there's an active cart in sessionStorage with items
+      let hasActiveCart = false;
+      try {
+        const saved = sessionStorage.getItem('pos_cart');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            hasActiveCart = true;
+          }
+        }
+      } catch(e) {}
+      if (hasActiveCart) {
         if (!confirm('¿Abandonar la venta actual?')) return;
-        state.cart = [];
-        saveCart();
       }
+      // Always start with empty cart
+      state.cart = [];
+      saveCart();
       state.mode = 'sale';
       const dash = ge('pos-dashboard');
       const sale = ge('pos-sale');
