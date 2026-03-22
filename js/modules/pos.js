@@ -911,7 +911,7 @@ export const POS = (() => {
       } else if (deudaRow) {
         deudaRow.style.display = 'none';
       }
-      renderCCSection();
+      renderDebtToggle();
     };
 
     const clearCliente = () => {
@@ -926,7 +926,7 @@ export const POS = (() => {
       if (deudaRow) deudaRow.style.display = 'none';
       const inp = ge('client-search-input');
       if (inp) inp.value = '';
-      renderCCSection();
+      renderDebtToggle();
       autoFillPayment();
     };
 
@@ -1494,8 +1494,8 @@ export const POS = (() => {
 
     // Ticket
     ge('btn-ticket-imprimir')?.addEventListener('click', () => window.print());
-    ge('btn-ticket-close')?.addEventListener('click',   () => hideModal('modal-ticket'));
-    ge('btn-ticket-volver')?.addEventListener('click',  () => hideModal('modal-ticket'));
+    ge('btn-ticket-close')?.addEventListener('click',   finalizeSaleAndGoDashboard);
+    ge('btn-ticket-volver')?.addEventListener('click',  finalizeSaleAndGoDashboard);
     ge('btn-ticket-confirmar')?.addEventListener('click', finalizeSaleAndGoDashboard);
 
     // Cierre
