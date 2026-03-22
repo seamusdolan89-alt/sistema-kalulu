@@ -505,6 +505,9 @@ export const POS = (() => {
       descuentoGlobal: 0,
       descItemIdx: null,
       descTipo: 'monto',
+      ccCobrarDeuda: false,
+      ccAplicarFavor: false,
+      ccRegistrarDeuda: false,
       currentUser: window.SGA_Auth.getCurrentUser(),
       currentSucursal: null,
     };
@@ -515,11 +518,10 @@ export const POS = (() => {
     const formatTime = iso => new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 
     const MEDIOS = [
-      { id: 'efectivo',        nombre: 'Efectivo',         icon: '💵' },
-      { id: 'mercadopago',     nombre: 'Mercado Pago',     icon: '📱' },
-      { id: 'tarjeta',         nombre: 'Tarjeta',          icon: '💳' },
-      { id: 'transferencia',   nombre: 'Transferencia',    icon: '🏦' },
-      { id: 'cuenta_corriente',nombre: 'Cta. Corriente',   icon: '📒' },
+      { id: 'efectivo',      nombre: 'Efectivo',     icon: '💵' },
+      { id: 'mercadopago',   nombre: 'Mercado Pago', icon: '📱' },
+      { id: 'tarjeta',       nombre: 'Tarjeta',      icon: '💳' },
+      { id: 'transferencia', nombre: 'Transferencia', icon: '🏦' },
     ];
 
     const DENOMINACIONES = [1000, 2000, 5000, 10000, 20000, 50000];
@@ -555,6 +557,17 @@ export const POS = (() => {
     const getCartTotal = () => Math.max(0, getCartSubtotal() - getCartDescuento());
     const getTotalAsignado = () => [...state.activeMedios].reduce((s, m) => s + (state.pagosAmounts[m] || 0), 0);
 
+    const getEffectiveTotal = () => {
+      const base = getCartTotal();
+      if (state.ccAplicarFavor && state.clienteSaldo < 0) {
+        return Math.max(0, base + state.clienteSaldo); // clienteSaldo is negative
+      }
+      return base;
+    };
+
+    let lastSearchResults = [];
+    let searchHlIdx = -1;
+
     // Restore cart from sessionStorage
     try {
       const saved = sessionStorage.getItem('pos_cart');
@@ -586,9 +599,9 @@ export const POS = (() => {
     // ── ADD TO CART ────────────────────────────────────────────────
     const addToCart = (producto) => {
       if (!state.sesionActiva) { showModalApertura(); return; }
-      const exist = state.cart.find(i => i.productoId === producto.id);
-      if (exist) {
-        exist.cantidad++;
+      const existIdx = state.cart.findIndex(i => i.productoId === producto.id);
+      if (existIdx >= 0) {
+        state.cart[existIdx].cantidad++;
       } else {
         state.cart.push({
           productoId: producto.id,
@@ -604,10 +617,17 @@ export const POS = (() => {
       renderCart();
       renderSaleTotals();
       autoFillPayment();
+      // FIX 2: focus qty input of added item
+      const addedIdx = state.cart.findIndex(i => i.productoId === producto.id);
+      if (addedIdx >= 0) {
+        const qtyInp = document.querySelector(`.qty-input[data-idx="${addedIdx}"]`);
+        if (qtyInp) { qtyInp.select(); qtyInp.focus(); }
+      }
       const si = ge('pos-search-input');
-      if (si) { si.value = ''; si.focus(); }
+      if (si) si.value = '';
       const dd = ge('pos-search-dropdown');
       if (dd) dd.style.display = 'none';
+      searchHlIdx = -1;
     };
 
     // ── RENDER CART ────────────────────────────────────────────────
@@ -635,13 +655,29 @@ export const POS = (() => {
       }).join('');
 
       tbody.querySelectorAll('.qty-input').forEach(inp => {
+        const idx = +inp.dataset.idx;
         inp.addEventListener('change', e => {
-          const item = state.cart[+e.target.dataset.idx];
+          const item = state.cart[idx];
           if (!item) return;
           const v = parseFloat(e.target.value);
-          if (isNaN(v) || v <= 0) { state.cart.splice(+e.target.dataset.idx, 1); }
+          if (isNaN(v) || v <= 0) { state.cart.splice(idx, 1); }
           else { item.cantidad = v; }
           saveCart(); renderCart(); renderSaleTotals(); autoFillPayment();
+        });
+        inp.addEventListener('keydown', e => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            const v = parseFloat(inp.value);
+            if (isNaN(v) || v <= 0) { state.cart.splice(idx, 1); }
+            else if (state.cart[idx]) { state.cart[idx].cantidad = v; }
+            saveCart(); renderCart(); renderSaleTotals(); autoFillPayment();
+            ge('pos-search-input')?.focus();
+          }
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            if (state.cart[idx]) inp.value = state.cart[idx].cantidad;
+            ge('pos-search-input')?.focus();
+          }
         });
       });
       tbody.querySelectorAll('.disc-btn').forEach(btn => {
@@ -679,71 +715,81 @@ export const POS = (() => {
       container.querySelectorAll('.pchip').forEach(chip => {
         chip.addEventListener('click', () => {
           const mid = chip.dataset.medio;
-          if (state.activeMedios.has(mid)) {
-            if (state.activeMedios.size === 1) return; // keep at least one
-            state.activeMedios.delete(mid);
-            state.pagosAmounts[mid] = 0;
-          } else {
-            state.activeMedios.add(mid);
-          }
+          // FIX 3: single-select
+          state.activeMedios = new Set([mid]);
+          Object.keys(state.pagosAmounts).forEach(k => { state.pagosAmounts[k] = 0; });
           renderPaymentChips();
-          renderPaymentInputs();
           autoFillPayment();
         });
       });
     };
 
-    // Auto-fill first active payment method with total when single method
+    // Auto-fill active payment method with effective total
     const autoFillPayment = () => {
-      if (state.activeMedios.size === 1) {
-        const mid = [...state.activeMedios][0];
-        state.pagosAmounts[mid] = getCartTotal();
-      }
+      const mid = [...state.activeMedios][0];
+      if (mid) state.pagosAmounts[mid] = getEffectiveTotal();
       renderPaymentInputs();
+    };
+
+    const renderVuelto = () => {
+      const effTotal = getEffectiveTotal();
+      const recibe = state.recibeEfectivo;
+      const vuelto = recibe > 0 ? Math.max(0, recibe - effTotal) : 0;
+      const falta  = recibe > 0 ? Math.max(0, effTotal - recibe) : 0;
+      const el = ge('efectivo-vuelto');
+      if (!el) return;
+      if (vuelto > 0) {
+        el.className = 'pinput-vuelto ok';
+        el.innerHTML = `💵 Vuelto: ${formatCurrency(vuelto)}` +
+          (state.clienteId ? `<div class="saldo-favor-row" style="margin-top:4px"><label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="chk-saldo-favor"> Dejar ${formatCurrency(vuelto)} como saldo a favor</label></div>` : '');
+        el.style.display = 'block';
+      } else if (falta > 0) {
+        el.className = 'pinput-vuelto falta';
+        el.textContent = `⚠ Falta: ${formatCurrency(falta)}`;
+        el.style.display = 'block';
+      } else {
+        el.style.display = 'none';
+      }
     };
 
     const renderPaymentInputs = () => {
       const container = ge('payment-inputs');
       if (!container) return;
 
+      const effTotal = getEffectiveTotal();
       let html = '';
       for (const mid of state.activeMedios) {
         const m = MEDIOS.find(x => x.id === mid);
-        const amount = state.pagosAmounts[mid] || 0;
+        if (!m) continue;
         if (mid === 'efectivo') {
-          const recibe = state.recibeEfectivo || amount;
-          const vuelto = Math.max(0, recibe - amount);
           html += `<div class="pinput-row" data-medio="efectivo">
             <div class="pinput-label">${m.icon} ${m.nombre}</div>
-            <input type="number" class="pinput-field" data-medio="efectivo" value="${amount.toFixed(2)}" min="0" step="0.01">
-            <div class="recibe-row">
+            <div class="pinput-sub-lbl">Total a cobrar</div>
+            <div class="pinput-total-ro">${formatCurrency(effTotal)}</div>
+            <div class="recibe-row" style="margin-top:8px">
               <span>Recibe $</span>
-              <input type="number" class="recibe-field" id="recibe-efectivo" value="${recibe.toFixed(2)}" min="0" step="0.01">
+              <input type="number" class="recibe-field" id="recibe-efectivo" value="${state.recibeEfectivo > 0 ? state.recibeEfectivo.toFixed(2) : ''}" min="0" step="0.01" placeholder="${effTotal.toFixed(2)}" autocomplete="off">
             </div>
-            ${vuelto > 0 ? `<div class="vuelto-box">💵 Vuelto: ${formatCurrency(vuelto)}
-              ${state.clienteId ? `<div class="saldo-favor-row"><input type="checkbox" id="chk-saldo-favor"> ¿Dejar ${formatCurrency(vuelto)} a favor?</div>` : ''}</div>` : ''}
+            <div id="efectivo-vuelto" class="pinput-vuelto" style="display:none"></div>
           </div>`;
         } else {
+          const amount = effTotal;
           html += `<div class="pinput-row">
             <div class="pinput-label">${m.icon} ${m.nombre}</div>
+            <div class="pinput-sub-lbl">Total a cobrar</div>
+            <div class="pinput-total-ro">${formatCurrency(effTotal)}</div>
+            <div class="pinput-sub-lbl">Monto recibido</div>
             <input type="number" class="pinput-field" data-medio="${mid}" value="${amount.toFixed(2)}" min="0" step="0.01">
           </div>`;
         }
       }
       container.innerHTML = html;
 
-      // Events on amount inputs
       container.querySelectorAll('.pinput-field').forEach(inp => {
         inp.addEventListener('input', () => {
           state.pagosAmounts[inp.dataset.medio] = parseFloat(inp.value) || 0;
           renderPaymentRunning();
           updateConfirmBtn();
-          // refresh efectivo vuelto without full re-render
-          if (inp.dataset.medio === 'efectivo') {
-            const recv = parseFloat(ge('recibe-efectivo')?.value) || 0;
-            state.recibeEfectivo = recv;
-            renderPaymentInputs();
-          }
         });
       });
 
@@ -751,31 +797,35 @@ export const POS = (() => {
       if (recibeEl) {
         recibeEl.addEventListener('input', () => {
           state.recibeEfectivo = parseFloat(recibeEl.value) || 0;
-          renderPaymentInputs();
+          renderVuelto();
         });
+        // Trigger initial vuelto render
+        renderVuelto();
       }
 
       renderPaymentRunning();
       updateConfirmBtn();
+      renderDebtToggle();
     };
 
     const renderPaymentRunning = () => {
       const asig = getTotalAsignado();
-      const tot  = getCartTotal();
+      const tot  = getEffectiveTotal();
       const diff = asig - tot;
       const el   = ge('payment-running');
       const txt  = ge('payment-running-text');
       if (!el || !txt) return;
       txt.textContent = `${formatCurrency(asig)} / ${formatCurrency(tot)}`;
-      el.className = 'payment-running ' + (Math.abs(diff) < 0.01 ? 'ok' : diff > 0 ? 'over' : 'pending');
+      el.className = 'payment-running ' + (asig >= tot ? 'ok' : 'pending');
     };
 
     const updateConfirmBtn = () => {
       const btn = ge('btn-confirm-venta');
       if (!btn) return;
       const asig = getTotalAsignado();
-      const tot  = getCartTotal();
-      btn.disabled = !state.sesionActiva || state.cart.length === 0 || Math.abs(asig - tot) > 0.01;
+      const tot  = getEffectiveTotal();
+      const canProceed = state.sesionActiva && state.cart.length > 0 && (asig >= tot || state.ccRegistrarDeuda);
+      btn.disabled = !canProceed;
     };
 
     // ── CLIENT SEARCH ──────────────────────────────────────────────
@@ -825,18 +875,38 @@ export const POS = (() => {
       } else if (deudaRow) {
         deudaRow.style.display = 'none';
       }
+      renderCCSection();
     };
 
     const clearCliente = () => {
       state.clienteId = null;
       state.clienteNombre = null;
       state.clienteSaldo = 0;
+      state.ccCobrarDeuda = false;
+      state.ccAplicarFavor = false;
       const card = ge('client-card');
       if (card) card.style.display = 'none';
       const deudaRow = ge('client-deuda-row');
       if (deudaRow) deudaRow.style.display = 'none';
       const inp = ge('client-search-input');
       if (inp) inp.value = '';
+      renderCCSection();
+      autoFillPayment();
+    };
+
+    // ── CC SECTION ─────────────────────────────────────────────────
+    const renderDebtToggle = () => {
+      const row = ge('debt-toggle-row');
+      const chk = ge('chk-registrar-deuda');
+      const warn = ge('debt-warning');
+      if (!row || !chk || !warn) return;
+      row.style.display = 'block';
+      chk.checked = state.ccRegistrarDeuda;
+      if (chk.checked && !state.clienteId) {
+        warn.style.display = 'block';
+      } else {
+        warn.style.display = 'none';
+      }
     };
 
     // ── HEADER STATUS ──────────────────────────────────────────────
@@ -874,6 +944,11 @@ export const POS = (() => {
 
     const enterSaleMode = () => {
       if (!state.sesionActiva) { showModalApertura(); return; }
+      if (state.cart.length > 0) {
+        if (!confirm('¿Abandonar la venta actual?')) return;
+        state.cart = [];
+        saveCart();
+      }
       state.mode = 'sale';
       const dash = ge('pos-dashboard');
       const sale = ge('pos-sale');
@@ -1291,16 +1366,19 @@ export const POS = (() => {
     // Ticket
     ge('btn-ticket-imprimir')?.addEventListener('click', () => window.print());
     ge('btn-ticket-close')?.addEventListener('click',   () => hideModal('modal-ticket'));
-    ge('btn-ticket-nueva-venta')?.addEventListener('click', () => {
+    ge('btn-ticket-volver')?.addEventListener('click',  () => hideModal('modal-ticket'));
+    ge('btn-ticket-confirmar')?.addEventListener('click', () => {
       hideModal('modal-ticket');
+      alert('Venta registrada ✓');
       state.cart = [];
-      state.pagosAmounts = { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0, cuenta_corriente: 0 };
+      state.pagosAmounts = { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0 };
       state.activeMedios = new Set(['efectivo']);
       state.recibeEfectivo = 0;
+      state.ccCobrarDeuda = false;
+      state.ccAplicarFavor = false;
       clearCliente();
       saveCart();
       checkSesion();
-      loadDashboard();
       enterDashboard();
     });
 
@@ -1376,6 +1454,8 @@ export const POS = (() => {
               <div class="sri-precio">${formatCurrency(p.precio_venta)}</div>
             </div>`).join('');
           dd.style.display = 'block';
+          lastSearchResults = results;
+          searchHlIdx = -1;
           dd.querySelectorAll('.sri').forEach(el => {
             el.addEventListener('click', () => {
               const p = results.find(x => x.id === el.dataset.id);
@@ -1386,26 +1466,51 @@ export const POS = (() => {
       });
 
       searchInput.addEventListener('keydown', e => {
+        const dd = ge('pos-search-dropdown');
+        const sriItems = dd ? dd.querySelectorAll('.sri') : [];
+
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (!sriItems.length) return;
+          searchHlIdx = Math.min(searchHlIdx + 1, sriItems.length - 1);
+          sriItems.forEach((el, i) => el.classList.toggle('highlighted', i === searchHlIdx));
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          searchHlIdx = Math.max(searchHlIdx - 1, -1);
+          sriItems.forEach((el, i) => el.classList.toggle('highlighted', i === searchHlIdx));
+          return;
+        }
         if (e.key === 'Enter') {
           e.preventDefault();
+          // If item is highlighted, select it
+          if (searchHlIdx >= 0 && lastSearchResults[searchHlIdx]) {
+            addToCart(lastSearchResults[searchHlIdx]);
+            searchHlIdx = -1;
+            return;
+          }
           const q = searchInput.value.trim();
           if (!q) return;
-          // Try exact barcode match first
           const byBarcode = getProductoByBarcode(q);
           if (byBarcode) { addToCart(byBarcode); return; }
-          // Then try exact name match
           const byName = searchProductos(q);
           if (byName.length === 1) { addToCart(byName[0]); return; }
-          // Show dropdown if multiple
-          if (byName.length > 1) {
-            const dd = ge('pos-search-dropdown');
-            if (dd) dd.style.display = dd.style.display === 'none' ? 'block' : dd.style.display;
-          }
+          if (byName.length > 1 && dd) dd.style.display = dd.style.display === 'none' ? 'block' : dd.style.display;
         }
         if (e.key === 'Escape') {
-          const dd = ge('pos-search-dropdown');
-          if (dd) dd.style.display = 'none';
-          searchInput.value = '';
+          if (dd && dd.style.display !== 'none') {
+            searchInput.value = '';
+            dd.style.display = 'none';
+            searchHlIdx = -1;
+            e.stopPropagation();
+            return;
+          }
+          if (!searchInput.value.trim()) {
+            // Let global handler exit
+          } else {
+            e.stopPropagation();
+          }
         }
       });
     }
@@ -1435,7 +1540,11 @@ export const POS = (() => {
       });
     }
 
-    ge('btn-clear-client')?.addEventListener('click', clearCliente);
+    ge('chk-registrar-deuda')?.addEventListener('change', e => {
+      state.ccRegistrarDeuda = e.target.checked;
+      renderDebtToggle();
+      updateConfirmBtn();
+    });
 
     // Cliente rápido
     ge('btn-cliente-rapido')?.addEventListener('click', () => showModal('modal-cliente-rapido'));
@@ -1458,8 +1567,8 @@ export const POS = (() => {
     ge('btn-confirm-venta')?.addEventListener('click', () => {
       if (!state.sesionActiva || !state.cart.length) return;
       const asig = getTotalAsignado();
-      const tot  = getCartTotal();
-      if (Math.abs(asig - tot) > 0.01) { alert('El monto asignado no coincide con el total'); return; }
+      const effTotal = getEffectiveTotal();
+      if (Math.abs(asig - effTotal) > 0.01) { alert('El monto asignado no coincide con el total'); return; }
 
       const pagos = [...state.activeMedios]
         .filter(m => (state.pagosAmounts[m] || 0) > 0)
@@ -1473,15 +1582,51 @@ export const POS = (() => {
         items: state.cart,
         pagos,
         descuentoGlobal: state.descuentoGlobal,
-        aplicarSaldoFavor: ge('chk-saldo-favor')?.checked || false,
+        aplicarSaldoFavor: false,
       };
 
       const result = registrarVenta(ventaData);
-      if (result.success) {
-        showModalTicket(result.ticketData);
-      } else {
+      if (!result.success) {
         alert('Error al registrar venta: ' + result.error);
+        return;
       }
+
+      // Post-sale CC operations
+      if (state.clienteId) {
+        const now = window.SGA_Utils.formatISODate(new Date());
+        const ccInsert = (tipo, monto, desc) => {
+          window.SGA_DB.run(
+            `INSERT INTO cuenta_corriente (id, cliente_id, sucursal_id, tipo, monto, venta_id, descripcion, fecha, usuario_id, sync_status, updated_at) VALUES (?,?,?,?,?,?,?,?,?,'pending',?)`,
+            [window.SGA_Utils.generateUUID(), state.clienteId, state.currentSucursal.id, tipo, monto, result.ventaId, desc, now, state.currentUser.id, now]
+          );
+        };
+        // FIX 4: aplicar saldo a favor (saldo < 0 = store owes client)
+        if (state.ccAplicarFavor && state.clienteSaldo < 0) {
+          const applied = Math.min(Math.abs(state.clienteSaldo), getCartTotal());
+          ccInsert('ajuste', applied, 'Aplicación de saldo a favor en compra');
+        }
+        // FIX 4: cobrar deuda (saldo > 0 = client owes store)
+        if (state.ccCobrarDeuda && state.clienteSaldo > 0) {
+          ccInsert('pago', -state.clienteSaldo, 'Cobro de deuda pendiente');
+        }
+        // FIX 4: registrar diferencia como deuda
+        if (state.ccRegistrarDeuda) {
+          const faltante = Math.max(0, getEffectiveTotal() - getTotalAsignado());
+          if (faltante > 0) {
+            ccInsert('venta_fiada', faltante, 'Diferencia registrada como deuda');
+          }
+        }
+        // FIX 5: vuelto como saldo a favor
+        if (ge('chk-saldo-favor')?.checked) {
+          const recibe = state.recibeEfectivo || 0;
+          const vuelto = Math.max(0, recibe - getEffectiveTotal());
+          if (vuelto > 0) {
+            ccInsert('saldo_favor', -vuelto, 'Vuelto dejado como saldo a favor');
+          }
+        }
+      }
+
+      showModalTicket(result.ticketData);
     });
 
     // Discount modal

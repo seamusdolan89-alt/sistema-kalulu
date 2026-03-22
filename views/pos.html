@@ -174,7 +174,8 @@ main#app { overflow: hidden; }
 }
 .sri { padding: 10px 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f5f5f5; font-size: 0.9em; }
 .sri:last-child { border-bottom: none; }
-.sri:hover { background: #f5f7ff; }
+.sri:hover, .sri.highlighted { background: #f0f4ff; }
+.sri.highlighted { outline: 2px solid #667eea; outline-offset: -2px; }
 .sri-left { display: flex; flex-direction: column; gap: 2px; }
 .sri-nombre { font-weight: 600; color: #333; }
 .sri-codigo { color: #aaa; font-size: 0.83em; }
@@ -409,6 +410,22 @@ main#app { overflow: hidden; }
 
 /* Devolucion detail */
 .dev-venta-info { background: #f8f9fa; border-radius: 8px; padding: 14px; font-size: 0.9em; }
+
+/* CC section */
+.cc-box { border-radius: 8px; padding: 10px 12px; margin-top: 4px; }
+.cc-box.deuda  { background: #ffebee; border: 1px solid #ffcdd2; }
+.cc-box.favor  { background: #e8f5e9; border: 1px solid #c8e6c9; }
+.cc-box.neutro { background: #f5f5f5; border: 1px solid #e0e0e0; }
+.cc-box-label  { font-weight: 700; font-size: 0.88em; }
+.cc-box.deuda .cc-box-label  { color: #c62828; }
+.cc-box.favor .cc-box-label  { color: #2e7d32; }
+.cc-box.neutro .cc-box-label { color: #888; }
+.cc-toggle-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 0.83em; cursor: pointer; }
+.pinput-total-ro { width: 100%; padding: 8px 10px; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 1em; font-weight: 700; text-align: right; background: #f8f9fa; color: #333; box-sizing: border-box; }
+.pinput-sub-lbl  { font-size: 0.78em; color: #999; margin-bottom: 4px; }
+.pinput-vuelto { margin-top: 6px; padding: 5px 10px; border-radius: 5px; font-size: 0.85em; font-weight: 600; }
+.pinput-vuelto.ok    { background: #e8f5e9; color: #2e7d32; }
+.pinput-vuelto.falta { background: #fff3e0; color: #e65100; }
 </style>
 
 <!-- ═══════════════════════════════════════════════════ -->
@@ -571,10 +588,22 @@ main#app { overflow: hidden; }
             <div class="payment-chips" id="payment-chips"></div>
             <div class="payment-inputs" id="payment-inputs"></div>
             <div class="payment-running pending" id="payment-running">
-              <span>Asignado</span>
+              <span>Cobrado</span>
               <span id="payment-running-text">$0,00 / $0,00</span>
             </div>
+            <div id="debt-toggle-row" style="display:none; margin-top:8px; font-size:0.85em;">
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                <input type="checkbox" id="chk-registrar-deuda">
+                Registrar diferencia como deuda del cliente
+              </label>
+              <div id="debt-warning" style="display:none; color:#f44336; font-size:0.8em; margin-top:4px;">
+                Seleccioná un cliente para registrar la deuda
+              </div>
+            </div>
           </div>
+
+          <!-- CC SECTION -->
+          <div id="cc-section" style="display:none"></div>
 
         </div>
 
@@ -631,8 +660,9 @@ main#app { overflow: hidden; }
       <div id="ticket-content" class="ticket-body"></div>
     </div>
     <div class="pmodal-ftr">
-      <button class="mbtn mbtn-secondary" id="btn-ticket-imprimir">🖨️ Imprimir</button>
-      <button class="mbtn mbtn-primary"   id="btn-ticket-nueva-venta">✓ Nueva Venta</button>
+      <button class="mbtn mbtn-secondary" id="btn-ticket-volver">← Volver a editar</button>
+      <button class="mbtn mbtn-secondary" id="btn-ticket-imprimir">🖨️ Imprimir ticket</button>
+      <button class="mbtn mbtn-primary"   id="btn-ticket-confirmar">✓ Confirmar y finalizar venta</button>
     </div>
   </div>
 </div>
