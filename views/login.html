@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Sistema Kalulu - Login">
+  <title>Sistema Kalulu - Inicia Sesión</title>
+  <link rel="stylesheet" href="../css/reset.css">
+  <link rel="stylesheet" href="../css/variables.css">
+  <style>
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    }
+
+    .login-container {
+      background: white;
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+      padding: var(--spacing-3xl);
+      width: 100%;
+      max-width: 400px;
+    }
+
+    .login-header {
+      text-align: center;
+      margin-bottom: var(--spacing-3xl);
+    }
+
+    .login-header h1 {
+      font-size: var(--font-size-2xl);
+      color: var(--color-primary);
+      margin-bottom: var(--spacing-md);
+    }
+
+    .login-header p {
+      color: var(--color-text-secondary);
+      font-size: var(--font-size-sm);
+    }
+
+    .form-group {
+      margin-bottom: var(--spacing-lg);
+    }
+
+    label {
+      display: block;
+      margin-bottom: var(--spacing-sm);
+      font-weight: var(--font-weight-medium);
+      color: var(--color-text);
+    }
+
+    input {
+      width: 100%;
+      padding: var(--spacing-md);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      font-size: var(--font-size-base);
+      font-family: var(--font-family-base);
+      transition: border-color 0.2s;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 3px var(--color-primary-light);
+    }
+
+    .alert {
+      padding: var(--spacing-md) var(--spacing-lg);
+      border-radius: var(--radius-md);
+      margin-bottom: var(--spacing-lg);
+      border-left: 4px solid;
+      color: #721c24;
+      background-color: #f8d7da;
+      border-color: var(--color-danger);
+      display: none;
+    }
+
+    .alert.show {
+      display: block;
+    }
+
+    .login-btn {
+      width: 100%;
+      padding: var(--spacing-md);
+      background-color: var(--color-primary);
+      color: white;
+      border: none;
+      border-radius: var(--radius-md);
+      font-size: var(--font-size-base);
+      font-weight: var(--font-weight-semibold);
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    .login-btn:hover {
+      background-color: var(--color-primary-dark);
+    }
+
+    .login-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .loading {
+      display: none;
+      text-align: center;
+      color: var(--color-text-secondary);
+      margin-top: var(--spacing-md);
+    }
+
+    .loading.show {
+      display: block;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid var(--color-border);
+      border-top-color: var(--color-primary);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      margin-right: var(--spacing-sm);
+      vertical-align: middle;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .dev-section {
+      display: none;
+      margin-top: var(--spacing-2xl);
+      padding-top: var(--spacing-2xl);
+      border-top: 1px solid var(--color-border);
+      text-align: center;
+    }
+
+    .dev-section.show {
+      display: block;
+    }
+
+    .dev-btn {
+      padding: var(--spacing-sm) var(--spacing-lg);
+      font-size: var(--font-size-sm);
+      background-color: var(--color-secondary);
+      color: white;
+      border: none;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      margin-top: var(--spacing-sm);
+    }
+
+    .dev-btn:hover {
+      background-color: var(--color-secondary-dark);
+    }
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-header">
+      <h1>🏪 Sistema Kalulu</h1>
+      <p>Gestión de Almacén</p>
+    </div>
+
+    <form id="login-form">
+      <div id="error-alert" class="alert"></div>
+
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" placeholder="usuario@ejemplo.com" required>
+      </div>
+
+      <div class="form-group">
+        <label for="password">Contraseña</label>
+        <input type="password" id="password" name="password" placeholder="••••••••" required>
+      </div>
+
+      <button type="submit" class="login-btn" id="login-btn">Inicia Sesión</button>
+      
+      <div class="loading" id="loading">
+        <span class="spinner"></span>Verificando credenciales...
+      </div>
+    </form>
+
+    <!-- Dev Section (only visible when dev_mode = true) -->
+    <div class="dev-section" id="dev-section">
+      <p style="font-size: var(--font-size-sm); color: var(--color-text-secondary); margin-bottom: var(--spacing-md);">
+        ⚙️ Modo Desarrollo
+      </p>
+      <button type="button" id="seed-btn" class="dev-btn">Cargar Datos Demo</button>
+    </div>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+
+  <!-- Core modules -->
+  <script src="../js/utils.js"></script>
+  <script src="../js/db.js"></script>
+  <script src="../js/auth.js"></script>
+
+  <!-- Login script -->
+  <script>
+    (async function() {
+      'use strict';
+
+      // Initialize database first
+      try {
+        await window.SGA_DB.initialize();
+      } catch (error) {
+        document.getElementById('error-alert').textContent = 'Error al inicializar la base de datos: ' + error.message;
+        document.getElementById('error-alert').classList.add('show');
+        return;
+      }
+
+      // Show dev section if in dev mode
+      if (localStorage.getItem('dev_mode') === 'true') {
+        document.getElementById('dev-section').classList.add('show');
+      }
+
+      // Firebase config (placeholder - configure before deployment)
+      const firebaseConfig = {
+        apiKey: "AIzaSyDemoPKey123456",
+        authDomain: "kalulu-demo.firebaseapp.com",
+        projectId: "kalulu-demo",
+        storageBucket: "kalulu-demo.appspot.com",
+        messagingSenderId: "123456789",
+        appId: "1:123456789:web:abc123def456"
+      };
+
+      // Initialize Firebase Auth
+      try {
+        await window.SGA_Auth.initialize(firebaseConfig);
+      } catch (error) {
+        console.warn('Firebase not configured - running in demo mode');
+      }
+
+      // Form submission
+      document.getElementById('login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+        const errorAlert = document.getElementById('error-alert');
+        const loginBtn = document.getElementById('login-btn');
+        const loading = document.getElementById('loading');
+
+        try {
+          loginBtn.disabled = true;
+          loading.classList.add('show');
+          errorAlert.classList.remove('show');
+
+          // Check dev mode first - skip Firebase entirely if enabled
+          if (localStorage.getItem('dev_mode') === 'true') {
+            console.log('🔧 DEV MODE: Skipping Firebase, auto-logging in...');
+            // Auth.js will handle dev mode internally
+            const user = await window.SGA_Auth.login(email, password);
+            window.location.href = '../index.html#pos';
+            return;
+          }
+
+          // Attempt Firebase login
+          const user = await window.SGA_Auth.login(email, password);
+          
+          // Navigate to app
+          window.location.href = '../index.html#pos';
+        } catch (error) {
+          errorAlert.textContent = error.message || 'Error al iniciar sesión';
+          errorAlert.classList.add('show');
+          loginBtn.disabled = false;
+          loading.classList.remove('show');
+        }
+      });
+
+      // Seed button
+      document.getElementById('seed-btn')?.addEventListener('click', async () => {
+        try {
+          const seedBtn = document.getElementById('seed-btn');
+          seedBtn.disabled = true;
+          seedBtn.textContent = 'Cargando datos...';
+          
+          // Load seed data into SQLite
+          await import('../js/seed.js').then(m => m.default());
+          
+          console.log('✅ Datos demo cargados, iniciando sesión en dev mode...');
+          
+          // Auto-login in dev mode and redirect (seed button implies dev mode)
+          const user = await window.SGA_Auth.login('admin@demo.com', 'admin123');
+          window.location.href = '../index.html#pos';
+        } catch (error) {
+          alert('Error: ' + error.message);
+          const seedBtn = document.getElementById('seed-btn');
+          seedBtn.disabled = false;
+          seedBtn.textContent = 'Cargar Datos Demo';
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

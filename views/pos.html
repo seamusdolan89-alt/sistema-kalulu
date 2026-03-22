@@ -1,0 +1,764 @@
+<style>
+main#app { overflow: hidden; }
+
+#pos-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #f0f2f5;
+  position: relative;
+  overflow: hidden;
+  font-family: inherit;
+}
+
+/* ── HEADER ── */
+.pos-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  flex-shrink: 0;
+  z-index: 10;
+}
+.pos-logo { font-size: 1.1em; font-weight: 700; white-space: nowrap; }
+.pos-caja-badge {
+  padding: 4px 12px; border-radius: 20px;
+  font-size: 0.82em; font-weight: 600; white-space: nowrap;
+}
+.pos-caja-badge.open  { background: rgba(76,175,80,0.85); }
+.pos-caja-badge.closed{ background: rgba(244,67,54,0.8); }
+.pos-header-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.pos-btn {
+  padding: 7px 13px; border: none; border-radius: 6px; cursor: pointer;
+  font-size: 0.85em; font-weight: 600; transition: all 0.15s;
+  white-space: nowrap; display: inline-flex; align-items: center; gap: 5px;
+}
+.pos-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.pos-btn-ghost  { background: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.35); }
+.pos-btn-ghost:hover:not(:disabled) { background: rgba(255,255,255,0.32); }
+.pos-btn-green  { background: #4CAF50; color: white; border: 1px solid #43A047; }
+.pos-btn-green:hover:not(:disabled) { background: #43A047; }
+.pos-btn-danger { background: rgba(244,67,54,0.75); color: white; border: 1px solid rgba(244,67,54,0.9); }
+.pos-btn-danger:hover:not(:disabled) { background: rgba(244,67,54,0.95); }
+
+/* ── DASHBOARD ── */
+#pos-dashboard { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+.dashboard-body { flex: 1; overflow-y: auto; padding: 16px; }
+.dash-title {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 14px; font-size: 1em; font-weight: 700; color: #333;
+}
+.count-badge {
+  background: #667eea; color: white; border-radius: 12px;
+  padding: 2px 9px; font-size: 0.82em; font-weight: 600;
+}
+.ventas-table-wrap {
+  background: white; border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08); overflow: hidden;
+}
+.ventas-table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+.ventas-table th {
+  background: #f8f9fa; padding: 10px 12px; text-align: left;
+  font-weight: 600; color: #555; border-bottom: 1px solid #e8e8e8;
+  font-size: 0.82em; text-transform: uppercase; letter-spacing: 0.03em;
+}
+.ventas-table td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; color: #333; }
+.ventas-table tr:last-child td { border-bottom: none; }
+.ventas-table tbody tr:hover td { background: #fafbff; cursor: pointer; }
+.estado-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 0.8em; font-weight: 600;
+}
+.estado-badge.completada { background: #e8f5e9; color: #2e7d32; }
+.estado-badge.anulada    { background: #ffebee; color: #c62828; }
+.medio-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.88em; }
+.dash-empty {
+  text-align: center; padding: 60px 20px; color: #aaa;
+  font-size: 0.95em;
+}
+.dash-empty-icon { font-size: 2.5em; margin-bottom: 12px; }
+
+/* ── SUMMARY BAR ── */
+.pos-summary {
+  background: white; border-top: 1px solid #e0e0e0;
+  padding: 10px 16px; display: flex; align-items: center;
+  gap: 24px; flex-shrink: 0; font-size: 0.85em; flex-wrap: wrap;
+}
+.sum-item { display: flex; flex-direction: column; gap: 1px; }
+.sum-label { color: #888; font-size: 0.8em; }
+.sum-value { font-weight: 700; color: #333; }
+.sum-item.total .sum-value { font-size: 1.2em; color: #667eea; }
+
+/* ── RIGHT DETAIL PANEL ── */
+#pos-detail-panel {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 390px;
+  background: white; box-shadow: -4px 0 20px rgba(0,0,0,0.15);
+  display: flex; flex-direction: column; z-index: 50;
+  transform: translateX(100%); transition: transform 0.25s ease;
+}
+#pos-detail-panel.open { transform: translateX(0); }
+.dp-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white; padding: 14px 16px;
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+}
+.dp-title { font-weight: 700; font-size: 1em; }
+.dp-close { background: none; border: none; color: white; font-size: 1.3em; cursor: pointer; padding: 0 4px; }
+.dp-body { flex: 1; overflow-y: auto; padding: 16px; }
+.dp-section { margin-bottom: 18px; }
+.dp-section-label {
+  font-size: 0.73em; font-weight: 700; color: #aaa;
+  text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px;
+}
+.dp-info-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 0.88em; color: #555; }
+.dp-info-row strong { color: #333; }
+.dp-items-table { width: 100%; border-collapse: collapse; font-size: 0.87em; }
+.dp-items-table td { padding: 5px 0; border-bottom: 1px solid #f0f0f0; }
+.dp-items-table tr:last-child td { border-bottom: none; }
+.dp-items-table .td-r { text-align: right; white-space: nowrap; color: #555; }
+.dp-total-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 0.9em; }
+.dp-total-row.grand { font-size: 1.1em; font-weight: 800; color: #333; border-top: 2px solid #eee; padding-top: 8px; margin-top: 4px; }
+.dp-footer { padding: 12px 16px; border-top: 1px solid #f0f0f0; display: flex; gap: 8px; flex-wrap: wrap; }
+.dp-btn {
+  flex: 1; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px;
+  background: white; cursor: pointer; font-size: 0.82em; font-weight: 600;
+  color: #555; transition: all 0.15s; text-align: center; min-width: 80px;
+}
+.dp-btn:hover:not(:disabled) { background: #f5f5f5; }
+.dp-btn:disabled { opacity: 0.38; cursor: not-allowed; }
+.dp-btn.danger { border-color: #f44336; color: #f44336; }
+.dp-btn.danger:hover:not(:disabled) { background: #ffebee; }
+
+/* ── SALE MODE OVERLAY ── */
+#pos-sale {
+  position: absolute; inset: 0; background: #f0f2f5;
+  display: flex; flex-direction: column; z-index: 40;
+}
+#pos-sale.hidden { display: none; }
+.sale-topbar {
+  background: white; border-bottom: 1px solid #e0e0e0;
+  padding: 10px 16px; display: flex; align-items: center; gap: 16px; flex-shrink: 0;
+}
+.sale-back-btn {
+  background: none; border: 1px solid #ddd; border-radius: 6px;
+  padding: 6px 12px; cursor: pointer; font-size: 0.88em; color: #555;
+  font-weight: 600; display: flex; align-items: center; gap: 6px; transition: all 0.15s;
+}
+.sale-back-btn:hover { background: #f5f5f5; }
+.sale-topbar-title { font-weight: 700; color: #333; }
+.sale-shortcuts { margin-left: auto; font-size: 0.78em; color: #bbb; display: flex; gap: 14px; }
+.sk { background: #f0f0f0; border-radius: 4px; padding: 1px 6px; font-family: monospace; font-size: 1em; color: #666; }
+
+.sale-body { display: flex; flex: 1; overflow: hidden; }
+
+/* LEFT */
+.sale-left {
+  flex: 65; display: flex; flex-direction: column;
+  overflow: hidden; background: #f8f9fa; border-right: 1px solid #e0e0e0;
+}
+.search-wrap { padding: 12px 14px 0; position: relative; flex-shrink: 0; }
+.search-input {
+  width: 100%; padding: 10px 14px; font-size: 1em;
+  border: 2px solid #667eea; border-radius: 8px; outline: none;
+  background: white; box-sizing: border-box;
+}
+.search-input:focus { border-color: #764ba2; }
+.search-dropdown {
+  position: absolute; top: calc(100% + 2px); left: 14px; right: 14px;
+  background: white; border: 1px solid #ddd; border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 100;
+  max-height: 280px; overflow-y: auto; display: none;
+}
+.sri { padding: 10px 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f5f5f5; font-size: 0.9em; }
+.sri:last-child { border-bottom: none; }
+.sri:hover { background: #f5f7ff; }
+.sri-left { display: flex; flex-direction: column; gap: 2px; }
+.sri-nombre { font-weight: 600; color: #333; }
+.sri-codigo { color: #aaa; font-size: 0.83em; }
+.sri-precio { font-weight: 700; color: #667eea; white-space: nowrap; }
+
+.cart-wrap { flex: 1; overflow: hidden; display: flex; flex-direction: column; padding: 12px 14px; gap: 10px; }
+.cart-scroll { flex: 1; overflow-y: auto; background: white; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+.cart-table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
+.cart-table th {
+  position: sticky; top: 0; background: #f8f9fa; padding: 9px 10px;
+  text-align: left; font-weight: 600; color: #666;
+  border-bottom: 1px solid #e8e8e8; font-size: 0.8em; text-transform: uppercase;
+}
+.cart-table td { padding: 8px 10px; border-bottom: 1px solid #f5f5f5; vertical-align: middle; }
+.cart-table tr:last-child td { border-bottom: none; }
+.cart-table .c-idx   { width: 28px; color: #ccc; font-weight: 600; }
+.cart-table .c-qty   { width: 88px; }
+.cart-table .c-price { width: 88px; text-align: right; }
+.cart-table .c-disc  { width: 76px; text-align: right; }
+.cart-table .c-sub   { width: 88px; text-align: right; font-weight: 700; }
+.cart-table .c-del   { width: 30px; text-align: center; }
+.qty-input {
+  width: 58px; padding: 4px 6px; border: 1px solid #ddd;
+  border-radius: 4px; text-align: center; font-size: 0.95em;
+}
+.qty-input:focus { border-color: #667eea; outline: none; }
+.disc-btn {
+  background: none; border: 1px dashed #ccc; border-radius: 4px;
+  padding: 2px 7px; cursor: pointer; font-size: 0.82em; color: #999; transition: all 0.15s;
+}
+.disc-btn:hover { border-color: #667eea; color: #667eea; background: #f5f7ff; }
+.disc-btn.active { border-style: solid; border-color: #ff9800; color: #e65100; background: #fff3e0; }
+.del-btn { background: none; border: none; cursor: pointer; color: #ddd; font-size: 1.1em; transition: color 0.15s; padding: 2px; }
+.del-btn:hover { color: #f44336; }
+.cart-empty { text-align: center; padding: 50px 20px; color: #ccc; }
+.cart-empty-icon { font-size: 2em; margin-bottom: 8px; }
+
+.cart-footer {
+  background: white; border-radius: 8px; padding: 12px 14px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06); flex-shrink: 0;
+}
+.cart-totals { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 10px; }
+.cart-total-lines { display: flex; flex-direction: column; gap: 4px; }
+.ct-line { display: flex; gap: 16px; justify-content: space-between; font-size: 0.87em; color: #888; }
+.cart-grand { text-align: right; }
+.cart-grand-label { font-size: 0.72em; color: #aaa; }
+.cart-grand-amount { font-size: 1.65em; font-weight: 800; color: #333; }
+.btn-pausar {
+  width: 100%; padding: 7px; background: none; border: 1px solid #e0e0e0;
+  border-radius: 6px; cursor: pointer; font-size: 0.85em; color: #888;
+  font-weight: 600; transition: all 0.15s;
+}
+.btn-pausar:hover { background: #f5f5f5; border-color: #bbb; }
+
+/* RIGHT */
+.sale-right { flex: 35; display: flex; flex-direction: column; overflow: hidden; background: white; }
+.sale-right-scroll { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 18px; }
+.sale-sec-title { font-size: 0.73em; font-weight: 700; color: #aaa; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px; }
+
+/* Client */
+.client-search { width: 100%; padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 0.9em; outline: none; box-sizing: border-box; }
+.client-search:focus { border-color: #667eea; }
+.client-dropdown {
+  background: white; border: 1px solid #ddd; border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-height: 150px; overflow-y: auto; margin-top: 3px; display: none;
+}
+.cri { padding: 8px 12px; cursor: pointer; font-size: 0.88em; border-bottom: 1px solid #f5f5f5; transition: background 0.1s; }
+.cri:last-child { border-bottom: none; }
+.cri:hover { background: #f5f7ff; }
+.client-card {
+  background: #f5f7ff; border: 1px solid #c5cdf9; border-radius: 6px;
+  padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; margin-top: 6px;
+}
+.client-card-name { font-weight: 700; color: #333; font-size: 0.92em; }
+.saldo-badge { font-size: 0.8em; font-weight: 700; padding: 2px 8px; border-radius: 10px; display: inline-block; margin-top: 2px; }
+.saldo-badge.deuda  { background: #ffebee; color: #c62828; }
+.saldo-badge.favor  { background: #e8f5e9; color: #2e7d32; }
+.saldo-badge.neutro { background: #f5f5f5; color: #888; }
+.client-clear { background: none; border: none; color: #bbb; cursor: pointer; font-size: 0.9em; padding: 2px 4px; }
+.client-clear:hover { color: #f44336; }
+.deuda-row { background: #fff3e0; border-radius: 6px; padding: 8px 12px; font-size: 0.85em; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.deuda-row label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.btn-cliente-rapido { margin-top: 8px; font-size: 0.82em; color: #667eea; background: none; border: 1px dashed #c5cdf9; border-radius: 6px; padding: 5px 10px; cursor: pointer; width: 100%; }
+.btn-cliente-rapido:hover { background: #f5f7ff; }
+
+/* Payment chips */
+.payment-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.pchip {
+  display: flex; align-items: center; gap: 5px; padding: 6px 12px;
+  border: 2px solid #e0e0e0; border-radius: 20px; cursor: pointer;
+  font-size: 0.84em; font-weight: 600; color: #aaa; background: white; transition: all 0.15s; user-select: none;
+}
+.pchip:hover { border-color: #bbb; color: #777; }
+.pchip.active.pc-efectivo       { border-color: #4CAF50; color: #2e7d32; background: #e8f5e9; }
+.pchip.active.pc-mercadopago    { border-color: #00b0ff; color: #0069c0; background: #e3f2fd; }
+.pchip.active.pc-tarjeta        { border-color: #9c27b0; color: #6a0080; background: #f3e5f5; }
+.pchip.active.pc-transferencia  { border-color: #ff9800; color: #e65100; background: #fff3e0; }
+.pchip.active.pc-cuenta_corriente { border-color: #607d8b; color: #37474f; background: #eceff1; }
+
+.payment-inputs { display: flex; flex-direction: column; gap: 10px; }
+.pinput-row { background: #f8f9fa; border-radius: 8px; padding: 10px 12px; }
+.pinput-label { font-size: 0.8em; font-weight: 700; color: #666; margin-bottom: 6px; display: flex; align-items: center; gap: 5px; }
+.pinput-field {
+  width: 100%; padding: 8px 10px; border: 1px solid #e0e0e0;
+  border-radius: 6px; font-size: 1em; font-weight: 700; text-align: right;
+  outline: none; box-sizing: border-box;
+}
+.pinput-field:focus { border-color: #667eea; }
+.recibe-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 0.85em; color: #555; }
+.recibe-field { width: 120px; padding: 6px 8px; border: 1px solid #e0e0e0; border-radius: 5px; font-size: 0.95em; text-align: right; outline: none; }
+.recibe-field:focus { border-color: #4CAF50; }
+.vuelto-box { margin-top: 6px; padding: 6px 10px; background: #e8f5e9; border-radius: 6px; font-size: 0.88em; color: #2e7d32; font-weight: 600; }
+.saldo-favor-row { margin-top: 4px; font-size: 0.82em; display: flex; align-items: center; gap: 6px; color: #555; }
+
+.payment-running {
+  padding: 9px 12px; border-radius: 6px; display: flex; justify-content: space-between;
+  font-size: 0.88em; font-weight: 700; background: #f5f5f5; color: #888;
+}
+.payment-running.ok      { background: #e8f5e9; color: #2e7d32; }
+.payment-running.pending { background: #fff3e0; color: #e65100; }
+.payment-running.over    { background: #ffebee; color: #c62828; }
+
+.sale-confirm-wrap { padding: 12px 14px; border-top: 1px solid #f0f0f0; flex-shrink: 0; }
+.btn-confirm {
+  width: 100%; padding: 14px; background: #4CAF50; color: white; border: none;
+  border-radius: 8px; font-size: 1.05em; font-weight: 800; cursor: pointer; transition: all 0.15s;
+}
+.btn-confirm:hover:not(:disabled) { background: #43A047; transform: translateY(-1px); box-shadow: 0 3px 10px rgba(76,175,80,0.4); }
+.btn-confirm:disabled { opacity: 0.42; cursor: not-allowed; transform: none; box-shadow: none; }
+
+/* ── MODALS ── */
+.pbackdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+  z-index: 300; display: flex; align-items: center; justify-content: center;
+}
+.pbackdrop.hidden { display: none; }
+.pmodal {
+  background: white; border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+  width: 480px; max-width: 95vw; max-height: 90vh;
+  display: flex; flex-direction: column;
+}
+.pmodal.wide   { width: 620px; }
+.pmodal.narrow { width: 340px; }
+.pmodal.ticket { width: 380px; }
+.pmodal-hdr {
+  padding: 16px 20px; border-bottom: 1px solid #f0f0f0;
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+}
+.pmodal-title { font-size: 1.05em; font-weight: 700; color: #333; }
+.pmodal-close { background: none; border: none; font-size: 1.2em; cursor: pointer; color: #bbb; padding: 2px 4px; }
+.pmodal-close:hover { color: #333; }
+.pmodal-body { padding: 20px; overflow-y: auto; flex: 1; }
+.pmodal-ftr {
+  padding: 14px 20px; border-top: 1px solid #f0f0f0;
+  display: flex; gap: 10px; justify-content: flex-end; flex-shrink: 0;
+}
+.fg { margin-bottom: 14px; }
+.fg label { display: block; font-size: 0.85em; font-weight: 600; color: #555; margin-bottom: 5px; }
+.fi {
+  width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 6px;
+  font-size: 0.95em; outline: none; box-sizing: border-box;
+}
+.fi:focus { border-color: #667eea; }
+.mbtn { padding: 9px 20px; border-radius: 6px; font-size: 0.9em; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; }
+.mbtn-primary   { background: #667eea; color: white; }
+.mbtn-primary:hover { background: #5568d3; }
+.mbtn-secondary { background: #f5f5f5; color: #555; border: 1px solid #ddd; }
+.mbtn-secondary:hover { background: #eee; }
+.mbtn-danger    { background: #f44336; color: white; }
+.mbtn-danger:hover { background: #d32f2f; }
+
+/* Cierre tabs */
+.ctabs { display: flex; border-bottom: 1px solid #e0e0e0; margin-bottom: 16px; }
+.ctab {
+  padding: 8px 14px; cursor: pointer; font-size: 0.88em; font-weight: 600;
+  color: #aaa; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all 0.15s;
+}
+.ctab.active { color: #667eea; border-bottom-color: #667eea; }
+.ctab-content { display: none; }
+.ctab-content.active { display: block; }
+.billetes-grid {
+  display: grid; grid-template-columns: auto 70px auto auto;
+  gap: 8px 12px; align-items: center; font-size: 0.9em;
+}
+.billet-lbl { font-weight: 600; color: #555; white-space: nowrap; }
+.billet-inp { padding: 6px 8px; border: 1px solid #ddd; border-radius: 5px; text-align: center; font-size: 0.95em; width: 100%; }
+.billet-inp:focus { border-color: #667eea; outline: none; }
+.billet-x   { color: #bbb; text-align: center; }
+.billet-sub { text-align: right; font-weight: 600; color: #333; }
+.cierre-totals { background: #f8f9fa; border-radius: 8px; padding: 14px; margin-top: 14px; }
+.ct-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 0.9em; color: #555; }
+.ct-row.bold { font-weight: 700; color: #333; }
+.ct-row.dif-pos { color: #2e7d32; font-weight: 700; font-size: 1em; }
+.ct-row.dif-neg { color: #c62828; font-weight: 700; font-size: 1em; }
+.cierre-resumen-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.crs-card { background: #f8f9fa; border-radius: 8px; padding: 12px; }
+.crs-card-label { font-size: 0.78em; color: #888; margin-bottom: 4px; }
+.crs-card-value { font-size: 1.1em; font-weight: 700; color: #333; }
+
+/* Pedidos grid */
+.pedidos-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pedido-card { background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; }
+.pedido-card-name  { font-weight: 700; color: #333; margin-bottom: 3px; font-size: 0.92em; }
+.pedido-card-meta  { font-size: 0.82em; color: #888; margin-bottom: 6px; }
+.pedido-card-total { font-size: 1em; font-weight: 700; color: #667eea; margin-bottom: 10px; }
+.pedido-card-btns  { display: flex; gap: 8px; }
+.pedido-btn        { flex: 1; padding: 6px; font-size: 0.82em; font-weight: 600; border-radius: 5px; cursor: pointer; border: none; transition: all 0.15s; }
+.pedido-btn.retomar  { background: #667eea; color: white; }
+.pedido-btn.retomar:hover { background: #5568d3; }
+.pedido-btn.eliminar { background: white; color: #f44336; border: 1px solid #fcc; }
+.pedido-btn.eliminar:hover { background: #ffebee; }
+
+/* Ticket */
+.ticket-body { font-family: 'Courier New', monospace; font-size: 0.85em; line-height: 1.7; }
+.ticket-center { text-align: center; }
+.ticket-hr { border: none; border-top: 1px dashed #ccc; margin: 8px 0; }
+.ticket-tbl { width: 100%; border-collapse: collapse; }
+.ticket-tbl td { padding: 2px 4px; }
+.ticket-tbl .tr { text-align: right; }
+.ticket-trow { display: flex; justify-content: space-between; padding: 1px 0; font-size: 0.9em; }
+.ticket-grand { font-size: 1.1em; font-weight: 700; }
+
+/* Discount modal */
+.desc-tipo-btns { display: flex; gap: 8px; margin-bottom: 14px; }
+.desc-tipo-btn { flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 6px; background: white; cursor: pointer; font-weight: 600; color: #888; transition: all 0.15s; }
+.desc-tipo-btn.active { background: #667eea; color: white; border-color: #667eea; }
+
+/* New cliente quick form */
+.quick-form-row { display: flex; gap: 8px; }
+.quick-form-row .fi { flex: 1; }
+
+/* Devolucion detail */
+.dev-venta-info { background: #f8f9fa; border-radius: 8px; padding: 14px; font-size: 0.9em; }
+</style>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<div id="pos-root">
+
+  <!-- HEADER (always visible) -->
+  <div class="pos-header">
+    <span class="pos-logo">🏪 Sistema Kalulu</span>
+    <span id="pos-caja-badge" class="pos-caja-badge closed">● Caja cerrada</span>
+    <div class="pos-header-actions">
+      <button class="pos-btn pos-btn-green"  id="btn-nueva-venta">🛒 Nueva Venta · F3</button>
+      <button class="pos-btn pos-btn-ghost"  id="btn-pedidos-header">📋 Pedido Abierto · F4</button>
+      <button class="pos-btn pos-btn-ghost"  id="btn-devolucion-header">↩ Devolución</button>
+      <button class="pos-btn pos-btn-danger" id="btn-cerrar-caja">🔒 Cerrar Caja</button>
+    </div>
+  </div>
+
+  <!-- ══ DASHBOARD MODE ══ -->
+  <div id="pos-dashboard">
+    <div class="dashboard-body">
+      <div class="dash-title">
+        Ventas del turno
+        <span id="ventas-count-badge" class="count-badge">0</span>
+      </div>
+      <div class="ventas-table-wrap">
+        <table class="ventas-table">
+          <thead>
+            <tr>
+              <th>Hora</th>
+              <th>Cliente</th>
+              <th>Artículos</th>
+              <th>Total</th>
+              <th>Medio de pago</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="ventas-tbody">
+            <tr><td colspan="7">
+              <div class="dash-empty">
+                <div class="dash-empty-icon">🛒</div>
+                <div>No hay ventas en este turno todavía</div>
+              </div>
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="pos-summary">
+      <div class="sum-item total">
+        <span class="sum-label">Total turno</span>
+        <span class="sum-value" id="sum-total">$0,00</span>
+      </div>
+      <div class="sum-item">
+        <span class="sum-label">💵 Efectivo</span>
+        <span class="sum-value" id="sum-efectivo">$0,00</span>
+      </div>
+      <div class="sum-item">
+        <span class="sum-label">📱 MercadoPago</span>
+        <span class="sum-value" id="sum-mp">$0,00</span>
+      </div>
+      <div class="sum-item">
+        <span class="sum-label">💳 Tarjeta</span>
+        <span class="sum-value" id="sum-tarjeta">$0,00</span>
+      </div>
+      <div class="sum-item">
+        <span class="sum-label">🏦 Transferencia</span>
+        <span class="sum-value" id="sum-transf">$0,00</span>
+      </div>
+      <div class="sum-item">
+        <span class="sum-label">📒 Cta.Cte</span>
+        <span class="sum-value" id="sum-cc">$0,00</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SALE MODE OVERLAY ══ -->
+  <div id="pos-sale" class="hidden">
+    <div class="sale-topbar">
+      <button class="sale-back-btn" id="btn-volver-dashboard">← Volver</button>
+      <span class="sale-topbar-title">Venta en curso</span>
+      <div class="sale-shortcuts">
+        <span><span class="sk">F2</span> Buscar</span>
+        <span><span class="sk">F10</span> Confirmar</span>
+        <span><span class="sk">ESC</span> Volver</span>
+      </div>
+    </div>
+
+    <div class="sale-body">
+      <!-- LEFT: Search + Cart -->
+      <div class="sale-left">
+        <div class="search-wrap" id="search-wrap">
+          <input type="text" id="pos-search-input" class="search-input"
+            placeholder="Código, nombre del producto o código de barras..." autocomplete="off" spellcheck="false">
+          <div id="pos-search-dropdown" class="search-dropdown"></div>
+        </div>
+
+        <div class="cart-wrap">
+          <div class="cart-scroll">
+            <table class="cart-table">
+              <thead>
+                <tr>
+                  <th class="c-idx">#</th>
+                  <th>Producto</th>
+                  <th class="c-qty">Cantidad</th>
+                  <th class="c-price">Precio Unit</th>
+                  <th class="c-disc">Desc</th>
+                  <th class="c-sub">Subtotal</th>
+                  <th class="c-del"></th>
+                </tr>
+              </thead>
+              <tbody id="cart-tbody"></tbody>
+            </table>
+          </div>
+
+          <div class="cart-footer">
+            <div class="cart-totals">
+              <div class="cart-total-lines">
+                <div class="ct-line"><span>Subtotal:</span><span id="cart-subtotal">$0,00</span></div>
+                <div class="ct-line"><span>Descuento:</span><span id="cart-descuento">$0,00</span></div>
+              </div>
+              <div class="cart-grand">
+                <div class="cart-grand-label">TOTAL</div>
+                <div class="cart-grand-amount" id="cart-total">$0,00</div>
+              </div>
+            </div>
+            <button class="btn-pausar" id="btn-pausar-venta">⏸ Pausar venta</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Client + Payment -->
+      <div class="sale-right">
+        <div class="sale-right-scroll">
+
+          <!-- CLIENT -->
+          <div>
+            <div class="sale-sec-title">Cliente</div>
+            <input type="text" id="client-search-input" class="client-search"
+              placeholder="Buscar por nombre o teléfono...">
+            <div id="client-dropdown" class="client-dropdown"></div>
+            <div id="client-card" style="display:none" class="client-card">
+              <div>
+                <div class="client-card-name" id="client-card-name"></div>
+                <span id="client-saldo-badge" class="saldo-badge neutro"></span>
+              </div>
+              <button class="client-clear" id="btn-clear-client" title="Quitar cliente">✕</button>
+            </div>
+            <div id="client-deuda-row" style="display:none" class="deuda-row">
+              <span>💳 Tiene deuda: <strong id="client-deuda-amount"></strong></span>
+              <label><input type="checkbox" id="chk-aplicar-deuda" checked> Aplicar en esta venta</label>
+            </div>
+            <button class="btn-cliente-rapido" id="btn-cliente-rapido">+ Cliente rápido</button>
+          </div>
+
+          <!-- PAYMENT -->
+          <div>
+            <div class="sale-sec-title">Medio de pago</div>
+            <div class="payment-chips" id="payment-chips"></div>
+            <div class="payment-inputs" id="payment-inputs"></div>
+            <div class="payment-running pending" id="payment-running">
+              <span>Asignado</span>
+              <span id="payment-running-text">$0,00 / $0,00</span>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="sale-confirm-wrap">
+          <button class="btn-confirm" id="btn-confirm-venta" disabled>
+            ✓ CONFIRMAR VENTA · F10
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT DETAIL PANEL -->
+  <div id="pos-detail-panel">
+    <div class="dp-header">
+      <span class="dp-title" id="dp-title">Detalle de venta</span>
+      <button class="dp-close" id="btn-close-detail">✕</button>
+    </div>
+    <div class="dp-body" id="dp-body"></div>
+    <div class="dp-footer" id="dp-footer"></div>
+  </div>
+
+</div><!-- /pos-root -->
+
+<!-- ═══════════════ MODALS ═══════════════ -->
+
+<!-- Apertura -->
+<div id="modal-apertura" class="pbackdrop hidden">
+  <div class="pmodal narrow">
+    <div class="pmodal-hdr">
+      <span class="pmodal-title">💰 Apertura de Caja</span>
+    </div>
+    <div class="pmodal-body">
+      <p style="color:#666; margin-bottom:16px; font-size:0.9em;">No hay sesión de caja activa. Ingrese el saldo inicial en efectivo.</p>
+      <div class="fg">
+        <label>Saldo inicial (efectivo)</label>
+        <input type="number" id="apertura-saldo-input" class="fi" min="0" step="0.01" placeholder="0.00" value="0">
+      </div>
+    </div>
+    <div class="pmodal-ftr">
+      <button class="mbtn mbtn-primary" id="btn-apertura-confirm">Abrir Caja</button>
+    </div>
+  </div>
+</div>
+
+<!-- Ticket -->
+<div id="modal-ticket" class="pbackdrop hidden">
+  <div class="pmodal ticket">
+    <div class="pmodal-hdr">
+      <span class="pmodal-title">🧾 Ticket de venta</span>
+      <button class="pmodal-close" id="btn-ticket-close">✕</button>
+    </div>
+    <div class="pmodal-body">
+      <div id="ticket-content" class="ticket-body"></div>
+    </div>
+    <div class="pmodal-ftr">
+      <button class="mbtn mbtn-secondary" id="btn-ticket-imprimir">🖨️ Imprimir</button>
+      <button class="mbtn mbtn-primary"   id="btn-ticket-nueva-venta">✓ Nueva Venta</button>
+    </div>
+  </div>
+</div>
+
+<!-- Cierre -->
+<div id="modal-cierre" class="pbackdrop hidden">
+  <div class="pmodal wide">
+    <div class="pmodal-hdr">
+      <span class="pmodal-title">🔒 Cierre de Caja</span>
+      <button class="pmodal-close" id="btn-cierre-close">✕</button>
+    </div>
+    <div class="pmodal-body">
+      <div class="ctabs">
+        <div class="ctab active" data-ctab="resumen">Resumen</div>
+        <div class="ctab" data-ctab="medios">Medios de Pago</div>
+        <div class="ctab" data-ctab="recuento">Recuento de Dinero</div>
+        <div class="ctab" data-ctab="egresos">Egresos</div>
+      </div>
+      <div id="ctab-resumen"  class="ctab-content active"></div>
+      <div id="ctab-medios"   class="ctab-content"></div>
+      <div id="ctab-recuento" class="ctab-content">
+        <div class="billetes-grid" id="billetes-grid"></div>
+        <div class="cierre-totals" id="cierre-recuento-totals"></div>
+      </div>
+      <div id="ctab-egresos"  class="ctab-content"></div>
+      <input type="hidden" id="billetes-json" value="{}">
+    </div>
+    <div class="pmodal-ftr">
+      <button class="mbtn mbtn-secondary" id="btn-cierre-cancel">Cancelar</button>
+      <button class="mbtn mbtn-danger"    id="btn-cierre-confirm">Cerrar Caja</button>
+    </div>
+  </div>
+</div>
+
+<!-- Pedidos Abiertos -->
+<div id="modal-pedidos" class="pbackdrop hidden">
+  <div class="pmodal wide">
+    <div class="pmodal-hdr">
+      <span class="pmodal-title">📋 Pedidos Abiertos</span>
+      <button class="pmodal-close" id="btn-pedidos-close">✕</button>
+    </div>
+    <div class="pmodal-body">
+      <div id="pedidos-grid" class="pedidos-grid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Devolución -->
+<div id="modal-devolucion" class="pbackdrop hidden">
+  <div class="pmodal">
+    <div class="pmodal-hdr">
+      <span class="pmodal-title">↩ Anular Venta</span>
+      <button class="pmodal-close" id="btn-devolucion-close">✕</button>
+    </div>
+    <div class="pmodal-body">
+      <div class="fg">
+        <label>ID de la venta</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="devolucion-venta-id" class="fi" placeholder="Pegue el ID de la venta">
+          <button class="mbtn mbtn-secondary" id="btn-devolucion-buscar">Buscar</button>
+        </div>
+      </div>
+      <div id="devolucion-detail" style="display:none" class="dev-venta-info"></div>
+      <div class="fg" id="devolucion-motivo-wrap" style="display:none">
+        <label>Motivo de anulación</label>
+        <input type="text" id="devolucion-motivo" class="fi" placeholder="Ej: error de precio, devolución...">
+      </div>
+    </div>
+    <div class="pmodal-ftr">
+      <button class="mbtn mbtn-secondary" id="btn-devolucion-cancel">Cancelar</button>
+      <button class="mbtn mbtn-danger"    id="btn-devolucion-confirm" style="display:none">Anular Venta</button>
+    </div>
+  </div>
+</div>
+
+<!-- Discount -->
+<div id="modal-desc" class="pbackdrop hidden">
+  <div class="pmodal narrow">
+    <div class="pmodal-hdr">
+      <span class="pmodal-title">Descuento</span>
+      <button class="pmodal-close" id="btn-desc-close">✕</button>
+    </div>
+    <div class="pmodal-body">
+      <p id="desc-item-name" style="font-weight:700; margin-bottom:12px; color:#333;"></p>
+      <div class="desc-tipo-btns">
+        <button class="desc-tipo-btn"        id="btn-desc-pct">% Porcentaje</button>
+        <button class="desc-tipo-btn active"  id="btn-desc-monto">$ Monto fijo</button>
+      </div>
+      <div class="fg">
+        <label id="desc-input-label">Descuento ($)</label>
+        <input type="number" id="desc-amount-input" class="fi" min="0" step="0.01" placeholder="0">
+      </div>
+    </div>
+    <div class="pmodal-ftr">
+      <button class="mbtn mbtn-secondary" id="btn-desc-cancel">Cancelar</button>
+      <button class="mbtn mbtn-primary"   id="btn-desc-confirm">Aplicar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Cliente Rápido -->
+<div id="modal-cliente-rapido" class="pbackdrop hidden">
+  <div class="pmodal narrow">
+    <div class="pmodal-hdr">
+      <span class="pmodal-title">+ Cliente rápido</span>
+      <button class="pmodal-close" id="btn-crapido-close">✕</button>
+    </div>
+    <div class="pmodal-body">
+      <div class="quick-form-row">
+        <div class="fg" style="flex:1">
+          <label>Nombre *</label>
+          <input type="text" id="crapido-nombre" class="fi" placeholder="Nombre">
+        </div>
+        <div class="fg" style="flex:1">
+          <label>Apellido</label>
+          <input type="text" id="crapido-apellido" class="fi" placeholder="Apellido">
+        </div>
+      </div>
+      <div class="fg">
+        <label>Teléfono</label>
+        <input type="text" id="crapido-telefono" class="fi" placeholder="Teléfono">
+      </div>
+    </div>
+    <div class="pmodal-ftr">
+      <button class="mbtn mbtn-secondary" id="btn-crapido-cancel">Cancelar</button>
+      <button class="mbtn mbtn-primary"   id="btn-crapido-confirm">Guardar y seleccionar</button>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Sistema de Gestión de Almacén (SGA) - 100% Offline">
+  <meta name="theme-color" content="#0066cc">
+  <title>Sistema Kalulu - Gestión de Almacén</title>
+  
+  <!-- CSS -->
+  <link rel="stylesheet" href="./css/reset.css">
+  <link rel="stylesheet" href="./css/variables.css">
+  <link rel="stylesheet" href="./css/layout.css">
+  <link rel="stylesheet" href="./css/components.css">
+  
+  <!-- PWA Manifest (optional) -->
+  <link rel="manifest" href="./manifest.json">
+</head>
+<body>
+  <!-- Header -->
+  <header>
+    <h1>🏪 Sistema Kalulu</h1>
+    <div class="header-user">
+      <span id="user-name">Usuario</span>
+      <button id="logout-btn" class="btn btn-outline btn-sm">Salir</button>
+    </div>
+  </header>
+
+  <!-- Sidebar Navigation -->
+  <aside class="sidebar">
+    <nav>
+      <ul>
+        <!-- Navigation links will be populated by app.js -->
+      </ul>
+    </nav>
+  </aside>
+
+  <!-- Main Application Container -->
+  <main id="app">
+    <div class="alert alert-info">
+      <strong>Cargando...</strong> Inicializando aplicación...
+    </div>
+  </main>
+
+  <!-- Core JavaScript Modules -->
+  <!-- Firebase SDK (9 compat) -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-storage-compat.js"></script>
+
+  <!-- Tesseract.js for OCR -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js"></script>
+
+  <!-- SheetJS for Excel import -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <!-- Application Scripts -->
+  <script src="./js/utils.js"></script>
+  <script src="./js/db.js"></script>
+  <script src="./js/auth.js"></script>
+  <script src="./js/sync.js"></script>
+  <script src="./js/print.js"></script>
+  <script src="./js/seed.js" type="module"></script>
+  <script src="./js/app.js" type="module"></script>
+</body>
+</html>

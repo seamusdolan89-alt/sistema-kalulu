@@ -1,0 +1,1703 @@
+<div class="productos-container">
+  <!-- TOOLBAR -->
+  <div class="toolbar">
+    <h2>📦 Productos</h2>
+    <div class="toolbar-buttons">
+      <button id="btn-importar-excel" class="btn btn-secondary">📊 Importar Excel</button>
+      <button id="btn-nuevo-producto" class="btn btn-primary">+ Nuevo Producto</button>
+    </div>
+  </div>
+
+  <!-- FILTERS SECTION -->
+  <div class="filters-section">
+    <div class="search-box">
+      <input 
+        type="text" 
+        id="search-productos" 
+        placeholder="🔍 Buscar por nombre o código..."
+        class="search-input"
+      >
+    </div>
+
+    <div class="filter-group">
+      <select id="filter-categoria" class="select-filter">
+        <option value="">Todas las categorías</option>
+        <!-- populated dynamically -->
+      </select>
+
+      <label class="checkbox-label">
+        <input type="checkbox" id="filter-solo-madres">
+        Solo productos madre
+      </label>
+
+      <select id="filter-activo" class="select-filter">
+        <option value="">Todos los estados</option>
+        <option value="1">Activos</option>
+        <option value="0">Inactivos</option>
+      </select>
+
+      <button id="btn-bajo-minimo" class="btn btn-secondary btn-small">
+        ⚠️ Bajo Mínimo
+      </button>
+    </div>
+  </div>
+
+  <!-- PRODUCTS TABLE -->
+  <div class="products-table-wrapper">
+    <table class="productos-table">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Nombre</th>
+          <th>Categoría</th>
+          <th>Costo</th>
+          <th>Precio</th>
+          <th>Margen %</th>
+          <th>Stock</th>
+          <th>Mín.</th>
+          <th>Familia</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="productos-tbody">
+        <!-- populated dynamically -->
+      </tbody>
+    </table>
+  </div>
+
+  <!-- PAGINATION -->
+  <div class="pagination">
+    <button id="btn-prev-page" class="btn btn-secondary btn-small">← Anterior</button>
+    <span id="pagination-info">Página 1</span>
+    <button id="btn-next-page" class="btn btn-secondary btn-small">Siguiente →</button>
+  </div>
+</div>
+
+<!-- PRODUCT FORM MODAL (5-step wizard) -->
+<div id="product-modal" class="modal hidden">
+  <div class="modal-content modal-large">
+    <div class="modal-header">
+      <h3 id="modal-title">Nuevo Producto</h3>
+      <button class="btn-close" aria-label="Cerrar">✕</button>
+    </div>
+
+    <!-- STEP 1: Product Type -->
+    <div id="step1" class="modal-step active">
+      <h4>Paso 1: Tipo de Producto</h4>
+      
+      <div class="form-group">
+        <label>
+          <input type="radio" name="product-type" value="independiente" checked>
+          Producto independiente
+        </label>
+      </div>
+
+      <div class="form-group">
+        <label>
+          <input type="radio" name="product-type" value="madre">
+          Producto madre (puede tener variantes)
+        </label>
+      </div>
+
+      <div class="form-group">
+        <label>
+          <input type="radio" name="product-type" value="hijo">
+          Variante de otro producto
+        </label>
+
+        <div id="madre-selector-container" class="hidden" style="margin-top: 15px;">
+          <label for="select-madre">Seleccionar producto madre:</label>
+          <div class="searchable-dropdown-wrapper">
+            <input 
+              type="text" 
+              id="madre-search" 
+              placeholder="Buscar madre..."
+              class="dropdown-search"
+            >
+            <select id="select-madre" class="select-full">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+          <div id="madre-preview" class="hidden" style="margin-top: 10px; background: #f5f5f5; padding: 10px; border-radius: 4px;">
+            <small><strong>Heredado de madre:</strong></small>
+            <div>Costo: <span id="madre-costo">-</span> (heredado)</div>
+            <div>Precio: <span id="madre-precio">-</span> (heredado)</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button id="btn-next-step1" class="btn btn-primary">Siguiente →</button>
+      </div>
+    </div>
+
+    <!-- STEP 2: Basic Data -->
+    <div id="step2" class="modal-step hidden">
+      <h4>Paso 2: Datos Básicos</h4>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="product-nombre">Nombre *</label>
+          <input type="text" id="product-nombre" class="input-full" required>
+        </div>
+
+        <div class="form-group">
+          <label for="product-descripcion">Descripción</label>
+          <input type="text" id="product-descripcion" class="input-full">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="product-categoria">Categoría</label>
+          <div class="searchable-dropdown-wrapper">
+            <input 
+              type="text" 
+              id="categoria-search" 
+              placeholder="Buscar categoría..."
+              class="dropdown-search"
+            >
+            <select id="product-categoria" class="select-full">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+          <small><a href="#" id="link-nueva-categoria">+ Nueva categoría</a></small>
+        </div>
+
+        <div class="form-group">
+          <label for="product-unidad">Unidad de Medida</label>
+          <select id="product-unidad" class="select-full">
+            <option value="unidad">Unidad</option>
+            <option value="kg">Kg</option>
+            <option value="lt">Litro</option>
+            <option value="docena">Docena</option>
+            <option value="caja">Caja</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="product-proveedor-principal">Proveedor Principal</label>
+          <div class="searchable-dropdown-wrapper">
+            <input 
+              type="text" 
+              id="proveedor-principal-search" 
+              placeholder="Buscar proveedor..."
+              class="dropdown-search"
+            >
+            <select id="product-proveedor-principal" class="select-full">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="product-proveedor-alternativo">Proveedor Alternativo</label>
+          <div class="searchable-dropdown-wrapper">
+            <input 
+              type="text" 
+              id="proveedor-alternativo-search" 
+              placeholder="Buscar proveedor..."
+              class="dropdown-search"
+            >
+            <select id="product-proveedor-alternativo" class="select-full">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button id="btn-prev-step2" class="btn btn-secondary">← Anterior</button>
+        <button id="btn-next-step2" class="btn btn-primary">Siguiente →</button>
+      </div>
+    </div>
+
+    <!-- STEP 3: Prices & Stock -->
+    <div id="step3" class="modal-step hidden">
+      <h4>Paso 3: Precios y Stock</h4>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="product-costo">Costo $</label>
+          <input type="number" id="product-costo" class="input-currency" step="0.01" min="0">
+        </div>
+
+        <div class="form-group">
+          <label for="product-precio">Precio de Venta $</label>
+          <input type="number" id="product-precio" class="input-currency" step="0.01" min="0">
+        </div>
+
+        <div class="form-group">
+          <label for="product-margen">Margen %</label>
+          <input type="text" id="product-margen" class="input-full" readonly style="background: #f5f5f5;">
+        </div>
+      </div>
+
+      <div id="precio-heredado-section" class="hidden" style="margin: 15px 0; padding: 10px; background: #e3f2fd; border-radius: 4px;">
+        <label class="checkbox-label">
+          <input type="checkbox" id="precio-independiente">
+          ¿Usar precio independiente? (diferente de la madre)
+        </label>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="product-stock-minimo">Stock Mínimo</label>
+          <input type="number" id="product-stock-minimo" class="input-full" step="0.01" min="0" value="0">
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button id="btn-prev-step3" class="btn btn-secondary">← Anterior</button>
+        <button id="btn-next-step3" class="btn btn-primary">Siguiente →</button>
+      </div>
+    </div>
+
+    <!-- STEP 4: Barcodes -->
+    <div id="step4" class="modal-step hidden">
+      <h4>Paso 4: Códigos de Barras</h4>
+
+      <div class="barcode-input-group">
+        <label for="barcode-input">Escanear o escribir código:</label>
+        <div style="display: flex; gap: 8px;">
+          <input 
+            type="text" 
+            id="barcode-input" 
+            class="input-full" 
+            placeholder="Escanea aquí (escáner USB)"
+            autofocus
+          >
+          <button id="btn-add-barcode" class="btn btn-primary btn-small">Agregar</button>
+        </div>
+        <small>El escáner USB simula entrada de teclado. Presiona Enter al escanear.</small>
+      </div>
+
+      <div style="margin-top: 20px;">
+        <h5>Códigos Agregados:</h5>
+        <div id="barcodes-list" style="margin-top: 10px;">
+          <!-- populated dynamically -->
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button id="btn-prev-step4" class="btn btn-secondary">← Anterior</button>
+        <button id="btn-next-step4" class="btn btn-primary">Siguiente →</button>
+      </div>
+    </div>
+
+    <!-- STEP 5: Substitutes -->
+    <div id="step5" class="modal-step hidden">
+      <h4>Paso 5: Productos Sustitutos</h4>
+
+      <p style="margin-bottom: 15px; font-size: 0.9em; color: #666;">
+        El stock disponible de este producto incluirá el stock de sus sustitutos activos.
+      </p>
+
+      <div class="form-group">
+        <label>Agregar sustituto:</label>
+        <div class="searchable-dropdown-wrapper">
+          <input 
+            type="text" 
+            id="sustituto-search" 
+            placeholder="Buscar producto..."
+            class="dropdown-search"
+          >
+          <select id="select-sustituto" class="select-full">
+            <option value="">-- Seleccionar --</option>
+          </select>
+        </div>
+        <button id="btn-add-sustituto" class="btn btn-primary btn-small" style="margin-top: 8px;">
+          + Agregar Sustituto
+        </button>
+      </div>
+
+      <div style="margin-top: 20px;">
+        <h5>Sustitutos Agregados:</h5>
+        <div id="sustitutos-list" style="margin-top: 10px;">
+          <!-- populated dynamically -->
+        </div>
+      </div>
+
+      <div class="form-actions" style="margin-top: 20px;">
+        <button id="btn-prev-step5" class="btn btn-secondary">← Anterior</button>
+        <button id="btn-save-producto" class="btn btn-success">✓ Guardar Producto</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- FAMILY UPDATE MODAL -->
+<div id="family-modal" class="modal hidden">
+  <div class="modal-content modal-medium">
+    <div class="modal-header">
+      <h3>Actualizar Familia</h3>
+    </div>
+
+    <div class="modal-body">
+      <p id="family-message" style="margin-bottom: 20px; font-weight: 500;"></p>
+
+      <div id="family-members-list" style="margin: 20px 0; background: #f5f5f5; padding: 15px; border-radius: 4px;">
+        <!-- populated dynamically -->
+      </div>
+
+      <div style="margin: 20px 0;">
+        <label class="radio-label">
+          <input type="radio" name="family-action" value="solo" checked>
+          Solo actualizar este producto
+        </label>
+      </div>
+
+      <div style="margin: 20px 0;">
+        <label class="radio-label">
+          <input type="radio" name="family-action" value="familia">
+          Actualizar toda la familia
+        </label>
+        <div id="update-precio-section" class="hidden" style="margin-top: 10px; margin-left: 30px;">
+          <label class="checkbox-label">
+            <input type="checkbox" id="update-precio-proporcional" checked>
+            ¿Actualizar precio de venta proporcionalmente?
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button id="btn-family-cancel" class="btn btn-secondary">Cancelar</button>
+      <button id="btn-family-confirm" class="btn btn-success">✓ Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- DETAIL SIDE PANEL -->
+<div id="detail-panel" class="detail-panel hidden">
+  <div class="panel-header">
+    <h3 id="detail-title">Detalles del Producto</h3>
+    <button id="btn-close-detail" class="btn-close">✕</button>
+  </div>
+
+  <div class="panel-content">
+    <!-- Basic Info -->
+    <section class="detail-section">
+      <h4>Información General</h4>
+      <div class="detail-row">
+        <span class="label">Nombre:</span>
+        <span id="detail-nombre" class="value"></span>
+      </div>
+      <div class="detail-row">
+        <span class="label">Categoría:</span>
+        <span id="detail-categoria" class="value"></span>
+      </div>
+      <div class="detail-row">
+        <span class="label">Descripción:</span>
+        <span id="detail-descripcion" class="value"></span>
+      </div>
+    </section>
+
+    <!-- Pricing -->
+    <section class="detail-section">
+      <h4>Precios</h4>
+      <div class="detail-row">
+        <span class="label">Costo:</span>
+        <span id="detail-costo" class="value"></span>
+      </div>
+      <div class="detail-row">
+        <span class="label">Precio de Venta:</span>
+        <span id="detail-precio" class="value"></span>
+      </div>
+      <div class="detail-row">
+        <span class="label">Margen %:</span>
+        <span id="detail-margen" class="value"></span>
+      </div>
+    </section>
+
+    <!-- Stock by sucursal -->
+    <section class="detail-section">
+      <h4>Stock por Sucursal</h4>
+      <div id="detail-stock-sucursales"></div>
+    </section>
+
+    <!-- Barcodes -->
+    <section class="detail-section">
+      <h4>Códigos de Barras</h4>
+      <div id="detail-codigos" style="margin-top: 10px;"></div>
+    </section>
+
+    <!-- Family Info (if mother) -->
+    <section class="detail-section hidden" id="section-hijos">
+      <h4>Variantes</h4>
+      <div id="detail-hijos" style="margin-top: 10px;"></div>
+    </section>
+
+    <!-- Substitutes -->
+    <section class="detail-section hidden" id="section-sustitutos">
+      <h4>Productos Sustitutos</h4>
+      <div id="detail-sustitutos" style="margin-top: 10px;"></div>
+    </section>
+
+    <!-- Actions -->
+    <div class="panel-actions">
+      <button id="btn-detail-edit" class="btn btn-primary">✏️ Editar</button>
+      <button id="btn-detail-print" class="btn btn-secondary">🏷️ Imprimir Etiqueta</button>
+      <button id="btn-detail-deactivate" class="btn btn-danger">🚫 Desactivar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Backdrop -->
+<div id="modal-backdrop" class="modal-backdrop hidden"></div>
+
+<style>
+.productos-container {
+  padding: 20px;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+}
+
+.filters-section {
+  background: #f5f5f5;
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.search-box {
+  margin-bottom: 15px;
+}
+
+.search-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.filter-group {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.select-filter {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.checkbox-label input {
+  cursor: pointer;
+}
+
+.btn-small {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.products-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.productos-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.productos-table thead {
+  background: #f5f5f5;
+  border-bottom: 2px solid #ddd;
+}
+
+.productos-table th {
+  padding: 12px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.productos-table td {
+  padding: 12px;
+  border-bottom: 1px solid #eee;
+}
+
+.productos-table tbody tr {
+  transition: background 0.2s;
+}
+
+.productos-table tbody tr:hover {
+  background: #fafafa;
+  cursor: pointer;
+}
+
+.productos-table tbody tr.stock-bajo {
+  background: #ffebee;
+}
+
+.productos-table tbody tr.stock-aviso {
+  background: #fff3e0;
+}
+
+.table-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.table-actions button {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+#pagination-info {
+  font-size: 14px;
+  color: #666;
+  min-width: 80px;
+  text-align: center;
+}
+
+/* Modal Styles */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  transition: opacity 0.3s;
+}
+
+.modal.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+  transition: opacity 0.3s;
+}
+
+.modal-backdrop.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  max-height: 90vh;
+  overflow-y: auto;
+  z-index: 1001;
+}
+
+.modal-large {
+  width: 90%;
+  max-width: 600px;
+}
+
+.modal-medium {
+  width: 90%;
+  max-width: 500px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.modal-header h3 {
+  margin: 0;
+}
+
+.btn-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-step {
+  padding: 20px;
+  display: none;
+}
+
+.modal-step.active {
+  display: block;
+}
+
+.modal-step h4 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  color: #333;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.form-row.single {
+  grid-template-columns: 1fr;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.form-group label {
+  margin-bottom: 6px;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.input-full,
+.input-currency,
+.select-full {
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.input-full:focus,
+.input-currency:focus,
+.select-full:focus {
+  outline: none;
+  border-color: #2196F3;
+  box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.1);
+}
+
+.searchable-dropdown-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.dropdown-search {
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px 4px 0 0;
+  font-size: 14px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.dropdown-search:focus {
+  outline: none;
+  border-color: #2196F3;
+}
+
+.searchable-dropdown-wrapper select {
+  border: 1px solid #ddd;
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  padding: 8px 12px;
+  font-size: 14px;
+  max-height: 150px;
+}
+
+.form-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid #eee;
+}
+
+.btn {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.btn-primary {
+  background: #2196F3;
+  color: white;
+}
+
+.btn-primary:hover {
+  background: #1976D2;
+}
+
+.btn-secondary {
+  background: #f5f5f5;
+  color: #333;
+  border: 1px solid #ddd;
+}
+
+.btn-secondary:hover {
+  background: #e8e8e8;
+}
+
+.btn-success {
+  background: #4CAF50;
+  color: white;
+}
+
+.btn-success:hover {
+  background: #388E3C;
+}
+
+.btn-danger {
+  background: #f44336;
+  color: white;
+}
+
+.btn-danger:hover {
+  background: #d32f2f;
+}
+
+/* Radio and Checkbox Styles */
+.radio-label,
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  margin: 8px 0;
+  font-size: 14px;
+}
+
+.radio-label input,
+.checkbox-label input {
+  cursor: pointer;
+  margin: 0;
+}
+
+/* Barcodes and Substitutes List */
+.barcode-item,
+.sustituto-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  background: #f5f5f5;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.barcode-item .badge,
+.sustituto-item .badge {
+  background: #2196F3;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.barcode-item .btn-remove,
+.sustituto-item .btn-remove {
+  background: #f44336;
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+/* Detail Panel */
+.detail-panel {
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 350px;
+  background: white;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  z-index: 900;
+  transition: transform 0.3s;
+  overflow-y: auto;
+}
+
+.detail-panel.hidden {
+  transform: translateX(100%);
+  pointer-events: none;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid #eee;
+  flex-shrink: 0;
+}
+
+.panel-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.panel-content {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.detail-section {
+  margin-bottom: 25px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.detail-section:last-child {
+  border-bottom: none;
+}
+
+.detail-section h4 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.detail-row .label {
+  font-weight: 500;
+  color: #666;
+}
+
+.detail-row .value {
+  text-align: right;
+  color: #333;
+  word-break: break-word;
+}
+
+.panel-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+  border-top: 1px solid #eee;
+  flex-shrink: 0;
+  margin-top: auto;
+}
+
+.panel-actions .btn {
+  width: 100%;
+  text-align: center;
+}
+
+/* Utility Classes */
+.hidden {
+  display: none !important;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-group {
+    flex-direction: column;
+  }
+
+  .select-filter {
+    width: 100%;
+  }
+
+  .detail-panel {
+    width: 100%;
+    bottom: auto;
+    height: 50%;
+  }
+}
+
+/* IMPORT EXCEL STYLES */
+.toolbar-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.file-drop-zone {
+  border: 2px dashed #ccc;
+  border-radius: 8px;
+  padding: 40px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s;
+  background: #fafafa;
+}
+
+.file-drop-zone:hover,
+.file-drop-zone.dragover {
+  border-color: #667eea;
+  background: #f0f4ff;
+}
+
+.file-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.file-link {
+  color: #667eea;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.preview-table-container {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin-top: 15px;
+}
+
+.preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.preview-table th,
+.preview-table td {
+  padding: 8px;
+  border: 1px solid #ddd;
+  text-align: left;
+}
+
+.preview-table th {
+  background: #f5f5f5;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+
+.mapping-instructions {
+  background: #e3f2fd;
+  padding: 15px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.mapping-table {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.mapping-row {
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  border-bottom: 1px solid #eee;
+}
+
+.mapping-row:last-child {
+  border-bottom: none;
+}
+
+.mapping-header {
+  background: #f5f5f5;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.mapping-field {
+  flex: 1;
+  font-weight: 500;
+}
+
+.mapping-arrow {
+  margin: 0 15px;
+  color: #666;
+}
+
+.mapping-column {
+  flex: 1;
+}
+
+.mapping-select {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.preview-summary {
+  background: #fff3cd;
+  padding: 15px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+  font-size: 16px;
+}
+
+.import-options {
+  margin: 20px 0;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 4px;
+}
+
+.import-options .checkbox-label {
+  display: block;
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+
+.import-results {
+  background: #f8f9fa;
+  padding: 20px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.import-results h5 {
+  margin: 0 0 10px 0;
+  color: #333;
+}
+
+.import-results .result-item {
+  margin-bottom: 8px;
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.result-success { background: #d4edda; color: #155724; }
+.result-warning { background: #fff3cd; color: #856404; }
+.result-error { background: #f8d7da; color: #721c24; }
+
+.progress-bar {
+  width: 100%;
+  height: 20px;
+  background: #e9ecef;
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 10px 0;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #28a745;
+  transition: width 0.3s;
+}
+</style>
+
+<!-- IMPORT EXCEL MODAL -->
+<div id="import-modal" class="modal hidden">
+  <div class="modal-content modal-large">
+    <div class="modal-header">
+      <h3>📊 Importar Productos desde Excel</h3>
+      <button class="btn-close" aria-label="Cerrar">✕</button>
+    </div>
+
+    <!-- STEP 1: FILE UPLOAD -->
+    <div id="import-step1" class="modal-step active">
+      <h4>Paso 1: Seleccionar Archivo</h4>
+      
+      <div class="form-group">
+        <div id="file-drop-zone" class="file-drop-zone">
+          <div class="file-drop-content">
+            <div class="file-icon">📄</div>
+            <p>Arrastra tu archivo Excel aquí o <span class="file-link">haz clic para seleccionar</span></p>
+            <small>Formatos soportados: .xlsx, .xls</small>
+          </div>
+          <input type="file" id="file-input" accept=".xlsx,.xls" style="display: none;">
+        </div>
+      </div>
+
+      <div id="file-preview" class="hidden">
+        <h5>Archivo seleccionado: <span id="file-name"></span></h5>
+        <div class="preview-table-container">
+          <table id="preview-table" class="preview-table"></table>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button id="btn-import-next1" class="btn btn-primary" disabled>Siguiente →</button>
+      </div>
+    </div>
+
+    <!-- STEP 2: COLUMN MAPPING -->
+    <div id="import-step2" class="modal-step hidden">
+      <h4>Paso 2: Mapear Columnas</h4>
+      
+      <div class="mapping-instructions">
+        <p>Asigna las columnas de tu Excel a los campos del sistema. Las columnas se detectaron automáticamente donde fue posible.</p>
+      </div>
+
+      <div class="mapping-table">
+        <div class="mapping-row mapping-header">
+          <div class="mapping-field">Campo del Sistema</div>
+          <div class="mapping-arrow">→</div>
+          <div class="mapping-column">Columna en tu archivo</div>
+        </div>
+        
+        <div class="mapping-row">
+          <div class="mapping-field">Código de barras *</div>
+          <div class="mapping-arrow">→</div>
+          <div class="mapping-column">
+            <select id="map-codigo_barras" class="mapping-select">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mapping-row">
+          <div class="mapping-field">Nombre *</div>
+          <div class="mapping-arrow">→</div>
+          <div class="mapping-column">
+            <select id="map-nombre" class="mapping-select">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mapping-row">
+          <div class="mapping-field">Costo</div>
+          <div class="mapping-arrow">→</div>
+          <div class="mapping-column">
+            <select id="map-costo" class="mapping-select">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mapping-row">
+          <div class="mapping-field">Precio de venta</div>
+          <div class="mapping-arrow">→</div>
+          <div class="mapping-column">
+            <select id="map-precio_venta" class="mapping-select">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mapping-row">
+          <div class="mapping-field">Stock actual</div>
+          <div class="mapping-arrow">→</div>
+          <div class="mapping-column">
+            <select id="map-stock_actual" class="mapping-select">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mapping-row">
+          <div class="mapping-field">Stock mínimo</div>
+          <div class="mapping-arrow">→</div>
+          <div class="mapping-column">
+            <select id="map-stock_minimo" class="mapping-select">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mapping-row">
+          <div class="mapping-field">Categoría</div>
+          <div class="mapping-arrow">→</div>
+          <div class="mapping-column">
+            <select id="map-categoria" class="mapping-select">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mapping-row">
+          <div class="mapping-field">Proveedor</div>
+          <div class="mapping-arrow">→</div>
+          <div class="mapping-column">
+            <select id="map-proveedor" class="mapping-select">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mapping-row">
+          <div class="mapping-field">Código sustituto</div>
+          <div class="mapping-arrow">→</div>
+          <div class="mapping-column">
+            <select id="map-codigo_sustituto" class="mapping-select">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button id="btn-import-prev2" class="btn btn-secondary">← Anterior</button>
+        <button id="btn-import-next2" class="btn btn-primary">Siguiente →</button>
+      </div>
+    </div>
+
+    <!-- STEP 3: PREVIEW & CONFIRM -->
+    <div id="import-step3" class="modal-step hidden">
+      <h4>Paso 3: Vista Previa y Confirmación</h4>
+      
+      <div id="preview-summary" class="preview-summary">
+        <p>Se importarán <strong id="preview-count">0</strong> productos.</p>
+      </div>
+
+      <div class="preview-table-container">
+        <table id="confirm-table" class="preview-table"></table>
+      </div>
+
+      <div class="import-options">
+        <label class="checkbox-label">
+          <input type="checkbox" id="update-existing" checked>
+          Actualizar productos existentes (mismo código de barras)
+        </label>
+        
+        <label class="checkbox-label">
+          <input type="checkbox" id="create-categories" checked>
+          Crear categorías nuevas automáticamente
+        </label>
+        
+        <label class="checkbox-label">
+          <input type="checkbox" id="create-providers" checked>
+          Crear proveedores nuevos automáticamente
+        </label>
+      </div>
+
+      <div class="form-actions">
+        <button id="btn-import-prev3" class="btn btn-secondary">← Anterior</button>
+        <button id="btn-import-confirm" class="btn btn-success">Importar</button>
+      </div>
+    </div>
+
+    <!-- STEP 4: RESULTS -->
+    <div id="import-step4" class="modal-step hidden">
+      <h4>Resultado de la Importación</h4>
+      
+      <div id="import-results" class="import-results">
+        <!-- Results will be populated here -->
+      </div>
+
+      <div class="form-actions">
+        <button id="btn-import-close" class="btn btn-primary">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(function() {
+  'use strict';
+
+  let importData = {
+    workbook: null,
+    worksheet: null,
+    columns: [],
+    rows: [],
+    mapping: {}
+  };
+
+  // Initialize import modal
+  function initImportModal() {
+    const modal = document.getElementById('import-modal');
+    const backdrop = document.getElementById('modal-backdrop');
+
+    // Show modal
+    document.getElementById('btn-importar-excel').addEventListener('click', () => {
+      resetImportModal();
+      modal.classList.remove('hidden');
+      backdrop.classList.remove('hidden');
+    });
+
+    // Close modal
+    document.querySelector('#import-modal .btn-close').addEventListener('click', hideImportModal);
+    document.getElementById('btn-import-close').addEventListener('click', hideImportModal);
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) hideImportModal();
+    });
+
+    // File drop zone
+    const dropZone = document.getElementById('file-drop-zone');
+    const fileInput = document.getElementById('file-input');
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      const files = e.dataTransfer.files;
+      if (files.length > 0) handleFileSelect(files[0]);
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) handleFileSelect(e.target.files[0]);
+    });
+
+    // Navigation buttons
+    document.getElementById('btn-import-next1').addEventListener('click', () => goToImportStep(2));
+    document.getElementById('btn-import-prev2').addEventListener('click', () => goToImportStep(1));
+    document.getElementById('btn-import-next2').addEventListener('click', () => goToImportStep(3));
+    document.getElementById('btn-import-prev3').addEventListener('click', () => goToImportStep(2));
+    document.getElementById('btn-import-confirm').addEventListener('click', performImport);
+  }
+
+  function resetImportModal() {
+    importData = {
+      workbook: null,
+      worksheet: null,
+      columns: [],
+      rows: [],
+      mapping: {}
+    };
+
+    // Reset to step 1
+    goToImportStep(1);
+
+    // Clear file preview
+    document.getElementById('file-preview').classList.add('hidden');
+    document.getElementById('file-name').textContent = '';
+    document.getElementById('preview-table').innerHTML = '';
+    document.getElementById('btn-import-next1').disabled = true;
+
+    // Clear mapping
+    document.querySelectorAll('.mapping-select').forEach(select => {
+      select.innerHTML = '<option value="">-- Seleccionar --</option>';
+    });
+
+    // Clear preview
+    document.getElementById('preview-count').textContent = '0';
+    document.getElementById('confirm-table').innerHTML = '';
+
+    // Reset checkboxes
+    document.getElementById('update-existing').checked = true;
+    document.getElementById('create-categories').checked = true;
+    document.getElementById('create-providers').checked = true;
+
+    // Clear results
+    document.getElementById('import-results').innerHTML = '';
+  }
+
+  function hideImportModal() {
+    document.getElementById('import-modal').classList.add('hidden');
+    document.getElementById('modal-backdrop').classList.add('hidden');
+  }
+
+  function goToImportStep(step) {
+    document.querySelectorAll('.modal-step').forEach(s => s.classList.remove('active'));
+    document.getElementById(`import-step${step}`).classList.add('active');
+  }
+
+  function handleFileSelect(file) {
+    if (!file.name.match(/\.(xlsx|xls)$/i)) {
+      alert('Por favor selecciona un archivo Excel (.xlsx o .xls)');
+      return;
+    }
+
+    document.getElementById('file-name').textContent = file.name;
+    document.getElementById('file-preview').classList.remove('hidden');
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        importData.workbook = XLSX.read(e.target.result, { type: 'array' });
+        const sheetName = importData.workbook.SheetNames[0];
+        importData.worksheet = importData.workbook.Sheets[sheetName];
+
+        // Convert to JSON
+        const jsonData = XLSX.utils.sheet_to_json(importData.worksheet, { header: 1 });
+        
+        if (jsonData.length < 2) {
+          alert('El archivo debe tener al menos una fila de encabezados y una fila de datos');
+          return;
+        }
+
+        // Extract columns and rows
+        importData.columns = jsonData[0].map(col => String(col || '').trim());
+        importData.rows = jsonData.slice(1).map(row => {
+          const obj = {};
+          importData.columns.forEach((col, idx) => {
+            obj[col] = row[idx] || '';
+          });
+          return obj;
+        });
+
+        // Show preview
+        showFilePreview();
+        document.getElementById('btn-import-next1').disabled = false;
+
+      } catch (error) {
+        alert('Error al leer el archivo: ' + error.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function showFilePreview() {
+    const table = document.getElementById('preview-table');
+    const previewRows = importData.rows.slice(0, 5);
+
+    let html = '<thead><tr>';
+    importData.columns.forEach(col => {
+      html += `<th>${col}</th>`;
+    });
+    html += '</tr></thead><tbody>';
+
+    previewRows.forEach(row => {
+      html += '<tr>';
+      importData.columns.forEach(col => {
+        html += `<td>${String(row[col] || '').substring(0, 50)}</td>`;
+      });
+      html += '</tr>';
+    });
+
+    html += '</tbody>';
+    table.innerHTML = html;
+  }
+
+  function goToImportStep(step) {
+    if (step === 2) {
+      setupColumnMapping();
+    } else if (step === 3) {
+      if (!validateMapping()) {
+        alert('Debes mapear al menos los campos obligatorios: Código de barras y Nombre');
+        return;
+      }
+      showPreview();
+    }
+
+    document.querySelectorAll('.modal-step').forEach(s => s.classList.remove('active'));
+    document.getElementById(`import-step${step}`).classList.add('active');
+  }
+
+  function setupColumnMapping() {
+    // Populate dropdowns
+    document.querySelectorAll('.mapping-select').forEach(select => {
+      select.innerHTML = '<option value="">-- Seleccionar --</option>';
+      importData.columns.forEach(col => {
+        select.appendChild(new Option(col, col));
+      });
+    });
+
+    // Auto-map common columns
+    const autoMappings = {
+      'codigo_barras': ['codigo', 'cod', 'barras', 'ean', 'codigo barras'],
+      'nombre': ['nombre', 'descripcion', 'producto', 'articulo'],
+      'costo': ['costo', 'precio costo', 'p.costo', 'costo unitario'],
+      'precio_venta': ['precio', 'precio venta', 'p.venta', 'precio final', 'venta'],
+      'stock_actual': ['stock', 'cantidad', 'existencia', 'inventario'],
+      'stock_minimo': ['minimo', 'stock min', 'min', 'stock minimo'],
+      'categoria': ['categoria', 'rubro', 'familia', 'tipo'],
+      'proveedor': ['proveedor', 'prov', 'fabricante', 'marca'],
+      'codigo_sustituto': ['sustituto', 'cod sustituto', 'reemplaza', 'alternativo']
+    };
+
+    Object.keys(autoMappings).forEach(field => {
+      const select = document.getElementById(`map-${field}`);
+      const keywords = autoMappings[field];
+      
+      for (const col of importData.columns) {
+        const colLower = col.toLowerCase();
+        if (keywords.some(keyword => colLower.includes(keyword))) {
+          select.value = col;
+          break;
+        }
+      }
+    });
+  }
+
+  function validateMapping() {
+    const requiredFields = ['codigo_barras', 'nombre'];
+    return requiredFields.every(field => document.getElementById(`map-${field}`).value);
+  }
+
+  function showPreview() {
+    // Build mapping
+    importData.mapping = {};
+    document.querySelectorAll('.mapping-select').forEach(select => {
+      const field = select.id.replace('map-', '');
+      if (select.value) {
+        importData.mapping[field] = select.value;
+      }
+    });
+
+    // Transform data
+    const transformedRows = importData.rows.map(row => {
+      const transformed = {};
+      Object.keys(importData.mapping).forEach(field => {
+        const col = importData.mapping[field];
+        transformed[field] = row[col] || '';
+      });
+      return transformed;
+    });
+
+    // Show count
+    document.getElementById('preview-count').textContent = transformedRows.length;
+
+    // Show preview table
+    const table = document.getElementById('confirm-table');
+    const previewRows = transformedRows.slice(0, 10);
+
+    let html = '<thead><tr>';
+    Object.keys(importData.mapping).forEach(field => {
+      const fieldName = field.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+      html += `<th>${fieldName}</th>`;
+    });
+    html += '</tr></thead><tbody>';
+
+    previewRows.forEach(row => {
+      html += '<tr>';
+      Object.keys(importData.mapping).forEach(field => {
+        html += `<td>${String(row[field] || '').substring(0, 30)}</td>`;
+      });
+      html += '</tr>';
+    });
+
+    html += '</tbody>';
+    table.innerHTML = html;
+  }
+
+  async function performImport() {
+    goToImportStep(4);
+
+    const resultsDiv = document.getElementById('import-results');
+    resultsDiv.innerHTML = '<div class="progress-bar"><div class="progress-fill" style="width: 0%"></div></div><p>Importando productos...</p>';
+
+    try {
+      // Get current sucursal
+      const currentUser = window.SGA_Auth.getCurrentUser();
+      if (!currentUser || !currentUser.sucursal_id) {
+        throw new Error('No se pudo determinar la sucursal actual');
+      }
+
+      // Transform data for import
+      const filas = importData.rows.map(row => {
+        const transformed = {};
+        Object.keys(importData.mapping).forEach(field => {
+          const col = importData.mapping[field];
+          transformed[field] = row[col] || '';
+        });
+        return transformed;
+      });
+
+      // Perform import
+      const results = window.Productos.importarDesdeExcel(filas, currentUser.sucursal_id);
+
+      // Show results
+      let html = '<h5>✅ Importación completada</h5>';
+      
+      if (results.importados > 0) {
+        html += `<div class="result-item result-success">✓ ${results.importados} productos importados</div>`;
+      }
+      
+      if (results.actualizados > 0) {
+        html += `<div class="result-item result-success">🔄 ${results.actualizados} productos actualizados</div>`;
+      }
+      
+      if (results.categoriasCreadas.length > 0) {
+        html += `<div class="result-item result-success">🏷️ Categorías creadas: ${results.categoriasCreadas.join(', ')}</div>`;
+      }
+      
+      if (results.proveedoresCreados.length > 0) {
+        html += `<div class="result-item result-success">🏚️ Proveedores creados: ${results.proveedoresCreados.join(', ')}</div>`;
+      }
+      
+      if (results.sustitutosResueltos > 0) {
+        html += `<div class="result-item result-success">🔗 ${results.sustitutosResueltos} sustitutos vinculados</div>`;
+      }
+      
+      if (results.sustitutosPendientes.length > 0) {
+        html += `<div class="result-item result-warning">⚠️ Sustitutos pendientes: ${results.sustitutosPendientes.join(', ')}</div>`;
+      }
+      
+      if (results.errores.length > 0) {
+        html += `<div class="result-item result-error">❌ Errores: ${results.errores.length}</div>`;
+        results.errores.forEach(error => {
+          html += `<div class="result-item result-error" style="font-size: 12px; margin-left: 20px;">• ${error}</div>`;
+        });
+      }
+
+      resultsDiv.innerHTML = html;
+
+      // Refresh product list if successful
+      if (results.importados > 0 || results.actualizados > 0) {
+        // Trigger refresh of product list
+        setTimeout(() => {
+          if (window.location.hash === '#productos') {
+            window.location.reload();
+          }
+        }, 2000);
+      }
+
+    } catch (error) {
+      resultsDiv.innerHTML = `<div class="result-item result-error">❌ Error crítico: ${error.message}</div>`;
+    }
+  }
+
+  // Initialize when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initImportModal);
+  } else {
+    initImportModal();
+  }
+})();
+</script>
