@@ -1,15 +1,594 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SGA - Órdenes</title>
-</head>
-<body>
-  <!-- Órdenes Module -->
-  <main>
+<style>
+  /* ── ORDENES MODULE ─────────────────────────────────────────────────────── */
+  .ord-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-background);
+  }
+  .ord-toolbar h2 { margin: 0; font-size: 1.35rem; }
+  .ord-toolbar-right { display: flex; gap: 8px; }
+
+  /* Tabs */
+  .ord-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--color-border);
+    padding: 0 20px;
+    background: var(--color-background);
+  }
+  .ord-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 18px;
+    font-size: 14px;
+    cursor: pointer;
+    color: var(--color-text-secondary);
+    margin-bottom: -1px;
+  }
+  .ord-tab.active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
+    font-weight: 600;
+  }
+
+  /* Table */
+  .ord-table-wrap { padding: 20px; overflow-x: auto; }
+  .ord-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .ord-table th {
+    text-align: left;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    border-bottom: 1px solid var(--color-border);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .ord-table td { padding: 10px 12px; border-bottom: 1px solid var(--color-border); vertical-align: middle; }
+  .ord-table tr:last-child td { border-bottom: none; }
+  .ord-table tr:hover td { background: var(--color-surface); }
+  .ord-empty { padding: 48px; text-align: center; color: var(--color-text-secondary); }
+
+  /* Estado badges */
+  .ord-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 12px;
+    white-space: nowrap;
+  }
+  .ord-badge-borrador      { background: #e0e0e0; color: #424242; }
+  .ord-badge-enviada       { background: #1565C0; color: white; }
+  .ord-badge-recibiendo    { background: #E65100; color: white; }
+  .ord-badge-recibida_parcial { background: #F57F17; color: white; }
+  .ord-badge-cerrada       { background: #2E7D32; color: white; }
+  .ord-badge-pendiente_pago { background: #C62828; color: white; }
+
+  /* ── MODAL SHARED ───────────────────────────────────────────────────────── */
+  .ord-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 300;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .ord-modal {
+    background: var(--color-background);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    width: 100%;
+    max-width: 640px;
+    max-height: 90vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .ord-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--color-border);
+    position: sticky;
+    top: 0;
+    background: var(--color-background);
+    z-index: 1;
+  }
+  .ord-modal-header h3 { margin: 0; font-size: 1.05rem; }
+  .ord-modal-body { padding: 20px; flex: 1; }
+  .ord-modal-footer {
+    padding: 14px 20px;
+    border-top: 1px solid var(--color-border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    position: sticky;
+    bottom: 0;
+    background: var(--color-background);
+  }
+
+  /* Steps indicator */
+  .ord-steps {
+    display: flex;
+    gap: 0;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .ord-step-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--color-text-secondary);
+    flex: 1;
+  }
+  .ord-step-item.active { color: var(--color-primary); font-weight: 600; }
+  .ord-step-item.done { color: #2E7D32; }
+  .ord-step-num {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--color-border);
+    color: var(--color-text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .ord-step-item.active .ord-step-num { background: var(--color-primary); color: white; }
+  .ord-step-item.done .ord-step-num { background: #2E7D32; color: white; }
+
+  /* Form helpers */
+  .ord-form-group { margin-bottom: 16px; }
+  .ord-form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  .ord-form-group input,
+  .ord-form-group select,
+  .ord-form-group textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    background: var(--color-background);
+    color: var(--color-text);
+  }
+  .ord-search-wrap { position: relative; }
+  .ord-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-top: none;
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+    box-shadow: var(--shadow-md);
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 10;
+  }
+  .ord-dropdown-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .ord-dropdown-item:hover { background: var(--color-surface); }
+
+  /* Items list in nueva orden */
+  .ord-items-list { margin-top: 12px; }
+  .ord-item-row {
+    display: grid;
+    grid-template-columns: 1fr 100px 110px 32px;
+    gap: 8px;
+    align-items: center;
+    padding: 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    margin-bottom: 6px;
+    font-size: 13px;
+  }
+  .ord-item-row input { padding: 4px 6px; font-size: 13px; }
+  .ord-item-remove {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--color-text-secondary);
+    font-size: 16px;
+    padding: 0;
+    line-height: 1;
+  }
+  .ord-item-remove:hover { color: #C62828; }
+  .ord-subtotal { font-size: 14px; font-weight: 600; margin-top: 12px; text-align: right; }
+
+  /* ── RECEPCIÓN FULL-SCREEN ──────────────────────────────────────────────── */
+  #ord-recepcion-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 400;
+    background: var(--color-background);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .ord-rec-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-background);
+    flex-shrink: 0;
+  }
+  .ord-rec-header h2 { margin: 0; font-size: 1.1rem; }
+  .ord-rec-layout {
+    display: grid;
+    grid-template-columns: 60% 40%;
+    flex: 1;
+    overflow: hidden;
+  }
+  .ord-rec-left {
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--color-border);
+    overflow: hidden;
+  }
+  .ord-rec-scanner-wrap {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface);
+    flex-shrink: 0;
+  }
+  .ord-rec-scanner-wrap input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 14px;
+    border: 2px solid var(--color-primary);
+    border-radius: var(--radius-md);
+    font-size: 15px;
+    background: var(--color-background);
+    color: var(--color-text);
+    outline: none;
+  }
+  .ord-rec-items-wrap { flex: 1; overflow-y: auto; }
+  .ord-rec-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .ord-rec-table th {
+    position: sticky;
+    top: 0;
+    background: var(--color-surface);
+    padding: 8px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--color-border);
+    text-align: left;
+  }
+  .ord-rec-table td { padding: 8px 10px; border-bottom: 1px solid var(--color-border); vertical-align: middle; }
+  .ord-rec-row-recibido td { background: #E8F5E9; }
+  .ord-rec-row-parcial td { background: #FFF8E1; }
+  .ord-rec-row-no_entregado td { background: #FFEBEE; color: #999; }
+  .ord-rec-qty-ctrl { display: flex; align-items: center; gap: 4px; }
+  .ord-rec-qty-ctrl button {
+    width: 24px; height: 24px;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    background: var(--color-surface);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .ord-rec-qty-ctrl input {
+    width: 52px; text-align: center;
+    padding: 3px 4px;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    font-size: 13px;
+  }
+  .ord-rec-costo-input {
+    width: 80px;
+    padding: 3px 6px;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    font-size: 13px;
+  }
+  .ord-rec-right {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 16px;
+    gap: 12px;
+  }
+  .ord-rec-summary-card {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 14px;
+  }
+  .ord-rec-summary-card h3 { margin: 0 0 12px; font-size: 0.95rem; }
+  .ord-rec-stat { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
+  .ord-rec-stat-val { font-weight: 600; }
+  .ord-rec-progress-bar {
+    height: 8px;
+    background: var(--color-border);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 10px;
+  }
+  .ord-rec-progress-fill { height: 100%; background: var(--color-primary); border-radius: 4px; transition: width 0.3s; }
+  .ord-rec-pct { font-size: 12px; color: var(--color-text-secondary); margin-top: 4px; text-align: right; }
+  .ord-rec-pendientes-card {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 14px;
+    flex: 1;
+  }
+  .ord-rec-pendientes-card h3 { margin: 0 0 10px; font-size: 0.9rem; color: var(--color-text-secondary); }
+  .ord-rec-pendiente-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--color-border);
+    font-size: 13px;
+  }
+  .ord-rec-pendiente-item:last-child { border-bottom: none; }
+  .ord-rec-confirmar-wrap { margin-top: auto; }
+
+  /* Alert banner within recepcion */
+  .ord-scan-alert {
+    margin: 8px 16px;
+    padding: 10px 14px;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .ord-scan-alert-yellow { background: #FFF8E1; border: 1px solid #FFB300; }
+  .ord-scan-alert-red    { background: #FFEBEE; border: 1px solid #EF9A9A; }
+  .ord-scan-alert-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+  /* Discrepancia modal — larger */
+  #ord-disc-overlay .ord-modal { max-width: 520px; }
+  .ord-disc-options { display: grid; gap: 8px; margin-top: 12px; }
+  .ord-disc-option {
+    padding: 12px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 14px;
+    background: var(--color-background);
+    transition: border-color 0.15s, background 0.15s;
+    text-align: left;
+    width: 100%;
+  }
+  .ord-disc-option:hover { border-color: var(--color-primary); background: var(--color-surface); }
+  .ord-disc-option-icon { font-size: 18px; flex-shrink: 0; }
+  .ord-disc-option-label { font-weight: 600; }
+  .ord-disc-option-desc { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; }
+
+  /* Pago modal */
+  .ord-pago-total { font-size: 1.4rem; font-weight: 700; margin-bottom: 16px; }
+  .ord-pago-opts { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  .ord-pago-opt {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .ord-pago-opt.selected { border-color: var(--color-primary); background: var(--color-surface); }
+  .ord-pago-monto-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .ord-pago-monto-row label { font-size: 13px; flex-shrink: 0; }
+  .ord-pago-monto-row input { flex: 1; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: 15px; }
+
+  /* Costos modal */
+  .ord-costos-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+  .ord-costos-table th { padding: 6px 10px; font-size: 11px; font-weight: 600; color: var(--color-text-secondary); text-transform: uppercase; border-bottom: 1px solid var(--color-border); text-align: left; }
+  .ord-costos-table td { padding: 8px 10px; border-bottom: 1px solid var(--color-border); }
+  .ord-costos-diff-pos { color: #C62828; font-weight: 600; }
+  .ord-costos-diff-neg { color: #2E7D32; font-weight: 600; }
+  .ord-costos-check-row { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-top: 6px; }
+
+  /* Pagos pendientes view */
+  #ord-pagos-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 400;
+    background: var(--color-background);
+    display: flex;
+    flex-direction: column;
+  }
+  .ord-pagos-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+  }
+  .ord-pagos-header h2 { margin: 0; font-size: 1.1rem; }
+  .ord-pagos-body { flex: 1; overflow-y: auto; padding: 20px; }
+</style>
+
+<!-- ── MAIN LIST VIEW ──────────────────────────────────────────────────────── -->
+<div id="ord-main">
+  <div class="ord-toolbar">
     <h2>📋 Órdenes de Compra</h2>
-    <p>Módulo de órdenes en construcción...</p>
-  </main>
-</body>
-</html>
+    <div class="ord-toolbar-right">
+      <button class="btn btn-secondary" id="ord-btn-pagos">💰 Pagos pendientes (<span id="ord-pagos-count">0</span>)</button>
+      <button class="btn btn-primary" id="ord-btn-nueva">+ Nueva Orden</button>
+    </div>
+  </div>
+
+  <div class="ord-tabs">
+    <button class="ord-tab active" data-tab="activas">Activas</button>
+    <button class="ord-tab" data-tab="cerradas">Cerradas</button>
+    <button class="ord-tab" data-tab="todas">Todas</button>
+  </div>
+
+  <div class="ord-table-wrap">
+    <table class="ord-table">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Proveedor</th>
+          <th>Items</th>
+          <th>Total estimado</th>
+          <th>Estado</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="ord-tbody"></tbody>
+    </table>
+    <div id="ord-empty" class="ord-empty" style="display:none">No hay órdenes para mostrar.</div>
+  </div>
+</div>
+
+<!-- ── NUEVA ORDEN MODAL ──────────────────────────────────────────────────── -->
+<div id="ord-nueva-overlay" class="ord-overlay" style="display:none">
+  <div class="ord-modal">
+    <div class="ord-modal-header">
+      <h3>Nueva Orden de Compra</h3>
+      <button class="btn btn-ghost" id="ord-nueva-close">✕</button>
+    </div>
+    <div class="ord-steps" id="ord-nueva-steps"><!-- rendered by JS --></div>
+    <div class="ord-modal-body" id="ord-nueva-body"><!-- rendered by JS --></div>
+    <div class="ord-modal-footer" id="ord-nueva-footer"><!-- rendered by JS --></div>
+  </div>
+</div>
+
+<!-- ── RECEPCIÓN FULL-SCREEN ─────────────────────────────────────────────── -->
+<div id="ord-recepcion-overlay" style="display:none">
+  <div class="ord-rec-header">
+    <button class="btn btn-secondary" id="ord-rec-volver">← Volver</button>
+    <h2 id="ord-rec-titulo">📦 Recepción</h2>
+    <div style="width:100px"></div>
+  </div>
+  <div class="ord-rec-layout">
+    <!-- LEFT -->
+    <div class="ord-rec-left">
+      <div class="ord-rec-scanner-wrap">
+        <input id="ord-scanner-input" placeholder="Escanear código de barras..." autocomplete="off" spellcheck="false">
+      </div>
+      <div id="ord-scan-alert-wrap"></div>
+      <div class="ord-rec-items-wrap">
+        <table class="ord-rec-table">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th>Pedido</th>
+              <th>Recibido</th>
+              <th>Costo</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="ord-rec-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <!-- RIGHT -->
+    <div class="ord-rec-right">
+      <div class="ord-rec-summary-card">
+        <h3>Resumen</h3>
+        <div id="ord-rec-stats"></div>
+        <div class="ord-rec-progress-bar">
+          <div class="ord-rec-progress-fill" id="ord-rec-progress-fill" style="width:0%"></div>
+        </div>
+        <div class="ord-rec-pct" id="ord-rec-pct">0%</div>
+      </div>
+      <div class="ord-rec-pendientes-card">
+        <h3>Pendientes</h3>
+        <div id="ord-rec-pendientes"></div>
+      </div>
+      <div class="ord-rec-confirmar-wrap">
+        <button class="btn btn-primary" id="ord-rec-confirmar" style="width:100%" disabled>
+          ✓ Confirmar Recepción
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── DISCREPANCIA MODAL ─────────────────────────────────────────────────── -->
+<div id="ord-disc-overlay" class="ord-overlay" style="display:none">
+  <div class="ord-modal" id="ord-disc-modal">
+    <div class="ord-modal-header">
+      <h3>⚠️ Código no encontrado</h3>
+      <button class="btn btn-ghost" id="ord-disc-close">✕</button>
+    </div>
+    <div class="ord-modal-body" id="ord-disc-body"><!-- rendered by JS --></div>
+  </div>
+</div>
+
+<!-- ── PAYMENT MODAL ──────────────────────────────────────────────────────── -->
+<div id="ord-pago-overlay" class="ord-overlay" style="display:none">
+  <div class="ord-modal">
+    <div class="ord-modal-header">
+      <h3 id="ord-pago-titulo">💳 Registrar pago</h3>
+      <button class="btn btn-ghost" id="ord-pago-close">✕</button>
+    </div>
+    <div class="ord-modal-body" id="ord-pago-body"><!-- rendered by JS --></div>
+    <div class="ord-modal-footer">
+      <button class="btn btn-secondary" id="ord-pago-cancelar">Cancelar</button>
+      <button class="btn btn-primary" id="ord-pago-confirmar">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── COST CHANGES MODAL ─────────────────────────────────────────────────── -->
+<div id="ord-costos-overlay" class="ord-overlay" style="display:none">
+  <div class="ord-modal" style="max-width:700px">
+    <div class="ord-modal-header">
+      <h3>📊 Cambios de costo detectados</h3>
+    </div>
+    <div class="ord-modal-body" id="ord-costos-body"><!-- rendered by JS --></div>
+    <div class="ord-modal-footer">
+      <button class="btn btn-primary" id="ord-costos-confirmar">Confirmar cambios de costo</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── PAGOS PENDIENTES VIEW ──────────────────────────────────────────────── -->
+<div id="ord-pagos-overlay" style="display:none">
+  <div class="ord-pagos-header">
+    <button class="btn btn-secondary" id="ord-pagos-volver">← Volver</button>
+    <h2>💰 Pagos Pendientes a Proveedores</h2>
+  </div>
+  <div class="ord-pagos-body">
+    <table class="ord-table">
+      <thead>
+        <tr>
+          <th>Proveedor</th>
+          <th>Fecha recepción</th>
+          <th>Total</th>
+          <th>Pagado</th>
+          <th>Pendiente</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="ord-pagos-tbody"></tbody>
+    </table>
+    <div id="ord-pagos-empty" class="ord-empty" style="display:none">No hay pagos pendientes.</div>
+  </div>
+</div>

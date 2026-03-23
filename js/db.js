@@ -389,7 +389,7 @@
         usuario_id TEXT REFERENCES usuarios(id),
         fecha_creacion TEXT,
         fecha_entrega TEXT,
-        estado TEXT DEFAULT 'borrador' CHECK(estado IN ('borrador','enviada','recibida_parcial','cerrada')),
+        estado TEXT DEFAULT 'borrador' CHECK(estado IN ('borrador','enviada','recibiendo','recibida_parcial','cerrada','pendiente_pago')),
         notas TEXT,
         sync_status TEXT DEFAULT 'pending',
         updated_at TEXT
@@ -499,6 +499,53 @@
       `);
     } catch(e) { console.warn('ingresos_caja:', e.message); }
 
+    // Migrate ordenes_compra: expand estado constraint (add 'recibiendo','pendiente_pago')
+    try {
+      const schemaStmt = database.prepare(
+        `SELECT sql FROM sqlite_master WHERE type='table' AND name='ordenes_compra'`
+      );
+      let schemaRow = null;
+      if (schemaStmt.step()) schemaRow = schemaStmt.getAsObject();
+      schemaStmt.free();
+      if (schemaRow && schemaRow.sql && !schemaRow.sql.includes('recibiendo')) {
+        database.run(`ALTER TABLE ordenes_compra RENAME TO ordenes_compra_bak`);
+        database.run(`CREATE TABLE ordenes_compra (
+          id TEXT PRIMARY KEY,
+          sucursal_id TEXT REFERENCES sucursales(id),
+          proveedor_id TEXT REFERENCES proveedores(id),
+          usuario_id TEXT REFERENCES usuarios(id),
+          fecha_creacion TEXT,
+          fecha_entrega TEXT,
+          estado TEXT DEFAULT 'borrador' CHECK(estado IN ('borrador','enviada','recibiendo','recibida_parcial','cerrada','pendiente_pago')),
+          notas TEXT,
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
+        )`);
+        database.run(`INSERT INTO ordenes_compra
+          SELECT id,sucursal_id,proveedor_id,usuario_id,fecha_creacion,fecha_entrega,estado,notas,sync_status,updated_at
+          FROM ordenes_compra_bak`);
+        database.run(`DROP TABLE ordenes_compra_bak`);
+      }
+    } catch(e) { console.warn('ordenes_compra migration:', e.message); }
+
+    // cuenta_proveedor — accounts payable ledger per supplier
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS cuenta_proveedor (
+          id TEXT PRIMARY KEY,
+          proveedor_id TEXT REFERENCES proveedores(id),
+          orden_id TEXT REFERENCES ordenes_compra(id),
+          tipo TEXT CHECK(tipo IN ('deuda','pago','ajuste')),
+          monto REAL,
+          descripcion TEXT,
+          fecha TEXT,
+          usuario_id TEXT,
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
+        )
+      `);
+    } catch(e) { console.warn('cuenta_proveedor:', e.message); }
+
     // Add new columns to existing databases (safe: fails silently if column exists)
     const columnAlterations = [
       'ALTER TABLE productos ADD COLUMN stock_alerta REAL DEFAULT 0',
@@ -511,6 +558,8 @@
       'ALTER TABLE egresos_caja ADD COLUMN tipo TEXT',
       "ALTER TABLE egresos_caja ADD COLUMN sync_status TEXT DEFAULT 'pending'",
       'ALTER TABLE egresos_caja ADD COLUMN updated_at TEXT',
+      'ALTER TABLE orden_compra_items ADD COLUMN costo_unitario REAL DEFAULT 0',
+      'ALTER TABLE orden_compra_items ADD COLUMN costo_anterior REAL DEFAULT 0',
     ];
     for (const sql of columnAlterations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }
