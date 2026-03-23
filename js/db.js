@@ -483,6 +483,22 @@
       `);
     } catch(e) { console.warn('stock_ajustes:', e.message); }
 
+    // ingresos_caja — extra cash received during a session
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS ingresos_caja (
+          id TEXT PRIMARY KEY,
+          sesion_caja_id TEXT REFERENCES sesiones_caja(id),
+          monto REAL NOT NULL,
+          descripcion TEXT,
+          fecha TEXT,
+          usuario_id TEXT REFERENCES usuarios(id),
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
+        )
+      `);
+    } catch(e) { console.warn('ingresos_caja:', e.message); }
+
     // Add new columns to existing databases (safe: fails silently if column exists)
     const columnAlterations = [
       'ALTER TABLE productos ADD COLUMN stock_alerta REAL DEFAULT 0',
@@ -491,6 +507,10 @@
       'ALTER TABLE productos ADD COLUMN hereda_costo INTEGER DEFAULT 1',
       'ALTER TABLE productos ADD COLUMN hereda_precio INTEGER DEFAULT 1',
       'ALTER TABLE productos ADD COLUMN imagen TEXT',
+      'ALTER TABLE sesiones_caja ADD COLUMN cierre_automatico INTEGER DEFAULT 0',
+      'ALTER TABLE egresos_caja ADD COLUMN tipo TEXT',
+      "ALTER TABLE egresos_caja ADD COLUMN sync_status TEXT DEFAULT 'pending'",
+      'ALTER TABLE egresos_caja ADD COLUMN updated_at TEXT',
     ];
     for (const sql of columnAlterations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }

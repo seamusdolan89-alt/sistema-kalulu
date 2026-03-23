@@ -1,15 +1,317 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SGA - Caja</title>
-</head>
-<body>
-  <!-- Caja Module -->
-  <main>
-    <h2>💰 Caja</h2>
-    <p>Módulo de caja en construcción...</p>
-  </main>
-</body>
-</html>
+<style>
+  /* ── CAJA MODULE ──────────────────────────────────────────────────────────── */
+  .caja-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-background);
+  }
+  .caja-toolbar h2 {
+    margin: 0;
+    font-size: 1.35rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .caja-toolbar-right { display: flex; gap: 8px; }
+  .caja-apertura-info { color: var(--color-text-secondary); font-size: 13px; display: block; margin-top: 2px; }
+
+  .badge-abierta {
+    display: inline-block;
+    background: #2E7D32;
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 12px;
+    vertical-align: middle;
+  }
+
+  /* ── APERTURA ─────────────────────────────────────────────────────────────── */
+  .caja-apertura-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 60vh;
+    padding: 24px;
+  }
+  .caja-apertura-card {
+    background: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: 48px 40px;
+    text-align: center;
+    max-width: 400px;
+    width: 100%;
+    box-shadow: var(--shadow-md);
+  }
+  .caja-apertura-icon { font-size: 3rem; margin-bottom: 12px; }
+  .caja-apertura-card h3 { margin: 0 0 8px; font-size: 1.2rem; }
+  .caja-apertura-card p { color: var(--color-text-secondary); font-size: 14px; margin-bottom: 24px; }
+  .caja-apertura-field { text-align: left; margin-bottom: 24px; }
+  .caja-apertura-field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  .caja-input-prefix {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  .caja-input-prefix span {
+    padding: 8px 10px;
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    font-size: 14px;
+    border-right: 1px solid var(--color-border);
+  }
+  .caja-input-prefix input {
+    flex: 1;
+    border: none;
+    padding: 8px 10px;
+    font-size: 15px;
+    outline: none;
+  }
+  .btn-lg { padding: 12px 28px; font-size: 1rem; width: 100%; justify-content: center; }
+
+  /* ── TABS ─────────────────────────────────────────────────────────────────── */
+  .caja-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid var(--color-border);
+    background: var(--color-background);
+    padding: 0 20px;
+  }
+  .caja-tab {
+    padding: 12px 20px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .caja-tab:hover { color: var(--color-text); }
+  .caja-tab.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+  .caja-tab-content { padding: 20px; }
+
+  /* ── RESUMEN ──────────────────────────────────────────────────────────────── */
+  .caja-resumen-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .caja-stat-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+  }
+  .caja-stat-card.highlight {
+    background: var(--color-primary-light);
+    border-color: var(--color-primary);
+  }
+  .caja-stat-label { font-size: 12px; color: var(--color-text-secondary); font-weight: 500; text-transform: uppercase; letter-spacing: .03em; margin-bottom: 4px; }
+  .caja-stat-value { font-size: 1.5rem; font-weight: 700; color: var(--color-text); }
+  .caja-stat-sub { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; }
+  .caja-medios-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+  }
+  .caja-medios-card h4 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--color-text-secondary); }
+
+  /* ── STAT ROWS ──────────────────────────────────────────────────────────────*/
+  .caja-stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--color-border);
+    font-size: 14px;
+  }
+  .caja-stat-row:last-child { border-bottom: none; }
+  .caja-stat-row.total-row { font-weight: 700; font-size: 15px; }
+  .caja-stat-row.highlight-row {
+    font-weight: 700;
+    font-size: 15px;
+    background: var(--color-primary-light);
+    padding: 8px;
+    border-radius: var(--radius-sm);
+    margin-top: 4px;
+    border: none;
+  }
+
+  /* ── TABLES ──────────────────────────────────────────────────────────────── */
+  .caja-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .caja-table th {
+    text-align: left;
+    padding: 8px 12px;
+    background: var(--color-surface);
+    border-bottom: 2px solid var(--color-border);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    color: var(--color-text-secondary);
+  }
+  .caja-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--color-border);
+    color: var(--color-text);
+  }
+  .caja-table tbody tr:hover { background: var(--color-surface); }
+  .caja-empty { color: var(--color-text-secondary); font-size: 14px; padding: 32px 0; text-align: center; }
+  .caja-link-venta { color: var(--color-primary); text-decoration: none; font-family: monospace; }
+  .caja-link-venta:hover { text-decoration: underline; }
+
+  /* ── BADGE ESTADO ─────────────────────────────────────────────────────────── */
+  .badge-estado {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge-estado.completada { background: #e8f5e9; color: #2E7D32; }
+  .badge-estado.anulada { background: #ffebee; color: #C62828; }
+  .badge-estado.pendiente { background: #fff8e1; color: #E65100; }
+
+  /* ── EGRESOS / INGRESOS ──────────────────────────────────────────────────── */
+  .caja-ei-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .caja-ei-header h3 { margin: 0; font-size: 15px; }
+  .btn-sm { padding: 6px 14px; font-size: 13px; }
+  .btn-success { background: #2E7D32; color: white; }
+  .btn-success:hover { background: #1B5E20; }
+
+  /* ── TEXT COLORS ─────────────────────────────────────────────────────────── */
+  .text-danger { color: var(--color-danger); }
+  .text-success { color: var(--color-success); }
+
+  /* ── HISTORIAL ───────────────────────────────────────────────────────────── */
+  .btn-xs { padding: 3px 10px; font-size: 12px; }
+
+  /* ── MODAL OVERLAY ───────────────────────────────────────────────────────── */
+  .caja-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.5);
+    z-index: var(--z-modal);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .caja-modal-overlay.hidden { display: none; }
+  .caja-modal {
+    background: white;
+    border-radius: var(--radius-lg);
+    padding: 28px;
+    width: 100%;
+    max-width: 520px;
+    max-height: 90vh;
+    overflow-y: auto;
+    position: relative;
+    box-shadow: var(--shadow-lg);
+  }
+  .caja-modal h3 { margin: 0 0 20px; font-size: 1.1rem; }
+  .caja-modal-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    color: var(--color-text-secondary);
+    padding: 4px 8px;
+    line-height: 1;
+  }
+  .caja-modal-close:hover { color: var(--color-text); }
+  .caja-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--color-border);
+  }
+
+  /* ── FORM INSIDE MODAL ───────────────────────────────────────────────────── */
+  .caja-form { display: flex; flex-direction: column; gap: 12px; }
+  .caja-form label { font-size: 13px; font-weight: 600; color: var(--color-text); }
+  .caja-form input,
+  .caja-form select,
+  .caja-form textarea {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 8px 10px;
+    font-size: 14px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .caja-form input:focus,
+  .caja-form select:focus,
+  .caja-form textarea:focus { outline: 2px solid var(--color-primary); border-color: transparent; }
+  .caja-form textarea { resize: vertical; }
+
+  /* ── CIERRE STEPS NAV ────────────────────────────────────────────────────── */
+  .cierre-steps-nav {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 20px;
+    font-size: 12px;
+  }
+  .cierre-step-indicator {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--color-text-secondary);
+    font-weight: 500;
+  }
+  .cierre-step-indicator span {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--color-surface);
+    border: 2px solid var(--color-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .cierre-step-indicator.active { color: var(--color-primary); }
+  .cierre-step-indicator.active span { background: var(--color-primary); border-color: var(--color-primary); color: white; }
+  .cierre-step-indicator.done span { background: var(--color-success); border-color: var(--color-success); color: white; }
+  .cierre-step-sep { color: var(--color-border); font-size: 16px; }
+
+  /* ── CIERRE BODY ─────────────────────────────────────────────────────────── */
+  .cierre-resumen { background: var(--color-surface); border-radius: var(--radius-md); padding: 12px; }
+  .cierre-billetes-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .cierre-billetes-table th { padding: 6px 8px; text-align: left; font-size: 12px; color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border); }
+  .cierre-billetes-table td { padding: 5px 8px; border-bottom: 1px solid var(--color-border); }
+  .cierre-billetes-table tfoot td { font-weight: 700; padding-top: 8px; }
+  .billete-input { width: 80px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 4px 6px; text-align: right; font-size: 13px; }
+  .billete-subtotal { font-size: 13px; text-align: right; }
+  .cierre-confirm-grid { background: var(--color-surface); border-radius: var(--radius-md); padding: 12px; }
+</style>
+
+<div id="caja-root"></div>
+<div id="caja-modal-overlay" class="caja-modal-overlay hidden"></div>
