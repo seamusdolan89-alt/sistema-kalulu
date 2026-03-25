@@ -290,13 +290,6 @@ main#app { overflow: hidden; }
 .vuelto-box { margin-top: 6px; padding: 6px 10px; background: #e8f5e9; border-radius: 6px; font-size: 0.88em; color: #2e7d32; font-weight: 600; }
 .saldo-favor-row { margin-top: 4px; font-size: 0.82em; display: flex; align-items: center; gap: 6px; color: #555; }
 
-.payment-running {
-  padding: 9px 12px; border-radius: 6px; display: flex; justify-content: space-between;
-  font-size: 0.88em; font-weight: 700; background: #f5f5f5; color: #888;
-}
-.payment-running.ok      { background: #e8f5e9; color: #2e7d32; }
-.payment-running.pending { background: #fff3e0; color: #e65100; }
-.payment-running.over    { background: #ffebee; color: #c62828; }
 
 .sale-confirm-wrap { padding: 12px 14px; border-top: 1px solid #f0f0f0; flex-shrink: 0; }
 .btn-confirm {
@@ -426,6 +419,43 @@ main#app { overflow: hidden; }
 .pinput-vuelto { margin-top: 6px; padding: 5px 10px; border-radius: 5px; font-size: 0.85em; font-weight: 600; }
 .pinput-vuelto.ok    { background: #e8f5e9; color: #2e7d32; }
 .pinput-vuelto.falta { background: #fff3e0; color: #e65100; }
+
+/* ── RECOVER BANNER (uncontrolled exit) ── */
+#pos-recover-banner {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #FFF8E1;
+  border: 1px solid #FFB300;
+  border-radius: 8px;
+  padding: 11px 16px;
+  margin: 12px 16px 0;
+  font-size: 0.88em;
+  flex-shrink: 0;
+}
+.recover-banner-left { display: flex; align-items: center; gap: 8px; }
+.recover-banner-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* ── NAV BLOCK MODAL ── */
+.nav-block-cart-summary {
+  background: #f8f9fa; border: 1px solid #e8e8e8;
+  border-radius: 8px; padding: 10px 14px;
+  margin: 10px 0 14px; font-size: 0.95em;
+  font-weight: 600; color: #333; text-align: center;
+}
+.nav-block-options { display: flex; flex-direction: column; gap: 8px; }
+.nav-block-btn {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 11px 14px; border: 1px solid #e0e0e0;
+  border-radius: 8px; background: white; cursor: pointer;
+  font-size: 0.88em; text-align: left; width: 100%;
+  transition: border-color 0.15s, background 0.15s;
+}
+.nav-block-btn:hover { border-color: #667eea; background: #f8f9ff; }
+.nav-block-btn-icon { font-size: 1.2em; flex-shrink: 0; line-height: 1.3; }
+.nav-block-btn-label { font-weight: 600; }
+.nav-block-btn-desc { font-size: 0.82em; color: #777; margin-top: 1px; }
 </style>
 
 <!-- ═══════════════════════════════════════════════════ -->
@@ -439,13 +469,26 @@ main#app { overflow: hidden; }
       <button class="pos-btn pos-btn-green"  id="btn-nueva-venta">🛒 Nueva Venta · F3</button>
       <button class="pos-btn pos-btn-ghost"  id="btn-pedidos-header">📋 Pedido Abierto · F4</button>
       <button class="pos-btn pos-btn-ghost"  id="btn-devolucion-header">↩ Devolución</button>
-      <button class="pos-btn pos-btn-ghost"  id="btn-limpiar-pendientes">🗑️ Limpiar pendientes</button>
-      <button class="pos-btn pos-btn-danger" id="btn-cerrar-caja">🔒 Cerrar Caja</button>
+<button class="pos-btn pos-btn-danger" id="btn-cerrar-caja">🔒 Cerrar Caja</button>
     </div>
   </div>
 
   <!-- ══ DASHBOARD MODE ══ -->
   <div id="pos-dashboard">
+    <!-- Recover banner: shown on init if sessionStorage had orphaned cart -->
+    <div id="pos-recover-banner">
+      <div class="recover-banner-left">
+        <span>⚠️</span>
+        <div>
+          <strong>Había una venta sin finalizar</strong>
+          <div id="pos-recover-label" style="color:#666;margin-top:2px"></div>
+        </div>
+      </div>
+      <div class="recover-banner-actions">
+        <button class="pos-btn pos-btn-green" id="btn-recover-retomar">Retomar venta</button>
+        <button class="pos-btn pos-btn-danger" id="btn-recover-descartar" style="background:rgba(244,67,54,0.12);color:#c62828;border-color:rgba(244,67,54,0.4)">Descartar</button>
+      </div>
+    </div>
     <div class="dashboard-body">
       <div class="dash-title">
         Ventas del turno
@@ -588,18 +631,12 @@ main#app { overflow: hidden; }
             <div class="sale-sec-title">Medio de pago</div>
             <div class="payment-chips" id="payment-chips"></div>
             <div class="payment-inputs" id="payment-inputs"></div>
-            <div class="payment-running pending" id="payment-running">
-              <span>Cobrado</span>
-              <span id="payment-running-text">$0,00 / $0,00</span>
-            </div>
             <div id="debt-toggle-row" style="display:none; margin-top:8px; font-size:0.85em;">
               <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
                 <input type="checkbox" id="chk-registrar-deuda">
-                Registrar diferencia como deuda del cliente
+                📒 Registrar como deuda del cliente
               </label>
-              <div id="debt-warning" style="display:none; color:#f44336; font-size:0.8em; margin-top:4px;">
-                Seleccioná un cliente para registrar la deuda
-              </div>
+              <div id="debt-warning" style="display:none; color:#f44336; font-size:0.8em; margin-top:4px;"></div>
             </div>
           </div>
 
@@ -790,6 +827,42 @@ main#app { overflow: hidden; }
     <div class="pmodal-ftr">
       <button class="mbtn mbtn-secondary" id="btn-crapido-cancel">Cancelar</button>
       <button class="mbtn mbtn-primary"   id="btn-crapido-confirm">Guardar y seleccionar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Nav Block Modal: controlled navigation away with active cart -->
+<div id="modal-nav-block" class="pbackdrop hidden">
+  <div class="pmodal narrow">
+    <div class="pmodal-hdr">
+      <span class="pmodal-title">⚠️ Tenés una venta en curso</span>
+    </div>
+    <div class="pmodal-body">
+      <div class="nav-block-cart-summary" id="nav-block-summary">—</div>
+      <p style="margin:0 0 12px;font-size:0.85em;color:#666">¿Qué querés hacer con la venta actual?</p>
+      <div class="nav-block-options">
+        <button class="nav-block-btn" id="btn-nav-pausar">
+          <span class="nav-block-btn-icon">⏸</span>
+          <div>
+            <div class="nav-block-btn-label">Pausar venta</div>
+            <div class="nav-block-btn-desc">Guarda el carrito en Pedidos abiertos para retomarlo luego</div>
+          </div>
+        </button>
+        <button class="nav-block-btn" id="btn-nav-descartar">
+          <span class="nav-block-btn-icon">🗑️</span>
+          <div>
+            <div class="nav-block-btn-label">Descartar</div>
+            <div class="nav-block-btn-desc">Cancela la venta y pierde los artículos seleccionados</div>
+          </div>
+        </button>
+        <button class="nav-block-btn" id="btn-nav-seguir">
+          <span class="nav-block-btn-icon">✏️</span>
+          <div>
+            <div class="nav-block-btn-label">Seguir editando</div>
+            <div class="nav-block-btn-desc">Vuelve a la venta actual sin cambios</div>
+          </div>
+        </button>
+      </div>
     </div>
   </div>
 </div>

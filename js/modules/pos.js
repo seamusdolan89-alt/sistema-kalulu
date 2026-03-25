@@ -517,6 +517,15 @@ export const POS = (() => {
   function init(params = []) {
     console.log('💳 POS module initialized');
 
+    // Restore ventas incorrectly marked as 'anulada' that still have venta_items
+    try {
+      window.SGA_DB.run(
+        `UPDATE ventas SET estado = 'completada', sync_status = 'pending'
+         WHERE estado = 'anulada'
+           AND id IN (SELECT DISTINCT venta_id FROM venta_items)`
+      );
+    } catch(e) { console.warn('restore_anuladas:', e); }
+
     // ── STATE ──────────────────────────────────────────────────────
     const state = {
       mode: 'dashboard',       // 'dashboard' | 'sale'
@@ -600,6 +609,8 @@ export const POS = (() => {
       const saved = sessionStorage.getItem('pos_cart');
       if (saved) state.cart = JSON.parse(saved);
     } catch(e) { /* ignore */ }
+    // Flag orphaned cart (uncontrolled exit): cart has items but we're in dashboard
+    const _hasOrphanCart = state.cart.length > 0;
 
     // ── PRODUCT SEARCH ─────────────────────────────────────────────
     const searchProductos = (q) => {
@@ -770,22 +781,83 @@ export const POS = (() => {
     const renderVuelto = () => {
       const effTotal = getEffectiveTotal();
       const recibe = state.recibeEfectivo;
-      const vuelto = recibe > 0 ? Math.max(0, recibe - effTotal) : 0;
-      const falta  = recibe > 0 ? Math.max(0, effTotal - recibe) : 0;
       const el = ge('efectivo-vuelto');
+      const debtRow = ge('debt-toggle-row');
       if (!el) return;
-      if (vuelto > 0) {
-        el.className = 'pinput-vuelto ok';
-        el.innerHTML = `💵 Vuelto: ${formatCurrency(vuelto)}` +
-          (state.clienteId ? `<div class="saldo-favor-row" style="margin-top:4px"><label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="chk-saldo-favor"> Dejar ${formatCurrency(vuelto)} como saldo a favor</label></div>` : '');
-        el.style.display = 'block';
-      } else if (falta > 0) {
-        el.className = 'pinput-vuelto falta';
-        el.textContent = `⚠ Falta: ${formatCurrency(falta)}`;
-        el.style.display = 'block';
-      } else {
+
+      if (recibe <= 0) {
+        // No amount entered yet — hide everything
         el.style.display = 'none';
+        if (debtRow) debtRow.style.display = 'none';
+        updateConfirmBtn();
+        return;
       }
+
+      const vuelto = Math.max(0, recibe - effTotal);
+      const falta  = Math.max(0, effTotal - recibe);
+
+      if (falta > 0) {
+        // ── SCENARIO A: deficit ──────────────────────────────────────
+        if (debtRow) debtRow.style.display = 'block';
+        el.className = 'pinput-vuelto falta';
+        el.innerHTML = `<span style="color:#C62828;font-weight:600">Falta: ${formatCurrency(falta)}</span>`;
+        el.style.display = 'block';
+        renderDebtToggle();
+
+      } else if (vuelto > 0) {
+        // ── SCENARIO C: surplus ──────────────────────────────────────
+        if (debtRow) debtRow.style.display = 'none';
+        el.className = 'pinput-vuelto ok';
+
+        let html = `<div style="color:#2E7D32;font-weight:600">💵 Vuelto: ${formatCurrency(vuelto)}</div>`;
+
+        if (!state.clienteId) {
+          html += `<div style="font-size:12px;color:#666;margin-top:4px">Recordá entregar el cambio al cliente</div>
+                   <div id="saldo-favor-warn" style="display:none;color:#E65100;font-size:12px;margin-top:4px">⚠️ Seleccioná un cliente para registrar el saldo a favor</div>`;
+        } else {
+          // Smart breakdown based on client debt
+          const saldo = state.clienteSaldo; // positive = owes store, negative = store owes client
+          let breakdownHtml = '';
+          if (saldo > 0) {
+            if (vuelto >= saldo) {
+              const sobrante = vuelto - saldo;
+              breakdownHtml = `Cancela deuda ${formatCurrency(saldo)}` +
+                (sobrante > 0 ? ` + Saldo a favor: ${formatCurrency(sobrante)}` : '');
+            } else {
+              breakdownHtml = `Cancela deuda parcial: ${formatCurrency(vuelto)} (resta debe: ${formatCurrency(saldo - vuelto)})`;
+            }
+          } else {
+            breakdownHtml = `Saldo a favor: ${formatCurrency(vuelto)}`;
+          }
+          html += `<div class="saldo-favor-row" style="margin-top:6px">
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+              <input type="checkbox" id="chk-saldo-favor"> 💚 Dejar ${formatCurrency(vuelto)} como saldo a favor
+            </label>
+            <div id="saldo-favor-breakdown" style="display:none;font-size:12px;color:#2E7D32;margin-top:4px">${breakdownHtml}</div>
+          </div>
+          <div id="saldo-favor-warn" style="display:none;color:#E65100;font-size:12px;margin-top:4px">⚠️ Seleccioná un cliente para registrar el saldo a favor</div>`;
+        }
+
+        el.innerHTML = html;
+        const chk = ge('chk-saldo-favor');
+        if (chk) {
+          chk.addEventListener('change', () => {
+            const bd = ge('saldo-favor-breakdown');
+            if (bd) bd.style.display = chk.checked ? 'block' : 'none';
+            updateConfirmBtn();
+          });
+        }
+        el.style.display = 'block';
+
+      } else {
+        // ── SCENARIO B: exact payment ────────────────────────────────
+        if (debtRow) debtRow.style.display = 'none';
+        el.className = 'pinput-vuelto ok';
+        el.innerHTML = `<span style="color:#2E7D32;font-weight:600">✓ Pago exacto</span>`;
+        el.style.display = 'block';
+      }
+
+      updateConfirmBtn();
     };
 
     const renderPaymentInputs = () => {
@@ -824,7 +896,6 @@ export const POS = (() => {
       container.querySelectorAll('.pinput-field').forEach(inp => {
         inp.addEventListener('input', () => {
           state.pagosAmounts[inp.dataset.medio] = parseFloat(inp.value) || 0;
-          renderPaymentRunning();
           updateConfirmBtn();
         });
       });
@@ -839,20 +910,8 @@ export const POS = (() => {
         renderVuelto();
       }
 
-      renderPaymentRunning();
       updateConfirmBtn();
       renderDebtToggle();
-    };
-
-    const renderPaymentRunning = () => {
-      const asig = getTotalAsignado();
-      const tot  = getEffectiveTotal();
-      const diff = asig - tot;
-      const el   = ge('payment-running');
-      const txt  = ge('payment-running-text');
-      if (!el || !txt) return;
-      txt.textContent = `${formatCurrency(asig)} / ${formatCurrency(tot)}`;
-      el.className = 'payment-running ' + (asig >= tot ? 'ok' : 'pending');
     };
 
     const updateConfirmBtn = () => {
@@ -860,7 +919,33 @@ export const POS = (() => {
       if (!btn) return;
       const asig = getTotalAsignado();
       const tot  = getEffectiveTotal();
-      const canProceed = state.sesionActiva && state.cart.length > 0 && (asig >= tot || state.ccRegistrarDeuda);
+
+      // saldo-favor toggle ON without client
+      const chkFavor = ge('chk-saldo-favor');
+      const favorSinCliente = chkFavor && chkFavor.checked && !state.clienteId;
+      const warnFavor = ge('saldo-favor-warn');
+      if (warnFavor) warnFavor.style.display = favorSinCliente ? 'block' : 'none';
+
+      // registrar-deuda toggle ON without client
+      const deudaSinCliente = state.ccRegistrarDeuda && !state.clienteId;
+      const warnDeuda = ge('debt-warning');
+      if (warnDeuda) {
+        warnDeuda.textContent = '⚠️ Seleccioná un cliente para registrar la deuda';
+        warnDeuda.style.display = deudaSinCliente ? 'block' : 'none';
+      }
+
+      if (favorSinCliente || deudaSinCliente) ge('client-search-input')?.focus();
+
+      // For efectivo: pagosAmounts.efectivo is always pre-filled to effTotal by autoFillPayment(),
+      // so asig >= tot is always true even when cashier typed less in "Recibe $".
+      // We must also check recibeEfectivo explicitly when it's been entered and is short.
+      const recibeShort = state.activeMedios.has('efectivo') &&
+        state.recibeEfectivo > 0 && state.recibeEfectivo < tot - 0.01;
+
+      // Payment is covered if: full amount received AND no efectivo shortfall,
+      // OR deficit explicitly accepted as deuda WITH client selected
+      const paymentCovered = (asig >= tot && !recibeShort) || (state.ccRegistrarDeuda && !!state.clienteId);
+      const canProceed = state.sesionActiva && state.cart.length > 0 && paymentCovered && !favorSinCliente && !deudaSinCliente;
       btn.disabled = !canProceed;
     };
 
@@ -912,6 +997,7 @@ export const POS = (() => {
         deudaRow.style.display = 'none';
       }
       renderDebtToggle();
+      renderVuelto(); // re-render so saldo-favor checkbox appears if recibe already entered
     };
 
     const clearCliente = () => {
@@ -931,14 +1017,14 @@ export const POS = (() => {
     };
 
     // ── CC SECTION ─────────────────────────────────────────────────
+    // Note: debt-toggle-row visibility is controlled by renderVuelto() (only shown in falta/deficit case)
     const renderDebtToggle = () => {
-      const row = ge('debt-toggle-row');
       const chk = ge('chk-registrar-deuda');
       const warn = ge('debt-warning');
-      if (!row || !chk || !warn) return;
-      row.style.display = 'block';
+      if (!chk || !warn) return;
       chk.checked = state.ccRegistrarDeuda;
       if (chk.checked && !state.clienteId) {
+        warn.textContent = '⚠️ Seleccioná un cliente para registrar la deuda';
         warn.style.display = 'block';
       } else {
         warn.style.display = 'none';
@@ -971,6 +1057,7 @@ export const POS = (() => {
     // ── MODE SWITCHING ─────────────────────────────────────────────
     const enterDashboard = () => {
       state.mode = 'dashboard';
+      window.SGA_POS_ACTIVE_SALE = false;
       const dash = ge('pos-dashboard');
       const sale = ge('pos-sale');
       if (dash) dash.style.display = 'flex';
@@ -1004,26 +1091,30 @@ export const POS = (() => {
       showToast('Venta registrada ✓');
     };
 
-    const enterSaleMode = () => {
+    const enterSaleMode = (retomar = false) => {
       if (!state.sesionActiva) { showModalApertura(); return; }
-      // Check if there's an active cart in sessionStorage with items
-      let hasActiveCart = false;
-      try {
-        const saved = sessionStorage.getItem('pos_cart');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            hasActiveCart = true;
+      if (!retomar) {
+        // Only warn about abandoning if we are already actively in a sale
+        if (window.SGA_POS_ACTIVE_SALE) {
+          let hasActiveCart = false;
+          try {
+            const saved = sessionStorage.getItem('pos_cart');
+            if (saved) {
+              const parsed = JSON.parse(saved);
+              if (Array.isArray(parsed) && parsed.length > 0) hasActiveCart = true;
+            }
+          } catch(e) {}
+          if (hasActiveCart) {
+            if (!confirm('¿Abandonar la venta actual?')) return;
           }
         }
-      } catch(e) {}
-      if (hasActiveCart) {
-        if (!confirm('¿Abandonar la venta actual?')) return;
+        // Start with empty cart
+        state.cart = [];
+        saveCart();
       }
-      // Always start with empty cart
-      state.cart = [];
-      saveCart();
       state.mode = 'sale';
+      window.SGA_POS_ACTIVE_SALE = true;
+      if (retomar) saveCart(); // persist recovered cart to sessionStorage for nav guard
       const dash = ge('pos-dashboard');
       const sale = ge('pos-sale');
       if (dash) dash.style.display = 'none';
@@ -1223,9 +1314,9 @@ export const POS = (() => {
           window.SGA_DB.run('UPDATE ventas SET estado = ? WHERE id = ?', ['editando', venta.id]);
           // Set editing mode
           state.editingVentaId = venta.id;
-          // Enter sale mode
+          // Enter sale mode — retomar=true: cart already loaded, skip abandon check
           closeDetailPanel();
-          enterSaleMode();
+          enterSaleMode(true);
         });
       }
 
@@ -1392,10 +1483,9 @@ export const POS = (() => {
             const pedido = retomarPedido(btn.dataset.id);
             if (!pedido) return;
             state.cart = pedido.items;
-            saveCart();
             eliminarPedidoAbierto(btn.dataset.id);
             hideModal('modal-pedidos');
-            enterSaleMode();
+            enterSaleMode(true); // retomar=true: cart already loaded, skip abandon check
           });
         });
         grid.querySelectorAll('.pedido-btn.eliminar').forEach(btn => {
@@ -1444,29 +1534,110 @@ export const POS = (() => {
       });
     });
 
+    // ── NAVIGATION GUARD ───────────────────────────────────────────
+    // CASE 1: Controlled navigation away while in sale mode with items
+
+    // targetHash: hash to navigate to after pause/discard (sidebar nav)
+    // onConfirm: optional callback used instead of hash navigation (← Volver / ESC)
+    const showNavBlockModal = (targetHash, onConfirm) => {
+      const modal = ge('modal-nav-block');
+      if (!modal) return;
+      const n = state.cart.length;
+      const total = getCartTotal();
+      const sumEl = ge('nav-block-summary');
+      if (sumEl) sumEl.textContent = `${n} artículo${n !== 1 ? 's' : ''} — ${formatCurrency(total)}`;
+      modal.classList.remove('hidden');
+
+      const doNavigate = onConfirm || (() => {
+        enterDashboard();
+        window.location.hash = targetHash;
+      });
+
+      ge('btn-nav-pausar').onclick = () => {
+        const result = pausarVenta({
+          items: state.cart,
+          sucursalId: state.currentSucursal.id,
+          usuarioId: state.currentUser.id,
+          cliente: state.clienteId ? { id: state.clienteId } : null,
+          totales: { total: getCartTotal() },
+          nombre: '',
+        });
+        if (result.success) {
+          state.cart = [];
+          saveCart();
+          clearCliente();
+          modal.classList.add('hidden');
+          showToast('Venta pausada — retomala desde Pedidos');
+          doNavigate();
+        } else {
+          alert('Error al pausar: ' + result.error);
+        }
+      };
+
+      ge('btn-nav-descartar').onclick = () => {
+        if (!confirm('¿Seguro que querés descartar la venta en curso?')) return;
+        state.cart = [];
+        saveCart();
+        clearCliente();
+        modal.classList.add('hidden');
+        doNavigate();
+      };
+
+      ge('btn-nav-seguir').onclick = () => {
+        modal.classList.add('hidden');
+      };
+    };
+
+    // CASE 2: Uncontrolled exit recovery — show banner if orphaned cart found on init
+
+    const showRecoverBanner = () => {
+      const banner = ge('pos-recover-banner');
+      if (!banner || !state.cart.length) return;
+      const n = state.cart.length;
+      const total = getCartTotal();
+      const lbl = ge('pos-recover-label');
+      if (lbl) lbl.textContent = `${n} artículo${n !== 1 ? 's' : ''} — ${formatCurrency(total)} total`;
+      banner.style.display = 'flex';
+
+      ge('btn-recover-retomar').onclick = () => {
+        banner.style.display = 'none';
+        enterSaleMode(true); // retomar=true: keep existing cart, skip abandon check
+      };
+
+      ge('btn-recover-descartar').onclick = () => {
+        if (!confirm('¿Seguro que querés descartar la venta sin finalizar?')) return;
+        state.cart = [];
+        saveCart();
+        banner.style.display = 'none';
+      };
+    };
+
     // ── EVENT LISTENERS ────────────────────────────────────────────
+
+    // Register navigation-blocked listener (replace previous instance if re-init)
+    if (window._posNavBlockedHandler) {
+      window.removeEventListener('navigation-blocked', window._posNavBlockedHandler);
+    }
+    window._posNavBlockedHandler = (e) => showNavBlockModal(e.detail.targetHash);
+    window.addEventListener('navigation-blocked', window._posNavBlockedHandler);
 
     // Header buttons
     ge('btn-nueva-venta')?.addEventListener('click', enterSaleMode);
     ge('btn-pedidos-header')?.addEventListener('click', showModalPedidos);
     ge('btn-devolucion-header')?.addEventListener('click', showModalDevolucion);
-    ge('btn-limpiar-pendientes')?.addEventListener('click', () => {
-      if (!confirm('¿Eliminar todas las ventas pendientes?')) return;
-      sessionStorage.clear();
-      window.SGA_DB.run('DELETE FROM pedidos_abiertos');
-      showToast('Pendientes eliminados');
-      loadDashboard();
-    });
     ge('btn-cerrar-caja')?.addEventListener('click', showModalCierre);
     // Sale mode: back button
     ge('btn-volver-dashboard')?.addEventListener('click', () => {
       if (state.editingVentaId) {
         if (!confirm('¿Cancelar edición? La venta volverá a su estado original.')) return;
-        // Revert status
         window.SGA_DB.run('UPDATE ventas SET estado = ? WHERE id = ?', ['completada', state.editingVentaId]);
         state.editingVentaId = null;
-      } else if (state.cart.length > 0) {
-        if (!confirm('¿Volver al dashboard? El carrito se mantendrá.')) return;
+        enterDashboard();
+        return;
+      }
+      if (state.cart.length > 0) {
+        showNavBlockModal(null, () => enterDashboard());
+        return;
       }
       enterDashboard();
     });
@@ -1656,6 +1827,8 @@ export const POS = (() => {
       });
     }
 
+    ge('btn-clear-client')?.addEventListener('click', clearCliente);
+
     ge('chk-registrar-deuda')?.addEventListener('change', e => {
       state.ccRegistrarDeuda = e.target.checked;
       renderDebtToggle();
@@ -1682,9 +1855,27 @@ export const POS = (() => {
     // Confirm venta
     ge('btn-confirm-venta')?.addEventListener('click', () => {
       if (!state.sesionActiva || !state.cart.length) return;
+      // Safety: toggles that require a client
+      if (ge('chk-saldo-favor')?.checked && !state.clienteId) {
+        alert('Seleccioná un cliente para poder dejar el vuelto como saldo a favor.');
+        ge('client-search-input')?.focus();
+        return;
+      }
+      if (state.ccRegistrarDeuda && !state.clienteId) {
+        alert('Seleccioná un cliente para registrar la diferencia como deuda.');
+        ge('client-search-input')?.focus();
+        return;
+      }
       const asig = getTotalAsignado();
       const effTotal = getEffectiveTotal();
-      if (Math.abs(asig - effTotal) > 0.01) { alert('El monto asignado no coincide con el total'); return; }
+      // Final safety: catch efectivo shortfall regardless of how confirm was triggered (click, F10, etc.)
+      const recibeShortFinal = state.activeMedios.has('efectivo') &&
+        state.recibeEfectivo > 0 && state.recibeEfectivo < effTotal - 0.01;
+      if ((asig < effTotal - 0.01 || recibeShortFinal) && !state.ccRegistrarDeuda) {
+        alert('Pago insuficiente. El monto recibido no cubre el total.');
+        return;
+      }
+      if (Math.abs(asig - effTotal) > 0.01 && !state.ccRegistrarDeuda) { alert('El monto asignado no coincide con el total'); return; }
 
       const pagos = [...state.activeMedios]
         .filter(m => (state.pagosAmounts[m] || 0) > 0)
@@ -1733,12 +1924,26 @@ export const POS = (() => {
             ccInsert('venta_fiada', faltante, 'Diferencia registrada como deuda');
           }
         }
-        // FIX 5: vuelto como saldo a favor
+        // Vuelto como saldo a favor (with smart debt cancellation)
         if (ge('chk-saldo-favor')?.checked) {
           const recibe = state.recibeEfectivo || 0;
           const vuelto = Math.max(0, recibe - getEffectiveTotal());
           if (vuelto > 0) {
-            ccInsert('saldo_favor', -vuelto, 'Vuelto dejado como saldo a favor');
+            const saldo = state.clienteSaldo; // positive = client owes store
+            if (saldo > 0) {
+              if (vuelto >= saldo) {
+                // Cancel full debt + register remaining as saldo_favor
+                ccInsert('pago', -saldo, 'Cancelación de deuda con vuelto');
+                const sobrante = vuelto - saldo;
+                if (sobrante > 0) ccInsert('saldo_favor', -sobrante, 'Saldo a favor del vuelto');
+              } else {
+                // Partial debt cancellation
+                ccInsert('pago', -vuelto, 'Cancelación parcial de deuda con vuelto');
+              }
+            } else {
+              // No debt — register full vuelto as saldo_favor
+              ccInsert('saldo_favor', -vuelto, 'Vuelto dejado como saldo a favor');
+            }
           }
         }
       }
@@ -1845,13 +2050,14 @@ export const POS = (() => {
         if (state.mode === 'sale') {
           if (state.editingVentaId) {
             if (!confirm('¿Cancelar edición? La venta volverá a su estado original.')) return;
-            // Revert status
             window.SGA_DB.run('UPDATE ventas SET estado = ? WHERE id = ?', ['completada', state.editingVentaId]);
             state.editingVentaId = null;
+            enterDashboard();
           } else if (state.cart.length > 0) {
-            if (!confirm('¿Volver al dashboard? El carrito se mantendrá.')) return;
+            showNavBlockModal(null, () => enterDashboard());
+          } else {
+            enterDashboard();
           }
-          enterDashboard();
         }
       }
       // Barcode scanner fallback in sale mode: redirect keystrokes to search input
@@ -1868,6 +2074,7 @@ export const POS = (() => {
     // ── INITIAL LOAD ───────────────────────────────────────────────
     checkSesion();
     enterDashboard();
+    if (_hasOrphanCart) showRecoverBanner();
     if (!state.sesionActiva) showModalApertura();
   }
 
