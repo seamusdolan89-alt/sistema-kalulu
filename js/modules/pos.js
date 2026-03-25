@@ -99,7 +99,6 @@ export const POS = (() => {
         items,
         pagos,
         descuentoGlobal = 0,
-        aplicarSaldoFavor = false
       } = ventaData;
 
       const now = window.SGA_Utils.formatISODate(new Date());
@@ -230,12 +229,14 @@ export const POS = (() => {
         ]);
 
         // Track totals by payment method
+        // saldo_favor is informational only — never counted in physical cash totals
         switch (pago.medio) {
           case 'efectivo': efectivoTotal += pago.monto; break;
           case 'mercadopago': mercadopagoTotal += pago.monto; break;
           case 'tarjeta': tarjetaTotal += pago.monto; break;
           case 'transferencia': transferenciaTotal += pago.monto; break;
           case 'cuenta_corriente': cuentacorrienteTotal += pago.monto; break;
+          case 'saldo_favor': /* not counted in caja totals */ break;
         }
 
         // If cuenta_corriente payment, register credit movement
@@ -517,14 +518,15 @@ export const POS = (() => {
   function init(params = []) {
     console.log('💳 POS module initialized');
 
-    // Restore ventas incorrectly marked as 'anulada' that still have venta_items
+    // Restore ventas incorrectly marked as 'anulada' or 'editando' that still have venta_items
+    // 'editando' is a transient state that should never be persisted across sessions
     try {
       window.SGA_DB.run(
         `UPDATE ventas SET estado = 'completada', sync_status = 'pending'
-         WHERE estado = 'anulada'
+         WHERE estado IN ('anulada', 'editando')
            AND id IN (SELECT DISTINCT venta_id FROM venta_items)`
       );
-    } catch(e) { console.warn('restore_anuladas:', e); }
+    } catch(e) { console.warn('restore_ventas:', e); }
 
     // ── STATE ──────────────────────────────────────────────────────
     const state = {
@@ -775,6 +777,7 @@ export const POS = (() => {
     const autoFillPayment = () => {
       const mid = [...state.activeMedios][0];
       if (mid) state.pagosAmounts[mid] = getEffectiveTotal();
+      renderFavorSection();
       renderPaymentInputs();
     };
 
@@ -786,6 +789,18 @@ export const POS = (() => {
       if (!el) return;
 
       if (recibe <= 0) {
+        // Special case: saldo a favor fully covers this sale
+        if (state.ccAplicarFavor && state.clienteSaldo < -0.01 && effTotal < 0.01) {
+          const applied = Math.min(Math.abs(state.clienteSaldo), getCartTotal());
+          const restante = Math.abs(state.clienteSaldo) - applied;
+          el.style.display = 'block';
+          el.className = 'pinput-vuelto ok';
+          el.innerHTML = `<div style="color:#2E7D32;font-weight:600">✓ Cubierto por saldo a favor (${formatCurrency(applied)})</div>` +
+            (restante > 0.01 ? `<div style="font-size:0.78em;color:#2E7D32;margin-top:2px">Crédito restante: ${formatCurrency(restante)}</div>` : '');
+          if (debtRow) debtRow.style.display = 'none';
+          updateConfirmBtn();
+          return;
+        }
         // No amount entered yet — hide everything
         el.style.display = 'none';
         if (debtRow) debtRow.style.display = 'none';
@@ -865,18 +880,24 @@ export const POS = (() => {
       if (!container) return;
 
       const effTotal = getEffectiveTotal();
+      const isFavorCovered = state.ccAplicarFavor && state.clienteSaldo < -0.01 && effTotal < 0.01;
       let html = '';
       for (const mid of state.activeMedios) {
         const m = MEDIOS.find(x => x.id === mid);
         if (!m) continue;
         if (mid === 'efectivo') {
+          if (isFavorCovered) state.recibeEfectivo = 0; // reset to 0 when fully covered
           html += `<div class="pinput-row" data-medio="efectivo">
             <div class="pinput-label">${m.icon} ${m.nombre}</div>
             <div class="pinput-sub-lbl">Total a cobrar</div>
             <div class="pinput-total-ro">${formatCurrency(effTotal)}</div>
             <div class="recibe-row" style="margin-top:8px">
               <span>Recibe $</span>
-              <input type="number" class="recibe-field" id="recibe-efectivo" value="${state.recibeEfectivo > 0 ? state.recibeEfectivo.toFixed(2) : ''}" min="0" step="0.01" placeholder="${effTotal.toFixed(2)}" autocomplete="off">
+              <input type="number" class="recibe-field" id="recibe-efectivo"
+                value="${state.recibeEfectivo > 0 && !isFavorCovered ? state.recibeEfectivo.toFixed(2) : ''}"
+                min="0" step="0.01" placeholder="${isFavorCovered ? '0,00' : effTotal.toFixed(2)}"
+                ${isFavorCovered ? 'readonly style="background:#f5f5f5;color:#aaa"' : ''}
+                autocomplete="off">
             </div>
             <div id="efectivo-vuelto" class="pinput-vuelto" style="display:none"></div>
           </div>`;
@@ -942,19 +963,35 @@ export const POS = (() => {
       const recibeShort = state.activeMedios.has('efectivo') &&
         state.recibeEfectivo > 0 && state.recibeEfectivo < tot - 0.01;
 
+      // Block if efectivo is active, nothing was entered (recibe=0), and nothing else covers:
+      // - saldo a favor is not ON or doesn't cover
+      // - not registering as deuda
+      const saldoFavorCovers = state.ccAplicarFavor && state.clienteSaldo < -0.01 && tot < 0.01;
+      const recibeNotEntered = state.activeMedios.has('efectivo') &&
+        state.recibeEfectivo === 0 && tot > 0.01 &&
+        !saldoFavorCovers && !state.ccRegistrarDeuda;
+
       // Payment is covered if: full amount received AND no efectivo shortfall,
+      // OR saldo a favor covers total,
       // OR deficit explicitly accepted as deuda WITH client selected
-      const paymentCovered = (asig >= tot && !recibeShort) || (state.ccRegistrarDeuda && !!state.clienteId);
+      const paymentCovered = (asig >= tot && !recibeShort && !recibeNotEntered) ||
+        saldoFavorCovers ||
+        (state.ccRegistrarDeuda && !!state.clienteId);
       const canProceed = state.sesionActiva && state.cart.length > 0 && paymentCovered && !favorSinCliente && !deudaSinCliente;
       btn.disabled = !canProceed;
     };
 
     // ── CLIENT SEARCH ──────────────────────────────────────────────
     const searchClientes = (q) => {
+      if (window.SGA_Clientes) return window.SGA_Clientes.search(q);
       const like = `%${q}%`;
       return window.SGA_DB.query(
-        `SELECT id, nombre, apellido, telefono FROM clientes WHERE activo = 1 AND (nombre LIKE ? OR apellido LIKE ? OR telefono LIKE ?) ORDER BY nombre LIMIT 8`,
-        [like, like, like]
+        `SELECT id, nombre, apellido, lote, telefono,
+           COALESCE((SELECT SUM(monto) FROM cuenta_corriente WHERE cliente_id = clientes.id), 0) AS saldo_actual
+         FROM clientes WHERE activo = 1
+           AND (nombre LIKE ? OR apellido LIKE ? OR telefono LIKE ? OR lote LIKE ?)
+         ORDER BY nombre LIMIT 10`,
+        [like, like, like, like]
       );
     };
 
@@ -996,8 +1033,43 @@ export const POS = (() => {
       } else if (deudaRow) {
         deudaRow.style.display = 'none';
       }
+      // Tope check — warn and block debt toggle if tope exceeded
+      const topeWarn = ge('client-tope-warn');
+      const topeWarnText = ge('client-tope-warn-text');
+      const chkDeuda = ge('chk-registrar-deuda');
+      let topeAlcanzado = false;
+      if (window.SGA_Clientes) {
+        const topeDisp = window.SGA_Clientes.getTopeDisponible(c.id);
+        if (topeDisp <= 0) {
+          topeAlcanzado = true;
+          const tope = window.SGA_DB.query(
+            `SELECT tope_deuda FROM clientes WHERE id = ?`, [c.id]
+          );
+          const topeVal = tope.length ? tope[0].tope_deuda : 0;
+          if (topeWarnText) topeWarnText.textContent = `Tope de deuda alcanzado ($${formatCurrency(topeVal).replace(/[^0-9,.]/g,'')})`;
+        }
+      }
+      if (topeWarn) topeWarn.style.display = topeAlcanzado ? 'block' : 'none';
+      if (chkDeuda && topeAlcanzado) {
+        chkDeuda.checked = false;
+        chkDeuda.disabled = true;
+        state.ccRegistrarDeuda = false;
+      } else if (chkDeuda) {
+        chkDeuda.disabled = false;
+      }
+
+      // Saldo a favor: set toggle ON by default if client has credit
+      if (state.clienteSaldo < -0.01) {
+        state.ccAplicarFavor = true;
+        const chkFavor = ge('chk-aplicar-favor');
+        if (chkFavor) chkFavor.checked = true;
+      } else {
+        state.ccAplicarFavor = false;
+      }
+
       renderDebtToggle();
-      renderVuelto(); // re-render so saldo-favor checkbox appears if recibe already entered
+      renderFavorSection();
+      autoFillPayment(); // recalculates effTotal with new ccAplicarFavor
     };
 
     const clearCliente = () => {
@@ -1006,12 +1078,20 @@ export const POS = (() => {
       state.clienteSaldo = 0;
       state.ccCobrarDeuda = false;
       state.ccAplicarFavor = false;
+      state.ccRegistrarDeuda = false;
       const card = ge('client-card');
       if (card) card.style.display = 'none';
       const deudaRow = ge('client-deuda-row');
       if (deudaRow) deudaRow.style.display = 'none';
+      const topeWarn = ge('client-tope-warn');
+      if (topeWarn) topeWarn.style.display = 'none';
+      const favorRow = ge('client-favor-row');
+      if (favorRow) favorRow.style.display = 'none';
+      const chkDeuda = ge('chk-registrar-deuda');
+      if (chkDeuda) { chkDeuda.checked = false; chkDeuda.disabled = false; }
       const inp = ge('client-search-input');
       if (inp) inp.value = '';
+      state.recibeEfectivo = 0;
       renderDebtToggle();
       autoFillPayment();
     };
@@ -1028,6 +1108,41 @@ export const POS = (() => {
         warn.style.display = 'block';
       } else {
         warn.style.display = 'none';
+      }
+    };
+
+    // ── SALDO A FAVOR SECTION ───────────────────────────────────────
+    // Updates the green credit panel shown below the client card
+    const renderFavorSection = () => {
+      const row = ge('client-favor-row');
+      const amtEl = ge('client-favor-amount');
+      const breakdown = ge('client-favor-breakdown');
+      if (!row) return;
+
+      if (!state.clienteId || state.clienteSaldo >= -0.01) {
+        row.style.display = 'none';
+        return;
+      }
+
+      const disponible = Math.abs(state.clienteSaldo); // credit available
+      const cartTot = getCartTotal();
+      const applied = Math.min(disponible, cartTot);
+      const creditoRestante = disponible - applied;
+      const cobrarCash = Math.max(0, cartTot - disponible);
+
+      if (amtEl) amtEl.textContent = formatCurrency(disponible);
+      row.style.display = 'block';
+
+      if (state.ccAplicarFavor && breakdown) {
+        const lines = [
+          `• Usa saldo a favor: <strong>${formatCurrency(applied)}</strong>`,
+          creditoRestante > 0.01 ? `• Saldo restante: ${formatCurrency(creditoRestante)}` : null,
+          `• Total a cobrar en efectivo: <strong>${formatCurrency(cobrarCash)}</strong>`,
+        ].filter(Boolean);
+        breakdown.innerHTML = lines.map(l => `<div>${l}</div>`).join('');
+        breakdown.style.display = 'block';
+      } else if (breakdown) {
+        breakdown.style.display = 'none';
       }
     };
 
@@ -1815,7 +1930,20 @@ export const POS = (() => {
           const results = searchClientes(q);
           if (!dd) return;
           if (!results.length) { dd.style.display = 'none'; return; }
-          dd.innerHTML = results.map(c => `<div class="cri" data-id="${c.id}">${c.nombre} ${c.apellido || ''} ${c.telefono ? `· ${c.telefono}` : ''}</div>`).join('');
+          dd.innerHTML = results.map(c => {
+            const nombre = `${c.nombre} ${c.apellido || ''}`.trim();
+            const sub = [c.lote ? `Lote ${c.lote}` : '', c.telefono || ''].filter(Boolean).join(' · ');
+            const saldo = c.saldo_actual || 0;
+            const saldoHtml = saldo > 0.01
+              ? `<span style="color:#c62828;font-size:0.78em;font-weight:600"> · Debe ${new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',minimumFractionDigits:0}).format(saldo)}</span>`
+              : saldo < -0.01
+                ? `<span style="color:#2e7d32;font-size:0.78em;font-weight:600"> · A favor ${new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',minimumFractionDigits:0}).format(Math.abs(saldo))}</span>`
+                : '';
+            return `<div class="cri" data-id="${c.id}" style="display:flex;flex-direction:column;gap:1px">
+              <div style="font-weight:600">${nombre}${saldoHtml}</div>
+              ${sub ? `<div style="color:#888;font-size:0.78em">${sub}</div>` : ''}
+            </div>`;
+          }).join('');
           dd.style.display = 'block';
           dd.querySelectorAll('.cri').forEach(el => {
             el.addEventListener('click', () => {
@@ -1828,6 +1956,12 @@ export const POS = (() => {
     }
 
     ge('btn-clear-client')?.addEventListener('click', clearCliente);
+
+    ge('chk-aplicar-favor')?.addEventListener('change', e => {
+      state.ccAplicarFavor = e.target.checked;
+      renderFavorSection();
+      autoFillPayment(); // re-renders payment inputs with updated effTotal
+    });
 
     ge('chk-registrar-deuda')?.addEventListener('change', e => {
       state.ccRegistrarDeuda = e.target.checked;
@@ -1866,6 +2000,23 @@ export const POS = (() => {
         ge('client-search-input')?.focus();
         return;
       }
+      // Tope de deuda check when registering debt
+      if (state.ccRegistrarDeuda && state.clienteId && window.SGA_Clientes) {
+        const topeDisp = window.SGA_Clientes.getTopeDisponible(state.clienteId);
+        const faltaMonto = getEffectiveTotal() - getTotalAsignado();
+        if (faltaMonto > 0 && topeDisp < faltaMonto) {
+          const clienteNombre = state.clienteNombre || 'El cliente';
+          const topeRows = window.SGA_DB.query(`SELECT tope_deuda FROM clientes WHERE id = ?`, [state.clienteId]);
+          const topeVal = topeRows.length ? topeRows[0].tope_deuda : 0;
+          const msg = `La deuda de ${clienteNombre} superaría el tope de ${formatCurrency(topeVal)}.\n¿Confirmar de todas formas?`;
+          const u = state.currentUser;
+          if (u && u.rol === 'cajero') {
+            alert(`La deuda de ${clienteNombre} superaría el tope de ${formatCurrency(topeVal)}. Solo un encargado o admin puede autorizar esto.`);
+            return;
+          }
+          if (!confirm(msg)) return;
+        }
+      }
       const asig = getTotalAsignado();
       const effTotal = getEffectiveTotal();
       // Final safety: catch efectivo shortfall regardless of how confirm was triggered (click, F10, etc.)
@@ -1877,9 +2028,19 @@ export const POS = (() => {
       }
       if (Math.abs(asig - effTotal) > 0.01 && !state.ccRegistrarDeuda) { alert('El monto asignado no coincide con el total'); return; }
 
+      // Calculate saldo a favor to apply
+      const saldoFavorApplied = (state.ccAplicarFavor && state.clienteSaldo < -0.01)
+        ? Math.min(Math.abs(state.clienteSaldo), getCartTotal())
+        : 0;
+
       const pagos = [...state.activeMedios]
-        .filter(m => (state.pagosAmounts[m] || 0) > 0)
+        .filter(m => (state.pagosAmounts[m] || 0) > 0.001)
         .map(m => ({ medio: m, monto: state.pagosAmounts[m], referencia: null }));
+
+      // Add saldo_favor as its own payment entry (not efectivo)
+      if (saldoFavorApplied > 0.001) {
+        pagos.push({ medio: 'saldo_favor', monto: saldoFavorApplied, referencia: null });
+      }
 
       const ventaData = {
         ventaId: state.editingVentaId || undefined,
@@ -1890,7 +2051,7 @@ export const POS = (() => {
         items: state.cart,
         pagos,
         descuentoGlobal: state.descuentoGlobal,
-        aplicarSaldoFavor: false,
+        saldoFavorMonto: saldoFavorApplied,
       };
 
       const result = registrarVenta(ventaData);
@@ -1908,40 +2069,43 @@ export const POS = (() => {
             [window.SGA_Utils.generateUUID(), state.clienteId, state.currentSucursal.id, tipo, monto, result.ventaId, desc, now, state.currentUser.id, now]
           );
         };
-        // FIX 4: aplicar saldo a favor (saldo < 0 = store owes client)
-        if (state.ccAplicarFavor && state.clienteSaldo < 0) {
-          const applied = Math.min(Math.abs(state.clienteSaldo), getCartTotal());
-          ccInsert('ajuste', applied, 'Aplicación de saldo a favor en compra');
+
+        // Saldo a favor applied: reduce client's credit (saldo < 0 means store owes client)
+        // Adding +applied to balance reduces how much the store owes
+        if (saldoFavorApplied > 0.001) {
+          ccInsert('pago', saldoFavorApplied,
+            `Aplicado saldo a favor en venta #${result.ventaId.slice(-6)}`);
+          // Update ultima_visita
+          window.SGA_DB.run(
+            `UPDATE clientes SET ultima_visita = ?, updated_at = ?, sync_status = 'pending' WHERE id = ?`,
+            [now, now, state.clienteId]
+          );
         }
-        // FIX 4: cobrar deuda (saldo > 0 = client owes store)
-        if (state.ccCobrarDeuda && state.clienteSaldo > 0) {
-          ccInsert('pago', -state.clienteSaldo, 'Cobro de deuda pendiente');
-        }
-        // FIX 4: registrar diferencia como deuda
+
+        // Register remaining as debt if toggle was on
         if (state.ccRegistrarDeuda) {
-          const faltante = Math.max(0, getEffectiveTotal() - getTotalAsignado());
-          if (faltante > 0) {
-            ccInsert('venta_fiada', faltante, 'Diferencia registrada como deuda');
+          const totalPaid = getTotalAsignado() + saldoFavorApplied;
+          const realFaltante = Math.max(0, getCartTotal() - totalPaid);
+          if (realFaltante > 0.001) {
+            ccInsert('venta_fiada', realFaltante, 'Diferencia registrada como deuda');
           }
         }
+
         // Vuelto como saldo a favor (with smart debt cancellation)
         if (ge('chk-saldo-favor')?.checked) {
           const recibe = state.recibeEfectivo || 0;
-          const vuelto = Math.max(0, recibe - getEffectiveTotal());
-          if (vuelto > 0) {
+          const vuelto = Math.max(0, recibe - effTotal);
+          if (vuelto > 0.001) {
             const saldo = state.clienteSaldo; // positive = client owes store
             if (saldo > 0) {
               if (vuelto >= saldo) {
-                // Cancel full debt + register remaining as saldo_favor
                 ccInsert('pago', -saldo, 'Cancelación de deuda con vuelto');
                 const sobrante = vuelto - saldo;
-                if (sobrante > 0) ccInsert('saldo_favor', -sobrante, 'Saldo a favor del vuelto');
+                if (sobrante > 0.001) ccInsert('saldo_favor', -sobrante, 'Saldo a favor del vuelto');
               } else {
-                // Partial debt cancellation
                 ccInsert('pago', -vuelto, 'Cancelación parcial de deuda con vuelto');
               }
             } else {
-              // No debt — register full vuelto as saldo_favor
               ccInsert('saldo_favor', -vuelto, 'Vuelto dejado como saldo a favor');
             }
           }

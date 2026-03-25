@@ -184,9 +184,32 @@
   }
 
   /**
-   * Handle navigation
+   * Handle navigation — with POS sale guard
    */
-  window.addEventListener('hashchange', router);
+  window.addEventListener('hashchange', (e) => {
+    const newHash = window.location.hash.slice(1) || 'pos';
+    const [route] = newHash.split('/');
+
+    // Navigation guard: if POS has an active sale with cart items, block and notify
+    if (window.SGA_POS_ACTIVE_SALE && route !== 'pos') {
+      try {
+        const cart = JSON.parse(sessionStorage.getItem('pos_cart') || '[]');
+        if (Array.isArray(cart) && cart.length > 0) {
+          // Restore previous URL so the address bar doesn't show the new route
+          const oldHash = e.oldURL && e.oldURL.includes('#')
+            ? e.oldURL.slice(e.oldURL.indexOf('#'))
+            : '#pos';
+          history.replaceState(null, '', oldHash);
+          window.dispatchEvent(new CustomEvent('navigation-blocked', {
+            detail: { targetHash: newHash }
+          }));
+          return;
+        }
+      } catch (_) {}
+    }
+
+    router();
+  });
 
   /**
    * Main initialization

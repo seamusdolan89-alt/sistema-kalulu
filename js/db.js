@@ -528,6 +528,40 @@
       }
     } catch(e) { console.warn('ordenes_compra migration:', e.message); }
 
+    // Migrate venta_pagos: add 'saldo_favor' to medio CHECK constraint
+    try {
+      const vpStmt = database.prepare(
+        `SELECT sql FROM sqlite_master WHERE type='table' AND name='venta_pagos'`
+      );
+      let vpRow = null;
+      if (vpStmt.step()) vpRow = vpStmt.getAsObject();
+      vpStmt.free();
+      if (vpRow && vpRow.sql && !vpRow.sql.includes('saldo_favor')) {
+        database.run(`ALTER TABLE venta_pagos RENAME TO venta_pagos_bak`);
+        database.run(`CREATE TABLE venta_pagos (
+          id TEXT PRIMARY KEY,
+          venta_id TEXT REFERENCES ventas(id),
+          medio TEXT NOT NULL CHECK(medio IN ('efectivo','mercadopago','tarjeta','transferencia','cuenta_corriente','saldo_favor')),
+          monto REAL NOT NULL,
+          referencia TEXT
+        )`);
+        database.run(`INSERT INTO venta_pagos SELECT * FROM venta_pagos_bak`);
+        database.run(`DROP TABLE venta_pagos_bak`);
+      }
+    } catch(e) { console.warn('venta_pagos migration:', e.message); }
+
+    // system_config — key/value store for app-wide settings
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS system_config (
+          key TEXT PRIMARY KEY,
+          value TEXT,
+          updated_at TEXT
+        )
+      `);
+      database.run(`INSERT OR IGNORE INTO system_config VALUES ('tope_deuda_default', '50000', datetime('now'))`);
+    } catch(e) { console.warn('system_config:', e.message); }
+
     // cuenta_proveedor — accounts payable ledger per supplier
     try {
       database.run(`
@@ -560,6 +594,12 @@
       'ALTER TABLE egresos_caja ADD COLUMN updated_at TEXT',
       'ALTER TABLE orden_compra_items ADD COLUMN costo_unitario REAL DEFAULT 0',
       'ALTER TABLE orden_compra_items ADD COLUMN costo_anterior REAL DEFAULT 0',
+      'ALTER TABLE clientes ADD COLUMN direccion TEXT',
+      'ALTER TABLE clientes ADD COLUMN lote TEXT',
+      'ALTER TABLE clientes ADD COLUMN tope_deuda REAL DEFAULT 50000',
+      'ALTER TABLE clientes ADD COLUMN cliente_master_id TEXT',
+      'ALTER TABLE clientes ADD COLUMN es_master INTEGER DEFAULT 0',
+      'ALTER TABLE clientes ADD COLUMN ultima_visita TEXT',
     ];
     for (const sql of columnAlterations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }

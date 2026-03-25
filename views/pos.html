@@ -610,7 +610,7 @@ main#app { overflow: hidden; }
           <div>
             <div class="sale-sec-title">Cliente</div>
             <input type="text" id="client-search-input" class="client-search"
-              placeholder="Buscar por nombre o teléfono...">
+              placeholder="Buscar por nombre, apellido, teléfono o lote...">
             <div id="client-dropdown" class="client-dropdown"></div>
             <div id="client-card" style="display:none" class="client-card">
               <div>
@@ -618,6 +618,19 @@ main#app { overflow: hidden; }
                 <span id="client-saldo-badge" class="saldo-badge neutro"></span>
               </div>
               <button class="client-clear" id="btn-clear-client" title="Quitar cliente">✕</button>
+            </div>
+            <div id="client-tope-warn" style="display:none; padding:6px 10px; background:#fff3e0; border:1px solid #ff9800; border-radius:5px; font-size:0.8em; color:#e65100; font-weight:600; margin-top:4px">
+              ⚠️ <span id="client-tope-warn-text">Tope de deuda alcanzado</span>
+            </div>
+            <div id="client-favor-row" style="display:none; padding:8px 10px; background:#e8f5e9; border:1px solid #66bb6a; border-radius:6px; margin-top:4px; font-size:0.85em;">
+              <div style="color:#2e7d32; font-weight:700; margin-bottom:4px">
+                💚 Saldo a favor: <span id="client-favor-amount">$0</span>
+              </div>
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer; margin-bottom:4px">
+                <input type="checkbox" id="chk-aplicar-favor" checked>
+                Aplicar saldo a favor en esta venta
+              </label>
+              <div id="client-favor-breakdown" style="color:#1b5e20; font-size:0.9em; line-height:1.6; display:none"></div>
             </div>
             <div id="client-deuda-row" style="display:none" class="deuda-row">
               <span>💳 Tiene deuda: <strong id="client-deuda-amount"></strong></span>

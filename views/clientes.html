@@ -2,14 +2,533 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SGA - Clientes</title>
+  <style>
+    /* ── LAYOUT ─────────────────────────────────────────────────────────── */
+    #clientes-root { display: flex; flex-direction: column; height: 100%; }
+
+    /* ── LIST VIEW ──────────────────────────────────────────────────────── */
+    #clientes-list-view { display: flex; flex-direction: column; height: 100%; }
+    .cl-header { display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px 12px; border-bottom: 1px solid #e8e8e8; flex-shrink: 0; }
+    .cl-header h2 { margin: 0; font-size: 1.35em; font-weight: 700; color: #1a1a2e; }
+    .cl-header-btns { display: flex; gap: 8px; }
+
+    .cl-filters { display: flex; gap: 10px; padding: 10px 20px;
+      border-bottom: 1px solid #f0f0f0; flex-shrink: 0; flex-wrap: wrap; align-items: center; }
+    .cl-search { flex: 1; min-width: 220px; padding: 8px 12px;
+      border: 1px solid #ddd; border-radius: 6px; font-size: 0.9em; outline: none; }
+    .cl-search:focus { border-color: #667eea; }
+    .cl-toggle-group { display: flex; gap: 6px; }
+    .cl-toggle { padding: 6px 12px; border: 1px solid #ddd; border-radius: 20px;
+      background: #f8f8f8; cursor: pointer; font-size: 0.82em; color: #555;
+      transition: all 0.15s; white-space: nowrap; }
+    .cl-toggle.active { background: #667eea; color: #fff; border-color: #667eea; }
+
+    .cl-table-wrap { flex: 1; overflow-y: auto; padding: 0 20px 20px; }
+    .cl-table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
+    .cl-table thead th { padding: 10px 8px; text-align: left; font-weight: 600;
+      color: #666; border-bottom: 2px solid #e8e8e8; white-space: nowrap;
+      position: sticky; top: 0; background: #fff; z-index: 1; }
+    .cl-table tbody tr { border-bottom: 1px solid #f5f5f5; cursor: pointer;
+      transition: background 0.1s; }
+    .cl-table tbody tr:hover { background: #f8f9ff; }
+    .cl-table tbody td { padding: 10px 8px; vertical-align: middle; }
+
+    /* Saldo badge */
+    .saldo-b { padding: 3px 8px; border-radius: 12px; font-size: 0.82em;
+      font-weight: 700; white-space: nowrap; }
+    .saldo-b.deuda  { background: #ffebee; color: #c62828; }
+    .saldo-b.favor  { background: #e8f5e9; color: #2e7d32; }
+    .saldo-b.neutro { background: #f5f5f5; color: #888; }
+
+    /* Tope progress */
+    .tope-wrap { min-width: 90px; }
+    .tope-bar { height: 5px; background: #e0e0e0; border-radius: 3px; margin-top: 3px; }
+    .tope-fill { height: 100%; border-radius: 3px; background: #4caf50; transition: width 0.3s; }
+    .tope-fill.warn { background: #ff9800; }
+    .tope-fill.danger { background: #f44336; }
+    .tope-label { font-size: 0.78em; color: #666; }
+
+    /* Familia badge */
+    .familia-b { font-size: 0.8em; color: #666; }
+    .familia-b.master { color: #7b1fa2; font-weight: 600; }
+    .familia-b.miembro { color: #0288d1; }
+
+    /* Actions */
+    .cl-actions { display: flex; gap: 4px; }
+    .cl-actions button { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px;
+      background: #f8f8f8; cursor: pointer; font-size: 0.8em; transition: background 0.1s; }
+    .cl-actions button:hover { background: #e8e8e8; }
+
+    .cl-empty { padding: 60px 20px; text-align: center; color: #aaa; font-size: 0.95em; }
+
+    /* ── FICHA COMPLETA ─────────────────────────────────────────────────── */
+    #clientes-ficha-view { display: none; height: 100%; overflow: hidden; }
+    #clientes-ficha-view.active { display: flex; }
+
+    /* Replaces app aside — rendered by JS */
+    .ficha-aside { width: 220px; min-width: 220px; background: #1a1a2e; color: #fff;
+      display: flex; flex-direction: column; padding: 0; overflow-y: auto; }
+    .ficha-aside-header { padding: 16px 14px 12px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+    .ficha-aside-name { font-weight: 700; font-size: 1em; word-break: break-word; }
+    .ficha-aside-lote { font-size: 0.78em; color: rgba(255,255,255,0.6); margin-top: 2px; }
+    .ficha-saldo-large { margin-top: 8px; }
+
+    .ficha-nav { padding: 8px 0; flex: 1; }
+    .ficha-nav-item { display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; cursor: pointer; font-size: 0.88em; color: rgba(255,255,255,0.75);
+      transition: background 0.15s; }
+    .ficha-nav-item:hover { background: rgba(255,255,255,0.08); }
+    .ficha-nav-item.active { background: rgba(102,126,234,0.35); color: #fff; font-weight: 600; }
+
+    .ficha-nav-back { padding: 12px 14px; border-top: 1px solid rgba(255,255,255,0.1);
+      cursor: pointer; font-size: 0.85em; color: rgba(255,255,255,0.7);
+      transition: color 0.15s; }
+    .ficha-nav-back:hover { color: #fff; }
+
+    .ficha-main { flex: 1; overflow-y: auto; padding: 24px 28px; background: #f7f8fc; }
+    .ficha-section { display: none; }
+    .ficha-section.active { display: block; }
+    .ficha-section-title { font-size: 1.1em; font-weight: 700; color: #1a1a2e;
+      margin-bottom: 18px; padding-bottom: 8px; border-bottom: 2px solid #667eea; }
+
+    /* Form rows */
+    .f-row { display: flex; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+    .f-group { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 150px; }
+    .f-group label { font-size: 0.8em; font-weight: 600; color: #555; }
+    .f-group input, .f-group select { padding: 8px 10px; border: 1px solid #ddd;
+      border-radius: 6px; font-size: 0.9em; outline: none; }
+    .f-group input:focus, .f-group select:focus { border-color: #667eea; }
+    .f-group input[readonly] { background: #f5f5f5; color: #888; }
+    .f-group.full { flex: 1 1 100%; }
+
+    /* Tope section inside ficha */
+    .tope-disponible { margin-top: 6px; }
+    .tope-bar-large { height: 8px; background: #e0e0e0; border-radius: 4px; margin-top: 4px; }
+    .tope-fill-large { height: 100%; border-radius: 4px; background: #4caf50; }
+    .tope-fill-large.warn { background: #ff9800; }
+    .tope-fill-large.danger { background: #f44336; }
+    .tope-disp-text { font-size: 0.82em; color: #555; margin-top: 4px; }
+
+    /* CC section */
+    .cc-balance-box { padding: 16px; background: #fff; border-radius: 8px;
+      border: 1px solid #e0e0e0; margin-bottom: 16px; text-align: center; }
+    .cc-balance-amount { font-size: 1.8em; font-weight: 700; }
+    .cc-balance-amount.deuda { color: #c62828; }
+    .cc-balance-amount.favor { color: #2e7d32; }
+    .cc-balance-amount.neutro { color: #888; }
+    .cc-balance-label { font-size: 0.82em; color: #888; margin-top: 2px; }
+
+    .cc-pago-form { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px;
+      padding: 14px; margin-bottom: 16px; display: none; }
+    .cc-pago-form.open { display: block; }
+    .cc-pago-row { display: flex; gap: 10px; align-items: flex-end; margin-top: 8px; flex-wrap: wrap; }
+    .cc-pago-row input { flex: 1; min-width: 120px; padding: 8px 10px;
+      border: 1px solid #ddd; border-radius: 6px; font-size: 0.9em; outline: none; }
+    .cc-pago-row input:focus { border-color: #667eea; }
+
+    /* Movimientos table */
+    .mov-table { width: 100%; border-collapse: collapse; font-size: 0.84em; background: #fff;
+      border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+    .mov-table thead th { padding: 9px 10px; text-align: left; font-weight: 600;
+      color: #666; background: #f5f5f5; border-bottom: 1px solid #e0e0e0; }
+    .mov-table tbody td { padding: 9px 10px; border-bottom: 1px solid #f0f0f0; }
+    .mov-table tbody tr:last-child td { border-bottom: none; }
+
+    .tipo-b { padding: 2px 7px; border-radius: 10px; font-size: 0.78em; font-weight: 600; }
+    .tipo-b.venta_fiada { background: #ffebee; color: #c62828; }
+    .tipo-b.pago       { background: #e8f5e9; color: #2e7d32; }
+    .tipo-b.saldo_favor{ background: #e3f2fd; color: #0277bd; }
+    .tipo-b.ajuste     { background: #f5f5f5; color: #555; }
+
+    .mov-link { color: #667eea; cursor: pointer; text-decoration: underline; font-size: 0.85em; }
+
+    /* Ventas historial */
+    .venta-row { background: #fff; border: 1px solid #e8e8e8; border-radius: 6px;
+      padding: 10px 14px; margin-bottom: 8px; cursor: pointer; transition: box-shadow 0.15s; }
+    .venta-row:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .venta-row-top { display: flex; justify-content: space-between; align-items: center; }
+    .venta-fecha { font-size: 0.82em; color: #888; }
+    .venta-total { font-weight: 700; color: #1a1a2e; }
+    .venta-medio { font-size: 0.78em; background: #f0f0f0; padding: 2px 6px;
+      border-radius: 4px; color: #555; }
+    .venta-items-preview { font-size: 0.8em; color: #666; margin-top: 4px; }
+
+    /* Familia */
+    .familia-header { padding: 12px 16px; background: #f3e5f5; border-radius: 8px;
+      border-left: 4px solid #7b1fa2; margin-bottom: 16px; }
+    .miembro-table { width: 100%; border-collapse: collapse; font-size: 0.86em;
+      background: #fff; border-radius: 8px; overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+    .miembro-table thead th { padding: 9px 10px; text-align: left; font-weight: 600;
+      color: #666; background: #f5f5f5; border-bottom: 1px solid #e0e0e0; }
+    .miembro-table tbody td { padding: 9px 10px; border-bottom: 1px solid #f0f0f0; }
+    .miembro-table tbody tr:last-child td { border-bottom: none; }
+    .familia-totals { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px;
+      padding: 14px 16px; margin-top: 14px; }
+
+    /* Estadísticas */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px; margin-bottom: 20px; }
+    .stat-card { background: #fff; border: 1px solid #e8e8e8; border-radius: 8px;
+      padding: 14px 16px; }
+    .stat-card-label { font-size: 0.78em; color: #888; margin-bottom: 4px; }
+    .stat-card-value { font-size: 1.15em; font-weight: 700; color: #1a1a2e; }
+    .top-prod-table { width: 100%; border-collapse: collapse; font-size: 0.86em;
+      background: #fff; border-radius: 8px; overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06); margin-bottom: 20px; }
+    .top-prod-table thead th { padding: 9px 10px; text-align: left; font-weight: 600;
+      color: #666; background: #f5f5f5; border-bottom: 1px solid #e0e0e0; }
+    .top-prod-table tbody td { padding: 9px 10px; border-bottom: 1px solid #f0f0f0; }
+    .top-prod-table tbody tr:last-child td { border-bottom: none; }
+
+    /* SVG chart */
+    .chart-title { font-size: 0.88em; font-weight: 600; color: #555; margin-bottom: 8px; }
+    .bar-chart-wrap { background: #fff; border: 1px solid #e8e8e8; border-radius: 8px;
+      padding: 14px 16px; }
+
+    /* Búsqueda de cliente para agregar a familia */
+    .familia-search-wrap { position: relative; }
+    .familia-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: #fff;
+      border: 1px solid #ddd; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+      z-index: 100; max-height: 200px; overflow-y: auto; display: none; }
+    .familia-dropdown.open { display: block; }
+    .fdrop-item { padding: 9px 12px; cursor: pointer; font-size: 0.88em;
+      border-bottom: 1px solid #f5f5f5; }
+    .fdrop-item:hover { background: #f5f7ff; }
+
+    /* Tope warning banner */
+    .tope-warn-banner { padding: 8px 12px; background: #fff3e0; border: 1px solid #ff9800;
+      border-radius: 6px; color: #e65100; font-size: 0.82em; font-weight: 600;
+      margin-top: 6px; display: none; }
+    .tope-warn-banner.show { display: block; }
+
+    /* Modal backdrop for tope config */
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+      display: flex; align-items: center; justify-content: center; z-index: 1000;
+      display: none; }
+    .modal-backdrop.open { display: flex; }
+    .modal-box { background: #fff; border-radius: 10px; padding: 24px 28px;
+      min-width: 320px; max-width: 440px; width: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+    .modal-box h3 { margin: 0 0 16px; font-size: 1em; font-weight: 700; color: #1a1a2e; }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+    /* Shared helpers */
+    .btn { padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer;
+      font-size: 0.88em; font-weight: 600; transition: opacity 0.15s; }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: #667eea; color: #fff; }
+    .btn-secondary { background: #f0f0f0; color: #333; }
+    .btn-danger { background: #f44336; color: #fff; }
+    .btn-sm { padding: 5px 10px; font-size: 0.8em; }
+    .btn-outline { background: transparent; border: 1px solid #ddd; color: #555; }
+    .btn-outline:hover { background: #f5f5f5; }
+    .text-muted { color: #999; font-size: 0.82em; }
+    .mt-8 { margin-top: 8px; }
+    .mt-12 { margin-top: 12px; }
+    .flex-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .filter-row { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+    .filter-row select, .filter-row input[type="date"] { padding: 6px 8px;
+      border: 1px solid #ddd; border-radius: 5px; font-size: 0.85em; outline: none; }
+  </style>
 </head>
 <body>
-  <!-- Clientes Module -->
-  <main>
-    <h2>👥 Clientes</h2>
-    <p>Módulo de clientes en construcción...</p>
-  </main>
+<div id="clientes-root">
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       LIST VIEW
+  ════════════════════════════════════════════════════════════════════════ -->
+  <div id="clientes-list-view">
+
+    <div class="cl-header">
+      <h2>👥 Clientes</h2>
+      <div class="cl-header-btns">
+        <button class="btn btn-secondary" id="btn-tope-config">⚙️ Tope default</button>
+        <button class="btn btn-primary" id="btn-nuevo-cliente">+ Nuevo Cliente</button>
+      </div>
+    </div>
+
+    <div class="cl-filters">
+      <input type="text" id="cl-search-input" class="cl-search"
+        placeholder="Buscar por nombre, apellido, teléfono o lote...">
+      <div class="cl-toggle-group">
+        <button class="cl-toggle" id="toggle-con-deuda">Solo con deuda</button>
+        <button class="cl-toggle" id="toggle-masters">Solo masters</button>
+        <button class="cl-toggle active" id="toggle-activos" data-value="activos">Solo activos</button>
+      </div>
+    </div>
+
+    <div class="cl-table-wrap">
+      <table class="cl-table">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Lote</th>
+            <th>Teléfono</th>
+            <th>Saldo</th>
+            <th>Tope deuda</th>
+            <th>Familia</th>
+            <th>Última visita</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="cl-tbody"></tbody>
+      </table>
+      <div id="cl-empty" class="cl-empty" style="display:none">
+        No se encontraron clientes
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       FICHA COMPLETA
+  ════════════════════════════════════════════════════════════════════════ -->
+  <div id="clientes-ficha-view">
+
+    <div class="ficha-aside" id="ficha-aside">
+      <div class="ficha-aside-header">
+        <div class="ficha-aside-name" id="ficha-aside-name">—</div>
+        <div class="ficha-aside-lote" id="ficha-aside-lote"></div>
+        <div class="ficha-saldo-large mt-8" id="ficha-aside-saldo"></div>
+      </div>
+      <nav class="ficha-nav" id="ficha-nav">
+        <div class="ficha-nav-item active" data-section="datos">📋 Datos Personales</div>
+        <div class="ficha-nav-item" data-section="cc">💰 Cuenta Corriente</div>
+        <div class="ficha-nav-item" data-section="compras">🛒 Historial de Compras</div>
+        <div class="ficha-nav-item" data-section="familia">👨‍👩‍👧 Familia</div>
+        <div class="ficha-nav-item" data-section="stats">📊 Estadísticas</div>
+      </nav>
+      <div class="ficha-nav-back" id="ficha-back">← Volver</div>
+    </div>
+
+    <div class="ficha-main" id="ficha-main">
+
+      <!-- DATOS PERSONALES -->
+      <div class="ficha-section active" id="ficha-datos">
+        <div class="ficha-section-title">📋 Datos Personales</div>
+        <div class="f-row">
+          <div class="f-group">
+            <label>Nombre *</label>
+            <input type="text" id="fi-nombre" placeholder="Nombre">
+          </div>
+          <div class="f-group">
+            <label>Apellido</label>
+            <input type="text" id="fi-apellido" placeholder="Apellido">
+          </div>
+        </div>
+        <div class="f-row">
+          <div class="f-group">
+            <label>Lote / Manzana</label>
+            <input type="text" id="fi-lote" placeholder="Ej: M12 L3">
+          </div>
+          <div class="f-group">
+            <label>Dirección</label>
+            <input type="text" id="fi-direccion" placeholder="Dirección">
+          </div>
+        </div>
+        <div class="f-row">
+          <div class="f-group">
+            <label>Teléfono</label>
+            <input type="tel" id="fi-telefono" placeholder="Teléfono">
+          </div>
+          <div class="f-group">
+            <label>Email</label>
+            <input type="email" id="fi-email" placeholder="Email">
+          </div>
+        </div>
+        <div class="f-row">
+          <div class="f-group">
+            <label>Estado</label>
+            <select id="fi-activo">
+              <option value="1">✅ Activo</option>
+              <option value="0">❌ Inactivo</option>
+            </select>
+          </div>
+          <div class="f-group">
+            <label>Fecha de alta</label>
+            <input type="text" id="fi-fecha-alta" readonly>
+          </div>
+        </div>
+        <div class="f-row">
+          <div class="f-group full" id="fi-tope-group">
+            <label>Tope máximo de deuda $</label>
+            <input type="number" id="fi-tope-deuda" min="0" step="100">
+            <div class="tope-disponible" id="fi-tope-disponible"></div>
+          </div>
+        </div>
+        <div class="flex-row mt-12">
+          <button class="btn btn-primary" id="fi-guardar">Guardar cambios</button>
+          <span id="fi-save-msg" class="text-muted" style="display:none"></span>
+        </div>
+      </div>
+
+      <!-- CUENTA CORRIENTE -->
+      <div class="ficha-section" id="ficha-cc">
+        <div class="ficha-section-title">💰 Cuenta Corriente</div>
+
+        <div class="cc-balance-box">
+          <div class="cc-balance-amount neutro" id="cc-balance-amount">$0,00</div>
+          <div class="cc-balance-label" id="cc-balance-label">Sin movimientos</div>
+        </div>
+
+        <div class="flex-row mb-12">
+          <button class="btn btn-primary btn-sm" id="btn-registrar-pago">+ Registrar pago</button>
+        </div>
+        <div class="cc-pago-form" id="cc-pago-form">
+          <div style="font-weight:600; font-size:0.9em; margin-bottom:8px;">Registrar pago</div>
+          <div class="cc-pago-row">
+            <input type="number" id="cc-monto-pago" placeholder="Monto $" min="0.01" step="0.01">
+            <input type="text" id="cc-desc-pago" placeholder="Descripción (opcional)" style="flex:2">
+            <button class="btn btn-primary btn-sm" id="btn-cc-pago-confirm">Confirmar</button>
+            <button class="btn btn-secondary btn-sm" id="btn-cc-pago-cancel">Cancelar</button>
+          </div>
+        </div>
+
+        <div class="filter-row mt-8">
+          <select id="cc-filter-tipo">
+            <option value="">Todos los tipos</option>
+            <option value="venta_fiada">Venta fiada</option>
+            <option value="pago">Pago</option>
+            <option value="saldo_favor">Saldo a favor</option>
+            <option value="ajuste">Ajuste</option>
+          </select>
+          <input type="date" id="cc-filter-desde" title="Desde">
+          <input type="date" id="cc-filter-hasta" title="Hasta">
+          <button class="btn btn-secondary btn-sm" id="btn-cc-filter">Filtrar</button>
+        </div>
+
+        <table class="mov-table" id="cc-mov-table">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Tipo</th>
+              <th>Descripción</th>
+              <th style="text-align:right">Debe (+)</th>
+              <th style="text-align:right">Haber (-)</th>
+              <th style="text-align:right">Saldo acum.</th>
+            </tr>
+          </thead>
+          <tbody id="cc-mov-tbody"></tbody>
+        </table>
+        <div id="cc-mov-empty" class="cl-empty" style="display:none">Sin movimientos</div>
+      </div>
+
+      <!-- HISTORIAL DE COMPRAS -->
+      <div class="ficha-section" id="ficha-compras">
+        <div class="ficha-section-title">🛒 Historial de Compras</div>
+
+        <div class="flex-row mb-12" id="compras-summary" style="gap:16px; flex-wrap:wrap;">
+          <span id="resumen-mes" class="text-muted"></span>
+          <span id="resumen-anio" class="text-muted"></span>
+        </div>
+
+        <div class="filter-row">
+          <input type="date" id="compras-filter-desde" title="Desde">
+          <input type="date" id="compras-filter-hasta" title="Hasta">
+          <button class="btn btn-secondary btn-sm" id="btn-compras-filter">Filtrar</button>
+        </div>
+
+        <div id="compras-list"></div>
+        <div id="compras-empty" class="cl-empty" style="display:none">Sin compras registradas</div>
+      </div>
+
+      <!-- FAMILIA -->
+      <div class="ficha-section" id="ficha-familia">
+        <div class="ficha-section-title">👨‍👩‍👧 Familia</div>
+        <div id="familia-content"></div>
+      </div>
+
+      <!-- ESTADÍSTICAS -->
+      <div class="ficha-section" id="ficha-stats">
+        <div class="ficha-section-title">📊 Estadísticas</div>
+        <div class="stats-grid" id="stats-grid"></div>
+        <div style="font-size:0.88em; font-weight:600; color:#555; margin-bottom:8px;">
+          Top 5 productos más comprados
+        </div>
+        <table class="top-prod-table">
+          <thead>
+            <tr>
+              <th>#</th><th>Producto</th>
+              <th style="text-align:right">Veces</th>
+              <th>Última vez</th>
+            </tr>
+          </thead>
+          <tbody id="stats-top-tbody"></tbody>
+        </table>
+        <div class="bar-chart-wrap">
+          <div class="chart-title">Compras mensuales — últimos 6 meses</div>
+          <svg id="bar-chart-svg" width="100%" height="120"></svg>
+        </div>
+      </div>
+
+    </div><!-- /ficha-main -->
+  </div><!-- /ficha-view -->
+
+</div><!-- /root -->
+
+<!-- MODAL: Tope default -->
+<div class="modal-backdrop" id="modal-tope-config">
+  <div class="modal-box">
+    <h3>⚙️ Tope de deuda predeterminado</h3>
+    <div class="f-group">
+      <label>Monto $ para nuevos clientes</label>
+      <input type="number" id="tope-config-input" min="0" step="100">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="btn-tope-config-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-tope-config-save">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Nuevo / Editar cliente -->
+<div class="modal-backdrop" id="modal-cliente-form">
+  <div class="modal-box" style="max-width:520px">
+    <h3 id="modal-cliente-title">+ Nuevo Cliente</h3>
+    <div class="f-row">
+      <div class="f-group">
+        <label>Nombre *</label>
+        <input type="text" id="mc-nombre" placeholder="Nombre">
+      </div>
+      <div class="f-group">
+        <label>Apellido</label>
+        <input type="text" id="mc-apellido" placeholder="Apellido">
+      </div>
+    </div>
+    <div class="f-row">
+      <div class="f-group">
+        <label>Lote / Manzana</label>
+        <input type="text" id="mc-lote" placeholder="Ej: M12 L3">
+      </div>
+      <div class="f-group">
+        <label>Dirección</label>
+        <input type="text" id="mc-direccion" placeholder="Dirección">
+      </div>
+    </div>
+    <div class="f-row">
+      <div class="f-group">
+        <label>Teléfono</label>
+        <input type="tel" id="mc-telefono" placeholder="Teléfono">
+      </div>
+      <div class="f-group">
+        <label>Email</label>
+        <input type="email" id="mc-email" placeholder="Email">
+      </div>
+    </div>
+    <div class="f-row">
+      <div class="f-group">
+        <label>Tope de deuda $</label>
+        <input type="number" id="mc-tope-deuda" min="0" step="100" placeholder="Dejar vacío = default">
+      </div>
+    </div>
+    <input type="hidden" id="mc-id">
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="btn-mc-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-mc-save">Guardar</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
