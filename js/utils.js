@@ -266,9 +266,35 @@
   // Argentine bill/coin denominations (shared by POS and Caja modules)
   const DENOMINACIONES = [100000, 50000, 20000, 10000, 5000, 2000, 1000, 500, 100];
 
+  /**
+   * Format date+time for display — DD/MM/YYYY HH:MM
+   * @param {string} isoString
+   * @returns {string}
+   */
+  function formatFecha(isoString) {
+    if (!isoString) return '—';
+    const d = new Date(isoString);
+    return d.toLocaleDateString('es-AR') + ' ' + d.toTimeString().slice(0, 5);
+  }
+
+  /**
+   * Attach an event listener to a DOM element by ID, logging a warning if the element is missing.
+   * Replaces the ge('id')?.addEventListener(...) pattern.
+   * @param {string} id
+   * @param {string} event
+   * @param {Function} handler
+   */
+  function safeOn(id, event, handler) {
+    const el = document.getElementById(id);
+    if (!el) { console.warn('safeOn: missing element #' + id); return; }
+    el.addEventListener(event, handler);
+  }
+
   // Export functions
   window.SGA_Utils = {
     DENOMINACIONES,
+    formatFecha,
+    safeOn,
     generateUUID,
     formatISODate,
     formatDisplayDate,

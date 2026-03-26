@@ -89,14 +89,8 @@ const Ordenes = (() => {
       .replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-  const fmtPeso = (n) =>
-    '$' + (parseFloat(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-
-  const fmtFecha = (str) => {
-    if (!str) return '—';
-    const d = new Date(str);
-    return d.toLocaleDateString('es-AR');
-  };
+  const fmtPeso = (n) => window.SGA_Utils.formatCurrency(n);
+  const fmtFecha = (str) => window.SGA_Utils.formatFecha(str);
 
   const uuid = () => window.SGA_Utils.generateUUID();
   const now  = () => window.SGA_Utils.formatISODate(new Date());

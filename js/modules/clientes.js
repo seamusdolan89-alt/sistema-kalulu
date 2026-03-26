@@ -271,11 +271,12 @@ const SGA_Clientes = (() => {
       if (!['admin','encargado'].includes(userRol)) throw new Error('Sin permiso para cambiar el tope');
       fields.push('tope_deuda = ?'); vals.push(data.tope_deuda);
     }
-    if (!fields.length) return;
+    if (!fields.length) return { success: false, reason: 'no_fields' };
     fields.push('updated_at = ?', "sync_status = 'pending'");
     vals.push(now());
     vals.push(id);
     db().run(`UPDATE clientes SET ${fields.join(', ')} WHERE id = ?`, vals);
+    return { success: true };
   }
 
   function registrarPago(clienteId, monto, descripcion, usuarioId) {
@@ -660,28 +661,24 @@ const ClientesUI = (() => {
 
       const msInput = ge('miembro-search-input');
       const msDrop = ge('miembro-dropdown');
-      let msTimeout = null;
       if (msInput) {
-        msInput.addEventListener('input', () => {
-          clearTimeout(msTimeout);
+        msInput.addEventListener('input', window.SGA_Utils.debounce(() => {
           const q = msInput.value.trim();
           if (q.length < 2) { msDrop.classList.remove('open'); return; }
-          msTimeout = setTimeout(() => {
-            const res = SGA_Clientes.search(q).filter(r => !r.cliente_master_id && r.id !== c.id);
-            if (!res.length) { msDrop.classList.remove('open'); return; }
-            msDrop.innerHTML = res.map(r =>
-              `<div class="fdrop-item" data-id="${r.id}">${esc(r.nombre)} ${esc(r.apellido || '')}${r.lote ? ` · ${esc(r.lote)}` : ''}</div>`
-            ).join('');
-            msDrop.classList.add('open');
-            msDrop.querySelectorAll('.fdrop-item').forEach(el => {
-              el.addEventListener('click', () => {
-                vincularMiembro(el.dataset.id, c.id, c.lote);
-                msDrop.classList.remove('open');
-                msInput.value = '';
-              });
+          const res = SGA_Clientes.search(q).filter(r => !r.cliente_master_id && r.id !== c.id);
+          if (!res.length) { msDrop.classList.remove('open'); return; }
+          msDrop.innerHTML = res.map(r =>
+            `<div class="fdrop-item" data-id="${r.id}">${esc(r.nombre)} ${esc(r.apellido || '')}${r.lote ? ` · ${esc(r.lote)}` : ''}</div>`
+          ).join('');
+          msDrop.classList.add('open');
+          msDrop.querySelectorAll('.fdrop-item').forEach(el => {
+            el.addEventListener('click', () => {
+              vincularMiembro(el.dataset.id, c.id, c.lote);
+              msDrop.classList.remove('open');
+              msInput.value = '';
             });
-          }, 180);
-        });
+          });
+        }, 250));
       }
 
       ge('btn-crear-miembro')?.addEventListener('click', () => {
@@ -752,29 +749,25 @@ const ClientesUI = (() => {
 
       const fmSearch = ge('familia-master-search');
       const fmDrop = ge('familia-master-dropdown');
-      let fmTimeout = null;
       if (fmSearch) {
-        fmSearch.addEventListener('input', () => {
-          clearTimeout(fmTimeout);
+        fmSearch.addEventListener('input', window.SGA_Utils.debounce(() => {
           const q = fmSearch.value.trim();
           if (q.length < 2) { fmDrop.classList.remove('open'); return; }
-          fmTimeout = setTimeout(() => {
-            const res = SGA_Clientes.search(q).filter(r => r.es_master && r.id !== c.id);
-            if (!res.length) { fmDrop.classList.remove('open'); return; }
-            fmDrop.innerHTML = res.map(r =>
-              `<div class="fdrop-item" data-id="${r.id}">${esc(r.nombre)} ${esc(r.apellido || '')}${r.lote ? ` · Lote ${esc(r.lote)}` : ''}</div>`
-            ).join('');
-            fmDrop.classList.add('open');
-            fmDrop.querySelectorAll('.fdrop-item').forEach(el => {
-              el.addEventListener('click', () => {
-                vincularMiembro(c.id, el.dataset.id, null);
-                fmDrop.classList.remove('open');
-                fmSearch.value = '';
-                loadFichaData();
-              });
+          const res = SGA_Clientes.search(q).filter(r => r.es_master && r.id !== c.id);
+          if (!res.length) { fmDrop.classList.remove('open'); return; }
+          fmDrop.innerHTML = res.map(r =>
+            `<div class="fdrop-item" data-id="${r.id}">${esc(r.nombre)} ${esc(r.apellido || '')}${r.lote ? ` · Lote ${esc(r.lote)}` : ''}</div>`
+          ).join('');
+          fmDrop.classList.add('open');
+          fmDrop.querySelectorAll('.fdrop-item').forEach(el => {
+            el.addEventListener('click', () => {
+              vincularMiembro(c.id, el.dataset.id, null);
+              fmDrop.classList.remove('open');
+              fmSearch.value = '';
+              loadFichaData();
             });
-          }, 180);
-        });
+          });
+        }, 250));
       }
 
       ge('btn-hacerse-master')?.addEventListener('click', () => {
@@ -986,15 +979,11 @@ const ClientesUI = (() => {
   function wireEvents() {
     // Search / filter
     const searchInput = ge('cl-search-input');
-    let searchTimeout = null;
     if (searchInput) {
-      searchInput.addEventListener('input', () => {
-        clearTimeout(searchTimeout);
-        searchTimeout = setTimeout(() => {
-          filters.search = searchInput.value.trim();
-          renderList();
-        }, 200);
-      });
+      searchInput.addEventListener('input', window.SGA_Utils.debounce(() => {
+        filters.search = searchInput.value.trim();
+        renderList();
+      }, 250));
     }
 
     ge('toggle-con-deuda')?.addEventListener('click', function() {

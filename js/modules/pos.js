@@ -336,7 +336,7 @@ export const POS = (() => {
 
       const promociones = window.SGA_DB.query(promocionesSql, [now, now]);
       const aplicadas = [];
-      const updatedItems = JSON.parse(JSON.stringify(items)); // Deep copy
+      const updatedItems = structuredClone(items);
 
       for (const promo of promociones) {
         if (promo.tipo === 'descuento_cantidad') {
@@ -545,7 +545,8 @@ export const POS = (() => {
 
     // ── UTILS ──────────────────────────────────────────────────────
     const ge = id => document.getElementById(id);
-    const formatCurrency = v => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2 }).format(v || 0);
+    const formatCurrency = v => window.SGA_Utils.formatCurrency(v);
+    const safeOn = window.SGA_Utils.safeOn;
     const formatTime = iso => new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 
     const MEDIOS = [
@@ -603,7 +604,7 @@ export const POS = (() => {
     try {
       const saved = sessionStorage.getItem('pos_cart');
       if (saved) state.cart = JSON.parse(saved);
-    } catch(e) { /* ignore */ }
+    } catch(e) { console.warn('restore cart from sessionStorage:', e); }
     // Flag orphaned cart (uncontrolled exit): cart has items but we're in dashboard
     const _hasOrphanCart = state.cart.length > 0;
 
@@ -1211,7 +1212,7 @@ export const POS = (() => {
               const parsed = JSON.parse(saved);
               if (Array.isArray(parsed) && parsed.length > 0) hasActiveCart = true;
             }
-          } catch(e) {}
+          } catch(e) { console.warn('parse cart check:', e); }
           if (hasActiveCart) {
             if (!confirm('¿Abandonar la venta actual?')) return;
           }
@@ -1377,7 +1378,7 @@ export const POS = (() => {
         <button class="dp-btn" id="dp-btn-editar" ${canEditar ? '' : 'disabled'} title="${canEditar ? '' : 'Editar venta'}">✏️ Editar</button>
       `;
 
-      ge('dp-btn-reimprimir')?.addEventListener('click', () => {
+      safeOn('dp-btn-reimprimir', 'click', () => {
         const ticketData = {
           ventaId: venta.id,
           fecha: venta.fecha,
@@ -1393,7 +1394,7 @@ export const POS = (() => {
       });
 
       if (canAnular) {
-        ge('dp-btn-anular')?.addEventListener('click', () => {
+        safeOn('dp-btn-anular', 'click', () => {
           if (!confirm('¿Anular esta venta? Se restaurará el stock.')) return;
           const result = anularVenta(venta.id, 'Anulación manual');
           if (result.success) {
@@ -1407,7 +1408,7 @@ export const POS = (() => {
       }
 
       if (canEditar) {
-        ge('dp-btn-editar')?.addEventListener('click', () => {
+        safeOn('dp-btn-editar', 'click', () => {
           // Load sale into cart
           state.cart = venta.items.map(i => ({
             productoId: i.producto_id,
@@ -1731,12 +1732,12 @@ export const POS = (() => {
     window.addEventListener('navigation-blocked', window._posNavBlockedHandler);
 
     // Header buttons
-    ge('btn-nueva-venta')?.addEventListener('click', enterSaleMode);
-    ge('btn-pedidos-header')?.addEventListener('click', showModalPedidos);
-    ge('btn-devolucion-header')?.addEventListener('click', showModalDevolucion);
-    ge('btn-cerrar-caja')?.addEventListener('click', showModalCierre);
+    safeOn('btn-nueva-venta', 'click', enterSaleMode);
+    safeOn('btn-pedidos-header', 'click', showModalPedidos);
+    safeOn('btn-devolucion-header', 'click', showModalDevolucion);
+    safeOn('btn-cerrar-caja', 'click', showModalCierre);
     // Sale mode: back button
-    ge('btn-volver-dashboard')?.addEventListener('click', () => {
+    safeOn('btn-volver-dashboard', 'click', () => {
       if (state.editingVentaId) {
         if (!confirm('¿Cancelar edición? La venta volverá a su estado original.')) return;
         window.SGA_DB.run('UPDATE ventas SET estado = ? WHERE id = ?', ['completada', state.editingVentaId]);
@@ -1752,10 +1753,10 @@ export const POS = (() => {
     });
 
     // Detail panel close
-    ge('btn-close-detail')?.addEventListener('click', closeDetailPanel);
+    safeOn('btn-close-detail', 'click', closeDetailPanel);
 
     // Apertura confirm
-    ge('btn-apertura-confirm')?.addEventListener('click', () => {
+    safeOn('btn-apertura-confirm', 'click', () => {
       const saldo = parseFloat(ge('apertura-saldo-input')?.value) || 0;
       const result = abrirCaja(state.currentSucursal.id, state.currentUser.id, saldo);
       if (result.success) {
@@ -1768,20 +1769,20 @@ export const POS = (() => {
       }
     });
 
-    ge('apertura-saldo-input')?.addEventListener('keydown', e => {
+    safeOn('apertura-saldo-input', 'keydown', e => {
       if (e.key === 'Enter') ge('btn-apertura-confirm')?.click();
     });
 
     // Ticket
-    ge('btn-ticket-imprimir')?.addEventListener('click', () => window.print());
-    ge('btn-ticket-close')?.addEventListener('click',   finalizeSaleAndGoDashboard);
-    ge('btn-ticket-volver')?.addEventListener('click',  finalizeSaleAndGoDashboard);
-    ge('btn-ticket-confirmar')?.addEventListener('click', finalizeSaleAndGoDashboard);
+    safeOn('btn-ticket-imprimir', 'click', () => window.print());
+    safeOn('btn-ticket-close',   'click', finalizeSaleAndGoDashboard);
+    safeOn('btn-ticket-volver',  'click', finalizeSaleAndGoDashboard);
+    safeOn('btn-ticket-confirmar','click', finalizeSaleAndGoDashboard);
 
     // Cierre
-    ge('btn-cierre-close')?.addEventListener('click',   () => hideModal('modal-cierre'));
-    ge('btn-cierre-cancel')?.addEventListener('click',  () => hideModal('modal-cierre'));
-    ge('btn-cierre-confirm')?.addEventListener('click', () => {
+    safeOn('btn-cierre-close',  'click', () => hideModal('modal-cierre'));
+    safeOn('btn-cierre-cancel', 'click', () => hideModal('modal-cierre'));
+    safeOn('btn-cierre-confirm', 'click', () => {
       const billJson = JSON.parse(ge('billetes-json')?.value || '{}');
       const saldoReal = billJson.total || 0;
       const result = cerrarCaja(state.sesionActiva.id, saldoReal, billJson.billetes || {});
@@ -1805,10 +1806,10 @@ export const POS = (() => {
     });
 
     // Pedidos
-    ge('btn-pedidos-close')?.addEventListener('click', () => hideModal('modal-pedidos'));
+    safeOn('btn-pedidos-close', 'click', () => hideModal('modal-pedidos'));
 
     // Pausar venta
-    ge('btn-pausar-venta')?.addEventListener('click', () => {
+    safeOn('btn-pausar-venta', 'click', () => {
       if (!state.cart.length) return;
       const nombre = prompt('Nombre para el pedido (opcional):') || '';
       const result = pausarVenta({
@@ -1949,25 +1950,25 @@ export const POS = (() => {
       });
     }
 
-    ge('btn-clear-client')?.addEventListener('click', clearCliente);
+    safeOn('btn-clear-client', 'click', clearCliente);
 
-    ge('chk-aplicar-favor')?.addEventListener('change', e => {
+    safeOn('chk-aplicar-favor', 'change', e => {
       state.ccAplicarFavor = e.target.checked;
       renderFavorSection();
       autoFillPayment(); // re-renders payment inputs with updated effTotal
     });
 
-    ge('chk-registrar-deuda')?.addEventListener('change', e => {
+    safeOn('chk-registrar-deuda', 'change', e => {
       state.ccRegistrarDeuda = e.target.checked;
       renderDebtToggle();
       updateConfirmBtn();
     });
 
     // Cliente rápido
-    ge('btn-cliente-rapido')?.addEventListener('click', () => showModal('modal-cliente-rapido'));
-    ge('btn-crapido-close')?.addEventListener('click',  () => hideModal('modal-cliente-rapido'));
-    ge('btn-crapido-cancel')?.addEventListener('click', () => hideModal('modal-cliente-rapido'));
-    ge('btn-crapido-confirm')?.addEventListener('click', () => {
+    safeOn('btn-cliente-rapido', 'click', () => showModal('modal-cliente-rapido'));
+    safeOn('btn-crapido-close',  'click', () => hideModal('modal-cliente-rapido'));
+    safeOn('btn-crapido-cancel', 'click', () => hideModal('modal-cliente-rapido'));
+    safeOn('btn-crapido-confirm', 'click', () => {
       const nombre = ge('crapido-nombre')?.value.trim();
       if (!nombre) { alert('El nombre es obligatorio'); return; }
       const id = window.SGA_Utils.generateUUID();
@@ -1981,7 +1982,7 @@ export const POS = (() => {
     });
 
     // Confirm venta
-    ge('btn-confirm-venta')?.addEventListener('click', () => {
+    safeOn('btn-confirm-venta', 'click', () => {
       if (!state.sesionActiva || !state.cart.length) return;
       // Safety: toggles that require a client
       if (ge('chk-saldo-favor')?.checked && !state.clienteId) {
@@ -2115,21 +2116,21 @@ export const POS = (() => {
     });
 
     // Discount modal
-    ge('btn-desc-close')?.addEventListener('click',   () => hideModal('modal-desc'));
-    ge('btn-desc-cancel')?.addEventListener('click',  () => hideModal('modal-desc'));
-    ge('btn-desc-pct')?.addEventListener('click', () => {
+    safeOn('btn-desc-close',   'click', () => hideModal('modal-desc'));
+    safeOn('btn-desc-cancel',  'click', () => hideModal('modal-desc'));
+    safeOn('btn-desc-pct', 'click', () => {
       state.descTipo = 'pct';
       ge('btn-desc-pct').classList.add('active');
       ge('btn-desc-monto').classList.remove('active');
       ge('desc-input-label').textContent = 'Descuento (%)';
     });
-    ge('btn-desc-monto')?.addEventListener('click', () => {
+    safeOn('btn-desc-monto', 'click', () => {
       state.descTipo = 'monto';
       ge('btn-desc-monto').classList.add('active');
       ge('btn-desc-pct').classList.remove('active');
       ge('desc-input-label').textContent = 'Descuento ($)';
     });
-    ge('btn-desc-confirm')?.addEventListener('click', () => {
+    safeOn('btn-desc-confirm', 'click', () => {
       const idx  = state.descItemIdx;
       const item = state.cart[idx];
       if (!item) { hideModal('modal-desc'); return; }
@@ -2144,9 +2145,9 @@ export const POS = (() => {
     });
 
     // Devolucion
-    ge('btn-devolucion-close')?.addEventListener('click',  () => hideModal('modal-devolucion'));
-    ge('btn-devolucion-cancel')?.addEventListener('click', () => hideModal('modal-devolucion'));
-    ge('btn-devolucion-buscar')?.addEventListener('click', () => {
+    safeOn('btn-devolucion-close',  'click', () => hideModal('modal-devolucion'));
+    safeOn('btn-devolucion-cancel', 'click', () => hideModal('modal-devolucion'));
+    safeOn('btn-devolucion-buscar', 'click', () => {
       const vid = ge('devolucion-venta-id')?.value.trim();
       if (!vid) return;
       const venta = getVentaDetail(vid);
@@ -2181,7 +2182,7 @@ export const POS = (() => {
       confirmBtn.style.display = 'inline-flex';
       confirmBtn.dataset.ventaId = venta.id;
     });
-    ge('btn-devolucion-confirm')?.addEventListener('click', () => {
+    safeOn('btn-devolucion-confirm', 'click', () => {
       const vid = ge('btn-devolucion-confirm').dataset.ventaId;
       const motivo = ge('devolucion-motivo')?.value.trim() || 'Anulación';
       const result = anularVenta(vid, motivo);
@@ -2618,13 +2619,9 @@ export const POS = (() => {
     getStockActual,
     init
   };
-
-  // Attach to window for global access
-  window.SGA_POS = POS;
-  console.log('💳 SGA_POS attached to window');
-
-  return POS;
 })();
 
-// Also export as module default
+// Attach to window for cross-module access
+window.SGA_POS = POS;
+
 export default POS;

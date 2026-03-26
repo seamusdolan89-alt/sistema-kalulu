@@ -41,14 +41,8 @@ const Caja = (() => {
       .replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-  const fmtPeso = (n) =>
-    '$' + (parseFloat(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-
-  const fmtFecha = (str) => {
-    if (!str) return '—';
-    const d = new Date(str);
-    return d.toLocaleDateString('es-AR') + ' ' + d.toTimeString().slice(0, 5);
-  };
+  const fmtPeso = (n) => window.SGA_Utils.formatCurrency(n);
+  const fmtFecha = (str) => window.SGA_Utils.formatFecha(str);
 
   // ── PERMISSION ───────────────────────────────────────────────────────────────
 
@@ -170,6 +164,7 @@ const Caja = (() => {
       );
       return { success: true, sesionId: id };
     } catch (e) {
+      console.error('abrirCaja:', e);
       return { success: false, error: e.message };
     }
   }
@@ -186,6 +181,7 @@ const Caja = (() => {
       );
       return { success: true };
     } catch (e) {
+      console.error('registrarEgreso:', e);
       return { success: false, error: e.message };
     }
   }
@@ -202,6 +198,7 @@ const Caja = (() => {
       );
       return { success: true };
     } catch (e) {
+      console.error('registrarIngreso:', e);
       return { success: false, error: e.message };
     }
   }
@@ -226,6 +223,7 @@ const Caja = (() => {
       );
       return { success: true, diferencia };
     } catch (e) {
+      console.error('cerrarCaja:', e);
       return { success: false, error: e.message };
     }
   }
@@ -860,7 +858,7 @@ const Caja = (() => {
     const s = rows[0];
 
     let billetes = {};
-    try { billetes = JSON.parse(s.detalle_billetes || '{}'); } catch (e) { /* ignore */ }
+    try { billetes = JSON.parse(s.detalle_billetes || '{}'); } catch (e) { console.warn('parse detalle_billetes:', e); }
 
     const totalVentas = ((window.SGA_DB.query(
       `SELECT COALESCE(SUM(total), 0) AS t FROM ventas WHERE sesion_caja_id = ? AND estado = 'completada'`,

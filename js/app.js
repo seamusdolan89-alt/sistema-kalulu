@@ -277,6 +277,6 @@
     init();
   }
 
-  // Export app object for debugging
-  window.SK_App = app;
+  // Export app object for debugging (dev mode only)
+  if (localStorage.getItem('dev_mode') === 'true') window.SK_App = app;
 })();

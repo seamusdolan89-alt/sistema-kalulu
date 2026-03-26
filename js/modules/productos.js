@@ -47,9 +47,7 @@
   };
 
 
-  const formatCurrency = (value) => {
-    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2 }).format(value);
-  };
+  const formatCurrency = (value) => window.SGA_Utils.formatCurrency(value);
 
 
   const getElement = (id) => document.getElementById(id);
@@ -1687,7 +1685,7 @@
     // FIX 1: Search bar with predictive dropdown
     const searchInput = getElement('search-productos');
     if (searchInput) {
-      searchInput.addEventListener('input', (e) => {
+      searchInput.addEventListener('input', window.SGA_Utils.debounce((e) => {
         state.filters.query = e.target.value;
         state.page = 1;
         applyFilters();
@@ -1697,7 +1695,7 @@
         } else {
           closeSearchDropdown();
         }
-      });
+      }, 250));
       searchInput.addEventListener('keydown', onSearchKeyDown);
       searchInput.addEventListener('blur', () => {
         setTimeout(closeSearchDropdown, 150);
@@ -1869,4 +1867,5 @@
 })();
 
 
+window.SGA_Productos = Productos;
 export default Productos;
