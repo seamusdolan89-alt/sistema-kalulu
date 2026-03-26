@@ -14,23 +14,6 @@ export const POS = (() => {
   'use strict';
 
   /**
-   * Get active caja session for a sucursal
-   * 
-   * @param {string} sucursalId - Sucursal ID
-   * @returns {Object} Session object or null
-   */
-  function getSesionActiva(sucursalId) {
-    const sql = `
-      SELECT * FROM sesiones_caja
-      WHERE sucursal_id = ? AND estado = 'abierta'
-      ORDER BY fecha_apertura DESC
-      LIMIT 1
-    `;
-    const results = window.SGA_DB.query(sql, [sucursalId]);
-    return results.length > 0 ? results[0] : null;
-  }
-
-  /**
    * Open a new caja session
    * 
    * @param {string} sucursalId - Sucursal ID
@@ -157,11 +140,21 @@ export const POS = (() => {
         now
       ]);
 
-      // If updating, delete old items and payments, and restore stock (simplified, no stock adjustment for now)
+      // If updating, restore stock from old items first, then delete and re-apply
       if (existingVentaId) {
+        const oldItems = window.SGA_DB.query(
+          'SELECT producto_id, cantidad FROM venta_items WHERE venta_id = ?',
+          [ventaId]
+        );
+        for (const old of oldItems) {
+          window.SGA_DB.run(
+            `UPDATE stock SET cantidad = cantidad + ?, fecha_modificacion = ?, sync_status = ?, updated_at = ?
+             WHERE producto_id = ? AND sucursal_id = ?`,
+            [old.cantidad, now, 'pending', now, old.producto_id, sucursalId]
+          );
+        }
         window.SGA_DB.run('DELETE FROM venta_items WHERE venta_id = ?', [ventaId]);
         window.SGA_DB.run('DELETE FROM venta_pagos WHERE venta_id = ?', [ventaId]);
-        // TODO: restore stock from old items
       }
 
       // INSERT venta_items
@@ -562,7 +555,7 @@ export const POS = (() => {
       { id: 'transferencia', nombre: 'Transferencia', icon: '🏦' },
     ];
 
-    const DENOMINACIONES = [1000, 2000, 5000, 10000, 20000, 50000];
+    const DENOMINACIONES = window.SGA_Utils.DENOMINACIONES;
 
     // ── SUCURSAL LOAD ───────────────────────────────────────────────
     if (state.currentUser && state.currentUser.sucursal_id) {
@@ -1161,7 +1154,7 @@ export const POS = (() => {
 
     const checkSesion = () => {
       try {
-        state.sesionActiva = getSesionActiva(state.currentSucursal.id);
+        state.sesionActiva = window.SGA_Caja.getSesionActiva(state.currentSucursal.id);
         updateHeaderStatus();
       } catch(e) {
         console.error('checkSesion:', e);
@@ -1766,7 +1759,7 @@ export const POS = (() => {
       const saldo = parseFloat(ge('apertura-saldo-input')?.value) || 0;
       const result = abrirCaja(state.currentSucursal.id, state.currentUser.id, saldo);
       if (result.success) {
-        state.sesionActiva = getSesionActiva(state.currentSucursal.id);
+        state.sesionActiva = window.SGA_Caja.getSesionActiva(state.currentSucursal.id);
         hideModal('modal-apertura');
         updateHeaderStatus();
         loadDashboard();
@@ -2606,7 +2599,6 @@ export const POS = (() => {
 
   // Public API
   return {
-    getSesionActiva,
     abrirCaja,
     registrarVenta,
     calcularVuelto,

@@ -216,7 +216,10 @@
    */
   async function init() {
     console.log('🚀 Sistema Kalulu iniciando...');
-    
+
+    // Initialize globals before any module loads
+    window.SGA_POS_ACTIVE_SALE = false;
+
     try {
       // Initialize database
       console.log('🔄 Initializing database...');
@@ -236,6 +239,9 @@
         }
       }
       
+      // Pre-load caja module so window.SGA_Caja is always available (used by POS data layer)
+      await import('./modules/caja.js');
+
       // Check authentication
       console.log('🔐 Checking authentication...');
       const isAuth = await checkAuth();

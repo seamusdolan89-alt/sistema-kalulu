@@ -86,9 +86,24 @@ const SGA_Clientes = (() => {
 
     if (soloConDeuda) return rows.filter(r => r.saldo_actual > 0);
 
-    // Attach deuda_lote for masters
+    // Batch-fetch deuda_lote for all masters in one query instead of N per-row calls
+    const masterIds = rows.filter(r => r.es_master).map(r => r.id);
+    if (!masterIds.length) return rows;
+    const ph = masterIds.map(() => '?').join(',');
+    const saldoLoteRows = db().query(`
+      SELECT
+        CASE WHEN c.cliente_master_id IS NOT NULL THEN c.cliente_master_id ELSE c.id END AS master_id,
+        COALESCE(SUM(cc.monto), 0) AS saldo
+      FROM cuenta_corriente cc
+      JOIN clientes c ON c.id = cc.cliente_id
+      WHERE c.cliente_master_id IN (${ph}) OR (c.id IN (${ph}) AND c.es_master = 1)
+      GROUP BY master_id
+    `, [...masterIds, ...masterIds]);
+    const saldoLoteMap = {};
+    saldoLoteRows.forEach(r => { saldoLoteMap[r.master_id] = r.saldo; });
+
     return rows.map(r => {
-      if (r.es_master) r.deuda_lote = getSaldoLote(r.id);
+      if (r.es_master) r.deuda_lote = saldoLoteMap[r.id] || 0;
       return r;
     });
   }
@@ -173,11 +188,51 @@ const SGA_Clientes = (() => {
         AND (c.nombre LIKE ? OR c.apellido LIKE ? OR c.telefono LIKE ? OR c.lote LIKE ?)
       ORDER BY c.nombre LIMIT 10
     `, [like, like, like, like]);
-    return rows.map(r => ({
-      ...r,
-      tope_disponible: getTopeDisponible(r.id),
-      deuda_lote: r.es_master ? getSaldoLote(r.id) : null,
-    }));
+    if (!rows.length) return rows;
+
+    // Batch query 1: saldo_lote for all master IDs referenced (masters + member's masters)
+    const allMasterIds = [...new Set(
+      rows.flatMap(r => r.cliente_master_id ? [r.cliente_master_id] : (r.es_master ? [r.id] : []))
+    )];
+    let saldoLoteMap = {};
+    if (allMasterIds.length) {
+      const ph = allMasterIds.map(() => '?').join(',');
+      db().query(`
+        SELECT
+          CASE WHEN c.cliente_master_id IS NOT NULL THEN c.cliente_master_id ELSE c.id END AS master_id,
+          COALESCE(SUM(cc.monto), 0) AS saldo
+        FROM cuenta_corriente cc
+        JOIN clientes c ON c.id = cc.cliente_id
+        WHERE c.cliente_master_id IN (${ph}) OR (c.id IN (${ph}) AND c.es_master = 1)
+        GROUP BY master_id
+      `, [...allMasterIds, ...allMasterIds]).forEach(r => { saldoLoteMap[r.master_id] = r.saldo; });
+    }
+
+    // Batch query 2: tope_deuda for masters that appear as members' masters
+    const memberMasterIds = [...new Set(rows.filter(r => r.cliente_master_id).map(r => r.cliente_master_id))];
+    let masterTopeMap = {};
+    if (memberMasterIds.length) {
+      const ph = memberMasterIds.map(() => '?').join(',');
+      db().query(`SELECT id, tope_deuda FROM clientes WHERE id IN (${ph})`, memberMasterIds)
+        .forEach(r => { masterTopeMap[r.id] = r.tope_deuda || 0; });
+    }
+
+    return rows.map(r => {
+      let tope_disponible;
+      if (r.cliente_master_id) {
+        const tope = masterTopeMap[r.cliente_master_id] || 0;
+        tope_disponible = tope - Math.max(0, saldoLoteMap[r.cliente_master_id] || 0);
+      } else if (r.es_master) {
+        tope_disponible = (r.tope_deuda || 0) - Math.max(0, saldoLoteMap[r.id] || 0);
+      } else {
+        tope_disponible = (r.tope_deuda || 0) - Math.max(0, r.saldo_actual || 0);
+      }
+      return {
+        ...r,
+        tope_disponible,
+        deuda_lote: r.es_master ? (saldoLoteMap[r.id] || 0) : null,
+      };
+    });
   }
 
   function crear(data) {
