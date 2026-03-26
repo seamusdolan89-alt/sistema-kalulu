@@ -82,9 +82,12 @@
     border-bottom: 2px solid var(--color-border);
     background: var(--color-background);
     padding: 0 20px;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
+  .caja-tabs::-webkit-scrollbar { display: none; }
   .caja-tab {
-    padding: 12px 20px;
+    padding: 12px 16px;
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
