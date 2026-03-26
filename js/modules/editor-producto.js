@@ -375,8 +375,8 @@ const EditorProducto = (() => {
       <div class="form-group">
         <label for="ed-cant-pedido">Pedido sugerido</label>
         <div style="display:flex;gap:8px">
-          <input type="number" id="ed-cant-pedido" class="input-full" step="1" min="0" placeholder="ej: 2" value="${cantPedido}">
-          <select id="ed-pedido-unidad" class="select-full" style="flex:0 0 auto;min-width:130px">
+          <input type="number" id="ed-cant-pedido" class="input-full" step="1" min="0" placeholder="ej: 2" value="${cantPedido}" style="flex:1;min-width:0">
+          <select id="ed-pedido-unidad" class="select-full" style="flex:0 0 140px;width:140px">
             <option value="unidad"        ${pedidoUnidad === 'unidad'        ? 'selected' : ''}>Unidad</option>
             <option value="kg"            ${pedidoUnidad === 'kg'            ? 'selected' : ''}>Kg</option>
             <option value="bulto_cerrado" ${pedidoUnidad === 'bulto_cerrado' ? 'selected' : ''}>Bulto cerrado</option>
