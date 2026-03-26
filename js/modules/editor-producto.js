@@ -169,6 +169,17 @@ const EditorProducto = (() => {
     const cantPedido  = p.cant_pedido || 0;
     const isActivo    = p.activo === 1 || p.activo === '1';
 
+    const BULK_UNITS  = ['bulto_cerrado', 'pack', 'display', 'bolsa'];
+    const BULK_LABEL  = { bulto_cerrado: 'bulto cerrado', pack: 'pack', display: 'display', bolsa: 'bolsa' };
+    const BULK_PLURAL = { bulto_cerrado: 'Bultos cerrados', pack: 'Packs', display: 'Displays', bolsa: 'Bolsas' };
+    const pedidoUnidad = p.pedido_unidad || 'unidad';
+    const isBulkInit   = BULK_UNITS.includes(pedidoUnidad);
+    const uppInit      = p.pedido_unidades_por_paquete != null ? p.pedido_unidades_por_paquete : '';
+    const showInfoInit = isBulkInit && uppInit !== '' && cantPedido > 0;
+    const infoTextInit = showInfoInit
+      ? `📦 Pedido sugerido: ${cantPedido} ${BULK_PLURAL[pedidoUnidad]} = ${cantPedido * uppInit} unidades`
+      : '';
+
     return `
 <div class="editor-content-area">
 
@@ -364,16 +375,21 @@ const EditorProducto = (() => {
       <div class="form-group">
         <label for="ed-cant-pedido">Pedido sugerido</label>
         <div style="display:flex;gap:8px">
-          <input type="number" id="ed-cant-pedido" class="input-full" step="1" min="0" value="${cantPedido}">
+          <input type="number" id="ed-cant-pedido" class="input-full" step="1" min="0" placeholder="ej: 2" value="${cantPedido}">
           <select id="ed-pedido-unidad" class="select-full" style="flex:0 0 auto;min-width:130px">
-            <option value="unidad"        ${(p.pedido_unidad || 'unidad') === 'unidad'        ? 'selected' : ''}>Unidad</option>
-            <option value="kg"            ${(p.pedido_unidad || '') === 'kg'            ? 'selected' : ''}>Kg</option>
-            <option value="bulto_cerrado" ${(p.pedido_unidad || '') === 'bulto_cerrado' ? 'selected' : ''}>Bulto cerrado</option>
-            <option value="pack"          ${(p.pedido_unidad || '') === 'pack'          ? 'selected' : ''}>Pack</option>
-            <option value="display"       ${(p.pedido_unidad || '') === 'display'       ? 'selected' : ''}>Display</option>
-            <option value="bolsa"         ${(p.pedido_unidad || '') === 'bolsa'         ? 'selected' : ''}>Bolsa</option>
+            <option value="unidad"        ${pedidoUnidad === 'unidad'        ? 'selected' : ''}>Unidad</option>
+            <option value="kg"            ${pedidoUnidad === 'kg'            ? 'selected' : ''}>Kg</option>
+            <option value="bulto_cerrado" ${pedidoUnidad === 'bulto_cerrado' ? 'selected' : ''}>Bulto cerrado</option>
+            <option value="pack"          ${pedidoUnidad === 'pack'          ? 'selected' : ''}>Pack</option>
+            <option value="display"       ${pedidoUnidad === 'display'       ? 'selected' : ''}>Display</option>
+            <option value="bolsa"         ${pedidoUnidad === 'bolsa'         ? 'selected' : ''}>Bolsa</option>
           </select>
         </div>
+        <div id="ed-unidades-paquete-wrap" style="display:${isBulkInit ? '' : 'none'};margin-top:8px">
+          <label for="ed-pedido-unidades-paquete" style="font-size:12px;color:var(--color-text-secondary);margin-bottom:4px;display:block">¿Cuántas unidades trae cada ${BULK_LABEL[pedidoUnidad] || 'paquete'}?</label>
+          <input type="number" id="ed-pedido-unidades-paquete" class="input-full" min="1" step="1" placeholder="ej: 12" value="${uppInit}">
+        </div>
+        <div id="ed-pedido-info" style="display:${showInfoInit ? '' : 'none'};margin-top:8px;font-size:13px;color:var(--color-text-secondary)">${infoTextInit}</div>
         <small class="ed-text-muted">Cantidad y unidad a pedir al reponer stock</small>
       </div>
     </div>
@@ -1609,6 +1625,40 @@ const EditorProducto = (() => {
       : '<p class="ed-text-muted">Este producto no pertenece a ninguna promoción activa.</p>';
   };
 
+  // ── PEDIDO UNIDAD UI ───────────────────────────────────────────────────────
+
+  const BULK_UNITS_EV  = ['bulto_cerrado', 'pack', 'display', 'bolsa'];
+  const BULK_LABEL_EV  = { bulto_cerrado: 'bulto cerrado', pack: 'pack', display: 'display', bolsa: 'bolsa' };
+  const BULK_PLURAL_EV = { bulto_cerrado: 'Bultos cerrados', pack: 'Packs', display: 'Displays', bolsa: 'Bolsas' };
+
+  const updatePedidoInfoLine = () => {
+    const infoDiv = ge('ed-pedido-info');
+    if (!infoDiv) return;
+    const unidad = (ge('ed-pedido-unidad') || {}).value || 'unidad';
+    const isBulk = BULK_UNITS_EV.includes(unidad);
+    const cant   = parseFloat((ge('ed-cant-pedido') || {}).value) || 0;
+    const upp    = parseFloat((ge('ed-pedido-unidades-paquete') || {}).value) || 0;
+    if (isBulk && upp > 0 && cant > 0) {
+      infoDiv.style.display = '';
+      infoDiv.textContent = `📦 Pedido sugerido: ${cant} ${BULK_PLURAL_EV[unidad]} = ${cant * upp} unidades`;
+    } else {
+      infoDiv.style.display = 'none';
+      infoDiv.textContent = '';
+    }
+  };
+
+  const updatePedidoUnidadUI = () => {
+    const unidad = (ge('ed-pedido-unidad') || {}).value || 'unidad';
+    const isBulk = BULK_UNITS_EV.includes(unidad);
+    const wrap   = ge('ed-unidades-paquete-wrap');
+    if (wrap) {
+      wrap.style.display = isBulk ? '' : 'none';
+      const label = wrap.querySelector('label');
+      if (label) label.textContent = `¿Cuántas unidades trae cada ${BULK_LABEL_EV[unidad] || 'paquete'}?`;
+    }
+    updatePedidoInfoLine();
+  };
+
   // ── EVENTS ─────────────────────────────────────────────────────────────────
 
   const attachEvents = () => {
@@ -1625,7 +1675,7 @@ const EditorProducto = (() => {
     ge('ed-btn-cancel') && ge('ed-btn-cancel').addEventListener('click', handleCancel);
 
     // Dirty tracking
-    ['ed-nombre', 'ed-descripcion', 'ed-costo', 'ed-precio-venta', 'ed-stock-alerta', 'ed-cant-pedido'].forEach(id => {
+    ['ed-nombre', 'ed-descripcion', 'ed-costo', 'ed-precio-venta', 'ed-stock-alerta', 'ed-cant-pedido', 'ed-pedido-unidades-paquete'].forEach(id => {
       const el = ge(id);
       if (el) el.addEventListener('input', markDirty);
     });
@@ -1633,6 +1683,15 @@ const EditorProducto = (() => {
       const el = ge(id);
       if (el) el.addEventListener('change', markDirty);
     });
+
+    // Pedido sugerido: Enter to save, live info line
+    const cantPedidoEl = ge('ed-cant-pedido');
+    if (cantPedidoEl) {
+      cantPedidoEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveAll(); } });
+      cantPedidoEl.addEventListener('input', updatePedidoInfoLine);
+    }
+    ge('ed-pedido-unidad') && ge('ed-pedido-unidad').addEventListener('change', () => { markDirty(); updatePedidoUnidadUI(); });
+    ge('ed-pedido-unidades-paquete') && ge('ed-pedido-unidades-paquete').addEventListener('input', updatePedidoInfoLine);
 
     // Toggle label
     const activoChk = ge('ed-activo');
@@ -1883,8 +1942,10 @@ const EditorProducto = (() => {
     const imagen = state.imagenDeleted ? null
       : (state.imagenBase64 || state.producto.imagen || null);
 
-    const stockAlerta  = parseFloat((ge('ed-stock-alerta')  || {}).value) || 0;
-    const cantPedido   = parseFloat((ge('ed-cant-pedido')   || {}).value) || 0;
+    const stockAlerta        = parseFloat((ge('ed-stock-alerta')             || {}).value) || 0;
+    const cantPedido         = parseFloat((ge('ed-cant-pedido')              || {}).value) || 0;
+    const uppRaw             = (ge('ed-pedido-unidades-paquete') || {}).value;
+    const unidadesPorPaquete = uppRaw !== '' ? (parseFloat(uppRaw) || null) : null;
 
     window.SGA_DB.run(`
       UPDATE productos SET
@@ -1892,7 +1953,7 @@ const EditorProducto = (() => {
         categoria_id = ?, proveedor_principal_id = ?, proveedor_alternativo_id = ?,
         unidad_medida = ?,
         costo = ?, precio_venta = ?,
-        stock_minimo = ?, stock_alerta = ?, cant_pedido = ?, pedido_unidad = ?,
+        stock_minimo = ?, stock_alerta = ?, cant_pedido = ?, pedido_unidad = ?, pedido_unidades_por_paquete = ?,
         activo = ?,
         es_madre = ?, producto_madre_id = ?, precio_independiente = ?,
         imagen = ?,
@@ -1911,6 +1972,7 @@ const EditorProducto = (() => {
       stockAlerta,
       cantPedido,
       (ge('ed-pedido-unidad') || {}).value || 'unidad',
+      unidadesPorPaquete,
       (ge('ed-activo') || {}).checked ? 1 : 0,
       state.producto.es_madre ? 1 : 0,
       state.producto.es_madre ? null : (state.producto.producto_madre_id || null),

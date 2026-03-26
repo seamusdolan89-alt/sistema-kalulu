@@ -615,6 +615,7 @@
       'ALTER TABLE clientes ADD COLUMN cliente_master_id TEXT',
       'ALTER TABLE clientes ADD COLUMN es_master INTEGER DEFAULT 0',
       'ALTER TABLE clientes ADD COLUMN ultima_visita TEXT',
+      'ALTER TABLE productos ADD COLUMN pedido_unidades_por_paquete REAL DEFAULT NULL',
     ];
     for (const sql of columnAlterations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }
