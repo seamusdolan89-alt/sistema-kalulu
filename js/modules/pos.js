@@ -538,7 +538,7 @@ export const POS = (() => {
       sesionActiva: null,
       activeMedios: new Set(['efectivo']),
       pagosAmounts: { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0, cuenta_corriente: 0 },
-      recibeEfectivo: 0,
+      recibeEfectivo: null,
       descuentoGlobal: 0,
       descItemIdx: null,
       descTipo: 'monto',
@@ -788,7 +788,7 @@ export const POS = (() => {
       const debtRow = ge('debt-toggle-row');
       if (!el) return;
 
-      if (recibe <= 0) {
+      if (recibe === null) {
         // Special case: saldo a favor fully covers this sale
         if (state.ccAplicarFavor && state.clienteSaldo < -0.01 && effTotal < 0.01) {
           const applied = Math.min(Math.abs(state.clienteSaldo), getCartTotal());
@@ -886,7 +886,7 @@ export const POS = (() => {
         const m = MEDIOS.find(x => x.id === mid);
         if (!m) continue;
         if (mid === 'efectivo') {
-          if (isFavorCovered) state.recibeEfectivo = 0; // reset to 0 when fully covered
+          if (isFavorCovered) state.recibeEfectivo = null; // reset when fully covered by saldo a favor
           html += `<div class="pinput-row" data-medio="efectivo">
             <div class="pinput-label">${m.icon} ${m.nombre}</div>
             <div class="pinput-sub-lbl">Total a cobrar</div>
@@ -894,7 +894,7 @@ export const POS = (() => {
             <div class="recibe-row" style="margin-top:8px">
               <span>Recibe $</span>
               <input type="number" class="recibe-field" id="recibe-efectivo"
-                value="${state.recibeEfectivo > 0 && !isFavorCovered ? state.recibeEfectivo.toFixed(2) : ''}"
+                value="${state.recibeEfectivo !== null && !isFavorCovered ? state.recibeEfectivo.toFixed(2) : ''}"
                 min="0" step="0.01" placeholder="${isFavorCovered ? '0,00' : effTotal.toFixed(2)}"
                 ${isFavorCovered ? 'readonly style="background:#f5f5f5;color:#aaa"' : ''}
                 autocomplete="off">
@@ -924,7 +924,9 @@ export const POS = (() => {
       const recibeEl = ge('recibe-efectivo');
       if (recibeEl) {
         recibeEl.addEventListener('input', () => {
-          state.recibeEfectivo = parseFloat(recibeEl.value) || 0;
+          const raw = recibeEl.value.trim();
+          const isEmpty = raw === '';
+          state.recibeEfectivo = isEmpty ? null : (parseFloat(raw) || 0);
           renderVuelto();
         });
         // Trigger initial vuelto render
@@ -961,14 +963,12 @@ export const POS = (() => {
       // so asig >= tot is always true even when cashier typed less in "Recibe $".
       // We must also check recibeEfectivo explicitly when it's been entered and is short.
       const recibeShort = state.activeMedios.has('efectivo') &&
-        state.recibeEfectivo > 0 && state.recibeEfectivo < tot - 0.01;
+        state.recibeEfectivo !== null && state.recibeEfectivo < tot - 0.01;
 
-      // Block if efectivo is active, nothing was entered (recibe=0), and nothing else covers:
-      // - saldo a favor is not ON or doesn't cover
-      // - not registering as deuda
+      // Block if efectivo is active and field is empty (null = cashier hasn't typed anything yet)
       const saldoFavorCovers = state.ccAplicarFavor && state.clienteSaldo < -0.01 && tot < 0.01;
       const recibeNotEntered = state.activeMedios.has('efectivo') &&
-        state.recibeEfectivo === 0 && tot > 0.01 &&
+        state.recibeEfectivo === null && tot > 0.01 &&
         !saldoFavorCovers && !state.ccRegistrarDeuda;
 
       // Payment is covered if: full amount received AND no efectivo shortfall,
@@ -1091,7 +1091,7 @@ export const POS = (() => {
       if (chkDeuda) { chkDeuda.checked = false; chkDeuda.disabled = false; }
       const inp = ge('client-search-input');
       if (inp) inp.value = '';
-      state.recibeEfectivo = 0;
+      state.recibeEfectivo = null;
       renderDebtToggle();
       autoFillPayment();
     };
@@ -1194,7 +1194,7 @@ export const POS = (() => {
       state.cart = [];
       state.pagosAmounts = { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0, cuenta_corriente: 0 };
       state.activeMedios = new Set(['efectivo']);
-      state.recibeEfectivo = 0;
+      state.recibeEfectivo = null;
       state.ccCobrarDeuda = false;
       state.ccAplicarFavor = false;
       clearCliente();
@@ -1229,6 +1229,7 @@ export const POS = (() => {
       }
       state.mode = 'sale';
       window.SGA_POS_ACTIVE_SALE = true;
+      state.recibeEfectivo = null; // always start with blank "Recibe $" — cashier must enter explicitly
       if (retomar) saveCart(); // persist recovered cart to sessionStorage for nav guard
       const dash = ge('pos-dashboard');
       const sale = ge('pos-sale');
@@ -2022,7 +2023,9 @@ export const POS = (() => {
       // Final safety: catch efectivo shortfall regardless of how confirm was triggered (click, F10, etc.)
       const recibeShortFinal = state.activeMedios.has('efectivo') &&
         state.recibeEfectivo > 0 && state.recibeEfectivo < effTotal - 0.01;
-      if ((asig < effTotal - 0.01 || recibeShortFinal) && !state.ccRegistrarDeuda) {
+      const recibeZeroFinal = state.activeMedios.has('efectivo') &&
+        (state.recibeEfectivo === 0 || state.recibeEfectivo === null) && effTotal > 0.01;
+      if ((asig < effTotal - 0.01 || recibeShortFinal || recibeZeroFinal) && !state.ccRegistrarDeuda) {
         alert('Pago insuficiente. El monto recibido no cubre el total.');
         return;
       }
