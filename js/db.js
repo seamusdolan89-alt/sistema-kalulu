@@ -483,6 +483,21 @@
       `);
     } catch(e) { console.warn('stock_ajustes:', e.message); }
 
+    // stock_ajustes — add approval columns for pending devolucion adjustments
+    const stockAjustesMigrations = [
+      `ALTER TABLE stock_ajustes ADD COLUMN estado TEXT DEFAULT 'aprobado'`,
+      `ALTER TABLE stock_ajustes ADD COLUMN aprobado_por TEXT`,
+      `ALTER TABLE stock_ajustes ADD COLUMN fecha_aprobacion TEXT`,
+    ];
+    for (const sql of stockAjustesMigrations) {
+      try { database.run(sql); } catch(e) { /* column already exists */ }
+    }
+
+    // devoluciones — add reintegro_tipo column
+    try {
+      database.run(`ALTER TABLE devoluciones ADD COLUMN reintegro_tipo TEXT`);
+    } catch(e) { /* column already exists */ }
+
     // ingresos_caja — extra cash received during a session
     try {
       database.run(`

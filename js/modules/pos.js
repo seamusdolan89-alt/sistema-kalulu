@@ -1163,6 +1163,23 @@ export const POS = (() => {
       }
     };
 
+    // ── PEDIDOS BADGE ───────────────────────────────────────────────
+    const updatePedidosBadge = () => {
+      const badge = ge('pedidos-count-badge');
+      if (!badge || !state.currentSucursal) return;
+      try {
+        const rows = window.SGA_DB.query(
+          'SELECT COUNT(*) AS cnt FROM pedidos_abiertos WHERE sucursal_id = ?',
+          [state.currentSucursal.id]
+        );
+        const cnt = (rows[0]?.cnt) || 0;
+        badge.textContent = cnt;
+        badge.style.display = cnt > 0 ? 'flex' : 'none';
+      } catch (e) {
+        badge.style.display = 'none';
+      }
+    };
+
     // ── MODE SWITCHING ─────────────────────────────────────────────
     const enterDashboard = () => {
       state.mode = 'dashboard';
@@ -1299,6 +1316,7 @@ export const POS = (() => {
 
       ge('ventas-count-badge').textContent = ventas.filter(v => v.estado === 'completada').length;
       updateSummaryBar(state.sesionActiva);
+      updatePedidosBadge();
     };
 
     const updateSummaryBar = (sesion) => {
@@ -1603,6 +1621,7 @@ export const POS = (() => {
             if (!confirm('¿Eliminar este pedido?')) return;
             eliminarPedidoAbierto(btn.dataset.id);
             showModalPedidos();
+            updatePedidosBadge();
           });
         });
       }
@@ -1610,13 +1629,309 @@ export const POS = (() => {
       showModal('modal-pedidos');
     };
 
+    // ── DEVOLUCIÓN MULTI-STEP ───────────────────────────────────────
+    let devState = { step: 1, ventas: [], venta: null, itemsMap: {}, motivo: null, reintegroTipo: null };
+
+    const devBody   = () => ge('dev-modal-body');
+    const devFooter = () => ge('dev-modal-footer');
+    const devTitle  = () => ge('dev-modal-title');
+
+    const devRenderFooter = (btnsPrimary, btnsSecondary = '') => {
+      const f = devFooter();
+      if (f) f.innerHTML = `<div style="display:flex;gap:8px;justify-content:flex-end;width:100%">${btnsSecondary}<button class="mbtn mbtn-secondary" id="btn-dev-cancel-step">Cancelar</button>${btnsPrimary}</div>`;
+      ge('btn-dev-cancel-step')?.addEventListener('click', () => hideModal('modal-devolucion'));
+    };
+
+    const devSearchVentas = (q) => {
+      if (!q || q.length < 2 || !state.currentSucursal) return [];
+      const like = `%${q}%`;
+      try {
+        return window.SGA_DB.query(`
+          SELECT DISTINCT v.id, v.fecha, v.total, v.estado,
+            COALESCE(c.nombre || ' ' || COALESCE(c.apellido,''), 'Sin cliente') AS cliente_nombre,
+            v.cliente_id
+          FROM ventas v
+          LEFT JOIN clientes c ON c.id = v.cliente_id
+          LEFT JOIN venta_items vi ON vi.venta_id = v.id
+          LEFT JOIN productos p ON p.id = vi.producto_id
+          LEFT JOIN codigos_barras cb ON cb.producto_id = p.id
+          WHERE v.sucursal_id = ? AND v.estado = 'completada'
+            AND (
+              LOWER(COALESCE(c.nombre,'') || ' ' || COALESCE(c.apellido,'')) LIKE LOWER(?)
+              OR LOWER(p.nombre) LIKE LOWER(?)
+              OR cb.codigo = ?
+            )
+          ORDER BY v.fecha DESC LIMIT 20
+        `, [state.currentSucursal.id, like, like, q]);
+      } catch (e) { console.warn('devSearchVentas:', e); return []; }
+    };
+
+    // STEP 1 — Search
+    const devStep1 = () => {
+      devState.step = 1;
+      if (devTitle()) devTitle().textContent = '↩ Devolución — Buscar venta';
+      const b = devBody();
+      if (!b) return;
+      b.innerHTML = `
+        <div class="fg">
+          <label>Buscar por cliente o producto</label>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="dev-search-input" class="fi" placeholder="Nombre cliente, producto o código de barras...">
+            <button class="mbtn mbtn-secondary" id="btn-dev-buscar">Buscar</button>
+          </div>
+        </div>
+        <div id="dev-results" style="margin-top:12px;max-height:280px;overflow-y:auto"></div>`;
+      devRenderFooter('');
+
+      const doSearch = () => {
+        const q = ge('dev-search-input')?.value.trim() || '';
+        const results = devSearchVentas(q);
+        const el = ge('dev-results');
+        if (!el) return;
+        if (!results.length) { el.innerHTML = '<p style="color:#888;font-size:13px">Sin resultados</p>'; return; }
+        el.innerHTML = results.map(v => `
+          <div class="dev-venta-row" data-id="${v.id}" style="padding:10px 12px;border:1px solid #e0e0e0;border-radius:6px;margin-bottom:6px;cursor:pointer;font-size:13px">
+            <strong>${formatTime(v.fecha)}</strong> · ${v.cliente_nombre}
+            <span style="float:right;font-weight:700;color:#667eea">${formatCurrency(v.total)}</span>
+            <div style="color:#aaa;font-size:11px;margin-top:2px">${v.id.slice(-8)}</div>
+          </div>`).join('');
+        el.querySelectorAll('.dev-venta-row').forEach(row => {
+          row.addEventListener('mouseenter', () => row.style.background = '#f0f4ff');
+          row.addEventListener('mouseleave', () => row.style.background = '');
+          row.addEventListener('click', () => {
+            devState.venta = results.find(v => v.id === row.dataset.id) || null;
+            if (devState.venta) devStep2();
+          });
+        });
+      };
+
+      ge('btn-dev-buscar')?.addEventListener('click', doSearch);
+      ge('dev-search-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+      setTimeout(() => ge('dev-search-input')?.focus(), 80);
+    };
+
+    // STEP 2 — Select items
+    const devStep2 = () => {
+      devState.step = 2;
+      const v = devState.venta;
+      if (!v) return;
+      if (devTitle()) devTitle().textContent = '↩ Devolución — Seleccionar artículos';
+
+      let items = [];
+      try {
+        items = window.SGA_DB.query(`
+          SELECT vi.producto_id, vi.cantidad, vi.precio_unitario,
+            COALESCE(p.nombre, '—') AS nombre
+          FROM venta_items vi
+          LEFT JOIN productos p ON p.id = vi.producto_id
+          WHERE vi.venta_id = ?
+        `, [v.id]);
+      } catch (e) { console.warn('devStep2:', e); }
+
+      // Init itemsMap with 0 quantities
+      devState.itemsMap = {};
+      items.forEach(i => { devState.itemsMap[i.producto_id] = { origCantidad: i.cantidad, devuelta: 0, precio: i.precio_unitario, nombre: i.nombre }; });
+
+      const b = devBody();
+      if (!b) return;
+      b.innerHTML = `
+        <p style="margin:0 0 10px;font-size:13px;color:#555">
+          <strong>${v.cliente_nombre}</strong> · ${formatTime(v.fecha)} · ${formatCurrency(v.total)}
+        </p>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:6px;border-bottom:1px solid #eee">Artículo</th>
+              <th style="text-align:center;padding:6px;border-bottom:1px solid #eee">Compró</th>
+              <th style="text-align:center;padding:6px;border-bottom:1px solid #eee">Devuelve</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map(i => `
+              <tr>
+                <td style="padding:6px;border-bottom:1px solid #f5f5f5">${i.nombre}</td>
+                <td style="text-align:center;padding:6px;border-bottom:1px solid #f5f5f5">${i.cantidad}</td>
+                <td style="text-align:center;padding:6px;border-bottom:1px solid #f5f5f5">
+                  <input type="number" class="dev-qty-input fi" data-pid="${i.producto_id}"
+                    min="0" max="${i.cantidad}" step="1" value="0"
+                    style="width:70px;text-align:center;padding:4px 6px">
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+        <p id="dev-items-error" style="color:#f44336;font-size:13px;margin:8px 0 0;display:none">Seleccioná al menos un artículo con cantidad mayor a 0.</p>`;
+
+      devRenderFooter(`<button class="mbtn mbtn-primary" id="btn-dev-next2">Siguiente →</button>`,
+        `<button class="mbtn mbtn-secondary" id="btn-dev-back1">← Volver</button>`);
+
+      ge('btn-dev-back1')?.addEventListener('click', devStep1);
+      ge('btn-dev-next2')?.addEventListener('click', () => {
+        // Read qty inputs
+        let anySelected = false;
+        b.querySelectorAll('.dev-qty-input').forEach(inp => {
+          const pid = inp.dataset.pid;
+          const qty = Math.min(parseFloat(inp.value) || 0, devState.itemsMap[pid]?.origCantidad || 0);
+          devState.itemsMap[pid].devuelta = qty;
+          if (qty > 0) anySelected = true;
+        });
+        const errEl = ge('dev-items-error');
+        if (!anySelected) { if (errEl) errEl.style.display = 'block'; return; }
+        if (errEl) errEl.style.display = 'none';
+        devStep3();
+      });
+    };
+
+    // STEP 3 — Reason
+    const devStep3 = () => {
+      devState.step = 3;
+      if (devTitle()) devTitle().textContent = '↩ Devolución — Motivo';
+      const b = devBody();
+      if (!b) return;
+      b.innerHTML = `
+        <p style="margin:0 0 12px;font-size:13px;color:#555">¿Por qué se devuelven los artículos?</p>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid #e0e0e0;border-radius:6px;cursor:pointer;font-size:14px">
+            <input type="radio" name="dev-motivo" value="no_queria"> El cliente no lo quería
+          </label>
+          <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid #e0e0e0;border-radius:6px;cursor:pointer;font-size:14px">
+            <input type="radio" name="dev-motivo" value="vencido"> Producto vencido
+          </label>
+          <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid #e0e0e0;border-radius:6px;cursor:pointer;font-size:14px">
+            <input type="radio" name="dev-motivo" value="defectuoso"> Producto roto / defectuoso
+          </label>
+        </div>
+        <p id="dev-motivo-error" style="color:#f44336;font-size:13px;margin:8px 0 0;display:none">Seleccioná un motivo.</p>`;
+
+      devRenderFooter(`<button class="mbtn mbtn-primary" id="btn-dev-next3">Siguiente →</button>`,
+        `<button class="mbtn mbtn-secondary" id="btn-dev-back2">← Volver</button>`);
+
+      ge('btn-dev-back2')?.addEventListener('click', devStep2);
+      ge('btn-dev-next3')?.addEventListener('click', () => {
+        const sel = b.querySelector('input[name="dev-motivo"]:checked');
+        const errEl = ge('dev-motivo-error');
+        if (!sel) { if (errEl) errEl.style.display = 'block'; return; }
+        if (errEl) errEl.style.display = 'none';
+        devState.motivo = sel.value;
+        if (devState.venta?.cliente_id) { devStep4(); } else { devStep5(); }
+      });
+    };
+
+    // STEP 4 — Reintegro method (only if venta has cliente)
+    const devStep4 = () => {
+      devState.step = 4;
+      if (devTitle()) devTitle().textContent = '↩ Devolución — Reintegro';
+      const b = devBody();
+      if (!b) return;
+      b.innerHTML = `
+        <p style="margin:0 0 12px;font-size:13px;color:#555">¿Cómo se reintegra el monto al cliente?</p>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid #e0e0e0;border-radius:6px;cursor:pointer;font-size:14px">
+            <input type="radio" name="dev-reintegro" value="saldo_favor"> Aplicar como saldo a favor
+          </label>
+          <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid #e0e0e0;border-radius:6px;cursor:pointer;font-size:14px">
+            <input type="radio" name="dev-reintegro" value="efectivo"> Reintegrar en efectivo
+          </label>
+          <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid #e0e0e0;border-radius:6px;cursor:pointer;font-size:14px">
+            <input type="radio" name="dev-reintegro" value="mercadopago"> Reintegrar por Mercado Pago
+          </label>
+          <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid #e0e0e0;border-radius:6px;cursor:pointer;font-size:14px">
+            <input type="radio" name="dev-reintegro" value="transferencia"> Reintegrar por transferencia
+          </label>
+        </div>
+        <p id="dev-reintegro-error" style="color:#f44336;font-size:13px;margin:8px 0 0;display:none">Seleccioná un método.</p>`;
+
+      devRenderFooter(`<button class="mbtn mbtn-primary" id="btn-dev-next4">Siguiente →</button>`,
+        `<button class="mbtn mbtn-secondary" id="btn-dev-back3">← Volver</button>`);
+
+      ge('btn-dev-back3')?.addEventListener('click', devStep3);
+      ge('btn-dev-next4')?.addEventListener('click', () => {
+        const sel = b.querySelector('input[name="dev-reintegro"]:checked');
+        const errEl = ge('dev-reintegro-error');
+        if (!sel) { if (errEl) errEl.style.display = 'block'; return; }
+        if (errEl) errEl.style.display = 'none';
+        devState.reintegroTipo = sel.value;
+        devStep5();
+      });
+    };
+
+    // STEP 5 — Confirm & process
+    const devStep5 = () => {
+      devState.step = 5;
+      if (devTitle()) devTitle().textContent = '↩ Devolución — Confirmar';
+      const b = devBody();
+      if (!b) return;
+
+      const selectedItems = Object.entries(devState.itemsMap)
+        .filter(([, d]) => d.devuelta > 0)
+        .map(([pid, d]) => ({ productoId: pid, cantidad: d.devuelta, precio: d.precio, nombre: d.nombre }));
+
+      const totalDev = selectedItems.reduce((s, i) => s + i.cantidad * i.precio, 0);
+
+      const MOTIVO_LABEL = { no_queria: 'El cliente no lo quería', vencido: 'Producto vencido', defectuoso: 'Producto roto / defectuoso' };
+      const REINTEGRO_LABEL = { saldo_favor: 'Saldo a favor', efectivo: 'Efectivo', mercadopago: 'Mercado Pago', transferencia: 'Transferencia' };
+
+      b.innerHTML = `
+        <div style="background:#f8f9fa;border-radius:8px;padding:14px;margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px">
+            <span style="color:#888">Venta</span><strong>${devState.venta?.id?.slice(-8)}</strong>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px">
+            <span style="color:#888">Cliente</span><strong>${devState.venta?.cliente_nombre || 'Sin cliente'}</strong>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px">
+            <span style="color:#888">Motivo</span><strong>${MOTIVO_LABEL[devState.motivo] || devState.motivo}</strong>
+          </div>
+          ${devState.reintegroTipo ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px">
+            <span style="color:#888">Reintegro</span><strong>${REINTEGRO_LABEL[devState.reintegroTipo] || devState.reintegroTipo}</strong>
+          </div>` : ''}
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:12px">
+          <thead><tr>
+            <th style="text-align:left;padding:6px;border-bottom:1px solid #eee">Artículo</th>
+            <th style="text-align:center;padding:6px;border-bottom:1px solid #eee">Cant.</th>
+            <th style="text-align:right;padding:6px;border-bottom:1px solid #eee">Subtotal</th>
+          </tr></thead>
+          <tbody>
+            ${selectedItems.map(i => `
+              <tr>
+                <td style="padding:5px 6px;border-bottom:1px solid #f5f5f5">${i.nombre}</td>
+                <td style="text-align:center;padding:5px 6px;border-bottom:1px solid #f5f5f5">${i.cantidad}</td>
+                <td style="text-align:right;padding:5px 6px;border-bottom:1px solid #f5f5f5">${formatCurrency(i.cantidad * i.precio)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+        <div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px;padding:6px 0;border-top:2px solid #eee">
+          <span>Total a reintegrar</span><span style="color:#667eea">${formatCurrency(totalDev)}</span>
+        </div>
+        ${devState.motivo !== 'no_queria' ? `<p style="margin-top:10px;padding:8px 10px;background:#fff8e1;border-radius:6px;font-size:12px;color:#795548">
+          ⚠️ El ajuste de merma quedará pendiente de aprobación del encargado.
+        </p>` : ''}`;
+
+      devRenderFooter(`<button class="mbtn mbtn-danger" id="btn-dev-confirmar">Confirmar devolución</button>`,
+        `<button class="mbtn mbtn-secondary" id="btn-dev-back4">← Volver</button>`);
+
+      ge('btn-dev-back4')?.addEventListener('click', devState.venta?.cliente_id ? devStep4 : devStep3);
+      ge('btn-dev-confirmar')?.addEventListener('click', () => {
+        const result = registrarDevolucion(
+          devState.venta.id,
+          selectedItems,
+          devState.motivo,
+          devState.reintegroTipo,
+          state.sesionActiva
+        );
+        if (result.success) {
+          hideModal('modal-devolucion');
+          loadDashboard();
+        } else {
+          alert('Error al registrar devolución: ' + result.error);
+        }
+      });
+    };
+
     const showModalDevolucion = () => {
-      ge('devolucion-venta-id').value = '';
-      ge('devolucion-detail').style.display = 'none';
-      ge('devolucion-motivo-wrap').style.display = 'none';
-      ge('btn-devolucion-confirm').style.display = 'none';
+      devState = { step: 1, ventas: [], venta: null, itemsMap: {}, motivo: null, reintegroTipo: null };
       showModal('modal-devolucion');
-      setTimeout(() => ge('devolucion-venta-id')?.focus(), 80);
+      devStep1();
     };
 
     const showDescModal = (idx) => {
@@ -2144,56 +2459,8 @@ export const POS = (() => {
       hideModal('modal-desc');
     });
 
-    // Devolucion
-    safeOn('btn-devolucion-close',  'click', () => hideModal('modal-devolucion'));
-    safeOn('btn-devolucion-cancel', 'click', () => hideModal('modal-devolucion'));
-    safeOn('btn-devolucion-buscar', 'click', () => {
-      const vid = ge('devolucion-venta-id')?.value.trim();
-      if (!vid) return;
-      const venta = getVentaDetail(vid);
-      const detEl = ge('devolucion-detail');
-      const motivoWrap = ge('devolucion-motivo-wrap');
-      const confirmBtn = ge('btn-devolucion-confirm');
-      if (!venta) {
-        detEl.innerHTML = '<p style="color:#f44336">Venta no encontrada</p>';
-        detEl.style.display = 'block';
-        motivoWrap.style.display = 'none';
-        confirmBtn.style.display = 'none';
-        return;
-      }
-      const rol = state.currentUser?.rol;
-      if (rol !== 'admin' && rol !== 'encargado') {
-        detEl.innerHTML = '<p style="color:#f44336">Sin permisos para anular ventas</p>';
-        detEl.style.display = 'block';
-        motivoWrap.style.display = 'none';
-        confirmBtn.style.display = 'none';
-        return;
-      }
-      if (venta.estado === 'anulada') {
-        detEl.innerHTML = '<p style="color:#888">Esta venta ya fue anulada</p>';
-        detEl.style.display = 'block';
-        motivoWrap.style.display = 'none';
-        confirmBtn.style.display = 'none';
-        return;
-      }
-      detEl.innerHTML = `<strong>${formatTime(venta.fecha)}</strong> — ${formatCurrency(venta.total)}<br><small>${(venta.items||[]).length} artículos</small>`;
-      detEl.style.display = 'block';
-      motivoWrap.style.display = 'block';
-      confirmBtn.style.display = 'inline-flex';
-      confirmBtn.dataset.ventaId = venta.id;
-    });
-    safeOn('btn-devolucion-confirm', 'click', () => {
-      const vid = ge('btn-devolucion-confirm').dataset.ventaId;
-      const motivo = ge('devolucion-motivo')?.value.trim() || 'Anulación';
-      const result = anularVenta(vid, motivo);
-      if (result.success) {
-        hideModal('modal-devolucion');
-        checkSesion();
-        loadDashboard();
-      } else {
-        alert('Error: ' + result.error);
-      }
-    });
+    // Devolucion — close button only; steps are rendered dynamically
+    safeOn('btn-devolucion-close', 'click', () => hideModal('modal-devolucion'));
 
     // ── KEYBOARD SHORTCUTS ─────────────────────────────────────────
     document.addEventListener('keydown', e => {
@@ -2334,101 +2601,79 @@ export const POS = (() => {
   /**
    * Register a return
    */
-  function registrarDevolucion(ventaId, items, motivo) {
+  function registrarDevolucion(ventaId, items, motivo, reintegroTipo, sesionActiva) {
     try {
-      const ventaSql = `SELECT * FROM ventas WHERE id = ?`;
-      const ventaResults = window.SGA_DB.query(ventaSql, [ventaId]);
-      if (ventaResults.length === 0) {
-        return { success: false, error: 'Venta no encontrada' };
-      }
+      const ventaResults = window.SGA_DB.query(`SELECT * FROM ventas WHERE id = ?`, [ventaId]);
+      if (!ventaResults.length) return { success: false, error: 'Venta no encontrada' };
 
       const venta = ventaResults[0];
       const devolucionId = window.SGA_Utils.generateUUID();
       const now = window.SGA_Utils.formatISODate(new Date());
+      const usuarioId = window.SGA_Auth.getCurrentUser().id;
 
-      const devSql = `
+      // Insert devolucion header
+      window.SGA_DB.run(`
         INSERT INTO devoluciones (
-          id, venta_id, sucursal_id, usuario_id, fecha, motivo, sync_status, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `;
+          id, venta_id, sucursal_id, usuario_id, fecha, motivo, reintegro_tipo, sync_status, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+      `, [devolucionId, ventaId, venta.sucursal_id, usuarioId, now, motivo, reintegroTipo || null, now]);
 
-      window.SGA_DB.run(devSql, [
-        devolucionId,
-        ventaId,
-        venta.sucursal_id,
-        window.SGA_Auth.getCurrentUser().id,
-        now,
-        motivo,
-        'pending',
-        now
-      ]);
-
-      // Get original venta items
       let totalDevuelto = 0;
-      const itemsSql = `SELECT * FROM venta_items WHERE venta_id = ?`;
-      const ventaItems = window.SGA_DB.query(itemsSql, [ventaId]);
 
-      // Add returned items and restore stock
       for (const item of items) {
-        const devItemId = window.SGA_Utils.generateUUID();
-        const origItem = ventaItems.find(vi => vi.producto_id === item.productoId);
-        if (!origItem) continue;
+        // Insert devolucion item
+        window.SGA_DB.run(`
+          INSERT INTO devolucion_items (id, devolucion_id, producto_id, cantidad, precio_unitario)
+          VALUES (?, ?, ?, ?, ?)
+        `, [window.SGA_Utils.generateUUID(), devolucionId, item.productoId, item.cantidad, item.precio]);
 
-        const devItemSql = `
-          INSERT INTO devolucion_items (
-            id, devolucion_id, producto_id, cantidad, precio_unitario
-          ) VALUES (?, ?, ?, ?, ?)
-        `;
-
-        window.SGA_DB.run(devItemSql, [
-          devItemId,
-          devolucionId,
-          item.productoId,
-          item.cantidad,
-          origItem.precio_unitario
-        ]);
-
-        // Restore stock
-        const restoreStockSql = `
-          UPDATE stock SET cantidad = cantidad + ?, fecha_modificacion = ?, sync_status = ?
+        // Always restore stock
+        window.SGA_DB.run(`
+          UPDATE stock SET cantidad = cantidad + ?, fecha_modificacion = ?, sync_status = 'pending'
           WHERE producto_id = ? AND sucursal_id = ?
-        `;
-        window.SGA_DB.run(restoreStockSql, [
-          item.cantidad,
-          now,
-          'pending',
-          item.productoId,
-          venta.sucursal_id
-        ]);
+        `, [item.cantidad, now, item.productoId, venta.sucursal_id]);
 
-        totalDevuelto += item.cantidad * origItem.precio_unitario;
+        // Record stock adjustment: reincorporation (always approved)
+        window.SGA_DB.run(`
+          INSERT INTO stock_ajustes
+            (id, producto_id, sucursal_id, tipo, cantidad, motivo, usuario_id, fecha, estado, sync_status, updated_at)
+          VALUES (?, ?, ?, 'ajuste_positivo', ?, 'devolucion_cliente', ?, ?, 'aprobado', 'pending', ?)
+        `, [window.SGA_Utils.generateUUID(), item.productoId, venta.sucursal_id, item.cantidad, usuarioId, now, now]);
+
+        // For defective / expired: queue a pending removal for admin approval
+        if (motivo === 'vencido' || motivo === 'defectuoso') {
+          const ajusteMotivo = motivo === 'vencido' ? 'devolucion_vencido' : 'devolucion_defectuoso';
+          window.SGA_DB.run(`
+            INSERT INTO stock_ajustes
+              (id, producto_id, sucursal_id, tipo, cantidad, motivo, usuario_id, fecha, estado, sync_status, updated_at)
+            VALUES (?, ?, ?, 'ajuste_negativo', ?, ?, ?, ?, 'pendiente_aprobacion', 'pending', ?)
+          `, [window.SGA_Utils.generateUUID(), item.productoId, venta.sucursal_id, item.cantidad, ajusteMotivo, usuarioId, now, now]);
+        }
+
+        totalDevuelto += item.cantidad * item.precio;
       }
 
-      // Handle cuenta_corriente reversal if applicable
-      const pagosCCSql = `SELECT * FROM venta_pagos WHERE venta_id = ? AND medio = ?`;
-      const pagosCC = window.SGA_DB.query(pagosCCSql, [ventaId, 'cuenta_corriente']);
+      if (totalDevuelto < 0.01) {
+        console.log('✅ Devolución registrada (sin monto):', devolucionId);
+        return { success: true, devolucionId };
+      }
 
-      if (pagosCC.length > 0 && venta.cliente_id) {
-        const movId = window.SGA_Utils.generateUUID();
-        const movSql = `
-          INSERT INTO cuenta_corriente (
-            id, cliente_id, sucursal_id, tipo, monto, descripcion,
-            fecha, usuario_id, sync_status, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `;
-
-        window.SGA_DB.run(movSql, [
-          movId,
-          venta.cliente_id,
-          venta.sucursal_id,
-          'saldo_favor',
-          -totalDevuelto, // negative = a favor
-          `Devolución venta ${ventaId.substring(0, 8)}`,
-          now,
-          window.SGA_Auth.getCurrentUser().id,
-          'pending',
-          now
-        ]);
+      // Reintegro
+      if (reintegroTipo === 'saldo_favor' && venta.cliente_id) {
+        // Credit the client's account
+        window.SGA_DB.run(`
+          INSERT INTO cuenta_corriente
+            (id, cliente_id, sucursal_id, tipo, monto, descripcion, fecha, usuario_id, sync_status, updated_at)
+          VALUES (?, ?, ?, 'saldo_favor', ?, ?, ?, ?, 'pending', ?)
+        `, [window.SGA_Utils.generateUUID(), venta.cliente_id, venta.sucursal_id,
+            -totalDevuelto, `Devolución venta ...${ventaId.slice(-6)}`, now, usuarioId, now]);
+      } else if (reintegroTipo && reintegroTipo !== 'saldo_favor' && sesionActiva) {
+        // Cash / MP / transfer: register as egreso
+        window.SGA_DB.run(`
+          INSERT INTO egresos_caja (id, sesion_caja_id, monto, descripcion, fecha, usuario_id, sync_status, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+        `, [window.SGA_Utils.generateUUID(), sesionActiva.id, totalDevuelto,
+            `Reintegro devolución (${reintegroTipo}) venta ...${ventaId.slice(-6)}`, now, usuarioId, now]);
       }
 
       console.log('✅ Devolución registrada:', devolucionId);

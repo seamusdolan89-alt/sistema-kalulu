@@ -393,7 +393,10 @@ const ClientesUI = (() => {
       const tope = c.tope_deuda || 0;
       const deuda = Math.max(0, saldo);
       const pct = tope > 0 ? Math.min(100, (deuda / tope) * 100) : 0;
-      const fillCls = pct >= 80 ? (pct >= 95 ? 'danger' : 'warn') : '';
+      const fillCls = pct >= 80 ? 'danger' : pct >= 50 ? 'warn' : '';
+      const topeLabel = deuda > 0.01
+        ? `Debe ${fmt(deuda)} — Tope: ${fmt(tope)}`
+        : `Tope: ${fmt(tope)}`;
 
       let familiaHtml = '<span class="familia-b">—</span>';
       if (c.es_master) {
@@ -411,7 +414,7 @@ const ClientesUI = (() => {
         <td>${saldoBadge(saldo)}</td>
         <td>
           <div class="tope-wrap">
-            <span class="tope-label">${fmt(deuda)} / ${fmt(tope)}</span>
+            <span class="tope-label">${topeLabel}</span>
             <div class="tope-bar"><div class="tope-fill ${fillCls}" style="width:${pct}%"></div></div>
           </div>
         </td>

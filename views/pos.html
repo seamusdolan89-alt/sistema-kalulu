@@ -37,6 +37,13 @@ main#app { overflow: hidden; }
   white-space: nowrap; display: inline-flex; align-items: center; gap: 5px;
 }
 .pos-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.pos-btn-badge {
+  position: absolute; top: -6px; right: -6px;
+  background: #f44336; color: white; border-radius: 50%;
+  min-width: 18px; height: 18px; font-size: 11px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 3px; line-height: 1; pointer-events: none;
+}
 .pos-btn-ghost  { background: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.35); }
 .pos-btn-ghost:hover:not(:disabled) { background: rgba(255,255,255,0.32); }
 .pos-btn-green  { background: #4CAF50; color: white; border: 1px solid #43A047; }
@@ -286,8 +293,10 @@ main#app { overflow: hidden; }
 }
 .pinput-field:focus { border-color: #667eea; }
 .recibe-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 0.85em; color: #555; }
-.recibe-field { width: 120px; padding: 6px 8px; border: 1px solid #e0e0e0; border-radius: 5px; font-size: 0.95em; text-align: right; outline: none; }
+.recibe-field { width: 120px; padding: 6px 8px; border: 1px solid #e0e0e0; border-radius: 5px; font-size: 0.95em; text-align: right; outline: none; -moz-appearance: textfield; }
 .recibe-field:focus { border-color: #4CAF50; }
+.recibe-field::-webkit-outer-spin-button,
+.recibe-field::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .vuelto-box { margin-top: 6px; padding: 6px 10px; background: #e8f5e9; border-radius: 6px; font-size: 0.88em; color: #2e7d32; font-weight: 600; }
 .saldo-favor-row { margin-top: 4px; font-size: 0.82em; display: flex; align-items: center; gap: 6px; color: #555; }
 
@@ -468,7 +477,7 @@ main#app { overflow: hidden; }
     <span id="pos-caja-badge" class="pos-caja-badge closed">● Caja cerrada</span>
     <div class="pos-header-actions">
       <button class="pos-btn pos-btn-green"  id="btn-nueva-venta">🛒 Nueva Venta · F3</button>
-      <button class="pos-btn pos-btn-ghost"  id="btn-pedidos-header">📋 Pedido Abierto · F4</button>
+      <button class="pos-btn pos-btn-ghost"  id="btn-pedidos-header" style="position:relative">📋 Pedido Abierto · F4<span id="pedidos-count-badge" class="pos-btn-badge" style="display:none"></span></button>
       <button class="pos-btn pos-btn-ghost"  id="btn-devolucion-header">↩ Devolución</button>
 <button class="pos-btn pos-btn-danger" id="btn-cerrar-caja">🔒 Cerrar Caja</button>
     </div>
@@ -762,31 +771,15 @@ main#app { overflow: hidden; }
   </div>
 </div>
 
-<!-- Devolución -->
+<!-- Devolución (multi-step) -->
 <div id="modal-devolucion" class="pbackdrop hidden">
-  <div class="pmodal">
+  <div class="pmodal" style="max-width:580px">
     <div class="pmodal-hdr">
-      <span class="pmodal-title">↩ Anular Venta</span>
+      <span class="pmodal-title" id="dev-modal-title">↩ Devolución</span>
       <button class="pmodal-close" id="btn-devolucion-close">✕</button>
     </div>
-    <div class="pmodal-body">
-      <div class="fg">
-        <label>ID de la venta</label>
-        <div style="display:flex; gap:8px;">
-          <input type="text" id="devolucion-venta-id" class="fi" placeholder="Pegue el ID de la venta">
-          <button class="mbtn mbtn-secondary" id="btn-devolucion-buscar">Buscar</button>
-        </div>
-      </div>
-      <div id="devolucion-detail" style="display:none" class="dev-venta-info"></div>
-      <div class="fg" id="devolucion-motivo-wrap" style="display:none">
-        <label>Motivo de anulación</label>
-        <input type="text" id="devolucion-motivo" class="fi" placeholder="Ej: error de precio, devolución...">
-      </div>
-    </div>
-    <div class="pmodal-ftr">
-      <button class="mbtn mbtn-secondary" id="btn-devolucion-cancel">Cancelar</button>
-      <button class="mbtn mbtn-danger"    id="btn-devolucion-confirm" style="display:none">Anular Venta</button>
-    </div>
+    <div id="dev-modal-body" class="pmodal-body"></div>
+    <div id="dev-modal-footer" class="pmodal-ftr"></div>
   </div>
 </div>
 

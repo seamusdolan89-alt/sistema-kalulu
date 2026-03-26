@@ -68,9 +68,7 @@
       const aside = document.querySelector('aside.sidebar');
       if (aside) {
         aside.classList.remove('editor-mode');
-        if (!aside.querySelector('nav ul')) {
-          aside.innerHTML = '<nav><ul></ul></nav>';
-        }
+        aside.innerHTML = '<nav><ul></ul></nav>';
         initNav();
       }
     }

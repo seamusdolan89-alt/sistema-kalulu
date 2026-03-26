@@ -31,6 +31,7 @@ const Caja = (() => {
     currentTab: 'resumen',
     cierreStep: 1,
     cierre: { billetes: {}, otrosMedios: {}, observaciones: '' },
+    recuento: { billetes: {} },
     refreshTimer: null,
     user: null,
   };
@@ -329,6 +330,7 @@ const Caja = (() => {
         <button class="caja-tab ${state.currentTab === 'movimientos' ? 'active' : ''}" data-tab="movimientos">Movimientos</button>
         <button class="caja-tab ${state.currentTab === 'egresos' ? 'active' : ''}" data-tab="egresos">Egresos e Ingresos</button>
         <button class="caja-tab ${state.currentTab === 'historial' ? 'active' : ''}" data-tab="historial">Historial</button>
+        <button class="caja-tab ${state.currentTab === 'recuento' ? 'active' : ''}" data-tab="recuento">Recuento de dinero</button>
       </div>
       <div id="caja-tab-content" class="caja-tab-content"></div>
     `;
@@ -357,6 +359,7 @@ const Caja = (() => {
       case 'movimientos': renderMovimientos(content);       break;
       case 'egresos':     renderEgresosIngresos(content);   break;
       case 'historial':   renderHistorial(content);         break;
+      case 'recuento':    renderRecuento(content);          break;
     }
   }
 
@@ -653,6 +656,111 @@ const Caja = (() => {
         switchTab('egresos');
       } else {
         showToast(result.error, 'error');
+      }
+    });
+  }
+
+  // ── TAB: RECUENTO DE DINERO ───────────────────────────────────────────────────
+
+  function renderRecuento(container) {
+    const el = container || ge('caja-tab-content');
+    if (!el || !state.sesion) return;
+
+    // Load existing saved billetes from session if recuento state is empty
+    if (!Object.keys(state.recuento.billetes).length) {
+      try {
+        const saved = JSON.parse(state.sesion.detalle_billetes || '{}');
+        state.recuento.billetes = saved;
+      } catch (e) { /* no saved data */ }
+    }
+
+    const tot = getTotalesSesion(state.sesion.id);
+    const totalContado = DENOMINATIONS.reduce(
+      (sum, d) => sum + d * (parseFloat(state.recuento.billetes[d]) || 0), 0
+    );
+    const diferencia = totalContado - tot.saldoEsperado;
+    const difClass = diferencia > 0.005 ? 'text-success' : diferencia < -0.005 ? 'text-danger' : '';
+
+    el.innerHTML = `
+      <p style="margin:0 0 12px;font-size:14px;color:#666">
+        Contá los billetes y monedas en caja en cualquier momento de la sesión.
+      </p>
+      <table class="cierre-billetes-table">
+        <thead><tr><th>Denominación</th><th>Cantidad</th><th style="text-align:right">Subtotal</th></tr></thead>
+        <tbody>
+          ${DENOMINATIONS.map(d => `
+            <tr>
+              <td>${fmtPeso(d)}</td>
+              <td><input type="number" class="billete-input recuento-input" data-denom="${d}" min="0"
+                value="${parseFloat(state.recuento.billetes[d]) || 0}"></td>
+              <td class="billete-subtotal" id="rec-sub-${d}" style="text-align:right">
+                ${fmtPeso((parseFloat(state.recuento.billetes[d]) || 0) * d)}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="2"><strong>Total contado</strong></td>
+            <td style="text-align:right" id="recuento-total-contado"><strong>${fmtPeso(totalContado)}</strong></td>
+          </tr>
+        </tfoot>
+      </table>
+      <div class="cierre-resumen" style="margin-top:16px">
+        <div class="caja-stat-row">
+          <span>Saldo esperado (efectivo)</span>
+          <span>${fmtPeso(tot.saldoEsperado)}</span>
+        </div>
+        <div class="caja-stat-row highlight-row">
+          <span>Diferencia</span>
+          <span id="recuento-diferencia" class="${difClass}">
+            ${diferencia >= 0 ? '+' : ''}${fmtPeso(diferencia)}
+          </span>
+        </div>
+      </div>
+      <div style="margin-top:16px">
+        <button id="btn-guardar-recuento" class="btn btn-primary">Guardar recuento</button>
+      </div>
+    `;
+
+    // Live subtotals
+    el.querySelectorAll('.recuento-input').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const d = parseFloat(inp.dataset.denom);
+        const n = parseFloat(inp.value) || 0;
+        state.recuento.billetes[d] = n;
+        const subEl = ge(`rec-sub-${inp.dataset.denom}`);
+        if (subEl) subEl.textContent = fmtPeso(d * n);
+        const total = DENOMINATIONS.reduce(
+          (sum, den) => sum + den * (parseFloat(state.recuento.billetes[den]) || 0), 0
+        );
+        const totEl = ge('recuento-total-contado');
+        if (totEl) totEl.innerHTML = `<strong>${fmtPeso(total)}</strong>`;
+        const dif = total - tot.saldoEsperado;
+        const difEl = ge('recuento-diferencia');
+        if (difEl) {
+          difEl.textContent = (dif >= 0 ? '+' : '') + fmtPeso(dif);
+          difEl.className = dif > 0.005 ? 'text-success' : dif < -0.005 ? 'text-danger' : '';
+        }
+      });
+    });
+
+    ge('btn-guardar-recuento').addEventListener('click', () => {
+      // Save billetes snapshot to sesion_caja.detalle_billetes
+      const billetes = {};
+      el.querySelectorAll('.recuento-input').forEach(inp => {
+        const n = parseFloat(inp.value) || 0;
+        if (n > 0) billetes[inp.dataset.denom] = n;
+      });
+      try {
+        window.SGA_DB.run(
+          `UPDATE sesiones_caja SET detalle_billetes = ?, updated_at = ? WHERE id = ?`,
+          [JSON.stringify(billetes), window.SGA_Utils.formatISODate(new Date()), state.sesion.id]
+        );
+        state.recuento.billetes = billetes;
+        showToast('Recuento guardado', 'success');
+      } catch (e) {
+        showToast('Error al guardar: ' + e.message, 'error');
       }
     });
   }
