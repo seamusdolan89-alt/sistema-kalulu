@@ -470,6 +470,7 @@
 
     const uc  = ucEl.value;
     const upp = parseFloat(getElement('product-unidades-paquete-compra')?.value) || 1;
+    const uv  = getElement('product-unidad-venta')?.value || 'Unidad';
     const plp = plpEl?.value || 'Por unidad de venta';
 
     // Show unidades por paquete when unit is not "Unidad" or "Kg"
@@ -629,65 +630,26 @@
   // ── EXPORT TEMPLATE ───────────────────────────────────────────────────────
 
   const downloadTemplate = () => {
-    // col idx:  0  1  2  3  4  5  6  7  8   9  10  11  12  13  14  15  16  17  18
-    // col ltr:  A  B  C  D  E  F  G  H  I   J   K   L   M   N   O   P   Q   R   S
     const headers = [
       'codigo_barras', 'nombre', 'costo', 'precio_venta',
-      'stock_actual', 'stock_minimo', 'categoria', 'proveedor', 'codigo_sustituto',
-      'unidad_compra', 'unidades_por_paquete_compra', 'unidad_venta',
-      'precio_lista_por', 'precio_lista_divisor',
-      'producto_madre_codigo', 'producto_madre_descripcion', 'proveedor_alternativo',
-      'pedido_sugerido_cantidad', 'pedido_sugerido_unidad'
+      'stock_actual', 'stock_minimo', 'categoria', 'proveedor', 'codigo_sustituto'
     ];
-
     const colFormats = {
-      0:  { t: 's', z: '@' },
-      1:  { t: 's', z: '@' },
-      2:  { t: 'n', z: '#,##0.00' },
-      3:  { t: 'n', z: '#,##0.00' },
-      4:  { t: 'n', z: '0' },
-      5:  { t: 'n', z: '0' },
-      6:  { t: 's', z: '@' },
-      7:  { t: 's', z: '@' },
-      8:  { t: 's', z: '@' },
-      9:  { t: 's', z: '@' },
-      10: { t: 'n', z: '0' },
-      11: { t: 's', z: '@' },
-      12: { t: 's', z: '@' },
-      13: { t: 'n', z: '0.##' },
-      14: { t: 's', z: '@' },
-      15: { t: 's', z: '@' },
-      16: { t: 's', z: '@' },
-      17: { t: 'n', z: '0' },
-      18: { t: 's', z: '@' },
+      0: { t: 's', z: '@' },
+      1: { t: 's', z: '@' },
+      2: { t: 'n', z: '#,##0.00' },
+      3: { t: 'n', z: '#,##0.00' },
+      4: { t: 'n', z: '0' },
+      5: { t: 'n', z: '0' },
+      6: { t: 's', z: '@' },
+      7: { t: 's', z: '@' },
+      8: { t: 's', z: '@' },
     };
 
     let dataRows;
     let filename;
     if (state.productos.length > 0) {
-      // Single query: includes madre barcode/nombre (COALESCE self if no madre) + alt-provider name
-      const sucursal_id = window.SGA_Auth.getCurrentUser()?.sucursal_id || '1';
-      const exportRows = window.SGA_DB.query(`
-        SELECT p.*,
-          cb.codigo                               AS codigo_barras,
-          cat.nombre                              AS categoria_nombre,
-          prov.razon_social                       AS proveedor_nombre,
-          alt_prov.razon_social                   AS proveedor_alternativo_nombre,
-          COALESCE(st.cantidad, 0)                AS stock_actual,
-          COALESCE(m.nombre, p.nombre)            AS madre_nombre,
-          COALESCE(mc.codigo, cb.codigo, '')      AS madre_codigo
-        FROM productos p
-        LEFT JOIN codigos_barras cb    ON cb.producto_id  = p.id    AND cb.es_principal = 1
-        LEFT JOIN categorias cat       ON cat.id          = p.categoria_id
-        LEFT JOIN proveedores prov     ON prov.id         = p.proveedor_principal_id
-        LEFT JOIN proveedores alt_prov ON alt_prov.id     = p.proveedor_alternativo_id
-        LEFT JOIN stock st             ON st.producto_id  = p.id    AND st.sucursal_id = ?
-        LEFT JOIN productos m          ON m.id            = p.producto_madre_id
-        LEFT JOIN codigos_barras mc    ON mc.producto_id  = m.id    AND mc.es_principal = 1
-        ORDER BY p.nombre
-      `, [sucursal_id]);
-
-      dataRows = exportRows.map(p => [
+      dataRows = state.productos.map(p => [
         p.codigo_barras || '',
         p.nombre || '',
         p.costo || 0,
@@ -696,44 +658,15 @@
         p.stock_minimo || 0,
         p.categoria_nombre || '',
         p.proveedor_nombre || '',
-        '',
-        p.unidad_compra || 'Unidad',
-        p.unidades_por_paquete_compra || 1,
-        p.unidad_venta || 'Unidad',
-        p.precio_lista_por || 'Por unidad de venta',
-        p.precio_lista_divisor || 1,
-        p.madre_codigo || '',
-        p.madre_nombre || '',
-        p.proveedor_alternativo_nombre || '',
-        p.cant_pedido || 0,
-        p.pedido_unidad || ''
+        ''
       ]);
       filename = 'productos_exportados.xlsx';
     } else {
-      dataRows = [['7790001234567', 'Coca Cola 500ml', 350, 550, 24, 6, 'Bebidas', 'Pepsico SA', '', 'Display', 32, 'Unidad', 'Por paquete', 32, '', '', '', 2, 'Display']];
+      dataRows = [['7790001234567', 'Coca Cola 500ml', 350, 550, 24, 6, 'Bebidas', 'Pepsico SA', '']];
       filename = 'plantilla_productos.xlsx';
     }
 
-    // Instruction row (row 2 in Excel) — guides user on dropdown columns
-    const instrRow = Array(19).fill('');
-    instrRow[9]  = "→ Ver hoja 'Opciones válidas'";   // J: unidad_compra
-    instrRow[11] = "→ Ver hoja 'Opciones válidas'";   // L: unidad_venta
-    instrRow[12] = "→ Ver hoja 'Opciones válidas'";   // M: precio_lista_por
-    instrRow[18] = "→ Ver hoja 'Opciones válidas'";   // S: pedido_sugerido_unidad
-
-    const ws = XLSX.utils.aoa_to_sheet([headers, instrRow, ...dataRows]);
-
-    // Header cell notes pointing to the options sheet (works in SheetJS CE)
-    const headerNotes = {
-      J1: 'Valores válidos: ver hoja "Opciones válidas" columna A\n(Unidad, Bulto, Display, Caja, Pack, Bolsa, Kg, Lt, Docena)',
-      L1: 'Valores válidos: ver hoja "Opciones válidas" columna B\n(Unidad, Kg, Lt, Por peso, Por fracción)',
-      M1: 'Valores válidos: ver hoja "Opciones válidas" columna C\n(Por unidad de venta, Por unidad de compra, Por otra cantidad)',
-      S1: 'Valores válidos: ver hoja "Opciones válidas" columna D\n(Unidad, Kg, Bulto cerrado, Pack, Display, Bolsa)',
-    };
-    Object.entries(headerNotes).forEach(([addr, text]) => {
-      if (ws[addr]) ws[addr].c = [{ a: 'SGA', t: text }];
-    });
-
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
     const range = XLSX.utils.decode_range(ws['!ref']);
     for (let row = 1; row <= range.e.r; row++) {
       Object.keys(colFormats).forEach(c => {
@@ -742,24 +675,8 @@
       });
     }
 
-    // ── OPCIONES VÁLIDAS SHEET ─────────────────────────────────────────────
-    const opcsName = 'Opciones válidas';
-    const wsOpts = XLSX.utils.aoa_to_sheet([
-      ['Unidad_compra',   'Unidad_venta',   'Precio_lista_por',        'Pedido_unidad'],
-      ['Unidad',          'Unidad',          'Por unidad de venta',     'Unidad'],
-      ['Bulto',           'Kg',              'Por unidad de compra',    'Kg'],
-      ['Display',         'Lt',              'Por otra cantidad',       'Bulto cerrado'],
-      ['Caja',            'Por peso',        '',                        'Pack'],
-      ['Pack',            'Por fracción',    '',                        'Display'],
-      ['Bolsa',           '',                '',                        'Bolsa'],
-      ['Kg',              '',                '',                        ''],
-      ['Lt',              '',                '',                        ''],
-      ['Docena',          '',                '',                        ''],
-    ]);
-
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Productos');
-    XLSX.utils.book_append_sheet(wb, wsOpts, opcsName);
     XLSX.writeFile(wb, filename);
   };
 
@@ -887,16 +804,7 @@
       'stock_minimo': ['minimo', 'stock min', 'min', 'stock minimo'],
       'categoria': ['categoria', 'rubro', 'familia', 'tipo'],
       'proveedor': ['proveedor', 'prov', 'fabricante', 'marca'],
-      'codigo_sustituto': ['sustituto', 'cod sustituto', 'reemplaza', 'alternativo'],
-      'unidad_compra': ['unidad compra', 'unidad_compra', 'compra'],
-      'unidades_por_paquete_compra': ['unidades por paquete', 'uds paquete', 'uxb', 'u x b', 'unidades bulto'],
-      'unidad_venta': ['unidad venta', 'unidad_venta', 'venta'],
-      'precio_lista_por': ['precio lista por', 'precio_lista_por'],
-      'precio_lista_divisor': ['divisor', 'precio_lista_divisor'],
-      'producto_madre_codigo': ['producto madre codigo', 'madre codigo', 'cod madre'],
-      'proveedor_alternativo': ['proveedor alternativo', 'prov alternativo'],
-      'pedido_sugerido_cantidad': ['pedido sugerido cantidad', 'pedido cantidad'],
-      'pedido_sugerido_unidad': ['pedido sugerido unidad', 'pedido unidad']
+      'codigo_sustituto': ['sustituto', 'cod sustituto', 'reemplaza', 'alternativo']
     };
     Object.keys(autoMappings).forEach(field => {
       const select = getElement('map-' + field);
@@ -1129,30 +1037,6 @@
         const precio_venta   = parseFloat(fila.precio_venta) || 0;
         const stock_actual   = parseFloat(fila.stock_actual) || 0;
         const stock_minimo   = parseFloat(fila.stock_minimo) || 0;
-        const unidad_compra  = String(fila.unidad_compra  || 'Unidad').trim();
-        const uxpc           = fila.unidades_por_paquete_compra !== '' && fila.unidades_por_paquete_compra != null
-                                 ? (parseFloat(fila.unidades_por_paquete_compra) || 1) : 1;
-        const unidad_venta   = String(fila.unidad_venta   || 'Unidad').trim();
-        const precio_lista_por = String(fila.precio_lista_por || 'Por unidad de venta').trim();
-        const precio_lista_divisor = fila.precio_lista_divisor !== '' && fila.precio_lista_divisor != null
-                                 ? (parseFloat(fila.precio_lista_divisor) || 1) : 1;
-
-        // Madre product via barcode
-        const madreCodStr = String(fila.producto_madre_codigo || '').trim();
-        let nuevo_madre_id;  // undefined = don't change; null = clear
-        if (madreCodStr) {
-          const mRow = window.SGA_DB.query('SELECT producto_id FROM codigos_barras WHERE codigo = ?', [madreCodStr]);
-          nuevo_madre_id = mRow.length ? mRow[0].producto_id : null;
-        }
-
-        // Alt provider
-        const altProvNombre = String(fila.proveedor_alternativo || '').trim();
-        const proveedor_alternativo_id = altProvNombre ? getOrCreateProveedor(altProvNombre) : null;
-
-        // Pedido sugerido
-        const cantPedido   = fila.pedido_sugerido_cantidad !== undefined && fila.pedido_sugerido_cantidad !== ''
-                               ? (parseFloat(fila.pedido_sugerido_cantidad) || 0) : null;
-        const pedidoUnidad = String(fila.pedido_sugerido_unidad || '').trim() || null;
 
         // Find existing product by barcode
         let producto_id = null;
@@ -1167,49 +1051,27 @@
         }
 
         if (producto_id) {
-          // UPDATE existing — build SET clause; producto_madre_id only updated if mapped
+          // UPDATE existing
           if (!updateExisting) continue;
-          const setParts = [
-            'nombre = ?', 'categoria_id = ?', 'proveedor_principal_id = ?',
-            'costo = ?', 'precio_venta = ?', 'stock_minimo = ?',
-            'unidad_compra = ?', 'unidades_por_paquete_compra = ?', 'unidad_venta = ?',
-            'precio_lista_por = ?', 'precio_lista_divisor = ?',
-            'proveedor_alternativo_id = ?',
-          ];
-          const setVals = [
-            nombre, categoria_id, proveedor_id, costo, precio_venta, stock_minimo,
-            unidad_compra, uxpc, unidad_venta, precio_lista_por, precio_lista_divisor,
-            proveedor_alternativo_id,
-          ];
-          if (cantPedido !== null)       { setParts.push('cant_pedido = ?');    setVals.push(cantPedido); }
-          if (pedidoUnidad !== null)     { setParts.push('pedido_unidad = ?');  setVals.push(pedidoUnidad); }
-          if (nuevo_madre_id !== undefined) { setParts.push('producto_madre_id = ?'); setVals.push(nuevo_madre_id); }
-          setVals.push(now, now, producto_id);
-          window.SGA_DB.run(
-            `UPDATE productos SET ${setParts.join(', ')}, fecha_modificacion = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
-            setVals
-          );
+          window.SGA_DB.run(`
+            UPDATE productos SET
+              nombre = ?, categoria_id = ?, proveedor_principal_id = ?,
+              costo = ?, precio_venta = ?, stock_minimo = ?,
+              fecha_modificacion = ?, sync_status = 'pending', updated_at = ?
+            WHERE id = ?
+          `, [nombre, categoria_id, proveedor_id, costo, precio_venta, stock_minimo, now, now, producto_id]);
           results.actualizados++;
         } else {
           // INSERT new
           producto_id = window.SGA_Utils.generateUUID();
           window.SGA_DB.run(`
             INSERT INTO productos (
-              id, nombre, categoria_id, proveedor_principal_id, proveedor_alternativo_id,
+              id, nombre, categoria_id, proveedor_principal_id,
               costo, precio_venta, stock_minimo,
-              unidad_compra, unidades_por_paquete_compra, unidad_venta,
-              precio_lista_por, precio_lista_divisor,
-              cant_pedido, pedido_unidad, producto_madre_id,
               es_madre, precio_independiente, unidad_medida, activo,
               fecha_alta, fecha_modificacion, sync_status, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'unidad', 1, ?, ?, 'pending', ?)
-          `, [
-            producto_id, nombre, categoria_id, proveedor_id, proveedor_alternativo_id,
-            costo, precio_venta, stock_minimo,
-            unidad_compra, uxpc, unidad_venta, precio_lista_por, precio_lista_divisor,
-            cantPedido, pedidoUnidad, nuevo_madre_id !== undefined ? nuevo_madre_id : null,
-            now, now, now
-          ]);
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 'unidad', 1, ?, ?, 'pending', ?)
+          `, [producto_id, nombre, categoria_id, proveedor_id, costo, precio_venta, stock_minimo, now, now, now]);
           results.importados++;
         }
 

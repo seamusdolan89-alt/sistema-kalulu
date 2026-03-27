@@ -238,6 +238,54 @@ const EditorProducto = (() => {
       </div>
     </div>
 
+    <!-- ── PRESENTACIÓN COMERCIAL ──────────────────────────── -->
+    <div class="ed-subsection">
+      <h4 class="ed-subsection-title">📦 Presentación comercial</h4>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="ed-unidad-compra">Unidad de compra</label>
+          <select id="ed-unidad-compra" class="select-full">
+            ${['Unidad','Bulto','Display','Caja','Pack','Bolsa','Kg','Lt','Docena'].map(u =>
+              `<option value="${u}" ${(p.unidad_compra || 'Unidad') === u ? 'selected' : ''}>${u}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <div class="form-group" id="ed-uxp-wrap" style="${!['Unidad','Kg','Lt'].includes(p.unidad_compra || 'Unidad') ? '' : 'display:none'}">
+          <label for="ed-unidades-paquete-compra">¿Cuántas unidades trae cada ${escapeHtml(p.unidad_compra || 'paquete')}?</label>
+          <input type="number" id="ed-unidades-paquete-compra" class="input-full" min="1" step="1" value="${p.unidades_por_paquete_compra != null ? p.unidades_por_paquete_compra : 1}">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="ed-unidad-venta">Unidad de venta</label>
+          <select id="ed-unidad-venta" class="select-full">
+            ${['Unidad','Kg','Lt','Por peso','Por fracción'].map(u =>
+              `<option value="${u}" ${(p.unidad_venta || 'Unidad') === u ? 'selected' : ''}>${u}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="ed-precio-lista-por">Precio de lista por</label>
+          <select id="ed-precio-lista-por" class="select-full">
+            <option value="Por unidad de venta" ${(p.precio_lista_por || 'Por unidad de venta') === 'Por unidad de venta' ? 'selected' : ''}>Por unidad de venta</option>
+            <option value="Por paquete" ${(p.precio_lista_por || '') === 'Por paquete' ? 'selected' : ''}>Por ${escapeHtml(p.unidad_compra || 'paquete')}</option>
+            <option value="Por otra cantidad" ${(p.precio_lista_por || '') === 'Por otra cantidad' ? 'selected' : ''}>Por otra cantidad</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group" id="ed-divisor-wrap" style="${(p.precio_lista_por || '') === 'Por otra cantidad' ? '' : 'display:none'}">
+        <label for="ed-precio-lista-divisor">Cantidad de unidades</label>
+        <input type="number" id="ed-precio-lista-divisor" class="input-full" min="1" step="0.01" value="${p.precio_lista_divisor != null ? p.precio_lista_divisor : 1}">
+      </div>
+
+      <div id="ed-pres-preview" class="ed-pres-preview" style="${!['Unidad','Kg','Lt'].includes(p.unidad_compra || 'Unidad') && (p.unidades_por_paquete_compra || 1) > 1 ? '' : 'display:none'}">
+        1 ${escapeHtml(p.unidad_compra || 'Unidad')} = ${p.unidades_por_paquete_compra || 1} unidades
+      </div>
+    </div>
+
     <div class="form-group">
       <div class="ed-toggle-row">
         <span>Estado</span>
@@ -526,6 +574,23 @@ const EditorProducto = (() => {
 
 <style>
 .editor-content-area { max-width: 820px; }
+.ed-subsection {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+.ed-subsection-title {
+  font-size: 14px; font-weight: 600; color: var(--color-text-secondary);
+  margin: 0 0 14px;
+}
+.ed-pres-preview {
+  margin-top: 8px;
+  padding: 7px 12px;
+  background: var(--color-primary-light, #e3f2fd);
+  border-radius: var(--radius-sm, 4px);
+  font-size: 13px;
+  color: var(--color-primary, #1565C0);
+}
 .ed-section-title {
   font-size: 18px; font-weight: 600; margin: 0 0 20px;
   padding-bottom: 12px; border-bottom: 2px solid var(--color-border);
@@ -1659,6 +1724,40 @@ const EditorProducto = (() => {
     updatePedidoInfoLine();
   };
 
+  const updatePresEditorUI = () => {
+    const ucEl       = ge('ed-unidad-compra');
+    const uxpWrap    = ge('ed-uxp-wrap');
+    const plpEl      = ge('ed-precio-lista-por');
+    const divisorWrap = ge('ed-divisor-wrap');
+    const previewEl  = ge('ed-pres-preview');
+    if (!ucEl) return;
+
+    const uc  = ucEl.value;
+    const upp = parseFloat((ge('ed-unidades-paquete-compra') || {}).value) || 1;
+    const plp = plpEl ? plpEl.value : '';
+
+    const showUxp = !['Unidad','Kg','Lt'].includes(uc);
+    if (uxpWrap) {
+      uxpWrap.style.display = showUxp ? '' : 'none';
+      const lbl = uxpWrap.querySelector('label');
+      if (lbl) lbl.textContent = `¿Cuántas unidades trae cada ${uc}?`;
+    }
+    if (plpEl) {
+      const optPack = plpEl.querySelector('option[value="Por paquete"]');
+      if (optPack) optPack.textContent = `Por ${uc}`;
+    }
+    if (divisorWrap) divisorWrap.style.display = plp === 'Por otra cantidad' ? '' : 'none';
+    if (previewEl) {
+      if (showUxp && upp > 1) {
+        previewEl.textContent = `1 ${uc} = ${upp} unidades`;
+        previewEl.style.display = '';
+      } else {
+        previewEl.textContent = '';
+        previewEl.style.display = 'none';
+      }
+    }
+  };
+
   // ── EVENTS ─────────────────────────────────────────────────────────────────
 
   const attachEvents = () => {
@@ -1692,6 +1791,13 @@ const EditorProducto = (() => {
     }
     ge('ed-pedido-unidad') && ge('ed-pedido-unidad').addEventListener('change', () => { markDirty(); updatePedidoUnidadUI(); });
     ge('ed-pedido-unidades-paquete') && ge('ed-pedido-unidades-paquete').addEventListener('input', updatePedidoInfoLine);
+
+    // Presentación comercial
+    ge('ed-unidad-compra') && ge('ed-unidad-compra').addEventListener('change', () => { markDirty(); updatePresEditorUI(); });
+    ge('ed-unidades-paquete-compra') && ge('ed-unidades-paquete-compra').addEventListener('input', () => { markDirty(); updatePresEditorUI(); });
+    ge('ed-unidad-venta') && ge('ed-unidad-venta').addEventListener('change', markDirty);
+    ge('ed-precio-lista-por') && ge('ed-precio-lista-por').addEventListener('change', () => { markDirty(); updatePresEditorUI(); });
+    ge('ed-precio-lista-divisor') && ge('ed-precio-lista-divisor').addEventListener('input', markDirty);
 
     // Toggle label
     const activoChk = ge('ed-activo');
@@ -1947,6 +2053,9 @@ const EditorProducto = (() => {
     const uppRaw             = (ge('ed-pedido-unidades-paquete') || {}).value;
     const unidadesPorPaquete = uppRaw !== '' ? (parseFloat(uppRaw) || null) : null;
 
+    const uppCompraRaw = (ge('ed-unidades-paquete-compra') || {}).value;
+    const pldRaw       = (ge('ed-precio-lista-divisor') || {}).value;
+
     window.SGA_DB.run(`
       UPDATE productos SET
         nombre = ?, descripcion = ?,
@@ -1956,6 +2065,8 @@ const EditorProducto = (() => {
         stock_minimo = ?, stock_alerta = ?, cant_pedido = ?, pedido_unidad = ?, pedido_unidades_por_paquete = ?,
         activo = ?,
         es_madre = ?, producto_madre_id = ?, precio_independiente = ?,
+        unidad_compra = ?, unidades_por_paquete_compra = ?, unidad_venta = ?,
+        precio_lista_por = ?, precio_lista_divisor = ?,
         imagen = ?,
         fecha_modificacion = ?, sync_status = 'pending', updated_at = ?
       WHERE id = ?
@@ -1977,6 +2088,11 @@ const EditorProducto = (() => {
       state.producto.es_madre ? 1 : 0,
       state.producto.es_madre ? null : (state.producto.producto_madre_id || null),
       (ge('ed-precio-independiente') || {}).checked ? 1 : 0,
+      (ge('ed-unidad-compra') || {}).value || 'Unidad',
+      uppCompraRaw !== '' ? (parseFloat(uppCompraRaw) || 1) : 1,
+      (ge('ed-unidad-venta') || {}).value || 'Unidad',
+      (ge('ed-precio-lista-por') || {}).value || 'Por unidad de venta',
+      pldRaw !== '' ? (parseFloat(pldRaw) || 1) : 1,
       imagen,
       now, now,
       state.productoId,

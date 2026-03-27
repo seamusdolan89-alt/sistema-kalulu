@@ -1,11 +1,227 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SGA - Proveedores</title>
-</head>
-<body>
-  <div id="app-content"></div>
-</body>
-</html>
+<style>
+  /* ── PROVEEDORES MODULE ──────────────────────────────────────────────────── */
+  #prov-root {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+
+  /* ── HEADER ──────────────────────────────────────────────────────────────── */
+  .prov-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+  }
+  .prov-header h2 {
+    margin: 0 0 2px;
+    font-size: 1.35rem;
+    font-weight: 700;
+  }
+  .prov-count-label {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+  }
+  .prov-header-right { display: flex; gap: 8px; }
+
+  /* ── FILTERS ─────────────────────────────────────────────────────────────── */
+  .prov-filters {
+    display: flex;
+    gap: 10px;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .prov-search {
+    flex: 1;
+    min-width: 240px;
+    padding: 8px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    outline: none;
+  }
+  .prov-search:focus { border-color: var(--color-primary); }
+  .prov-toggle {
+    padding: 7px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: 20px;
+    background: var(--color-surface);
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+    transition: all 0.15s;
+  }
+  .prov-toggle:hover { border-color: var(--color-primary); color: var(--color-primary); }
+  .prov-toggle.active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+
+  /* ── TABLE ───────────────────────────────────────────────────────────────── */
+  .prov-table-wrap {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 20px 20px;
+  }
+  .prov-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .prov-table thead th {
+    padding: 10px 10px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    border-bottom: 2px solid var(--color-border);
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    background: var(--color-background);
+    z-index: 1;
+  }
+  .prov-table tbody tr { border-bottom: 1px solid var(--color-border); transition: background 0.1s; }
+  .prov-table tbody tr:hover { background: var(--color-surface); }
+  .prov-table tbody td { padding: 10px 10px; vertical-align: middle; }
+  .prov-prod-count {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    font-size: 11px;
+    color: var(--color-text-secondary);
+    vertical-align: middle;
+  }
+
+  /* ── BADGES ──────────────────────────────────────────────────────────────── */
+  .prov-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .prov-badge.active   { background: #e8f5e9; color: #2e7d32; }
+  .prov-badge.inactive { background: #fafafa; color: #999; border: 1px solid #e0e0e0; }
+
+  /* ── ACTION BUTTONS ──────────────────────────────────────────────────────── */
+  .prov-actions { display: flex; gap: 4px; }
+  .prov-btn-icon {
+    padding: 4px 7px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-background);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    transition: background 0.1s;
+  }
+  .prov-btn-icon:hover { background: var(--color-surface); }
+
+  /* ── SHARED BUTTONS ──────────────────────────────────────────────────────── */
+  .prov-btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 16px;
+    background: var(--color-primary);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .prov-btn-primary:hover { opacity: 0.88; }
+  .prov-btn-secondary {
+    padding: 8px 16px;
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .prov-btn-secondary:hover { background: var(--color-border); }
+
+  /* ── MODAL OVERLAY ───────────────────────────────────────────────────────── */
+  .prov-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.45);
+    z-index: var(--z-modal);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .prov-modal-overlay.hidden { display: none; }
+  .prov-modal {
+    background: var(--color-background);
+    border-radius: var(--radius-lg);
+    width: 100%;
+    max-width: 520px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    flex-direction: column;
+  }
+  .prov-modal-hdr {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--color-border);
+    font-size: 1rem;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .prov-modal-close {
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    color: var(--color-text-secondary);
+    padding: 2px 6px;
+    line-height: 1;
+  }
+  .prov-modal-close:hover { color: var(--color-text); }
+  .prov-modal-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+  .prov-modal-ftr {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 14px 20px;
+    border-top: 1px solid var(--color-border);
+    flex-shrink: 0;
+  }
+
+  /* ── FORM FIELDS ─────────────────────────────────────────────────────────── */
+  .prov-field { display: flex; flex-direction: column; gap: 5px; }
+  .prov-field label { font-size: 13px; font-weight: 600; color: var(--color-text); }
+  .prov-field-row { display: flex; gap: 12px; }
+  .prov-field-row .prov-field { flex: 1; min-width: 0; }
+  .prov-req { color: var(--color-danger); }
+  .prov-input {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 8px 10px;
+    font-size: 14px;
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--color-background);
+    color: var(--color-text);
+  }
+  .prov-input:focus { outline: 2px solid var(--color-primary); border-color: transparent; }
+</style>
+
+<div id="prov-root"></div>
+<div id="prov-modal-overlay" class="prov-modal-overlay hidden"></div>

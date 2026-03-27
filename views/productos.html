@@ -410,6 +410,56 @@
         </div>
       </div>
 
+      <!-- Presentación comercial -->
+      <div class="pres-section">
+        <h5 class="pres-section-title">📦 Presentación comercial</h5>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="product-unidad-compra">Unidad de compra</label>
+            <select id="product-unidad-compra" class="select-full">
+              <option value="Unidad">Unidad</option>
+              <option value="Pack">Pack</option>
+              <option value="Caja">Caja</option>
+              <option value="Bandeja">Bandeja</option>
+              <option value="Fardo">Fardo</option>
+              <option value="Docena">Docena</option>
+              <option value="Kg">Kg</option>
+            </select>
+          </div>
+          <div class="form-group" id="unidades-paquete-compra-group">
+            <label for="product-unidades-paquete-compra">Unidades por paquete</label>
+            <input type="number" id="product-unidades-paquete-compra" class="input-full" min="1" step="1" value="1">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="product-unidad-venta">Unidad de venta</label>
+            <select id="product-unidad-venta" class="select-full">
+              <option value="Unidad">Unidad</option>
+              <option value="Kg">Kg</option>
+              <option value="Litro">Litro</option>
+              <option value="Porción">Porción</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="product-precio-lista-por">Precio de lista por</label>
+            <select id="product-precio-lista-por" class="select-full">
+              <option value="Por unidad de venta">Por unidad de venta</option>
+              <option value="Por paquete">Por paquete</option>
+              <option value="Por otra cantidad">Por otra cantidad</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row" id="precio-lista-divisor-group" style="display:none">
+          <div class="form-group">
+            <label for="product-precio-lista-divisor">Cantidad de unidades</label>
+            <input type="number" id="product-precio-lista-divisor" class="input-full" min="1" step="0.01" value="1">
+          </div>
+          <div class="form-group"></div>
+        </div>
+        <div id="pres-preview" class="pres-preview"></div>
+      </div>
+
       <div class="form-actions">
         <button id="btn-prev-step2" class="btn btn-secondary">← Anterior</button>
         <button id="btn-next-step2" class="btn btn-primary">Siguiente →</button>
@@ -1588,6 +1638,29 @@
   border: 1px solid #ccc;
 }
 .btn-outline:hover { background: #f5f5f5; }
+
+/* ── PRESENTACIÓN COMERCIAL ──────────────────────────────────────────────── */
+.pres-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #eee;
+}
+.pres-section-title {
+  margin: 0 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #555;
+}
+.pres-preview {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #e3f2fd;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #1565C0;
+  min-height: 0;
+}
+.pres-preview:empty { display: none; }
 </style>
 
 <!-- IMPORT EXCEL MODAL -->
@@ -1725,6 +1798,56 @@
           <div class="mapping-arrow">→</div>
           <div class="mapping-column">
             <select id="map-codigo_sustituto" class="mapping-select">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mapping-row">
+          <div class="mapping-field">Unidad de compra</div>
+          <div class="mapping-arrow">→</div>
+          <div class="mapping-column">
+            <select id="map-unidad_compra" class="mapping-select">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mapping-row">
+          <div class="mapping-field">Unidades por paquete</div>
+          <div class="mapping-arrow">→</div>
+          <div class="mapping-column">
+            <select id="map-unidades_por_paquete_compra" class="mapping-select">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mapping-row">
+          <div class="mapping-field">Unidad de venta</div>
+          <div class="mapping-arrow">→</div>
+          <div class="mapping-column">
+            <select id="map-unidad_venta" class="mapping-select">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mapping-row">
+          <div class="mapping-field">Precio de lista por</div>
+          <div class="mapping-arrow">→</div>
+          <div class="mapping-column">
+            <select id="map-precio_lista_por" class="mapping-select">
+              <option value="">-- Seleccionar --</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mapping-row">
+          <div class="mapping-field">Divisor precio lista</div>
+          <div class="mapping-arrow">→</div>
+          <div class="mapping-column">
+            <select id="map-precio_lista_divisor" class="mapping-select">
               <option value="">-- Seleccionar --</option>
             </select>
           </div>
