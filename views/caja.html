@@ -273,47 +273,92 @@
   .caja-form textarea:focus { outline: 2px solid var(--color-primary); border-color: transparent; }
   .caja-form textarea { resize: vertical; }
 
-  /* ── CIERRE STEPS NAV ────────────────────────────────────────────────────── */
-  .cierre-steps-nav {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 20px;
-    font-size: 12px;
-  }
-  .cierre-step-indicator {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    color: var(--color-text-secondary);
-    font-weight: 500;
-  }
-  .cierre-step-indicator span {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: var(--color-surface);
-    border: 2px solid var(--color-border);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 11px;
-    font-weight: 700;
-  }
-  .cierre-step-indicator.active { color: var(--color-primary); }
-  .cierre-step-indicator.active span { background: var(--color-primary); border-color: var(--color-primary); color: white; }
-  .cierre-step-indicator.done span { background: var(--color-success); border-color: var(--color-success); color: white; }
-  .cierre-step-sep { color: var(--color-border); font-size: 16px; }
-
   /* ── CIERRE BODY ─────────────────────────────────────────────────────────── */
   .cierre-resumen { background: var(--color-surface); border-radius: var(--radius-md); padding: 12px; }
   .cierre-billetes-table { width: 100%; border-collapse: collapse; font-size: 13px; }
   .cierre-billetes-table th { padding: 6px 8px; text-align: left; font-size: 12px; color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border); }
   .cierre-billetes-table td { padding: 5px 8px; border-bottom: 1px solid var(--color-border); }
   .cierre-billetes-table tfoot td { font-weight: 700; padding-top: 8px; }
-  .billete-input { width: 80px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 4px 6px; text-align: right; font-size: 13px; }
+  .billete-input { width: 80px; max-width: 120px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 4px 8px; text-align: right; font-size: 13px; }
+  .billete-input:focus { outline: 2px solid var(--color-primary); border-color: transparent; }
   .billete-subtotal { font-size: 13px; text-align: right; }
-  .cierre-confirm-grid { background: var(--color-surface); border-radius: var(--radius-md); padding: 12px; }
+
+  /* ── CIERRE MODAL ─────────────────────────────────────────────────────────── */
+  .cierre-section-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--color-text-secondary);
+    font-weight: 600;
+    margin: 0 0 10px;
+  }
+  .cierre-verificacion-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .cierre-verificacion-table th {
+    text-align: left; padding: 6px 8px; font-size: 11px;
+    color: var(--color-text-secondary); border-bottom: 2px solid var(--color-border);
+    text-transform: uppercase; letter-spacing: .03em;
+  }
+  .cierre-verificacion-table td { padding: 8px 8px; border-bottom: 1px solid var(--color-border); vertical-align: middle; }
+  .cierre-diff { font-weight: 600; font-size: 13px; }
+
+  /* ── EXPLANATION PANEL ───────────────────────────────────────────────────── */
+  .cierre-expl-panel {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    margin: 2px 0 6px;
+  }
+  .cierre-expl-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .expl-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .expl-status { font-size: 12px; font-weight: 600; }
+
+  /* ── EGRESOS/INGRESOS LINKS ──────────────────────────────────────────────── */
+  .cierre-ei-links { display: flex; flex-direction: column; gap: 6px; }
+  .cierre-ei-link { color: var(--color-primary); font-size: 13px; text-decoration: none; }
+  .cierre-ei-link:hover { text-decoration: underline; }
+  .cierre-ei-panel {
+    background: var(--color-surface);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    margin-top: 2px;
+    font-size: 13px;
+  }
+
+  /* ── POST-CIERRE SUMMARY ─────────────────────────────────────────────────── */
+  .postcaja-section {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    margin-bottom: 16px;
+  }
+  .postcaja-section h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--color-text-secondary);
+    font-weight: 600;
+    margin: 0 0 10px;
+  }
+
+  /* ── DENOMINATION LIST ROW ───────────────────────────────────────────────── */
+  .denom-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+  }
 </style>
 
 <div id="caja-root"></div>

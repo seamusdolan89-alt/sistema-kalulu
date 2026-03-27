@@ -1642,9 +1642,11 @@ export const POS = (() => {
       ge('btn-dev-cancel-step')?.addEventListener('click', () => hideModal('modal-devolucion'));
     };
 
-    const devSearchVentas = (q) => {
+    // expandido=false → últimos 90 días; expandido=true → todo el historial
+    const devSearchVentas = (q, expandido) => {
       if (!q || q.length < 2 || !state.currentSucursal) return [];
       const like = `%${q}%`;
+      const dateFilter = expandido ? '' : `AND v.fecha >= date('now', '-90 days')`;
       try {
         return window.SGA_DB.query(`
           SELECT DISTINCT v.id, v.fecha, v.total, v.estado,
@@ -1656,13 +1658,15 @@ export const POS = (() => {
           LEFT JOIN productos p ON p.id = vi.producto_id
           LEFT JOIN codigos_barras cb ON cb.producto_id = p.id
           WHERE v.sucursal_id = ? AND v.estado = 'completada'
+            ${dateFilter}
             AND (
               LOWER(COALESCE(c.nombre,'') || ' ' || COALESCE(c.apellido,'')) LIKE LOWER(?)
               OR LOWER(p.nombre) LIKE LOWER(?)
               OR cb.codigo = ?
+              OR LOWER(v.id) LIKE LOWER(?)
             )
-          ORDER BY v.fecha DESC LIMIT 20
-        `, [state.currentSucursal.id, like, like, q]);
+          ORDER BY v.fecha DESC LIMIT 40
+        `, [state.currentSucursal.id, like, like, q, like]);
       } catch (e) { console.warn('devSearchVentas:', e); return []; }
     };
 
@@ -1672,28 +1676,35 @@ export const POS = (() => {
       if (devTitle()) devTitle().textContent = '↩ Devolución — Buscar venta';
       const b = devBody();
       if (!b) return;
+      let expandido = false;
+
       b.innerHTML = `
         <div class="fg">
-          <label>Buscar por cliente o producto</label>
+          <label>Buscar por cliente, producto, código de barras o ID de venta</label>
           <div style="display:flex;gap:8px">
-            <input type="text" id="dev-search-input" class="fi" placeholder="Nombre cliente, producto o código de barras...">
+            <input type="text" id="dev-search-input" class="fi" placeholder="Nombre, producto, código o ID...">
             <button class="mbtn mbtn-secondary" id="btn-dev-buscar">Buscar</button>
           </div>
+          <div id="dev-scope-label" style="font-size:11px;color:#999;margin-top:4px">
+            📅 Buscando en los últimos 90 días ·
+            <span id="btn-dev-expandir" style="color:#667eea;cursor:pointer;text-decoration:underline">Ampliar a todo el historial</span>
+          </div>
         </div>
-        <div id="dev-results" style="margin-top:12px;max-height:280px;overflow-y:auto"></div>`;
+        <div id="dev-results" style="margin-top:10px;max-height:280px;overflow-y:auto"></div>`;
       devRenderFooter('');
 
-      const doSearch = () => {
-        const q = ge('dev-search-input')?.value.trim() || '';
-        const results = devSearchVentas(q);
+      const renderResults = (results) => {
         const el = ge('dev-results');
         if (!el) return;
-        if (!results.length) { el.innerHTML = '<p style="color:#888;font-size:13px">Sin resultados</p>'; return; }
+        if (!results.length) {
+          el.innerHTML = `<p style="color:#888;font-size:13px">Sin resultados${expandido ? '' : ' en los últimos 90 días'}</p>`;
+          return;
+        }
         el.innerHTML = results.map(v => `
           <div class="dev-venta-row" data-id="${v.id}" style="padding:10px 12px;border:1px solid #e0e0e0;border-radius:6px;margin-bottom:6px;cursor:pointer;font-size:13px">
             <strong>${formatTime(v.fecha)}</strong> · ${v.cliente_nombre}
             <span style="float:right;font-weight:700;color:#667eea">${formatCurrency(v.total)}</span>
-            <div style="color:#aaa;font-size:11px;margin-top:2px">${v.id.slice(-8)}</div>
+            <div style="color:#aaa;font-size:11px;margin-top:2px">ID: …${v.id.slice(-8)}</div>
           </div>`).join('');
         el.querySelectorAll('.dev-venta-row').forEach(row => {
           row.addEventListener('mouseenter', () => row.style.background = '#f0f4ff');
@@ -1705,6 +1716,17 @@ export const POS = (() => {
         });
       };
 
+      const doSearch = () => {
+        const q = ge('dev-search-input')?.value.trim() || '';
+        renderResults(devSearchVentas(q, expandido));
+      };
+
+      ge('btn-dev-expandir')?.addEventListener('click', () => {
+        expandido = true;
+        const lbl = ge('dev-scope-label');
+        if (lbl) lbl.innerHTML = '🗂️ Buscando en <strong>todo el historial</strong>';
+        doSearch();
+      });
       ge('btn-dev-buscar')?.addEventListener('click', doSearch);
       ge('dev-search-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
       setTimeout(() => ge('dev-search-input')?.focus(), 80);

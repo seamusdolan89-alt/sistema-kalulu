@@ -8,8 +8,7 @@
 const Caja = (() => {
   'use strict';
 
-  const DENOMINATIONS = window.SGA_Utils.DENOMINACIONES;
-  const MEDIOS = ['efectivo', 'mercadopago', 'tarjeta', 'transferencia', 'cuenta_corriente'];
+  const MEDIOS =['efectivo', 'mercadopago', 'tarjeta', 'transferencia', 'cuenta_corriente'];
   const MEDIOS_LABEL = {
     efectivo: 'Efectivo',
     mercadopago: 'Mercado Pago',
@@ -29,8 +28,7 @@ const Caja = (() => {
     sesion: null,
     totales: null,
     currentTab: 'resumen',
-    cierreStep: 1,
-    cierre: { billetes: {}, otrosMedios: {}, observaciones: '' },
+    cierre: { mediosInformados: {}, explicaciones: {} },
     recuento: { billetes: {} },
     refreshTimer: null,
     user: null,
@@ -44,6 +42,21 @@ const Caja = (() => {
 
   const fmtPeso = (n) => window.SGA_Utils.formatCurrency(n);
   const fmtFecha = (str) => window.SGA_Utils.formatFecha(str);
+
+  // ── DENOMINACIONES ────────────────────────────────────────────────────────────
+
+  function getDenominaciones() {
+    try {
+      const rows = window.SGA_DB.query(
+        `SELECT valor FROM system_config WHERE clave = 'denominaciones' LIMIT 1`
+      );
+      if (rows.length && rows[0].valor) {
+        const arr = JSON.parse(rows[0].valor);
+        if (Array.isArray(arr) && arr.length) return arr;
+      }
+    } catch (e) { /* fallback */ }
+    return window.SGA_Utils.DENOMINACIONES.slice();
+  }
 
   // ── PERMISSION ───────────────────────────────────────────────────────────────
 
@@ -215,12 +228,13 @@ const Caja = (() => {
              usuario_cierre_id = ?,
              fecha_cierre = ?,
              saldo_final_real = ?,
+             saldo_final_esperado = ?,
              diferencia = ?,
              detalle_billetes = ?,
              sync_status = 'pending',
              updated_at = ?
          WHERE id = ?`,
-        [usuarioId, now, parseFloat(saldoFinalReal), diferencia, JSON.stringify(detalleBilletes), now, sesionId]
+        [usuarioId, now, parseFloat(saldoFinalReal), tot.saldoEsperado, diferencia, JSON.stringify(detalleBilletes), now, sesionId]
       );
       return { success: true, diferencia };
     } catch (e) {
@@ -271,6 +285,32 @@ const Caja = (() => {
   function renderApertura() {
     const root = ge('caja-root');
     if (!root) return;
+
+    let ultimoCierre = null;
+    try {
+      const rows = window.SGA_DB.query(
+        `SELECT saldo_final_real FROM sesiones_caja
+         WHERE sucursal_id = ? AND estado = 'cerrada'
+         ORDER BY fecha_cierre DESC LIMIT 1`,
+        [state.user.sucursal_id]
+      );
+      if (rows.length) ultimoCierre = parseFloat(rows[0].saldo_final_real) || 0;
+    } catch (e) { /* no prev session */ }
+
+    const saldoInputHtml = ultimoCierre !== null
+      ? `<div class="caja-input-prefix">
+           <span>$</span>
+           <input type="number" id="caja-saldo-inicial" value="${ultimoCierre}" min="0" step="1" readonly
+             style="background:var(--color-surface);color:var(--color-text-secondary)">
+         </div>
+         <small style="color:var(--color-text-secondary);font-size:12px;display:block;margin-top:4px">
+           Transferido del turno anterior
+         </small>`
+      : `<div class="caja-input-prefix">
+           <span>$</span>
+           <input type="number" id="caja-saldo-inicial" value="0" min="0" step="1" placeholder="0">
+         </div>`;
+
     root.innerHTML = `
       <div class="caja-toolbar">
         <h2>💰 Caja</h2>
@@ -282,10 +322,7 @@ const Caja = (() => {
           <p>Para comenzar a registrar ventas, debés abrir una sesión de caja.</p>
           <div class="caja-apertura-field">
             <label for="caja-saldo-inicial">Saldo inicial en efectivo</label>
-            <div class="caja-input-prefix">
-              <span>$</span>
-              <input type="number" id="caja-saldo-inicial" value="0" min="0" step="1" placeholder="0">
-            </div>
+            ${saldoInputHtml}
           </div>
           <button id="btn-abrir-caja" class="btn btn-primary btn-lg">Abrir Caja</button>
         </div>
@@ -666,33 +703,49 @@ const Caja = (() => {
     const el = container || ge('caja-tab-content');
     if (!el || !state.sesion) return;
 
-    // Load existing saved billetes from session if recuento state is empty
+    const denoms = getDenominaciones();
+
+    // Load saved billetes if state is empty
     if (!Object.keys(state.recuento.billetes).length) {
       try {
         const saved = JSON.parse(state.sesion.detalle_billetes || '{}');
-        state.recuento.billetes = saved;
+        state.recuento.billetes = (saved.billetes && typeof saved.billetes === 'object')
+          ? saved.billetes : saved;
       } catch (e) { /* no saved data */ }
     }
 
     const tot = getTotalesSesion(state.sesion.id);
-    const totalContado = DENOMINATIONS.reduce(
+    const totalContado = denoms.reduce(
       (sum, d) => sum + d * (parseFloat(state.recuento.billetes[d]) || 0), 0
     );
     const diferencia = totalContado - tot.saldoEsperado;
     const difClass = diferencia > 0.005 ? 'text-success' : diferencia < -0.005 ? 'text-danger' : '';
 
     el.innerHTML = `
-      <p style="margin:0 0 12px;font-size:14px;color:#666">
-        Contá los billetes y monedas en caja en cualquier momento de la sesión.
-      </p>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <p style="margin:0;font-size:14px;color:#666">
+          Contá los billetes y monedas en caja en cualquier momento de la sesión.
+        </p>
+        ${state.user && state.user.rol === 'admin'
+          ? `<button id="btn-editar-denoms" class="btn btn-outline btn-sm" style="white-space:nowrap;margin-left:12px">⚙ Editar denominaciones</button>`
+          : ''}
+      </div>
       <table class="cierre-billetes-table">
-        <thead><tr><th>Denominación</th><th>Cantidad</th><th style="text-align:right">Subtotal</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Denominación</th>
+            <th style="text-align:center;width:130px">Cantidad</th>
+            <th style="text-align:right">Subtotal</th>
+          </tr>
+        </thead>
         <tbody>
-          ${DENOMINATIONS.map(d => `
+          ${denoms.map(d => `
             <tr>
               <td>${fmtPeso(d)}</td>
-              <td><input type="number" class="billete-input recuento-input" data-denom="${d}" min="0"
-                value="${parseFloat(state.recuento.billetes[d]) || 0}"></td>
+              <td style="text-align:center">
+                <input type="number" class="billete-input recuento-input" data-denom="${d}" min="0"
+                  value="${parseFloat(state.recuento.billetes[d]) || 0}">
+              </td>
               <td class="billete-subtotal" id="rec-sub-${d}" style="text-align:right">
                 ${fmtPeso((parseFloat(state.recuento.billetes[d]) || 0) * d)}
               </td>
@@ -723,15 +776,15 @@ const Caja = (() => {
       </div>
     `;
 
-    // Live subtotals
     el.querySelectorAll('.recuento-input').forEach(inp => {
+      inp.addEventListener('focus', () => inp.select());
       inp.addEventListener('input', () => {
         const d = parseFloat(inp.dataset.denom);
         const n = parseFloat(inp.value) || 0;
         state.recuento.billetes[d] = n;
         const subEl = ge(`rec-sub-${inp.dataset.denom}`);
         if (subEl) subEl.textContent = fmtPeso(d * n);
-        const total = DENOMINATIONS.reduce(
+        const total = denoms.reduce(
           (sum, den) => sum + den * (parseFloat(state.recuento.billetes[den]) || 0), 0
         );
         const totEl = ge('recuento-total-contado');
@@ -745,8 +798,8 @@ const Caja = (() => {
       });
     });
 
-    ge('btn-guardar-recuento').addEventListener('click', () => {
-      // Save billetes snapshot to sesion_caja.detalle_billetes
+    const btnGuardar = ge('btn-guardar-recuento');
+    if (btnGuardar) btnGuardar.addEventListener('click', () => {
       const billetes = {};
       el.querySelectorAll('.recuento-input').forEach(inp => {
         const n = parseFloat(inp.value) || 0;
@@ -755,7 +808,7 @@ const Caja = (() => {
       try {
         window.SGA_DB.run(
           `UPDATE sesiones_caja SET detalle_billetes = ?, updated_at = ? WHERE id = ?`,
-          [JSON.stringify(billetes), window.SGA_Utils.formatISODate(new Date()), state.sesion.id]
+          [JSON.stringify({ billetes }), window.SGA_Utils.formatISODate(new Date()), state.sesion.id]
         );
         state.recuento.billetes = billetes;
         showToast('Recuento guardado', 'success');
@@ -763,192 +816,537 @@ const Caja = (() => {
         showToast('Error al guardar: ' + e.message, 'error');
       }
     });
+
+    const btnEditDenoms = ge('btn-editar-denoms');
+    if (btnEditDenoms) btnEditDenoms.addEventListener('click', openDenomModal);
   }
 
-  // ── CIERRE WIZARD ─────────────────────────────────────────────────────────────
+  // ── EDITAR DENOMINACIONES MODAL ───────────────────────────────────────────────
+
+  function openDenomModal() {
+    let denoms = getDenominaciones().slice();
+
+    const renderDenomList = () => {
+      const list = ge('denom-list');
+      if (!list) return;
+      list.innerHTML = denoms.map((d, i) => `
+        <div class="denom-row">
+          <span style="flex:1;font-weight:500">${fmtPeso(d)}</span>
+          <button class="btn btn-xs btn-outline denom-up" data-idx="${i}" ${i === 0 ? 'disabled' : ''}>↑</button>
+          <button class="btn btn-xs btn-outline denom-down" data-idx="${i}" ${i === denoms.length - 1 ? 'disabled' : ''}>↓</button>
+          <button class="btn btn-xs btn-danger denom-remove" data-idx="${i}">✕</button>
+        </div>
+      `).join('');
+
+      list.querySelectorAll('.denom-up').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const i = parseInt(btn.dataset.idx);
+          if (i > 0) { [denoms[i - 1], denoms[i]] = [denoms[i], denoms[i - 1]]; renderDenomList(); }
+        });
+      });
+      list.querySelectorAll('.denom-down').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const i = parseInt(btn.dataset.idx);
+          if (i < denoms.length - 1) { [denoms[i], denoms[i + 1]] = [denoms[i + 1], denoms[i]]; renderDenomList(); }
+        });
+      });
+      list.querySelectorAll('.denom-remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+          denoms.splice(parseInt(btn.dataset.idx), 1);
+          renderDenomList();
+        });
+      });
+    };
+
+    openModal(`
+      <button class="caja-modal-close" id="btn-close-denoms">✕</button>
+      <h3>Editar denominaciones</h3>
+      <div id="denom-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px"></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="number" id="denom-nueva" placeholder="Nueva denominación (ej: 200)" min="1" step="1"
+          style="flex:1;border:1px solid var(--color-border);border-radius:var(--radius-md);padding:8px 10px;font-size:14px">
+        <button class="btn btn-secondary" id="btn-agregar-denom">+ Agregar</button>
+      </div>
+      <div class="caja-modal-footer">
+        <button class="btn btn-outline" id="btn-cancel-denoms">Cancelar</button>
+        <button class="btn btn-primary" id="btn-save-denoms">Guardar</button>
+      </div>
+    `);
+
+    renderDenomList();
+
+    ge('btn-close-denoms').addEventListener('click', closeModal);
+    ge('btn-cancel-denoms').addEventListener('click', closeModal);
+
+    ge('btn-agregar-denom').addEventListener('click', () => {
+      const val = parseInt(ge('denom-nueva').value);
+      if (!val || val <= 0) { showToast('Ingresá un valor válido', 'warn'); return; }
+      if (denoms.includes(val)) { showToast('Ya existe esa denominación', 'warn'); return; }
+      denoms.push(val);
+      denoms.sort((a, b) => b - a);
+      ge('denom-nueva').value = '';
+      renderDenomList();
+    });
+
+    ge('denom-nueva').addEventListener('keydown', e => {
+      if (e.key === 'Enter') ge('btn-agregar-denom').click();
+    });
+
+    ge('btn-save-denoms').addEventListener('click', () => {
+      if (!denoms.length) { showToast('Debe haber al menos una denominación', 'warn'); return; }
+      try {
+        window.SGA_DB.run(
+          `INSERT OR REPLACE INTO system_config (clave, valor, updated_at) VALUES ('denominaciones', ?, datetime('now'))`,
+          [JSON.stringify(denoms)]
+        );
+        // Update in-memory fallback and reset stale bill quantities
+        window.SGA_Utils.DENOMINACIONES = denoms.slice();
+        state.recuento.billetes = {};
+        closeModal();
+        switchTab('recuento');
+        showToast('Denominaciones guardadas', 'success');
+      } catch (e) {
+        showToast('Error al guardar: ' + e.message, 'error');
+      }
+    });
+  }
+
+  // ── CIERRE MODAL ──────────────────────────────────────────────────────────────
 
   function openCierreModal() {
-    state.cierreStep = 1;
-    state.cierre = { billetes: {}, otrosMedios: {}, observaciones: '' };
-    renderCierreStep();
-  }
-
-  function renderCierreStep() {
     const tot = getTotalesSesion(state.sesion.id);
     state.totales = tot;
+    const denoms = getDenominaciones();
 
-    const STEPS = [
-      { n: 1, label: 'Resumen' },
-      { n: 2, label: 'Arqueo' },
-      { n: 3, label: 'Otros medios' },
-      { n: 4, label: 'Confirmar' },
-    ];
+    // Pre-fill efectivo from saved recuento
+    const totalContado = denoms.reduce(
+      (sum, d) => sum + d * (parseFloat(state.recuento.billetes[d]) || 0), 0
+    );
 
-    const stepsHtml = STEPS.map((s, i) => {
-      const cls = state.cierreStep === s.n ? 'active' : state.cierreStep > s.n ? 'done' : '';
-      return (i > 0 ? '<div class="cierre-step-sep">›</div>' : '') +
-        `<div class="cierre-step-indicator ${cls}"><span>${s.n}</span> ${s.label}</div>`;
-    }).join('');
+    state.cierre = { mediosInformados: {}, explicaciones: {} };
 
-    let bodyHtml = '';
+    // medios to show: efectivo always; others only if they have sales activity
+    const mediosCierre = [
+      { id: 'efectivo',      label: '💵 Efectivo',      esperado: tot.saldoEsperado },
+      { id: 'mercadopago',   label: '📱 Mercado Pago',  esperado: tot.totPagos['mercadopago']   || 0 },
+      { id: 'tarjeta',       label: '💳 Tarjeta',       esperado: tot.totPagos['tarjeta']       || 0 },
+      { id: 'transferencia', label: '🏦 Transferencia', esperado: tot.totPagos['transferencia'] || 0 },
+    ].filter(m => m.id === 'efectivo' || m.esperado > 0);
 
-    if (state.cierreStep === 1) {
-      bodyHtml = `
-        <div class="cierre-resumen">
-          ${MEDIOS.map(m => `
-            <div class="caja-stat-row">
-              <span>${MEDIOS_LABEL[m]}</span>
-              <span>${fmtPeso(tot.totPagos[m] || 0)}</span>
+    // Init informed amounts (efectivo from recuento if available, else saldo esperado)
+    mediosCierre.forEach(m => {
+      state.cierre.mediosInformados[m.id] = (m.id === 'efectivo' && totalContado > 0)
+        ? totalContado : m.esperado;
+    });
+
+    const { egresos, ingresos } = getEgresosIngresos(state.sesion.id);
+    const totalEgresos = egresos.reduce((s, e) => s + parseFloat(e.monto || 0), 0);
+    const totalIngresos = ingresos.reduce((s, i) => s + parseFloat(i.monto || 0), 0);
+
+    const mediosRowsHtml = mediosCierre.map(m => {
+      const informado = state.cierre.mediosInformados[m.id];
+      const diff = informado - m.esperado;
+      const diffClass = diff > 0.005 ? 'text-success' : diff < -0.005 ? 'text-danger' : '';
+      return `
+        <tr data-medio="${esc(m.id)}">
+          <td>${m.label}</td>
+          <td style="text-align:right">${fmtPeso(m.esperado)}</td>
+          <td style="text-align:right;padding:4px 8px">
+            <input type="number" class="billete-input cierre-medio-input"
+              data-medio="${esc(m.id)}" data-esperado="${m.esperado}"
+              value="${informado}" min="0" step="0.01"
+              style="width:110px;text-align:right">
+          </td>
+          <td style="text-align:right;min-width:80px">
+            <span class="cierre-diff ${diffClass}" id="cierre-diff-${esc(m.id)}">
+              ${diff >= 0 ? '+' : ''}${fmtPeso(diff)}
+            </span>
+          </td>
+          <td>
+            <button class="btn btn-xs btn-outline cierre-btn-explicar"
+              data-medio="${esc(m.id)}" id="btn-explicar-${esc(m.id)}"
+              style="display:${Math.abs(diff) > 0.005 ? 'inline-flex' : 'none'}">
+              💬 Explicar
+            </button>
+          </td>
+        </tr>
+        <tr>
+          <td colspan="5" style="padding:0">
+            <div id="expl-panel-${esc(m.id)}" class="cierre-expl-panel" style="display:none">
+              <div class="cierre-expl-header">
+                <span id="expl-diff-label-${esc(m.id)}">
+                  Diferencia: ${diff >= 0 ? '+' : ''}${fmtPeso(diff)}
+                </span>
+                <span id="expl-status-${esc(m.id)}" class="expl-status"></span>
+              </div>
+              <div id="expl-rows-${esc(m.id)}"></div>
+              <button class="btn btn-xs btn-outline" id="btn-add-expl-${esc(m.id)}"
+                data-medio="${esc(m.id)}" style="margin-top:6px">+ Agregar fila</button>
             </div>
-          `).join('')}
-          <div class="caja-stat-row total-row"><span>Total ventas</span><span>${fmtPeso(tot.totalVentas)}</span></div>
-          <div class="caja-stat-row"><span>Egresos</span><span class="text-danger">-${fmtPeso(tot.egresos)}</span></div>
-          <div class="caja-stat-row"><span>Ingresos extra</span><span class="text-success">+${fmtPeso(tot.ingresos)}</span></div>
-          <div class="caja-stat-row highlight-row"><span>Saldo esperado (efectivo)</span><span>${fmtPeso(tot.saldoEsperado)}</span></div>
-        </div>
+          </td>
+        </tr>
       `;
-    } else if (state.cierreStep === 2) {
-      const totalContado = DENOMINATIONS.reduce((sum, d) => sum + d * (parseFloat(state.cierre.billetes[d]) || 0), 0);
-      bodyHtml = `
-        <p style="margin:0 0 12px;font-size:14px;color:#666">Contá los billetes y monedas en caja.</p>
-        <table class="cierre-billetes-table">
-          <thead><tr><th>Denominación</th><th>Cantidad</th><th style="text-align:right">Subtotal</th></tr></thead>
-          <tbody>
-            ${DENOMINATIONS.map(d => `
-              <tr>
-                <td>${fmtPeso(d)}</td>
-                <td><input type="number" class="billete-input" data-denom="${d}" min="0" value="${parseFloat(state.cierre.billetes[d]) || 0}"></td>
-                <td class="billete-subtotal" id="sub-${d}" style="text-align:right">${fmtPeso((parseFloat(state.cierre.billetes[d]) || 0) * d)}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td colspan="2"><strong>Total contado</strong></td>
-              <td style="text-align:right" id="cierre-total-contado"><strong>${fmtPeso(totalContado)}</strong></td>
-            </tr>
-          </tfoot>
-        </table>
-      `;
-    } else if (state.cierreStep === 3) {
-      const mediosExtra = MEDIOS.filter(m => m !== 'efectivo');
-      bodyHtml = `
-        <p style="margin:0 0 12px;font-size:14px;color:#666">Verificá los montos por medio de pago.</p>
-        <table class="caja-table">
-          <thead><tr><th>Medio</th><th>Esperado</th><th>Observaciones</th></tr></thead>
-          <tbody>
-            ${mediosExtra.map(m => `
-              <tr>
-                <td>${MEDIOS_LABEL[m]}</td>
-                <td>${fmtPeso(tot.totPagos[m] || 0)}</td>
-                <td><input type="text" class="otros-medios-obs" data-medio="${m}" placeholder="Opcional" value="${esc(state.cierre.otrosMedios[m] || '')}"></td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-        <div class="caja-form" style="margin-top:16px">
-          <label>Observaciones generales</label>
-          <textarea id="cierre-observaciones" rows="3" placeholder="Notas del cierre">${esc(state.cierre.observaciones)}</textarea>
-        </div>
-      `;
-    } else if (state.cierreStep === 4) {
-      const totalContado = DENOMINATIONS.reduce((sum, d) => sum + d * (parseFloat(state.cierre.billetes[d]) || 0), 0);
-      const diferencia = totalContado - tot.saldoEsperado;
-      const difClass = diferencia > 0 ? 'text-success' : diferencia < 0 ? 'text-danger' : '';
-      bodyHtml = `
-        <div class="cierre-confirm-grid">
-          <div class="caja-stat-row"><span>Saldo esperado</span><span>${fmtPeso(tot.saldoEsperado)}</span></div>
-          <div class="caja-stat-row"><span>Total contado</span><span>${fmtPeso(totalContado)}</span></div>
-          <div class="caja-stat-row highlight-row">
-            <span>Diferencia</span>
-            <span class="${difClass}">${diferencia >= 0 ? '+' : ''}${fmtPeso(diferencia)}</span>
-          </div>
-        </div>
-        <p style="margin-top:16px;color:#666;font-size:13px">Al confirmar, la sesión de caja se cerrará y no podrá modificarse.</p>
-      `;
-    }
-
-    const isFirst = state.cierreStep === 1;
-    const isLast  = state.cierreStep === 4;
+    }).join('');
 
     openModal(`
       <button class="caja-modal-close" id="btn-close-cierre">✕</button>
       <h3>Cierre de Caja</h3>
-      <div class="cierre-steps-nav">${stepsHtml}</div>
-      <div class="cierre-body">${bodyHtml}</div>
-      <div class="caja-modal-footer">
-        <button class="btn btn-outline" id="btn-cierre-prev" ${isFirst ? 'disabled' : ''}>← Anterior</button>
-        ${isLast
-          ? `<button class="btn btn-danger" id="btn-cierre-confirm">Confirmar Cierre</button>`
-          : `<button class="btn btn-primary" id="btn-cierre-next">Siguiente →</button>`
-        }
+
+      <h4 class="cierre-section-title">Verificación por medio de pago</h4>
+      <table class="cierre-verificacion-table">
+        <thead>
+          <tr>
+            <th>Medio</th>
+            <th style="text-align:right">Esperado</th>
+            <th style="text-align:right">Informado</th>
+            <th style="text-align:right">Diferencia</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>${mediosRowsHtml}</tbody>
+      </table>
+
+      <h4 class="cierre-section-title" style="margin-top:20px">Egresos e Ingresos</h4>
+      <div class="cierre-ei-links">
+        <a href="#" id="toggle-cierre-egresos" class="cierre-ei-link">
+          📋 Ver egresos del turno
+          (${egresos.length} movimiento${egresos.length !== 1 ? 's' : ''} — ${fmtPeso(totalEgresos)})
+        </a>
+        <div id="cierre-egresos-panel" class="cierre-ei-panel" style="display:none">
+          ${egresos.length
+            ? `<table class="caja-table">${egresos.map(e =>
+                `<tr><td>${fmtFecha(e.fecha)}</td><td>${esc(e.descripcion || '')}</td>
+                 <td style="text-align:right;color:var(--color-danger)">${fmtPeso(e.monto)}</td></tr>`
+              ).join('')}</table>`
+            : '<p style="color:#999;padding:8px 0;font-size:13px">Sin egresos</p>'}
+          <small style="color:#999;display:block;margin-top:6px">Si encontrás un error, cerrá este panel y corregilo en el módulo Caja.</small>
+        </div>
+        <a href="#" id="toggle-cierre-ingresos" class="cierre-ei-link">
+          📋 Ver ingresos extra del turno
+          (${ingresos.length} movimiento${ingresos.length !== 1 ? 's' : ''} — ${fmtPeso(totalIngresos)})
+        </a>
+        <div id="cierre-ingresos-panel" class="cierre-ei-panel" style="display:none">
+          ${ingresos.length
+            ? `<table class="caja-table">${ingresos.map(i =>
+                `<tr><td>${fmtFecha(i.fecha)}</td><td>${esc(i.descripcion || '')}</td>
+                 <td style="text-align:right;color:var(--color-success)">${fmtPeso(i.monto)}</td></tr>`
+              ).join('')}</table>`
+            : '<p style="color:#999;padding:8px 0;font-size:13px">Sin ingresos extra</p>'}
+          <small style="color:#999;display:block;margin-top:6px">Si encontrás un error, cerrá este panel y corregilo en el módulo Caja.</small>
+        </div>
+      </div>
+
+      <div class="caja-modal-footer" style="flex-direction:column;align-items:stretch;gap:8px">
+        <p id="cierre-warn" style="color:var(--color-danger);font-size:13px;display:none;margin:0">
+          ⚠️ Explicá todas las diferencias antes de confirmar.
+        </p>
+        <button class="btn btn-danger" id="btn-cierre-confirm"
+          style="width:100%;justify-content:center;font-size:15px;padding:12px">
+          ✓ Confirmar cierre de caja
+        </button>
       </div>
     `);
 
-    ge('btn-close-cierre').addEventListener('click', closeModal);
+    // ── Helpers ─────────────────────────────────────────────────────────────────
 
-    if (!isFirst) {
-      ge('btn-cierre-prev').addEventListener('click', () => {
-        saveCierreStepData();
-        state.cierreStep--;
-        renderCierreStep();
+    const validateCierre = () => {
+      let allOk = true;
+      mediosCierre.forEach(m => {
+        const informado = parseFloat(state.cierre.mediosInformados[m.id]) || 0;
+        const diff = informado - m.esperado;
+        if (Math.abs(diff) > 0.005) {
+          const expls = state.cierre.explicaciones[m.id] || [];
+          const totalExpl = expls.reduce((s, r) => s + (parseFloat(r.monto) || 0), 0);
+          if (Math.abs(totalExpl - Math.abs(diff)) > 0.005) allOk = false;
+        }
       });
-    }
+      const confirmBtn = ge('btn-cierre-confirm');
+      const warnEl = ge('cierre-warn');
+      if (confirmBtn) confirmBtn.disabled = !allOk;
+      if (warnEl) warnEl.style.display = allOk ? 'none' : 'block';
+    };
 
-    if (!isLast) {
-      ge('btn-cierre-next').addEventListener('click', () => {
-        saveCierreStepData();
-        state.cierreStep++;
-        renderCierreStep();
-      });
-    } else {
-      ge('btn-cierre-confirm').addEventListener('click', confirmarCierre);
-    }
+    const updateDiff = (medioId, esperado) => {
+      const informado = parseFloat(state.cierre.mediosInformados[medioId]) || 0;
+      const diff = informado - esperado;
+      const diffEl = ge(`cierre-diff-${medioId}`);
+      if (diffEl) {
+        diffEl.textContent = (diff >= 0 ? '+' : '') + fmtPeso(diff);
+        diffEl.className = `cierre-diff ${diff > 0.005 ? 'text-success' : diff < -0.005 ? 'text-danger' : ''}`;
+      }
+      const explBtn = ge(`btn-explicar-${medioId}`);
+      if (explBtn) explBtn.style.display = Math.abs(diff) > 0.005 ? 'inline-flex' : 'none';
+      const lbl = ge(`expl-diff-label-${medioId}`);
+      if (lbl) lbl.textContent = `Diferencia: ${diff >= 0 ? '+' : ''}${fmtPeso(diff)}`;
+      const panel = ge(`expl-panel-${medioId}`);
+      if (panel && Math.abs(diff) <= 0.005) panel.style.display = 'none';
+      validateCierre();
+    };
 
-    // Live billete subtotals (step 2)
-    if (state.cierreStep === 2) {
-      document.querySelectorAll('.billete-input').forEach(inp => {
+    const updateExplStatus = (medioId) => {
+      const informado = parseFloat(state.cierre.mediosInformados[medioId]) || 0;
+      const mObj = mediosCierre.find(m => m.id === medioId);
+      const diff = Math.abs(informado - (mObj ? mObj.esperado : 0));
+      const expls = state.cierre.explicaciones[medioId] || [];
+      const totalExpl = expls.reduce((s, r) => s + (parseFloat(r.monto) || 0), 0);
+      const statusEl = ge(`expl-status-${medioId}`);
+      if (!statusEl) return;
+      const ok = Math.abs(totalExpl - diff) <= 0.005;
+      statusEl.textContent = `Explicado: ${fmtPeso(totalExpl)} / ${fmtPeso(diff)}${ok ? ' ✓' : ''}`;
+      statusEl.className = `expl-status ${ok ? 'text-success' : 'text-danger'}`;
+    };
+
+    const renderExplRows = (medioId) => {
+      const container = ge(`expl-rows-${medioId}`);
+      if (!container) return;
+      const rows = state.cierre.explicaciones[medioId] || [];
+      container.innerHTML = rows.map((r, i) => `
+        <div class="expl-row">
+          <input type="number" class="billete-input expl-monto"
+            data-medio="${esc(medioId)}" data-idx="${i}"
+            placeholder="Monto" value="${r.monto || ''}" min="0" step="0.01"
+            style="width:100px;text-align:right">
+          <input type="text" class="expl-motivo"
+            data-medio="${esc(medioId)}" data-idx="${i}"
+            placeholder="Motivo" value="${esc(r.motivo || '')}"
+            style="flex:1;border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:4px 8px;font-size:13px">
+          <button class="btn btn-xs btn-danger expl-remove"
+            data-medio="${esc(medioId)}" data-idx="${i}">✕</button>
+        </div>
+      `).join('');
+
+      container.querySelectorAll('.expl-monto').forEach(inp => {
+        inp.addEventListener('focus', () => inp.select());
         inp.addEventListener('input', () => {
-          const d = parseFloat(inp.dataset.denom);
-          const n = parseFloat(inp.value) || 0;
-          state.cierre.billetes[d] = n;
-          const subEl = ge(`sub-${inp.dataset.denom}`);
-          if (subEl) subEl.textContent = fmtPeso(d * n);
-          const total = DENOMINATIONS.reduce((sum, den) => sum + den * (parseFloat(state.cierre.billetes[den]) || 0), 0);
-          const totEl = ge('cierre-total-contado');
-          if (totEl) totEl.innerHTML = `<strong>${fmtPeso(total)}</strong>`;
+          const i = parseInt(inp.dataset.idx);
+          state.cierre.explicaciones[inp.dataset.medio][i].monto = parseFloat(inp.value) || 0;
+          updateExplStatus(inp.dataset.medio);
+          validateCierre();
         });
       });
-    }
-  }
+      container.querySelectorAll('.expl-motivo').forEach(inp => {
+        inp.addEventListener('input', () => {
+          const i = parseInt(inp.dataset.idx);
+          state.cierre.explicaciones[inp.dataset.medio][i].motivo = inp.value;
+        });
+      });
+      container.querySelectorAll('.expl-remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.cierre.explicaciones[btn.dataset.medio].splice(parseInt(btn.dataset.idx), 1);
+          renderExplRows(btn.dataset.medio);
+          updateExplStatus(btn.dataset.medio);
+          validateCierre();
+        });
+      });
+    };
 
-  function saveCierreStepData() {
-    if (state.cierreStep === 2) {
-      document.querySelectorAll('.billete-input').forEach(inp => {
-        state.cierre.billetes[inp.dataset.denom] = parseFloat(inp.value) || 0;
+    // ── Event listeners ──────────────────────────────────────────────────────────
+
+    ge('btn-close-cierre').addEventListener('click', closeModal);
+
+    ge('toggle-cierre-egresos').addEventListener('click', e => {
+      e.preventDefault();
+      const p = ge('cierre-egresos-panel');
+      p.style.display = p.style.display === 'none' ? 'block' : 'none';
+    });
+    ge('toggle-cierre-ingresos').addEventListener('click', e => {
+      e.preventDefault();
+      const p = ge('cierre-ingresos-panel');
+      p.style.display = p.style.display === 'none' ? 'block' : 'none';
+    });
+
+    document.querySelectorAll('.cierre-medio-input').forEach(inp => {
+      inp.addEventListener('focus', () => inp.select());
+      inp.addEventListener('input', () => {
+        state.cierre.mediosInformados[inp.dataset.medio] = parseFloat(inp.value) || 0;
+        updateDiff(inp.dataset.medio, parseFloat(inp.dataset.esperado));
       });
-    } else if (state.cierreStep === 3) {
-      document.querySelectorAll('.otros-medios-obs').forEach(inp => {
-        state.cierre.otrosMedios[inp.dataset.medio] = inp.value;
+    });
+
+    document.querySelectorAll('.cierre-btn-explicar').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mid = btn.dataset.medio;
+        const panel = ge(`expl-panel-${mid}`);
+        if (!panel) return;
+        const showing = panel.style.display !== 'none';
+        panel.style.display = showing ? 'none' : 'block';
+        if (!showing) {
+          if (!state.cierre.explicaciones[mid] || !state.cierre.explicaciones[mid].length) {
+            state.cierre.explicaciones[mid] = [{ monto: 0, motivo: '' }];
+          }
+          renderExplRows(mid);
+          updateExplStatus(mid);
+        }
       });
-      const obsEl = ge('cierre-observaciones');
-      if (obsEl) state.cierre.observaciones = obsEl.value;
-    }
+    });
+
+    mediosCierre.forEach(m => {
+      const addBtn = ge(`btn-add-expl-${m.id}`);
+      if (!addBtn) return;
+      addBtn.addEventListener('click', () => {
+        if (!state.cierre.explicaciones[m.id]) state.cierre.explicaciones[m.id] = [];
+        state.cierre.explicaciones[m.id].push({ monto: 0, motivo: '' });
+        renderExplRows(m.id);
+      });
+    });
+
+    ge('btn-cierre-confirm').addEventListener('click', confirmarCierre);
+    validateCierre();
   }
 
   function confirmarCierre() {
-    saveCierreStepData();
-    const totalContado = DENOMINATIONS.reduce((sum, d) => sum + d * (parseFloat(state.cierre.billetes[d]) || 0), 0);
-    const result = cerrarCaja(state.sesion.id, state.user.id, totalContado, state.cierre.billetes);
+    const sesionId = state.sesion.id;
+    const tot = state.totales;
+    const saldoReal = parseFloat(state.cierre.mediosInformados['efectivo']) || (tot ? tot.saldoEsperado : 0);
+    const detalleCompleto = {
+      billetes: state.recuento.billetes,
+      medios_informados: state.cierre.mediosInformados,
+      explicaciones: state.cierre.explicaciones,
+    };
+    const result = cerrarCaja(sesionId, state.user.id, saldoReal, detalleCompleto);
     if (result.success) {
       closeModal();
-      showToast('Caja cerrada correctamente', 'success');
       stopAutoRefresh();
+      let sesionCerrada = null;
+      try {
+        sesionCerrada = window.SGA_DB.query(
+          `SELECT * FROM sesiones_caja WHERE id = ?`, [sesionId]
+        )[0] || null;
+      } catch (e) { /* ignore */ }
       state.sesion = null;
-      render();
+      renderPostCierreSummary(sesionCerrada, tot);
     } else {
       showToast(result.error, 'error');
     }
+  }
+
+  // ── POST-CIERRE SUMMARY ───────────────────────────────────────────────────────
+
+  function renderPostCierreSummary(sesion, tot) {
+    const root = ge('caja-root');
+    if (!root) return;
+
+    const saldoReal     = parseFloat(sesion && sesion.saldo_final_real) || 0;
+    const saldoEsperado = tot ? tot.saldoEsperado : 0;
+    const diferencia    = saldoReal - saldoEsperado;
+    const difClass      = diferencia > 0.005 ? 'text-success' : diferencia < -0.005 ? 'text-danger' : '';
+
+    const MEDIOS_ICON = {
+      efectivo: '💵 Efectivo', mercadopago: '📱 Mercado Pago',
+      tarjeta: '💳 Tarjeta', transferencia: '🏦 Transferencia',
+    };
+
+    const mediosHtml = ['efectivo', 'mercadopago', 'tarjeta', 'transferencia']
+      .filter(m => tot && (tot.totPagos[m] || 0) > 0)
+      .map(m => `
+        <div class="caja-stat-row">
+          <span>${MEDIOS_ICON[m]}</span>
+          <span>${fmtPeso(tot.totPagos[m])}</span>
+        </div>
+      `).join('');
+
+    const explEfectivo = (state.cierre.explicaciones && state.cierre.explicaciones['efectivo']) || [];
+    const explHtml = explEfectivo
+      .filter(r => r.monto)
+      .map(r => `
+        <div class="caja-stat-row" style="font-size:13px;color:#666">
+          <span>→ ${esc(r.motivo || 'Sin detalle')}</span>
+          <span>${fmtPeso(r.monto)}</span>
+        </div>
+      `).join('');
+
+    const summaryLines = [
+      '📊 CIERRE DE CAJA',
+      `Apertura: ${fmtFecha(sesion ? sesion.fecha_apertura : '')}`,
+      `Cierre:   ${fmtFecha(sesion ? sesion.fecha_cierre : '')}`,
+      '',
+      'VENTAS',
+      `Total ventas: ${tot ? fmtPeso(tot.totalVentas) : '-'} (${tot ? tot.nVentas : 0} ventas)`,
+      '',
+      'SALDO DE CAJA',
+      `Saldo inicial:  ${tot ? fmtPeso(tot.saldoInicial) : '-'}`,
+      `Ventas efect.:  ${tot ? fmtPeso(tot.totPagos['efectivo'] || 0) : '-'}`,
+      tot && tot.ingresos > 0 ? `Ingresos extra: +${fmtPeso(tot.ingresos)}` : null,
+      tot && tot.egresos > 0  ? `Egresos:        -${fmtPeso(tot.egresos)}` : null,
+      `Saldo esperado: ${fmtPeso(saldoEsperado)}`,
+      `Saldo contado:  ${fmtPeso(saldoReal)}`,
+      `Diferencia:     ${diferencia >= 0 ? '+' : ''}${fmtPeso(diferencia)}`,
+    ].filter(l => l !== null).join('\n');
+
+    root.innerHTML = `
+      <div class="caja-toolbar">
+        <h2>📊 Resumen del turno</h2>
+      </div>
+      <div style="max-width:640px;margin:0 auto;padding:24px 20px">
+        <p style="font-size:13px;color:var(--color-text-secondary);margin:0 0 20px">
+          ${fmtFecha(sesion ? sesion.fecha_apertura : '')}
+          → ${fmtFecha(sesion ? sesion.fecha_cierre : '')}
+        </p>
+
+        <div class="postcaja-section">
+          <h3>Ventas</h3>
+          <div class="caja-stat-row">
+            <span>Ventas realizadas</span>
+            <span>${tot ? tot.nVentas : 0} venta${tot && tot.nVentas !== 1 ? 's' : ''} — ${tot ? fmtPeso(tot.totalVentas) : '-'}</span>
+          </div>
+        </div>
+
+        <div class="postcaja-section">
+          <h3>Valores recibidos por medio de pago</h3>
+          ${mediosHtml || '<div class="caja-stat-row"><span style="color:#999">Sin ventas registradas</span></div>'}
+          <div class="caja-stat-row total-row">
+            <span>TOTAL RECIBIDO</span>
+            <span>${tot ? fmtPeso(tot.totalVentas) : '-'}</span>
+          </div>
+        </div>
+
+        <div class="postcaja-section">
+          <h3>Saldo de caja (efectivo)</h3>
+          <div class="caja-stat-row"><span>Saldo inicial</span><span>${tot ? fmtPeso(tot.saldoInicial) : '-'}</span></div>
+          <div class="caja-stat-row"><span>+ Ventas en efectivo</span><span>${tot ? fmtPeso(tot.totPagos['efectivo'] || 0) : '-'}</span></div>
+          ${tot && tot.ingresos > 0 ? `<div class="caja-stat-row"><span>+ Ingresos extra</span><span class="text-success">${fmtPeso(tot.ingresos)}</span></div>` : ''}
+          ${tot && tot.egresos > 0  ? `<div class="caja-stat-row"><span>− Egresos</span><span class="text-danger">-${fmtPeso(tot.egresos)}</span></div>` : ''}
+          <div class="caja-stat-row highlight-row"><span>Saldo esperado</span><span>${fmtPeso(saldoEsperado)}</span></div>
+          <div class="caja-stat-row"><span>Saldo informado (contado)</span><span>${fmtPeso(saldoReal)}</span></div>
+          <div class="caja-stat-row ${Math.abs(diferencia) > 0.005 ? 'highlight-row' : ''}">
+            <span>Diferencia</span>
+            <span class="${difClass}">${diferencia >= 0 ? '+' : ''}${fmtPeso(diferencia)}</span>
+          </div>
+          ${explHtml ? `
+            <div style="padding:6px 0 0">
+              <small style="color:#999;font-size:12px;display:block;margin-bottom:4px">Ajustes declarados:</small>
+              ${explHtml}
+            </div>` : ''}
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:24px;flex-wrap:wrap">
+          <button class="btn btn-outline" onclick="window.print()">🖨️ Imprimir resumen</button>
+          <button class="btn btn-secondary" id="btn-compartir-resumen">📤 Compartir</button>
+          <button class="btn btn-primary" id="btn-aceptar-resumen">✓ Aceptar</button>
+        </div>
+        <div id="compartir-opciones" style="display:none;margin-top:10px;gap:8px;flex-wrap:wrap">
+          <a class="btn btn-outline btn-sm"
+            href="mailto:?subject=Cierre%20de%20Caja&body=${encodeURIComponent(summaryLines)}">
+            📧 Email
+          </a>
+          <a class="btn btn-outline btn-sm"
+            href="https://wa.me/?text=${encodeURIComponent(summaryLines)}" target="_blank">
+            💬 WhatsApp
+          </a>
+        </div>
+      </div>
+    `;
+
+    ge('btn-compartir-resumen').addEventListener('click', () => {
+      const div = ge('compartir-opciones');
+      div.style.display = div.style.display === 'none' ? 'flex' : 'none';
+    });
+
+    ge('btn-aceptar-resumen').addEventListener('click', () => {
+      state.cierre = { mediosInformados: {}, explicaciones: {} };
+      state.recuento = { billetes: {} };
+      render();
+    });
   }
 
   // ── SESION DETALLE MODAL ──────────────────────────────────────────────────────
