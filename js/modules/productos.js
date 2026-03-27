@@ -234,7 +234,11 @@
     if (state.filters.stockMin != null) filtered = filtered.filter(p => (p.stock_actual || 0) >= state.filters.stockMin);
     if (state.filters.stockMax != null) filtered = filtered.filter(p => (p.stock_actual || 0) <= state.filters.stockMax);
     if (state.filters.soloBajoMinimo) {
-      filtered = filtered.filter(p => (p.stock_actual || 0) < (p.stock_minimo || 0));
+      const sucursal_id = window.SGA_Auth.getCurrentUser()?.sucursal_id || '1';
+      filtered = filtered.filter(p => {
+        const efectivo = getStockDisponible(p.id, sucursal_id);
+        return efectivo < (p.stock_minimo || 0);
+      });
     }
 
     const total = filtered.length;
@@ -633,7 +637,7 @@
     // col ltr:  A  B  C  D  E  F  G  H  I   J   K   L   M   N   O   P   Q   R   S
     const headers = [
       'codigo_barras', 'nombre', 'costo', 'precio_venta',
-      'stock_actual', 'stock_minimo', 'categoria', 'proveedor', 'codigo_sustituto',
+      'stock_actual', 'stock_minimo', 'categoria', 'proveedor', 'codigo_sustituto_referencia',
       'unidad_compra', 'unidades_por_paquete_compra', 'unidad_venta',
       'precio_lista_por', 'precio_lista_divisor',
       'producto_madre_codigo', 'producto_madre_descripcion', 'proveedor_alternativo',
@@ -675,15 +679,18 @@
           alt_prov.razon_social                   AS proveedor_alternativo_nombre,
           COALESCE(st.cantidad, 0)                AS stock_actual,
           COALESCE(m.nombre, p.nombre)            AS madre_nombre,
-          COALESCE(mc.codigo, cb.codigo, '')      AS madre_codigo
+          COALESCE(mc.codigo, cb.codigo, '')      AS madre_codigo,
+          sust_ref_cb.codigo                      AS codigo_sustituto_referencia
         FROM productos p
-        LEFT JOIN codigos_barras cb    ON cb.producto_id  = p.id    AND cb.es_principal = 1
-        LEFT JOIN categorias cat       ON cat.id          = p.categoria_id
-        LEFT JOIN proveedores prov     ON prov.id         = p.proveedor_principal_id
-        LEFT JOIN proveedores alt_prov ON alt_prov.id     = p.proveedor_alternativo_id
-        LEFT JOIN stock st             ON st.producto_id  = p.id    AND st.sucursal_id = ?
-        LEFT JOIN productos m          ON m.id            = p.producto_madre_id
-        LEFT JOIN codigos_barras mc    ON mc.producto_id  = m.id    AND mc.es_principal = 1
+        LEFT JOIN codigos_barras cb       ON cb.producto_id  = p.id    AND cb.es_principal = 1
+        LEFT JOIN categorias cat          ON cat.id          = p.categoria_id
+        LEFT JOIN proveedores prov        ON prov.id         = p.proveedor_principal_id
+        LEFT JOIN proveedores alt_prov    ON alt_prov.id     = p.proveedor_alternativo_id
+        LEFT JOIN stock st                ON st.producto_id  = p.id    AND st.sucursal_id = ?
+        LEFT JOIN productos m             ON m.id            = p.producto_madre_id
+        LEFT JOIN codigos_barras mc       ON mc.producto_id  = m.id    AND mc.es_principal = 1
+        LEFT JOIN producto_sustitutos ps_ref ON ps_ref.producto_id = p.id AND ps_ref.referencia_id IS NOT NULL
+        LEFT JOIN codigos_barras sust_ref_cb ON sust_ref_cb.producto_id = ps_ref.referencia_id AND sust_ref_cb.es_principal = 1
         ORDER BY p.nombre
       `, [sucursal_id]);
 
@@ -696,7 +703,7 @@
         p.stock_minimo || 0,
         p.categoria_nombre || '',
         p.proveedor_nombre || '',
-        '',
+        p.codigo_sustituto_referencia || '',
         p.unidad_compra || 'Unidad',
         p.unidades_por_paquete_compra || 1,
         p.unidad_venta || 'Unidad',
@@ -710,7 +717,7 @@
       ]);
       filename = 'productos_exportados.xlsx';
     } else {
-      dataRows = [['7790001234567', 'Coca Cola 500ml', 350, 550, 24, 6, 'Bebidas', 'Pepsico SA', '', 'Display', 32, 'Unidad', 'Por paquete', 32, '', '', '', 2, 'Display']];
+      dataRows = [['7790001234567', 'Coca Cola 500ml', 350, 550, 24, 6, 'Bebidas', 'Pepsico SA', '', 'Display', 32, 'Unidad', 'Por unidad_compra', 32, '', '', '', 2, 'Display']];
       filename = 'plantilla_productos.xlsx';
     }
 
@@ -821,7 +828,7 @@
           return;
         }
         importData.columns = jsonData[0].map(col => String(col || '').trim());
-        const textCols = new Set(['codigo_barras', 'nombre', 'categoria', 'proveedor', 'codigo_sustituto']);
+        const textCols = new Set(['codigo_barras', 'nombre', 'categoria', 'proveedor', 'codigo_sustituto_referencia']);
         const numCols  = new Set(['costo', 'precio_venta', 'stock_actual', 'stock_minimo']);
         importData.rows = jsonData.slice(1)
           .filter(row => row.some(cell => cell !== null && cell !== undefined && String(cell).trim() !== ''))
@@ -887,7 +894,7 @@
       'stock_minimo': ['minimo', 'stock min', 'min', 'stock minimo'],
       'categoria': ['categoria', 'rubro', 'familia', 'tipo'],
       'proveedor': ['proveedor', 'prov', 'fabricante', 'marca'],
-      'codigo_sustituto': ['sustituto', 'cod sustituto', 'reemplaza', 'alternativo'],
+      'codigo_sustituto_referencia': ['sustituto referencia', 'cod sustituto ref', 'codigo sustituto referencia', 'referencia sustituto'],
       'unidad_compra': ['unidad compra', 'unidad_compra', 'compra'],
       'unidades_por_paquete_compra': ['unidades por paquete', 'uds paquete', 'uxb', 'u x b', 'unidades bulto'],
       'unidad_venta': ['unidad venta', 'unidad_venta', 'venta'],
@@ -1015,7 +1022,7 @@
           summary.nuevos++;
         }
 
-        if (String(fila.codigo_sustituto || '').trim()) summary.sustitutos++;
+        if (String(fila.codigo_sustituto_referencia || '').trim()) summary.sustitutos++;
       }
 
       let html = '';
@@ -1241,25 +1248,20 @@
           );
         }
 
-        // Sustituto
-        const codSustituto = String(fila.codigo_sustituto || '').trim();
-        if (codSustituto) {
-          const sust = window.SGA_DB.query('SELECT producto_id FROM codigos_barras WHERE codigo = ?', [codSustituto]);
-          if (sust.length) {
-            const sust_id = sust[0].producto_id;
-            const existsRel = window.SGA_DB.query(
-              'SELECT 1 FROM producto_sustitutos WHERE producto_id = ? AND sustituto_id = ?',
-              [producto_id, sust_id]
+        // Sustituto referencia — set group membership
+        const codSustRef = String(fila.codigo_sustituto_referencia || '').trim();
+        if (codSustRef) {
+          const refCb = window.SGA_DB.query('SELECT producto_id FROM codigos_barras WHERE codigo = ?', [codSustRef]);
+          if (refCb.length) {
+            const referencia_id = refCb[0].producto_id;
+            window.SGA_DB.run(
+              'INSERT OR REPLACE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion) VALUES (?, ?, ?, 1, ?)',
+              [producto_id, referencia_id, referencia_id, now]
             );
-            if (!existsRel.length) {
-              window.SGA_DB.run(
-                'INSERT INTO producto_sustitutos (producto_id, sustituto_id, activo, fecha_asignacion) VALUES (?, ?, 1, ?)',
-                [producto_id, sust_id, now]
-              );
-            }
             results.sustitutosResueltos++;
           } else {
-            results.sustitutosPendientes.push(codSustituto);
+            console.warn('Producto de referencia no encontrado:', codSustRef);
+            results.sustitutosPendientes.push(codSustRef);
           }
         }
 
@@ -2042,13 +2044,79 @@
   };
 
 
+  // ── STOCK DISPONIBLE (group-aware) ────────────────────────────────────────
+
+  const getStockDisponible = (productoId, sucursalId) => {
+    // Check if this product is a member of a referencia group
+    const refRow = window.SGA_DB.query(
+      'SELECT referencia_id FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1',
+      [productoId]
+    );
+    if (!refRow.length) {
+      // Not in any group — own stock only
+      const st = window.SGA_DB.query(
+        'SELECT COALESCE(cantidad, 0) AS qty FROM stock WHERE producto_id = ? AND sucursal_id = ?',
+        [productoId, sucursalId]
+      );
+      return st.length ? (st[0].qty || 0) : 0;
+    }
+    // In a group — sum all members' stock
+    const referenciaId = refRow[0].referencia_id;
+    const groupSt = window.SGA_DB.query(`
+      SELECT COALESCE(SUM(st.cantidad), 0) AS total
+      FROM producto_sustitutos ps
+      LEFT JOIN stock st ON st.producto_id = ps.producto_id AND st.sucursal_id = ?
+      WHERE ps.referencia_id = ?
+    `, [sucursalId, referenciaId]);
+    return groupSt.length ? (groupSt[0].total || 0) : 0;
+  };
+
+  // Returns products (or groups) whose effective stock is below stock_minimo.
+  // Groups are represented by their referencia product.
+  const getProductosBajoMinimo = (sucursalId) => {
+    // Groups with referencia_id set
+    const grouped = window.SGA_DB.query(`
+      SELECT ps.referencia_id AS id,
+        ref_p.nombre,
+        ref_cb.codigo AS codigo_barras,
+        COALESCE(SUM(st.cantidad), 0) AS stock_disponible,
+        MAX(COALESCE(p.stock_minimo, 0)) AS stock_minimo
+      FROM producto_sustitutos ps
+      JOIN productos p     ON p.id = ps.producto_id AND p.activo = 1
+      JOIN productos ref_p ON ref_p.id = ps.referencia_id
+      LEFT JOIN codigos_barras ref_cb ON ref_cb.producto_id = ps.referencia_id AND ref_cb.es_principal = 1
+      LEFT JOIN stock st ON st.producto_id = ps.producto_id AND st.sucursal_id = ?
+      WHERE ps.referencia_id IS NOT NULL
+      GROUP BY ps.referencia_id
+      HAVING stock_disponible < stock_minimo
+    `, [sucursalId]);
+
+    // Products not in any group
+    const solo = window.SGA_DB.query(`
+      SELECT p.id, p.nombre, cb.codigo AS codigo_barras,
+        COALESCE(st.cantidad, 0) AS stock_disponible,
+        p.stock_minimo
+      FROM productos p
+      LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
+      LEFT JOIN stock st ON st.producto_id = p.id AND st.sucursal_id = ?
+      WHERE p.activo = 1
+        AND COALESCE(st.cantidad, 0) < p.stock_minimo
+        AND p.id NOT IN (
+          SELECT producto_id FROM producto_sustitutos WHERE referencia_id IS NOT NULL
+        )
+    `, [sucursalId]);
+
+    return { grouped, solo };
+  };
+
   const runMigrations = () => {
     const migrations = [
       `ALTER TABLE productos ADD COLUMN unidad_compra TEXT DEFAULT 'Unidad'`,
       `ALTER TABLE productos ADD COLUMN unidades_por_paquete_compra REAL DEFAULT 1`,
       `ALTER TABLE productos ADD COLUMN unidad_venta TEXT DEFAULT 'Unidad'`,
-      `ALTER TABLE productos ADD COLUMN precio_lista_por TEXT DEFAULT 'Por unidad de venta'`,
+      `ALTER TABLE productos ADD COLUMN precio_lista_por TEXT DEFAULT 'Por unidad_compra'`,
       `ALTER TABLE productos ADD COLUMN precio_lista_divisor REAL DEFAULT 1`,
+      `ALTER TABLE producto_sustitutos ADD COLUMN referencia_id TEXT`,
     ];
     migrations.forEach(sql => {
       try { window.SGA_DB.run(sql); } catch (e) { /* column already exists */ }
@@ -2074,7 +2142,9 @@
 
   return {
     init,
-    loadProductos
+    loadProductos,
+    getStockDisponible,
+    getProductosBajoMinimo,
   };
 })();
 

@@ -450,19 +450,7 @@ const EditorProducto = (() => {
   <!-- ── SUSTITUTOS ─────────────────────────────────────────────── -->
   <div id="section-sustitutos" class="editor-section" style="display:none">
     <h3 class="ed-section-title">🔄 Sustitutos</h3>
-    <p class="ed-text-muted">El stock disponible de este producto incluye el stock de los sustitutos activos.</p>
-
-    <div id="ed-sustitutos-list" style="margin-bottom:12px"></div>
-
-    <div class="form-group">
-      <label>Agregar sustituto</label>
-      <div style="position:relative">
-        <input type="text" id="ed-sustituto-search" class="input-full"
-               placeholder="🔍 Buscar por nombre o escanear código..." autocomplete="off">
-        <div id="ed-sustituto-dropdown" class="ed-search-dropdown" style="display:none"></div>
-      </div>
-      <small class="ed-text-muted">Escribí el nombre o escaneá un código (Enter para seleccionar)</small>
-    </div>
+    <div id="ed-sustitutos-list"></div>
   </div>
 
   <!-- ── PROMOCIONES ────────────────────────────────────────────── -->
@@ -659,6 +647,12 @@ const EditorProducto = (() => {
 }
 .ed-sust-info { font-size: 13px; }
 .ed-sust-code { color: var(--color-text-secondary); font-size: 12px; margin-left: 6px; }
+.ed-ref-panel {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 12px 14px; margin-bottom: 14px;
+  font-size: 13px;
+}
 .ed-tabs-bar { display: flex; border-bottom: 2px solid var(--color-border); margin-bottom: 12px; }
 .ed-tab-btn {
   background: none; border: none; padding: 8px 18px; cursor: pointer;
@@ -859,92 +853,315 @@ const EditorProducto = (() => {
   const renderSustitutos = () => {
     const list = ge('ed-sustitutos-list');
     if (!list) return;
+    const sucursal_id = window.SGA_Auth.getCurrentUser()?.sucursal_id || '1';
 
-    const sustitutos = window.SGA_DB.query(`
-      SELECT ps.sustituto_id, ps.activo, p.nombre,
-        cb.codigo AS codigo_barras
+    // Find current referencia for this product
+    const refRow = window.SGA_DB.query(`
+      SELECT ps.referencia_id, p.nombre AS ref_nombre, cb.codigo AS ref_codigo
       FROM producto_sustitutos ps
-      JOIN productos p ON p.id = ps.sustituto_id
-      LEFT JOIN codigos_barras cb ON cb.producto_id = ps.sustituto_id AND cb.es_principal = 1
-      WHERE ps.producto_id = ?
-      ORDER BY p.nombre
+      JOIN productos p ON p.id = ps.referencia_id
+      LEFT JOIN codigos_barras cb ON cb.producto_id = ps.referencia_id AND cb.es_principal = 1
+      WHERE ps.producto_id = ? AND ps.referencia_id IS NOT NULL
+      LIMIT 1
     `, [state.productoId]);
+    const referenciaId   = refRow.length ? refRow[0].referencia_id : null;
+    const referenciaInfo = refRow.length ? refRow[0] : null;
 
-    if (!sustitutos.length) {
-      list.innerHTML = '<p class="ed-text-muted">Sin sustitutos asignados.</p>';
+    let html = '';
+
+    // Explanation
+    html += `<p class="ed-text-muted" style="margin-bottom:14px">El stock disponible es la suma del stock de todos los miembros del grupo. Al reponer, se pedirá el producto de referencia.</p>`;
+
+    // Referencia info panel
+    if (referenciaInfo) {
+      html += `
+        <div class="ed-ref-panel">
+          <div>
+            <span style="font-size:11px;color:var(--color-text-secondary);display:block;margin-bottom:2px">Producto de referencia del grupo</span>
+            <strong>${escapeHtml(referenciaInfo.ref_nombre)}</strong>
+            ${referenciaInfo.ref_codigo ? `<span class="ed-sust-code">${escapeHtml(referenciaInfo.ref_codigo)}</span>` : ''}
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <button class="btn btn-sm btn-secondary" id="ed-btn-cambiar-ref">Cambiar</button>
+            <button class="btn btn-sm btn-danger"    id="ed-btn-quitar-grupo">Quitar del grupo</button>
+          </div>
+        </div>`;
     } else {
-      list.innerHTML = sustitutos.map(s => `
-        <div class="ed-sust-row">
-          <div class="ed-sust-info">
-            <strong>${escapeHtml(s.nombre)}</strong>
-            <span class="ed-sust-code">${escapeHtml(s.codigo_barras || '')}</span>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <label class="ed-toggle-switch" title="${s.activo ? 'Activo' : 'Inactivo'}">
-              <input type="checkbox" class="ed-sust-toggle" data-id="${escapeHtml(s.sustituto_id)}" ${s.activo ? 'checked' : ''}>
-              <span class="ed-toggle-slider"></span>
-            </label>
-            <button class="btn btn-danger btn-sm ed-sust-remove" data-id="${escapeHtml(s.sustituto_id)}">×</button>
-          </div>
+      html += `
+        <div class="ed-ref-panel" style="color:var(--color-text-secondary)">
+          Sin grupo de sustitutos asignado.
+        </div>`;
+    }
+
+    // Referencia search (hidden by default when referencia already set)
+    html += `
+      <div class="form-group" id="ed-ref-search-wrap" style="${referenciaInfo ? 'display:none' : ''}margin-bottom:14px">
+        <label style="font-size:13px;font-weight:600;margin-bottom:4px;display:block">
+          ${referenciaInfo ? 'Cambiar referencia del grupo' : 'Asignar producto de referencia'}
+        </label>
+        <div style="position:relative">
+          <input type="text" id="ed-ref-search" class="input-full"
+                 placeholder="🔍 Buscar producto de referencia..." autocomplete="off">
+          <div id="ed-ref-dropdown" class="ed-search-dropdown" style="display:none"></div>
         </div>
-      `).join('');
+        <small class="ed-text-muted">El producto de referencia es el que se pedirá al proveedor.</small>
+      </div>`;
 
-      list.querySelectorAll('.ed-sust-toggle').forEach(chk => {
-        chk.addEventListener('change', () => {
-          window.SGA_DB.run(
-            'UPDATE producto_sustitutos SET activo = ? WHERE producto_id = ? AND sustituto_id = ?',
-            [chk.checked ? 1 : 0, state.productoId, chk.dataset.id]
-          );
-          showToast('Sustituto actualizado');
+    // Group members table (only when in a group)
+    if (referenciaId) {
+      const members = window.SGA_DB.query(`
+        SELECT ps.producto_id, ps.activo, p.nombre,
+          cb.codigo AS codigo_barras,
+          COALESCE(st.cantidad, 0) AS stock
+        FROM producto_sustitutos ps
+        JOIN productos p ON p.id = ps.producto_id
+        LEFT JOIN codigos_barras cb ON cb.producto_id = ps.producto_id AND cb.es_principal = 1
+        LEFT JOIN stock st ON st.producto_id = ps.producto_id AND st.sucursal_id = ?
+        WHERE ps.referencia_id = ?
+        ORDER BY p.nombre
+      `, [sucursal_id, referenciaId]);
+
+      html += `<h5 style="font-size:13px;font-weight:600;margin:14px 0 8px">Miembros del grupo (${members.length})</h5>`;
+
+      if (members.length) {
+        html += `
+          <div style="border:1px solid var(--color-border);border-radius:var(--radius-md);overflow:hidden;margin-bottom:14px">
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead><tr style="background:var(--color-surface)">
+                <th style="padding:7px 10px;text-align:left;font-weight:600">Nombre</th>
+                <th style="padding:7px 10px;text-align:left;font-weight:600">Código</th>
+                <th style="padding:7px 10px;text-align:right;font-weight:600">Stock</th>
+                <th style="padding:7px 10px;text-align:center;font-weight:600">Activo</th>
+              </tr></thead>
+              <tbody>
+        `;
+        members.forEach(m => {
+          const isRef = m.producto_id === referenciaId;
+          html += `
+            <tr style="border-top:1px solid var(--color-border)${isRef ? ';background:var(--color-surface)' : ''}">
+              <td style="padding:7px 10px">
+                ${escapeHtml(m.nombre)}
+                ${isRef ? '<span style="font-size:10px;background:#e8f5e9;color:#2e7d32;padding:1px 6px;border-radius:8px;margin-left:5px;font-weight:600">REF</span>' : ''}
+              </td>
+              <td style="padding:7px 10px;color:var(--color-text-secondary)">${escapeHtml(m.codigo_barras || '—')}</td>
+              <td style="padding:7px 10px;text-align:right">${m.stock}</td>
+              <td style="padding:7px 10px;text-align:center">
+                <label class="ed-toggle-switch">
+                  <input type="checkbox" class="ed-sust-toggle" data-id="${escapeHtml(m.producto_id)}" ${m.activo ? 'checked' : ''}>
+                  <span class="ed-toggle-slider"></span>
+                </label>
+              </td>
+            </tr>`;
         });
+        html += `</tbody></table></div>`;
+      } else {
+        html += `<p class="ed-text-muted" style="margin-bottom:14px">No hay miembros en este grupo aún.</p>`;
+      }
+
+      // Add member search
+      html += `
+        <div class="form-group">
+          <label style="font-size:13px;font-weight:600;margin-bottom:4px;display:block">Agregar miembro al grupo</label>
+          <div style="position:relative">
+            <input type="text" id="ed-sustituto-search" class="input-full"
+                   placeholder="🔍 Buscar por nombre o escanear código..." autocomplete="off">
+            <div id="ed-sustituto-dropdown" class="ed-search-dropdown" style="display:none"></div>
+          </div>
+          <small class="ed-text-muted">Escribí el nombre o escaneá un código (Enter para seleccionar)</small>
+        </div>`;
+    }
+
+    list.innerHTML = html;
+
+    // ── Wire events ──────────────────────────────────────────────────────────
+
+    // Active-toggle for each member
+    list.querySelectorAll('.ed-sust-toggle').forEach(chk => {
+      chk.addEventListener('change', () => {
+        window.SGA_DB.run(
+          'UPDATE producto_sustitutos SET activo = ? WHERE producto_id = ? AND referencia_id IS NOT NULL',
+          [chk.checked ? 1 : 0, chk.dataset.id]
+        );
+        showToast(chk.checked ? 'Miembro activado' : 'Miembro desactivado');
       });
+    });
 
-      list.querySelectorAll('.ed-sust-remove').forEach(btn => {
-        btn.addEventListener('click', () => {
-          if (!confirm('¿Quitar este sustituto?')) return;
-          window.SGA_DB.run(
-            'DELETE FROM producto_sustitutos WHERE producto_id = ? AND sustituto_id = ?',
-            [state.productoId, btn.dataset.id]
-          );
-          renderSustitutos();
-        });
+    // Cambiar referencia
+    ge('ed-btn-cambiar-ref')?.addEventListener('click', () => {
+      const wrap = ge('ed-ref-search-wrap');
+      if (wrap) {
+        wrap.style.display = '';
+        const lbl = wrap.querySelector('label');
+        if (lbl) lbl.textContent = 'Cambiar referencia del grupo';
+        ge('ed-ref-search')?.focus();
+      }
+    });
+
+    // Quitar del grupo
+    ge('ed-btn-quitar-grupo')?.addEventListener('click', () => {
+      if (!confirm('¿Quitar este producto del grupo de sustitutos?')) return;
+      window.SGA_DB.run(
+        'DELETE FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL',
+        [state.productoId]
+      );
+      renderSustitutos();
+      showToast('Producto quitado del grupo');
+    });
+
+    // Referencia search input
+    const refSearch = ge('ed-ref-search');
+    if (refSearch) {
+      refSearch.addEventListener('input', () => renderRefDropdown(refSearch.value.trim()));
+      document.addEventListener('click', function closeRefDd(e) {
+        if (!refSearch.isConnected) { document.removeEventListener('click', closeRefDd); return; }
+        if (!refSearch.contains(e.target)) {
+          const dd = ge('ed-ref-dropdown');
+          if (dd) dd.style.display = 'none';
+        }
       });
     }
 
+    // Member (sustituto) search input
+    const sustSearch = ge('ed-sustituto-search');
+    if (sustSearch) {
+      sustSearch.addEventListener('input', () => renderSustitutoDropdown(sustSearch.value.trim()));
+      sustSearch.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          sustSearch.value = '';
+          const dd = ge('ed-sustituto-dropdown');
+          if (dd) dd.style.display = 'none';
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const q = sustSearch.value.trim();
+          if (/^\d{6,}$/.test(q)) {
+            const hit = window.SGA_DB.query(
+              'SELECT p.id FROM productos p JOIN codigos_barras cb ON cb.producto_id = p.id WHERE cb.codigo = ? AND p.activo = 1 LIMIT 1',
+              [q]
+            );
+            if (hit.length) {
+              addMiembroGrupo(hit[0].id, referenciaId);
+              sustSearch.value = '';
+              const dd = ge('ed-sustituto-dropdown');
+              if (dd) dd.style.display = 'none';
+            }
+          }
+        }
+      });
+      document.addEventListener('click', function closeSustDd(e) {
+        if (!sustSearch.isConnected) { document.removeEventListener('click', closeSustDd); return; }
+        if (!sustSearch.contains(e.target)) {
+          const dd = ge('ed-sustituto-dropdown');
+          if (dd) dd.style.display = 'none';
+        }
+      });
+    }
   };
 
-  const addSustituto = (sustitutoId) => {
-    if (!sustitutoId) return;
+  // Set (or change) the referencia for this product's group.
+  // Also updates any existing group members that shared the old referencia.
+  const setReferencia = (newRefId) => {
     const now = window.SGA_Utils.formatISODate(new Date());
+    const oldRef = window.SGA_DB.query(
+      'SELECT referencia_id FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1',
+      [state.productoId]
+    );
+    if (oldRef.length) {
+      // Update every member that shared the old referencia
+      window.SGA_DB.run(
+        'UPDATE producto_sustitutos SET referencia_id = ?, sustituto_id = ? WHERE referencia_id = ?',
+        [newRefId, newRefId, oldRef[0].referencia_id]
+      );
+    }
+    // Upsert this product's own membership row
     window.SGA_DB.run(
-      'INSERT OR IGNORE INTO producto_sustitutos (producto_id, sustituto_id, activo, fecha_asignacion) VALUES (?, ?, 1, ?)',
-      [state.productoId, sustitutoId, now]
+      'INSERT OR REPLACE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion) VALUES (?, ?, ?, 1, ?)',
+      [state.productoId, newRefId, newRefId, now]
     );
     renderSustitutos();
+    showToast('Referencia del grupo actualizada');
   };
 
+  // Add a new product to the current group (or bootstrap the group with this product as reference).
+  const addMiembroGrupo = (miembroId, referenciaId) => {
+    if (!miembroId) return;
+    const now   = window.SGA_Utils.formatISODate(new Date());
+    const refId = referenciaId || state.productoId;
+    // Ensure this product is in the group
+    window.SGA_DB.run(
+      'INSERT OR REPLACE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion) VALUES (?, ?, ?, 1, ?)',
+      [state.productoId, refId, refId, now]
+    );
+    // Add the new member
+    window.SGA_DB.run(
+      'INSERT OR REPLACE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion) VALUES (?, ?, ?, 1, ?)',
+      [miembroId, refId, refId, now]
+    );
+    renderSustitutos();
+    showToast('Miembro agregado al grupo');
+  };
+
+  // Dropdown for choosing a referencia product
+  const renderRefDropdown = (q) => {
+    const dropdown = ge('ed-ref-dropdown');
+    if (!dropdown) return;
+    if (!q || q.length < 2) { dropdown.style.display = 'none'; return; }
+
+    const results = window.SGA_DB.query(`
+      SELECT p.id, p.nombre, cb.codigo AS codigo_barras
+      FROM productos p
+      LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
+      WHERE p.activo = 1 AND (LOWER(p.nombre) LIKE ? OR cb.codigo LIKE ?)
+      ORDER BY p.nombre LIMIT 10
+    `, [`%${q.toLowerCase()}%`, `%${q}%`]);
+
+    if (!results.length) {
+      dropdown.innerHTML = '<div class="ed-search-result-item ed-text-muted">Sin resultados</div>';
+      dropdown.style.display = '';
+      return;
+    }
+    dropdown.innerHTML = results.map(pr => `
+      <div class="ed-search-result-item" data-id="${escapeHtml(pr.id)}">
+        <strong>${escapeHtml(pr.nombre)}</strong>
+        ${pr.codigo_barras ? `<span class="ed-sust-code">${escapeHtml(pr.codigo_barras)}</span>` : ''}
+      </div>
+    `).join('');
+    dropdown.style.display = '';
+    dropdown.querySelectorAll('.ed-search-result-item[data-id]').forEach(item => {
+      item.addEventListener('click', () => {
+        setReferencia(item.dataset.id);
+        const ri = ge('ed-ref-search');
+        if (ri) { ri.value = ''; }
+        const wrap = ge('ed-ref-search-wrap');
+        if (wrap) wrap.style.display = 'none';
+        dropdown.style.display = 'none';
+      });
+    });
+  };
+
+  // Dropdown for adding a group member
   const renderSustitutoDropdown = (q) => {
     const dropdown = ge('ed-sustituto-dropdown');
     if (!dropdown) return;
     if (!q || q.length < 2) { dropdown.style.display = 'none'; return; }
 
+    // Exclude products already in the group
     const existingIds = new Set(
       window.SGA_DB.query(
-        'SELECT sustituto_id FROM producto_sustitutos WHERE producto_id = ?',
+        'SELECT producto_id FROM producto_sustitutos WHERE referencia_id = (SELECT referencia_id FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1)',
         [state.productoId]
-      ).map(r => r.sustituto_id)
+      ).map(r => r.producto_id)
     );
     existingIds.add(state.productoId);
 
     const results = window.SGA_DB.query(`
-      SELECT p.id, p.nombre, cat.nombre AS categoria_nombre,
-        cb.codigo AS codigo_barras
+      SELECT p.id, p.nombre, cat.nombre AS categoria_nombre, cb.codigo AS codigo_barras
       FROM productos p
       LEFT JOIN categorias cat ON cat.id = p.categoria_id
       LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
       WHERE p.activo = 1 AND (LOWER(p.nombre) LIKE ? OR cb.codigo LIKE ?)
       ORDER BY p.nombre LIMIT 10
-    `, ['%' + q.toLowerCase() + '%', '%' + q + '%'])
+    `, [`%${q.toLowerCase()}%`, `%${q}%`])
     .filter(pr => !existingIds.has(pr.id));
 
     if (!results.length) {
@@ -952,7 +1169,6 @@ const EditorProducto = (() => {
       dropdown.style.display = '';
       return;
     }
-
     dropdown.innerHTML = results.map(pr => `
       <div class="ed-search-result-item" data-id="${escapeHtml(pr.id)}">
         <strong>${escapeHtml(pr.nombre)}</strong>
@@ -960,10 +1176,13 @@ const EditorProducto = (() => {
       </div>
     `).join('');
     dropdown.style.display = '';
-
     dropdown.querySelectorAll('.ed-search-result-item[data-id]').forEach(item => {
       item.addEventListener('click', () => {
-        addSustituto(item.dataset.id);
+        const refRow = window.SGA_DB.query(
+          'SELECT referencia_id FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1',
+          [state.productoId]
+        );
+        addMiembroGrupo(item.dataset.id, refRow.length ? refRow[0].referencia_id : null);
         const si = ge('ed-sustituto-search');
         if (si) si.value = '';
         dropdown.style.display = 'none';
@@ -1872,43 +2091,7 @@ const EditorProducto = (() => {
       openAgregarHijoModal();
     });
 
-    // Sustitutos — predictive search
-    const sustitutoSearch = ge('ed-sustituto-search');
-    if (sustitutoSearch) {
-      sustitutoSearch.addEventListener('input', () => {
-        renderSustitutoDropdown(sustitutoSearch.value.trim());
-      });
-      sustitutoSearch.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-          sustitutoSearch.value = '';
-          const dd = ge('ed-sustituto-dropdown');
-          if (dd) dd.style.display = 'none';
-        }
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          const q = sustitutoSearch.value.trim();
-          // Barcode scanner: mostly digits → search by exact barcode and auto-select
-          if (/^\d{6,}$/.test(q)) {
-            const hit = window.SGA_DB.query(
-              'SELECT p.id FROM productos p JOIN codigos_barras cb ON cb.producto_id = p.id WHERE cb.codigo = ? AND p.activo = 1 LIMIT 1',
-              [q]
-            );
-            if (hit.length) {
-              addSustituto(hit[0].id);
-              sustitutoSearch.value = '';
-              const dd = ge('ed-sustituto-dropdown');
-              if (dd) dd.style.display = 'none';
-            }
-          }
-        }
-      });
-      document.addEventListener('click', (e) => {
-        if (!sustitutoSearch.contains(e.target)) {
-          const dd = ge('ed-sustituto-dropdown');
-          if (dd) dd.style.display = 'none';
-        }
-      });
-    }
+    // Sustitutos section: events are wired inside renderSustitutos() on each render
 
     // Transacciones ledger
     ge('ed-btn-tx-filtrar') && ge('ed-btn-tx-filtrar').addEventListener('click', loadLedger);

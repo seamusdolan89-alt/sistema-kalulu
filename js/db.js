@@ -228,6 +228,11 @@
         stock_alerta REAL DEFAULT 0,
         cant_pedido REAL DEFAULT 0,
         pedido_unidad TEXT DEFAULT 'unidad',
+        unidad_compra TEXT DEFAULT 'Unidad',
+        unidades_por_paquete_compra REAL DEFAULT 1,
+        unidad_venta TEXT DEFAULT 'Unidad',
+        precio_lista_por TEXT DEFAULT 'Por unidad_compra',
+        precio_lista_divisor REAL DEFAULT 1,
         hereda_costo INTEGER DEFAULT 1,
         hereda_precio INTEGER DEFAULT 1,
         imagen TEXT,
@@ -248,6 +253,7 @@
       `CREATE TABLE IF NOT EXISTS producto_sustitutos (
         producto_id TEXT REFERENCES productos(id),
         sustituto_id TEXT REFERENCES productos(id),
+        referencia_id TEXT REFERENCES productos(id),
         activo INTEGER DEFAULT 1,
         fecha_asignacion TEXT,
         PRIMARY KEY (producto_id, sustituto_id)
