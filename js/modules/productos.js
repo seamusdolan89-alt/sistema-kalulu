@@ -463,13 +463,9 @@
     const ucEl  = getElement('product-unidad-compra');
     const uppEl = getElement('product-unidades-paquete-compra');
     const uvEl  = getElement('product-unidad-venta');
-    const plpEl = getElement('product-precio-lista-por');
-    const pldEl = getElement('product-precio-lista-divisor');
     if (ucEl)  ucEl.value  = producto?.unidad_compra  || 'Unidad';
     if (uppEl) uppEl.value = producto?.unidades_por_paquete_compra ?? 1;
     if (uvEl)  uvEl.value  = producto?.unidad_venta   || 'Unidad';
-    if (plpEl) plpEl.value = producto?.precio_lista_por || 'Por unidad de compra';
-    if (pldEl) pldEl.value = producto?.precio_lista_divisor ?? 1;
     updatePresFields();
 
     getElement('barcodes-list').innerHTML = state.barcodes.map(c => `<div>${c}</div>`).join('');
@@ -482,25 +478,21 @@
   };
 
   const updatePresFields = () => {
-    const ucEl  = getElement('product-unidad-compra');
+    const ucEl   = getElement('product-unidad-compra');
     const uppGrp = getElement('unidades-paquete-compra-group');
-    const plpEl = getElement('product-precio-lista-por');
-    const pldGrp = getElement('precio-lista-divisor-group');
     const previewEl = getElement('pres-preview');
     if (!ucEl) return;
 
     const uc  = ucEl.value;
     const upp = parseFloat(getElement('product-unidades-paquete-compra')?.value) || 1;
-    const plp = plpEl?.value || 'Por unidad de venta';
 
-    // Show unidades por paquete when unit is not "Unidad" or "Kg"
-    const showUpp = uc !== 'Unidad' && uc !== 'Kg';
-    if (uppGrp) uppGrp.style.display = showUpp ? '' : 'none';
+    const showUpp = !['Unidad', 'Kg', 'Lt'].includes(uc);
+    if (uppGrp) {
+      uppGrp.style.display = showUpp ? '' : 'none';
+      const lbl = getElement('label-unidades-paquete');
+      if (lbl) lbl.textContent = `¿Cuántas unidades trae cada ${uc}?`;
+    }
 
-    // Show divisor input only for "Por otra cantidad"
-    if (pldGrp) pldGrp.style.display = plp === 'Por otra cantidad' ? '' : 'none';
-
-    // Preview
     if (!previewEl) return;
     if (showUpp && upp > 1) {
       previewEl.textContent = `1 ${uc} = ${upp} unidades`;
@@ -564,8 +556,12 @@
       unidad_compra: getElement('product-unidad-compra')?.value || 'Unidad',
       unidades_por_paquete_compra: parseFloat(getElement('product-unidades-paquete-compra')?.value) || 1,
       unidad_venta: getElement('product-unidad-venta')?.value || 'Unidad',
-      precio_lista_por: getElement('product-precio-lista-por')?.value || 'Por unidad de compra',
-      precio_lista_divisor: parseFloat(getElement('product-precio-lista-divisor')?.value) || 1,
+      precio_lista_por: getElement('product-unidad-compra')?.value || 'Unidad',
+      precio_lista_divisor: (() => {
+        const uc = getElement('product-unidad-compra')?.value || 'Unidad';
+        if (['Unidad', 'Kg', 'Lt'].includes(uc)) return 1;
+        return parseFloat(getElement('product-unidades-paquete-compra')?.value) || 1;
+      })(),
       fecha_modificacion: window.SGA_Utils.formatISODate(new Date()),
       fecha_alta: state.editingProduct ? state.editingProduct.fecha_alta : window.SGA_Utils.formatISODate(new Date()),
       activo: 1,
@@ -2004,7 +2000,6 @@
     getElement('product-unidad-compra')?.addEventListener('change', updatePresFields);
     getElement('product-unidades-paquete-compra')?.addEventListener('input', updatePresFields);
     getElement('product-unidad-venta')?.addEventListener('change', updatePresFields);
-    getElement('product-precio-lista-por')?.addEventListener('change', updatePresFields);
     getElement('btn-prev-step3')?.addEventListener('click', () => goToStep(2));
     getElement('btn-next-step3')?.addEventListener('click', () => goToStep(4));
     getElement('btn-prev-step4')?.addEventListener('click', () => goToStep(3));

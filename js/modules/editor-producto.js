@@ -251,41 +251,28 @@ const EditorProducto = (() => {
 
       <div class="form-row">
         <div class="form-group">
-          <label for="ed-unidad-compra">Unidad de compra</label>
+          <label for="ed-unidad-compra">¿Cómo lo compro?</label>
           <select id="ed-unidad-compra" class="select-full">
-            ${['Unidad','Bulto','Display','Caja','Pack','Bolsa','Kg','Lt','Docena'].map(u =>
+            ${['Unidad','Kg','Lt','Bulto','Display','Caja','Pack','Bolsa','Docena'].map(u =>
               `<option value="${u}" ${(p.unidad_compra || 'Unidad') === u ? 'selected' : ''}>${u}</option>`
             ).join('')}
           </select>
         </div>
-        <div class="form-group" id="ed-uxp-wrap" style="${!['Unidad','Kg','Lt'].includes(p.unidad_compra || 'Unidad') ? '' : 'display:none'}">
-          <label for="ed-unidades-paquete-compra">¿Cuántas unidades trae cada ${escapeHtml(p.unidad_compra || 'paquete')}?</label>
-          <input type="number" id="ed-unidades-paquete-compra" class="input-full" min="1" step="1" value="${p.unidades_por_paquete_compra != null ? p.unidades_por_paquete_compra : 1}">
-        </div>
-      </div>
-
-      <div class="form-row">
         <div class="form-group">
-          <label for="ed-unidad-venta">Unidad de venta</label>
+          <label for="ed-unidad-venta">¿Cómo lo vendo?</label>
           <select id="ed-unidad-venta" class="select-full">
             ${['Unidad','Kg','Lt','Por peso','Por fracción'].map(u =>
               `<option value="${u}" ${(p.unidad_venta || 'Unidad') === u ? 'selected' : ''}>${u}</option>`
             ).join('')}
           </select>
         </div>
-        <div class="form-group">
-          <label for="ed-precio-lista-por">Precio de lista por</label>
-          <select id="ed-precio-lista-por" class="select-full">
-            <option value="Por unidad de compra" ${(p.precio_lista_por || 'Por unidad de compra') === 'Por unidad de compra' ? 'selected' : ''}>Por unidad de compra</option>
-            <option value="Por unidad de venta" ${(p.precio_lista_por || '') === 'Por unidad de venta' ? 'selected' : ''}>Por unidad de venta</option>
-            <option value="Por otra cantidad" ${(p.precio_lista_por || '') === 'Por otra cantidad' ? 'selected' : ''}>Por otra cantidad</option>
-          </select>
-        </div>
       </div>
 
-      <div class="form-group" id="ed-divisor-wrap" style="${(p.precio_lista_por || '') === 'Por otra cantidad' ? '' : 'display:none'}">
-        <label for="ed-precio-lista-divisor">Cantidad de unidades</label>
-        <input type="number" id="ed-precio-lista-divisor" class="input-full" min="1" step="0.01" value="${p.precio_lista_divisor != null ? p.precio_lista_divisor : 1}">
+      <div id="ed-uxp-wrap" style="${!['Unidad','Kg','Lt'].includes(p.unidad_compra || 'Unidad') ? '' : 'display:none'}">
+        <div class="form-group">
+          <label for="ed-unidades-paquete-compra">¿Cuántas unidades trae cada ${escapeHtml(p.unidad_compra || 'paquete')}?</label>
+          <input type="number" id="ed-unidades-paquete-compra" class="input-full" min="1" step="1" placeholder="ej: 32" value="${p.unidades_por_paquete_compra != null ? p.unidades_por_paquete_compra : 1}">
+        </div>
       </div>
 
       <div id="ed-pres-preview" class="ed-pres-preview" style="${!['Unidad','Kg','Lt'].includes(p.unidad_compra || 'Unidad') && (p.unidades_por_paquete_compra || 1) > 1 ? '' : 'display:none'}">
@@ -1990,16 +1977,13 @@ const EditorProducto = (() => {
   };
 
   const updatePresEditorUI = () => {
-    const ucEl       = ge('ed-unidad-compra');
-    const uxpWrap    = ge('ed-uxp-wrap');
-    const plpEl      = ge('ed-precio-lista-por');
-    const divisorWrap = ge('ed-divisor-wrap');
-    const previewEl  = ge('ed-pres-preview');
+    const ucEl    = ge('ed-unidad-compra');
+    const uxpWrap = ge('ed-uxp-wrap');
+    const previewEl = ge('ed-pres-preview');
     if (!ucEl) return;
 
     const uc  = ucEl.value;
     const upp = parseFloat((ge('ed-unidades-paquete-compra') || {}).value) || 1;
-    const plp = plpEl ? plpEl.value : '';
 
     const showUxp = !['Unidad','Kg','Lt'].includes(uc);
     if (uxpWrap) {
@@ -2007,7 +1991,6 @@ const EditorProducto = (() => {
       const lbl = uxpWrap.querySelector('label');
       if (lbl) lbl.textContent = `¿Cuántas unidades trae cada ${uc}?`;
     }
-    if (divisorWrap) divisorWrap.style.display = plp === 'Por otra cantidad' ? '' : 'none';
     if (previewEl) {
       if (showUxp && upp > 1) {
         previewEl.textContent = `1 ${uc} = ${upp} unidades`;
@@ -2090,8 +2073,6 @@ const EditorProducto = (() => {
     ge('ed-unidad-compra') && ge('ed-unidad-compra').addEventListener('change', () => { markDirty(); updatePresEditorUI(); });
     ge('ed-unidades-paquete-compra') && ge('ed-unidades-paquete-compra').addEventListener('input', () => { markDirty(); updatePresEditorUI(); syncCostoPaquete('costo'); });
     ge('ed-unidad-venta') && ge('ed-unidad-venta').addEventListener('change', markDirty);
-    ge('ed-precio-lista-por') && ge('ed-precio-lista-por').addEventListener('change', () => { markDirty(); updatePresEditorUI(); });
-    ge('ed-precio-lista-divisor') && ge('ed-precio-lista-divisor').addEventListener('input', markDirty);
 
     // Toggle label
     const activoChk = ge('ed-activo');
@@ -2325,7 +2306,7 @@ const EditorProducto = (() => {
     const unidadesPorPaquete = uppRaw !== '' ? (parseFloat(uppRaw) || null) : null;
 
     const uppCompraRaw = (ge('ed-unidades-paquete-compra') || {}).value;
-    const pldRaw       = (ge('ed-precio-lista-divisor') || {}).value;
+
 
     window.SGA_DB.run(`
       UPDATE productos SET
@@ -2364,8 +2345,8 @@ const EditorProducto = (() => {
       (ge('ed-unidad-compra') || {}).value || 'Unidad',
       uppCompraRaw !== '' ? (parseFloat(uppCompraRaw) || 1) : 1,
       (ge('ed-unidad-venta') || {}).value || 'Unidad',
-      (ge('ed-precio-lista-por') || {}).value || 'Por unidad de compra',
-      pldRaw !== '' ? (parseFloat(pldRaw) || 1) : 1,
+      (ge('ed-unidad-compra') || {}).value || 'Unidad',
+      (() => { const uc = (ge('ed-unidad-compra') || {}).value || 'Unidad'; return ['Unidad','Kg','Lt'].includes(uc) ? 1 : (uppCompraRaw !== '' ? (parseFloat(uppCompraRaw) || 1) : 1); })(),
       (ge('ed-es-oferta') || {}).checked ? 1 : 0,
       (ge('ed-oferta-desde') || {}).value || null,
       (ge('ed-oferta-hasta') || {}).value || null,

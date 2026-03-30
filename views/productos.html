@@ -415,47 +415,35 @@
         <h5 class="pres-section-title">📦 Presentación comercial</h5>
         <div class="form-row">
           <div class="form-group">
-            <label for="product-unidad-compra">Unidad de compra</label>
+            <label for="product-unidad-compra">¿Cómo lo compro?</label>
             <select id="product-unidad-compra" class="select-full">
               <option value="Unidad">Unidad</option>
-              <option value="Pack">Pack</option>
-              <option value="Caja">Caja</option>
-              <option value="Bandeja">Bandeja</option>
-              <option value="Fardo">Fardo</option>
-              <option value="Docena">Docena</option>
               <option value="Kg">Kg</option>
+              <option value="Lt">Lt</option>
+              <option value="Bulto">Bulto</option>
+              <option value="Display">Display</option>
+              <option value="Caja">Caja</option>
+              <option value="Pack">Pack</option>
+              <option value="Bolsa">Bolsa</option>
+              <option value="Docena">Docena</option>
             </select>
           </div>
-          <div class="form-group" id="unidades-paquete-compra-group">
-            <label for="product-unidades-paquete-compra">Unidades por paquete</label>
-            <input type="number" id="product-unidades-paquete-compra" class="input-full" min="1" step="1" value="1">
-          </div>
-        </div>
-        <div class="form-row">
           <div class="form-group">
-            <label for="product-unidad-venta">Unidad de venta</label>
+            <label for="product-unidad-venta">¿Cómo lo vendo?</label>
             <select id="product-unidad-venta" class="select-full">
               <option value="Unidad">Unidad</option>
               <option value="Kg">Kg</option>
-              <option value="Litro">Litro</option>
-              <option value="Porción">Porción</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label for="product-precio-lista-por">Precio de lista por</label>
-            <select id="product-precio-lista-por" class="select-full">
-              <option value="Por unidad de compra" selected>Por unidad de compra</option>
-              <option value="Por unidad de venta">Por unidad de venta</option>
-              <option value="Por otra cantidad">Por otra cantidad</option>
+              <option value="Lt">Lt</option>
+              <option value="Por peso">Por peso</option>
+              <option value="Por fracción">Por fracción</option>
             </select>
           </div>
         </div>
-        <div class="form-row" id="precio-lista-divisor-group" style="display:none">
+        <div id="unidades-paquete-compra-group" style="display:none">
           <div class="form-group">
-            <label for="product-precio-lista-divisor">Cantidad de unidades</label>
-            <input type="number" id="product-precio-lista-divisor" class="input-full" min="1" step="0.01" value="1">
+            <label for="product-unidades-paquete-compra" id="label-unidades-paquete">¿Cuántas unidades trae?</label>
+            <input type="number" id="product-unidades-paquete-compra" class="input-full" min="1" step="1" placeholder="ej: 32" value="1">
           </div>
-          <div class="form-group"></div>
         </div>
         <div id="pres-preview" class="pres-preview"></div>
       </div>
