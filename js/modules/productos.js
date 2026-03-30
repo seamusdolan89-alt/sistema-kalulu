@@ -118,6 +118,22 @@
       console.warn('Error cargando productos:', error.message);
       state.productos = [];
     }
+
+    // Auto-expire offers whose end date has passed
+    const today = new Date().toISOString().slice(0, 10);
+    try {
+      window.SGA_DB.run(
+        `UPDATE productos SET es_oferta = 0 WHERE es_oferta = 1 AND oferta_hasta IS NOT NULL AND oferta_hasta < ?`,
+        [today]
+      );
+      // Refresh if any were expired
+      if (window.SGA_DB.query('SELECT changes() AS c')[0]?.c > 0) {
+        state.productos = state.productos.map(p =>
+          (p.es_oferta && p.oferta_hasta && p.oferta_hasta < today) ? { ...p, es_oferta: 0 } : p
+        );
+      }
+    } catch (e) { /* column may not exist on older schema */ }
+
     applyFilters();
   };
 
@@ -298,11 +314,12 @@
         : 'font-weight:bold;';
 
       const estadoLabel  = producto.activo == 1 ? '<span style="color:#388E3C">Activo</span>' : '<span style="color:#d32f2f">Inactivo</span>';
+      const ofertaBadge  = producto.es_oferta ? '<span style="display:inline-block;background:#e53935;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle">OFERTA</span>' : '';
 
       return `
         <tr data-id="${producto.id}">
           <td>${producto.codigo_barras || ''}</td>
-          <td>${producto.nombre || ''}</td>
+          <td>${producto.nombre || ''}${ofertaBadge}</td>
           <td>${categoria}</td>
           <td>${formatCurrency(producto.costo || 0)}</td>
           <td>${formatCurrency(producto.precio_venta || 0)}</td>
@@ -451,7 +468,7 @@
     if (ucEl)  ucEl.value  = producto?.unidad_compra  || 'Unidad';
     if (uppEl) uppEl.value = producto?.unidades_por_paquete_compra ?? 1;
     if (uvEl)  uvEl.value  = producto?.unidad_venta   || 'Unidad';
-    if (plpEl) plpEl.value = producto?.precio_lista_por || 'Por unidad de venta';
+    if (plpEl) plpEl.value = producto?.precio_lista_por || 'Por unidad de compra';
     if (pldEl) pldEl.value = producto?.precio_lista_divisor ?? 1;
     updatePresFields();
 
@@ -547,7 +564,7 @@
       unidad_compra: getElement('product-unidad-compra')?.value || 'Unidad',
       unidades_por_paquete_compra: parseFloat(getElement('product-unidades-paquete-compra')?.value) || 1,
       unidad_venta: getElement('product-unidad-venta')?.value || 'Unidad',
-      precio_lista_por: getElement('product-precio-lista-por')?.value || 'Por unidad de venta',
+      precio_lista_por: getElement('product-precio-lista-por')?.value || 'Por unidad de compra',
       precio_lista_divisor: parseFloat(getElement('product-precio-lista-divisor')?.value) || 1,
       fecha_modificacion: window.SGA_Utils.formatISODate(new Date()),
       fecha_alta: state.editingProduct ? state.editingProduct.fecha_alta : window.SGA_Utils.formatISODate(new Date()),
@@ -707,7 +724,7 @@
         p.unidad_compra || 'Unidad',
         p.unidades_por_paquete_compra || 1,
         p.unidad_venta || 'Unidad',
-        p.precio_lista_por || 'Por unidad de venta',
+        p.precio_lista_por || 'Por unidad de compra',
         p.precio_lista_divisor || 1,
         p.madre_codigo || '',
         p.madre_nombre || '',
@@ -1149,7 +1166,7 @@
         const unidad_venta = m('unidad_venta')
           ? String(fila.unidad_venta || 'Unidad').trim() : undefined;
         const precio_lista_por = m('precio_lista_por')
-          ? String(fila.precio_lista_por || 'Por unidad_compra').trim() : undefined;
+          ? String(fila.precio_lista_por || 'Por unidad de compra').trim() : undefined;
         const precio_lista_divisor = m('precio_lista_divisor')
           ? (parseFloat(fila.precio_lista_divisor) || 1) : undefined;
 
@@ -1287,11 +1304,15 @@
           const refCb = window.SGA_DB.query('SELECT producto_id FROM codigos_barras WHERE codigo = ?', [codSustRef]);
           if (refCb.length) {
             const referencia_id = refCb[0].producto_id;
-            window.SGA_DB.run(
-              'INSERT OR REPLACE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion) VALUES (?, ?, ?, 1, ?)',
-              [producto_id, referencia_id, referencia_id, now]
-            );
-            results.sustitutosResueltos++;
+            if (referencia_id === producto_id) {
+              console.warn('Sustituto auto-referencia ignorado:', codSustRef);
+            } else {
+              window.SGA_DB.run(
+                'INSERT OR REPLACE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion) VALUES (?, ?, ?, 1, ?)',
+                [producto_id, referencia_id, referencia_id, now]
+              );
+              results.sustitutosResueltos++;
+            }
           } else {
             console.warn('Producto de referencia no encontrado:', codSustRef);
             results.sustitutosPendientes.push(codSustRef);
@@ -2147,8 +2168,12 @@
       `ALTER TABLE productos ADD COLUMN unidad_compra TEXT DEFAULT 'Unidad'`,
       `ALTER TABLE productos ADD COLUMN unidades_por_paquete_compra REAL DEFAULT 1`,
       `ALTER TABLE productos ADD COLUMN unidad_venta TEXT DEFAULT 'Unidad'`,
-      `ALTER TABLE productos ADD COLUMN precio_lista_por TEXT DEFAULT 'Por unidad_compra'`,
+      `ALTER TABLE productos ADD COLUMN precio_lista_por TEXT DEFAULT 'Por unidad de compra'`,
       `ALTER TABLE productos ADD COLUMN precio_lista_divisor REAL DEFAULT 1`,
+      `ALTER TABLE productos ADD COLUMN costo_paquete REAL DEFAULT 0`,
+      `ALTER TABLE productos ADD COLUMN es_oferta INTEGER DEFAULT 0`,
+      `ALTER TABLE productos ADD COLUMN oferta_desde TEXT`,
+      `ALTER TABLE productos ADD COLUMN oferta_hasta TEXT`,
       `ALTER TABLE producto_sustitutos ADD COLUMN referencia_id TEXT`,
     ];
     migrations.forEach(sql => {

@@ -169,6 +169,13 @@ const EditorProducto = (() => {
     const cantPedido  = p.cant_pedido || 0;
     const isActivo    = p.activo === 1 || p.activo === '1';
 
+    const grupoRef = window.SGA_DB.query(
+      'SELECT referencia_id FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL AND referencia_id != ? LIMIT 1',
+      [p.id, p.id]
+    );
+    const esMiembroGrupo = grupoRef.length > 0;
+    const referenciaGrupoId = esMiembroGrupo ? grupoRef[0].referencia_id : null;
+
     const BULK_UNITS  = ['bulto_cerrado', 'pack', 'display', 'bolsa'];
     const BULK_LABEL  = { bulto_cerrado: 'bulto cerrado', pack: 'pack', display: 'display', bolsa: 'bolsa' };
     const BULK_PLURAL = { bulto_cerrado: 'Bultos cerrados', pack: 'Packs', display: 'Displays', bolsa: 'Bolsas' };
@@ -269,8 +276,8 @@ const EditorProducto = (() => {
         <div class="form-group">
           <label for="ed-precio-lista-por">Precio de lista por</label>
           <select id="ed-precio-lista-por" class="select-full">
-            <option value="Por unidad de venta" ${(p.precio_lista_por || 'Por unidad de venta') === 'Por unidad de venta' ? 'selected' : ''}>Por unidad de venta</option>
-            <option value="Por paquete" ${(p.precio_lista_por || '') === 'Por paquete' ? 'selected' : ''}>Por ${escapeHtml(p.unidad_compra || 'paquete')}</option>
+            <option value="Por unidad de compra" ${(p.precio_lista_por || 'Por unidad de compra') === 'Por unidad de compra' ? 'selected' : ''}>Por unidad de compra</option>
+            <option value="Por unidad de venta" ${(p.precio_lista_por || '') === 'Por unidad de venta' ? 'selected' : ''}>Por unidad de venta</option>
             <option value="Por otra cantidad" ${(p.precio_lista_por || '') === 'Por otra cantidad' ? 'selected' : ''}>Por otra cantidad</option>
           </select>
         </div>
@@ -304,11 +311,19 @@ const EditorProducto = (() => {
 
     <div class="ed-precios-grid">
       <div class="form-group">
-        <label for="ed-costo">Costo</label>
+        <label for="ed-costo">Costo por unidad de venta</label>
         <div class="ed-input-prefix-wrap">
           <span class="ed-input-affix">$</span>
           <input type="number" id="ed-costo" class="input-full" step="0.01" min="0" value="${p.costo || 0}">
         </div>
+      </div>
+      <div class="form-group" id="ed-costo-paquete-wrap">
+        <label for="ed-costo-paquete">Costo por unidad de compra</label>
+        <div class="ed-input-prefix-wrap">
+          <span class="ed-input-affix">$</span>
+          <input type="number" id="ed-costo-paquete" class="input-full" step="0.01" min="0" value="${p.costo_paquete || 0}">
+        </div>
+        <small class="ed-text-muted" id="ed-costo-paquete-hint"></small>
       </div>
       <div class="form-group">
         <label for="ed-precio-venta">Precio de venta</label>
@@ -352,6 +367,30 @@ const EditorProducto = (() => {
         <div class="form-group" style="padding-top:22px">
           <button id="ed-btn-aplicar-precio" class="btn btn-secondary btn-sm">Aplicar →</button>
         </div>
+      </div>
+    </div>
+
+    <div style="margin-top:16px;padding:14px;border:1px solid var(--color-border);border-radius:8px">
+      <div class="ed-toggle-row" style="margin-bottom:0">
+        <span style="font-weight:600;font-size:15px">Producto en oferta</span>
+        <label class="ed-toggle-switch">
+          <input type="checkbox" id="ed-es-oferta" ${p.es_oferta ? 'checked' : ''}>
+          <span class="ed-toggle-slider"></span>
+        </label>
+        <span id="ed-es-oferta-label">${p.es_oferta ? 'Sí' : 'No'}</span>
+      </div>
+      <div id="ed-oferta-fechas-wrap" style="${p.es_oferta ? '' : 'display:none'};margin-top:12px">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="ed-oferta-desde">Oferta desde</label>
+            <input type="date" id="ed-oferta-desde" class="input-full" value="${p.oferta_desde || ''}">
+          </div>
+          <div class="form-group">
+            <label for="ed-oferta-hasta">Oferta hasta</label>
+            <input type="date" id="ed-oferta-hasta" class="input-full" value="${p.oferta_hasta || ''}">
+          </div>
+        </div>
+        <small class="ed-text-muted">Si se cumplen las fechas, la oferta se desactiva automáticamente al cargar el módulo.</small>
       </div>
     </div>
 
@@ -415,10 +454,17 @@ const EditorProducto = (() => {
     </table>
 
     <div class="form-row">
-      <div class="form-group">
-        <label for="ed-stock-alerta">Stock alerta</label>
-        <input type="number" id="ed-stock-alerta" class="input-full" step="1" min="0" value="${stockAlerta}">
-        <small class="ed-text-muted">Alerta cuando el stock cae por debajo de este valor</small>
+      <div class="form-group" id="ed-stock-alerta-wrap">
+        ${esMiembroGrupo
+          ? `<label>Stock alerta</label>
+             <div style="padding:8px 12px;background:var(--color-background-secondary);border-radius:6px;font-size:13px;color:var(--color-text-secondary)">
+               Este producto pertenece a un grupo de sustitutos.<br>
+               El stock alerta se configura en el <a href="#" class="ed-link-referencia" data-id="${referenciaGrupoId}">producto referencia</a>.
+             </div>`
+          : `<label for="ed-stock-alerta">Stock alerta</label>
+             <input type="number" id="ed-stock-alerta" class="input-full" step="1" min="0" value="${stockAlerta}">
+             <small class="ed-text-muted">Alerta cuando el stock cae por debajo de este valor</small>`
+        }
       </div>
       <div class="form-group">
         <label for="ed-cant-pedido">Pedido sugerido</label>
@@ -1961,10 +2007,6 @@ const EditorProducto = (() => {
       const lbl = uxpWrap.querySelector('label');
       if (lbl) lbl.textContent = `¿Cuántas unidades trae cada ${uc}?`;
     }
-    if (plpEl) {
-      const optPack = plpEl.querySelector('option[value="Por paquete"]');
-      if (optPack) optPack.textContent = `Por ${uc}`;
-    }
     if (divisorWrap) divisorWrap.style.display = plp === 'Por otra cantidad' ? '' : 'none';
     if (previewEl) {
       if (showUxp && upp > 1) {
@@ -1975,6 +2017,29 @@ const EditorProducto = (() => {
         previewEl.style.display = 'none';
       }
     }
+
+    // Costo por unidad de compra: show only when unidad_compra has quantity (not Unidad/Kg/Lt)
+    const costoPaqWrap = ge('ed-costo-paquete-wrap');
+    const hintEl = ge('ed-costo-paquete-hint');
+    if (costoPaqWrap) {
+      const showCostoPaq = showUxp;
+      costoPaqWrap.style.display = showCostoPaq ? '' : 'none';
+      if (hintEl) hintEl.textContent = showCostoPaq ? `1 ${uc} = ${upp} unidades de venta` : '';
+    }
+  };
+
+  const syncCostoPaquete = (source) => {
+    const upp = parseFloat((ge('ed-unidades-paquete-compra') || {}).value) || 1;
+    if (source === 'costo') {
+      const costo = parseFloat((ge('ed-costo') || {}).value) || 0;
+      const el = ge('ed-costo-paquete');
+      if (el) el.value = (costo * upp).toFixed(2);
+    } else {
+      const costoPaq = parseFloat((ge('ed-costo-paquete') || {}).value) || 0;
+      const el = ge('ed-costo');
+      if (el && upp > 0) el.value = (costoPaq / upp).toFixed(2);
+    }
+    recalcMargen();
   };
 
   // ── EVENTS ─────────────────────────────────────────────────────────────────
@@ -1992,8 +2057,18 @@ const EditorProducto = (() => {
     ge('ed-btn-save') && ge('ed-btn-save').addEventListener('click', saveAll);
     ge('ed-btn-cancel') && ge('ed-btn-cancel').addEventListener('click', handleCancel);
 
+    // Group referencia link
+    const refLink = document.querySelector('.ed-link-referencia');
+    if (refLink) {
+      refLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        const refId = refLink.dataset.id;
+        if (refId) window.location.hash = `#editor-producto/${refId}`;
+      });
+    }
+
     // Dirty tracking
-    ['ed-nombre', 'ed-descripcion', 'ed-costo', 'ed-precio-venta', 'ed-stock-alerta', 'ed-cant-pedido', 'ed-pedido-unidades-paquete'].forEach(id => {
+    ['ed-nombre', 'ed-descripcion', 'ed-precio-venta', 'ed-stock-alerta', 'ed-cant-pedido', 'ed-pedido-unidades-paquete'].forEach(id => {
       const el = ge(id);
       if (el) el.addEventListener('input', markDirty);
     });
@@ -2013,7 +2088,7 @@ const EditorProducto = (() => {
 
     // Presentación comercial
     ge('ed-unidad-compra') && ge('ed-unidad-compra').addEventListener('change', () => { markDirty(); updatePresEditorUI(); });
-    ge('ed-unidades-paquete-compra') && ge('ed-unidades-paquete-compra').addEventListener('input', () => { markDirty(); updatePresEditorUI(); });
+    ge('ed-unidades-paquete-compra') && ge('ed-unidades-paquete-compra').addEventListener('input', () => { markDirty(); updatePresEditorUI(); syncCostoPaquete('costo'); });
     ge('ed-unidad-venta') && ge('ed-unidad-venta').addEventListener('change', markDirty);
     ge('ed-precio-lista-por') && ge('ed-precio-lista-por').addEventListener('change', () => { markDirty(); updatePresEditorUI(); });
     ge('ed-precio-lista-divisor') && ge('ed-precio-lista-divisor').addEventListener('input', markDirty);
@@ -2028,6 +2103,18 @@ const EditorProducto = (() => {
       });
     }
 
+    // Oferta toggle
+    const ofertaChk = ge('ed-es-oferta');
+    if (ofertaChk) {
+      ofertaChk.addEventListener('change', () => {
+        const label = ge('ed-es-oferta-label');
+        const wrap  = ge('ed-oferta-fechas-wrap');
+        if (label) label.textContent = ofertaChk.checked ? 'Sí' : 'No';
+        if (wrap)  wrap.style.display = ofertaChk.checked ? '' : 'none';
+        markDirty();
+      });
+    }
+
     // Barcodes
     ge('ed-btn-add-barcode') && ge('ed-btn-add-barcode').addEventListener('click', addBarcode);
     const bcInput = ge('ed-barcode-input');
@@ -2036,7 +2123,8 @@ const EditorProducto = (() => {
     }
 
     // Precio calculator
-    ge('ed-costo') && ge('ed-costo').addEventListener('input', recalcMargen);
+    ge('ed-costo') && ge('ed-costo').addEventListener('input', () => { syncCostoPaquete('costo'); markDirty(); });
+    ge('ed-costo-paquete') && ge('ed-costo-paquete').addEventListener('input', () => { syncCostoPaquete('paquete'); markDirty(); });
     ge('ed-precio-venta') && ge('ed-precio-venta').addEventListener('input', recalcMargen);
     ge('ed-margen') && ge('ed-margen').addEventListener('input', recalcFromMargen);
     ge('ed-markup') && ge('ed-markup').addEventListener('input', recalcFromMarkup);
@@ -2244,12 +2332,13 @@ const EditorProducto = (() => {
         nombre = ?, descripcion = ?,
         categoria_id = ?, proveedor_principal_id = ?, proveedor_alternativo_id = ?,
         unidad_medida = ?,
-        costo = ?, precio_venta = ?,
+        costo = ?, costo_paquete = ?, precio_venta = ?,
         stock_minimo = ?, stock_alerta = ?, cant_pedido = ?, pedido_unidad = ?, pedido_unidades_por_paquete = ?,
         activo = ?,
         es_madre = ?, producto_madre_id = ?, precio_independiente = ?,
         unidad_compra = ?, unidades_por_paquete_compra = ?, unidad_venta = ?,
         precio_lista_por = ?, precio_lista_divisor = ?,
+        es_oferta = ?, oferta_desde = ?, oferta_hasta = ?,
         imagen = ?,
         fecha_modificacion = ?, sync_status = 'pending', updated_at = ?
       WHERE id = ?
@@ -2261,6 +2350,7 @@ const EditorProducto = (() => {
       (ge('ed-proveedor-alternativo') || {}).value || null,
       (ge('ed-unidad') || {}).value || 'unidad',
       parseFloat((ge('ed-costo') || {}).value) || 0,
+      parseFloat((ge('ed-costo-paquete') || {}).value) || 0,
       parseFloat((ge('ed-precio-venta') || {}).value) || 0,
       stockAlerta,   // keep stock_minimo in sync for backward compat
       stockAlerta,
@@ -2274,8 +2364,11 @@ const EditorProducto = (() => {
       (ge('ed-unidad-compra') || {}).value || 'Unidad',
       uppCompraRaw !== '' ? (parseFloat(uppCompraRaw) || 1) : 1,
       (ge('ed-unidad-venta') || {}).value || 'Unidad',
-      (ge('ed-precio-lista-por') || {}).value || 'Por unidad de venta',
+      (ge('ed-precio-lista-por') || {}).value || 'Por unidad de compra',
       pldRaw !== '' ? (parseFloat(pldRaw) || 1) : 1,
+      (ge('ed-es-oferta') || {}).checked ? 1 : 0,
+      (ge('ed-oferta-desde') || {}).value || null,
+      (ge('ed-oferta-hasta') || {}).value || null,
       imagen,
       now, now,
       state.productoId,

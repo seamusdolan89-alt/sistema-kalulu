@@ -116,18 +116,27 @@ fecha_alta
 fecha_modificacion
 ```
 
-#### Concepto de Producto Sustituto
-- Un producto puede tener uno o más sustitutos asignados
-- El stock disponible de un producto = stock propio + stock de sustitutos activos
-- Cuando el sistema evalúa si hay que reponer, considera la suma de sustitutos
-- Los sustitutos se desactivan manualmente cuando se agotan
+#### Concepto de Producto Sustituto (modelo de grupo)
+- Los sustitutos se organizan en **grupos**: un producto es la **referencia** del grupo, los demás son **miembros**.
+- La `referencia_id` en `producto_sustitutos` identifica al producto referencia del grupo.
+- El stock disponible de un producto referencia = suma del stock de todos los miembros del grupo (incluyendo la referencia misma).
+- Si un producto es miembro de un grupo (tiene `referencia_id != producto_id`), NO configura `stock_alerta` propio — el alerta se gestiona desde la referencia.
+- Los miembros se activan/desactivan individualmente; el stock se evalúa sólo sobre los activos.
 
 **Tabla producto_sustitutos:**
 ```
-producto_id
-sustituto_id
-activo (boolean)
+producto_id      — el miembro del grupo
+sustituto_id     — igual a referencia_id (FK al producto referencia)
+referencia_id    — ID del producto referencia del grupo
+activo           — si el miembro está activo en el grupo
 fecha_asignacion
+```
+
+**Stock del grupo:**
+```
+getStockDisponible(productoId, sucursalId):
+  si el producto NO tiene referencia_id → devuelve su propio stock
+  si tiene referencia_id → SUM(stock) de todos los miembros con esa referencia_id
 ```
 
 #### Carga de nuevo producto
@@ -519,11 +528,21 @@ CREATE TABLE productos (
   hereda_costo INTEGER DEFAULT 1,
   hereda_precio INTEGER DEFAULT 1,
   costo REAL NOT NULL DEFAULT 0,
+  costo_paquete REAL DEFAULT 0,         -- costo por unidad de compra (sincronizado con costo * unidades_por_paquete_compra)
   precio_venta REAL NOT NULL DEFAULT 0,
   comision_pct_override REAL,
   unidad_medida TEXT DEFAULT 'unidad',
-  stock_alerta REAL DEFAULT 0,
+  unidad_compra TEXT DEFAULT 'Unidad',
+  unidades_por_paquete_compra REAL DEFAULT 1,
+  unidad_venta TEXT DEFAULT 'Unidad',
+  precio_lista_por TEXT DEFAULT 'Por unidad de compra',  -- 'Por unidad de compra' | 'Por unidad de venta' | 'Por otra cantidad'
+  precio_lista_divisor REAL DEFAULT 1,
+  stock_alerta REAL DEFAULT 0,          -- solo aplica al producto referencia (no a miembros de grupo)
   cant_pedido REAL DEFAULT 0,
+  pedido_unidad TEXT DEFAULT 'unidad',
+  es_oferta INTEGER DEFAULT 0,
+  oferta_desde TEXT,                    -- fecha ISO YYYY-MM-DD, NULL = sin límite
+  oferta_hasta TEXT,                    -- la oferta se desactiva automáticamente cuando esta fecha pasa
   activo INTEGER DEFAULT 1,
   fecha_alta TEXT,
   fecha_modificacion TEXT
@@ -537,10 +556,11 @@ CREATE TABLE codigos_barras (
   es_principal INTEGER DEFAULT 0
 );
 
--- SUSTITUTOS
+-- SUSTITUTOS (modelo de grupo)
 CREATE TABLE producto_sustitutos (
   producto_id TEXT REFERENCES productos(id),
-  sustituto_id TEXT REFERENCES productos(id),
+  sustituto_id TEXT REFERENCES productos(id),   -- = referencia_id (producto referencia del grupo)
+  referencia_id TEXT,                            -- ID del producto referencia del grupo
   activo INTEGER DEFAULT 1,
   fecha_asignacion TEXT,
   PRIMARY KEY (producto_id, sustituto_id)
@@ -734,14 +754,20 @@ CREATE TABLE promocion_items (
 4. Mostrar botón: "¿Actualizar precios de venta e imprimir etiquetas?"
 ```
 
-### Flujo: Stock con sustitutos
+### Flujo: Stock con sustitutos (modelo de grupo)
 ```
-stock_disponible(producto_id) =
-  stock(producto_id) +
-  SUM(stock(sustituto_id)) WHERE activo = 1
-  
-Para alerta de stock alerta:
-  IF stock_disponible < stock_alerta → alertar reposición
+getStockDisponible(producto_id, sucursal_id):
+  refRow = SELECT referencia_id FROM producto_sustitutos
+           WHERE producto_id = ? AND referencia_id IS NOT NULL AND referencia_id != producto_id
+
+  si refRow vacío → devuelve stock propio del producto
+  si refRow existe → devuelve SUM(stock) de todos los miembros con esa referencia_id
+
+Para alerta de reposición (solo en producto referencia):
+  IF getStockDisponible(referencia_id) < stock_alerta → alertar reposición
+
+Nota: stock_alerta solo se configura en el producto referencia del grupo.
+Los miembros del grupo no tienen stock_alerta propio.
 ```
 
 ### Flujo: Vuelto como saldo a favor
