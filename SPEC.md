@@ -1,7 +1,7 @@
 # SPEC.md — Sistema de Gestión de Almacén (SGA)
 
-> **Versión:** 1.0  
-> **Fecha:** 2026  
+> **Versión:** 1.1  
+> **Fecha:** 2026-03  
 > **Stack:** HTML5 + CSS3 + JavaScript ES6 + IndexedDB (offline-first) + SQLite via OPFS  
 > **Arquitectura:** Single Page Application (SPA) sin frameworks, sin build system, 100% local
 
@@ -111,6 +111,16 @@ stock_alerta (dispara alerta cuando stock cae por debajo)
 cant_pedido (cantidad sugerida para reposición)
 imagen (base64, almacenada en productos.imagen)
 unidad_medida (unidad, kg, lt, etc.)
+unidad_compra (Unidad | Pack | Caja | Kg | Lt | Bolsa | Fardo | Docena)
+unidades_por_paquete_compra (cuántas unidades de venta trae cada unidad de compra)
+unidad_venta (Unidad | Kg | Lt | 100g | ½ kg)
+precio_lista_por ('Por unidad de compra' | 'Por unidad de venta' | 'Por otra cantidad')
+precio_lista_divisor (divisor para calcular precio de lista por unidad)
+costo_paquete (costo por unidad de compra; sincronizado con costo × unidades_por_paquete_compra)
+es_oferta (boolean; se desactiva automáticamente cuando oferta_hasta pasa)
+oferta_desde (fecha ISO YYYY-MM-DD, opcional)
+oferta_hasta (fecha ISO YYYY-MM-DD, opcional)
+pedido_unidades_por_paquete (cuántas unidades de compra por pedido sugerido)
 activo (boolean)
 fecha_alta
 fecha_modificacion
@@ -425,6 +435,59 @@ activo
 
 ---
 
+### 5.11 MÓDULO: COMPRAS — CARGA MANUAL
+
+> Estado: 🔄 En implementación. Flujo POS-style para registrar compras a proveedores sin OCR.
+
+#### Flujo de 5 pasos
+
+**Paso 1 — Datos**
+- Selección de proveedor (búsqueda por nombre)
+- Fecha de la compra
+- Órdenes de compra pendientes para ese proveedor: aparecen automáticamente como tarjetas seleccionables (`.cmp-oc-card`). Auto-selecciona si hay exactamente una OC pendiente. Toggle click para vincular/desvincular.
+- Condición de pago: efectivo | transferencia | pendiente
+
+**Paso 2 — Carga de productos (POS-style)**
+- Layout de dos paneles: izquierdo (escaneo + tabla carrito) y derecho (info proveedor + pagos + confirmar)
+- Búsqueda por nombre o código de barras con dropdown de resultados
+- Navegación por teclado en el dropdown: ↑↓ para moverse, Enter para agregar
+- Al agregar producto: foco automático en campo "cantidad" de la nueva fila
+- Teclado loop completo: `cant → Enter/Tab → costo → Enter/Tab → scan input`
+- Esc desde cualquier campo → vuelve al scan input
+- Tabla de ítems con columnas: producto, unidad de compra, cantidad, uds/paquete, costo anterior, costo nuevo, subtotal, quitar
+- Los campos de cantidad y costo actualizan el subtotal de fila y el total general en tiempo real, SIN re-renderizar la tabla completa (foco preservado)
+- Botón "Nuevo producto" para crear un producto no existente directamente desde la compra
+- Chips de forma de pago (efectivo / transferencia / pendiente)
+- Campo "Entregó" con cálculo de vuelto en tiempo real
+- Datos de factura opcionales (número, fecha)
+- Botón "⏸ Pausar compra" para guardar snapshot y retomar después
+- Botón "✓ CONFIRMAR COMPRA" fijo al pie del panel derecho
+
+**Paso 4 — Ajuste de precios** _(renumerado; paso 3 = revisión interna, saltado en UI)_
+- Lista de productos con cambio de costo detectado
+- Para cada uno: precio de venta sugerido (margen actual) y precio ajustado editable
+- Toggle "incluir" por producto
+- Toggle "aplicar a toda la familia" si el producto tiene hijos
+- Acción: aplicar cambios seleccionados y avanzar
+
+**Paso 5 — Resumen**
+- Tabla resumen de la compra confirmada
+- Listado de precios actualizados
+- Botón "Compartir resumen" (WhatsApp / email — pendiente)
+- Botón "Imprimir etiquetas" para productos con precio actualizado
+
+#### Compras pausadas
+- Se guardan en la tabla `compras_pausadas` como snapshot JSON
+- Al entrar al módulo, si hay compras pausadas se muestra un banner para retomarlas
+- Una compra pausada retomada restaura exactamente el estado anterior (paso, ítems, proveedor, pagos)
+
+#### Cuenta corriente de proveedores
+- Al confirmar una compra con `condicion_pago = 'pendiente'`: se registra deuda en `cuenta_proveedor`
+- Al confirmar con `condicion_pago = 'efectivo'` o `'transferencia'`: se descuenta de caja (si aplica)
+- El panel derecho en paso 2 muestra la deuda actual con el proveedor
+
+---
+
 ## 6. ESTRUCTURA DE ARCHIVOS
 
 ```
@@ -540,6 +603,7 @@ CREATE TABLE productos (
   stock_alerta REAL DEFAULT 0,          -- solo aplica al producto referencia (no a miembros de grupo)
   cant_pedido REAL DEFAULT 0,
   pedido_unidad TEXT DEFAULT 'unidad',
+  pedido_unidades_por_paquete REAL DEFAULT 1,  -- cuántas unidades de compra por pedido sugerido
   es_oferta INTEGER DEFAULT 0,
   oferta_desde TEXT,                    -- fecha ISO YYYY-MM-DD, NULL = sin límite
   oferta_hasta TEXT,                    -- la oferta se desactiva automáticamente cuando esta fecha pasa
@@ -677,8 +741,11 @@ CREATE TABLE compras (
   fecha TEXT,
   numero_factura TEXT,
   total REAL,
+  condicion_pago TEXT DEFAULT 'efectivo',        -- 'efectivo' | 'transferencia' | 'pendiente'
+  estado TEXT DEFAULT 'borrador',                -- 'borrador' | 'confirmada' | 'pendiente_pago' | 'pagada'
+  vinculada_orden_id TEXT,                       -- FK a ordenes_compra, si corresponde a una OC
   imagen_path TEXT,
-  procesado_por TEXT CHECK(procesado_por IN ('template_offline','claude_api'))
+  procesado_por TEXT CHECK(procesado_por IN ('template_offline','claude_api','manual'))
 );
 
 -- ITEMS DE COMPRA
@@ -690,7 +757,35 @@ CREATE TABLE compra_items (
   costo_unitario REAL,
   costo_anterior REAL,
   subtotal REAL,
-  costo_modificado INTEGER DEFAULT 0
+  costo_modificado INTEGER DEFAULT 0,
+  unidad_compra TEXT DEFAULT 'Unidad',
+  unidades_por_paquete REAL DEFAULT 1
+);
+
+-- CUENTA CORRIENTE DE PROVEEDORES
+CREATE TABLE cuenta_proveedor (
+  id TEXT PRIMARY KEY,
+  proveedor_id TEXT NOT NULL REFERENCES proveedores(id),
+  sucursal_id TEXT REFERENCES sucursales(id),
+  compra_id TEXT REFERENCES compras(id),
+  tipo TEXT NOT NULL CHECK(tipo IN ('deuda','pago')),
+  monto REAL NOT NULL,
+  descripcion TEXT,
+  fecha TEXT NOT NULL,
+  usuario_id TEXT REFERENCES usuarios(id)
+);
+
+-- COMPRAS PAUSADAS (snapshots para retomar)
+CREATE TABLE compras_pausadas (
+  id TEXT PRIMARY KEY,
+  sucursal_id TEXT NOT NULL,
+  usuario_id TEXT NOT NULL,
+  snapshot TEXT NOT NULL,        -- JSON serializado del estado completo (paso, ítems, proveedor, pagos)
+  proveedor_nombre TEXT,
+  num_items INTEGER DEFAULT 0,
+  total_estimado REAL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 
 -- ÓRDENES DE COMPRA
@@ -881,10 +976,11 @@ Respondé SOLO con el JSON, sin texto adicional.
 - Combos y promociones
 - POS active, caja pending full testing
 
-### Fase 3 — Compras ⏳ Pending
-- Órdenes de compra (manual + importación Excel)
-- Recepción de mercadería
-- Módulo de compras manual
+### Fase 3 — Compras 🔄 In progress
+- Órdenes de compra (manual + importación Excel) ✅
+- Recepción de mercadería ✅
+- Módulo de compras manual 🔄 (flujo POS-style 5 pasos, en implementación)
+- OCR de facturas ⏳ (Fase 4)
 
 ### Fase 4 — OCR de facturas ⏳ Pending
 - Integración Tesseract.js
@@ -904,6 +1000,40 @@ Respondé SOLO con el JSON, sin texto adicional.
 - Auto-update via GitHub Releases (uno por sucursal)
 - Automatic DB backup before each update, identified by sucursal ID + timestamp
 - Rollback available if update fails
+
+---
+
+---
+
+## 14. PENDIENTE DE IMPLEMENTAR
+
+Funcionalidades acordadas que aún no están en desarrollo activo. Ordenadas por prioridad estimada.
+
+### 14.1 OCR de facturas (Fase 4)
+- Integración Tesseract.js para lectura offline de facturas físicas
+- Integración API de Claude para proveedores nuevos (primer procesamiento)
+- Sistema de templates por proveedor (ver sección 5.6 para spec completo)
+- La ruta "carga manual" (sección 5.11) cubre el caso de uso mientras tanto
+
+### 14.2 Flujo especial La Serenísima
+- La Serenísima entrega con remito previo y factura posterior en fechas distintas
+- Requiere: registrar recepción con remito → cerrar con factura al llegar → vincular ambos documentos
+- Posible modelo: una compra puede tener `tipo = 'remito'` y una referencia a la compra-factura posterior
+
+### 14.3 Listas de precios por proveedor
+- Cada proveedor puede tener una lista de precios vigente (PDF o Excel)
+- La lista se importa y se usa como referencia al cargar una compra
+- Alertas cuando el precio de factura difiere del precio de lista
+
+### 14.4 Panel ajuste de precios post-compra con familias
+- Actualmente el paso 4 del módulo de compras lista cambios de costo detectados
+- Pendiente: aplicar ajuste a toda la familia de un producto (madre + todos los hijos) desde un único toggle
+- Pendiente: cálculo de nuevo precio de venta manteniendo margen actual vs. margen objetivo
+
+### 14.5 Resumen post-compra por WhatsApp / email
+- Al finalizar una compra (paso 5), botón "Compartir resumen"
+- Genera texto formateado con: proveedor, fecha, lista de productos, total
+- Envío vía WhatsApp Web (window.open con wa.me URL) o mailto
 
 ---
 

@@ -471,14 +471,10 @@ const Compras = (() => {
           </div>
         </div>
         <div class="cmp-form-group">
-          <label>Vinculada a orden de compra <span style="font-weight:400;color:var(--color-text-secondary)">(opcional)</span></label>
-          <div class="cmp-search-wrap">
-            <input type="text" id="cmp-orden-search" autocomplete="off"
-              placeholder="${n.proveedorId ? '¿Corresponde a una orden previa?' : 'Seleccioná un proveedor primero'}"
-              value="${esc(n.vinculadaOrdenNombre)}"
-              ${n.proveedorId ? '' : 'disabled style="opacity:.5;cursor:not-allowed"'}>
-            <input type="hidden" id="cmp-orden-id" value="${esc(n.vinculadaOrdenId || '')}">
-            <div class="cmp-dropdown" id="cmp-orden-dd"></div>
+          <label>Órdenes de compra pendientes <span style="font-weight:400;color:var(--color-text-secondary)">(opcional)</span></label>
+          <input type="hidden" id="cmp-orden-id" value="${esc(n.vinculadaOrdenId || '')}">
+          <div id="cmp-ordenes-wrap">
+            ${!n.proveedorId ? '<div style="font-size:0.82em;color:#aaa;padding:4px 0">Seleccioná un proveedor para ver órdenes pendientes</div>' : ''}
           </div>
         </div>
       </div>
@@ -491,16 +487,8 @@ const Compras = (() => {
 
     // Proveedor search
     _attachSearch('cmp-prov-search', 'cmp-prov-id', 'cmp-prov-dd', provs, 'id', 'razon_social', (item) => {
-      n.proveedorId    = item.id;
+      n.proveedorId     = item.id;
       n.proveedorNombre = item.razon_social;
-      // Enable orden field now that proveedor is selected
-      const ordenSearch = ge('cmp-orden-search');
-      if (ordenSearch) {
-        ordenSearch.disabled = false;
-        ordenSearch.style.opacity = '';
-        ordenSearch.style.cursor  = '';
-        ordenSearch.placeholder   = '¿Corresponde a una orden previa?';
-      }
       _loadOrdenesForProveedor(item.id);
     });
 
@@ -520,7 +508,6 @@ const Compras = (() => {
       n.proveedorNombre      = ge('cmp-prov-search').value;
       n.fecha                = fecha;
       n.vinculadaOrdenId     = ge('cmp-orden-id').value || null;
-      n.vinculadaOrdenNombre = ge('cmp-orden-search').value;
       n.step = 2;
       renderStep();
     });
@@ -534,34 +521,59 @@ const Compras = (() => {
       ORDER BY fecha_creacion DESC LIMIT 30
     `, [provId]);
 
-    const search = ge('cmp-orden-search');
-    const dd     = ge('cmp-orden-dd');
-    if (!search || !dd) return;
+    const wrap = ge('cmp-ordenes-wrap');
+    if (!wrap) return;
+
+    if (!ordenes.length) {
+      wrap.innerHTML = '<div style="font-size:0.82em;color:#aaa;padding:4px 0">Sin órdenes pendientes para este proveedor</div>';
+      return;
+    }
 
     const mapped = ordenes.map(o => ({
-      id: o.id,
+      id:    o.id,
       label: `OC ${o.id.slice(-6).toUpperCase()} — ${fmtFecha(o.fecha_creacion)}${o.notas ? ' — ' + o.notas : ''}`,
+      fecha: fmtFecha(o.fecha_creacion),
+      notas: o.notas,
     }));
 
     // Auto-select if exactly one open orden
     if (mapped.length === 1 && !state.nueva.vinculadaOrdenId) {
-      search.value = mapped[0].label;
-      ge('cmp-orden-id').value = mapped[0].id;
-      state.nueva.vinculadaOrdenId   = mapped[0].id;
+      state.nueva.vinculadaOrdenId     = mapped[0].id;
       state.nueva.vinculadaOrdenNombre = mapped[0].label;
-      return;
+      ge('cmp-orden-id').value = mapped[0].id;
     }
 
-    _attachSearch('cmp-orden-search', 'cmp-orden-id', 'cmp-orden-dd', mapped, 'id', 'label', (item) => {
-      state.nueva.vinculadaOrdenId   = item.id;
-      state.nueva.vinculadaOrdenNombre = item.label;
+    wrap.innerHTML = mapped.map(o => `
+      <div class="cmp-oc-card${state.nueva.vinculadaOrdenId === o.id ? ' selected' : ''}"
+        data-orden-id="${o.id}" data-orden-label="${esc(o.label)}">
+        <div>
+          <div class="cmp-oc-card-main">OC ${o.id.slice(-6).toUpperCase()} — ${o.fecha}</div>
+          ${o.notas ? `<div class="cmp-oc-card-sub">${esc(o.notas)}</div>` : ''}
+        </div>
+        ${state.nueva.vinculadaOrdenId === o.id ? '<span class="cmp-oc-check">✓</span>' : ''}
+      </div>
+    `).join('');
+
+    wrap.querySelectorAll('.cmp-oc-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const ordenId    = card.dataset.ordenId;
+        const ordenLabel = card.dataset.ordenLabel;
+        if (state.nueva.vinculadaOrdenId === ordenId) {
+          state.nueva.vinculadaOrdenId     = null;
+          state.nueva.vinculadaOrdenNombre = '';
+          ge('cmp-orden-id').value = '';
+        } else {
+          state.nueva.vinculadaOrdenId     = ordenId;
+          state.nueva.vinculadaOrdenNombre = ordenLabel;
+          ge('cmp-orden-id').value = ordenId;
+        }
+        _loadOrdenesForProveedor(provId);
+      });
     });
   }
 
   // ── STEP 2 — CARGA DE PRODUCTOS (POS-STYLE) ───────────────────────────────
 
-  let _scanBuffer       = '';
-  let _scanTimer        = null;
   let _scanDdHighlighted = -1;
 
   function renderStep2(body, footer) {
@@ -588,113 +600,128 @@ const Compras = (() => {
 
     body.innerHTML = `
       <div class="cmp-step2-layout">
-        <!-- LEFT: scan bar + items table + footer -->
+
+        <!-- LEFT: scan bar + cart scroll + footer -->
         <div class="cmp-step2-left">
           <div class="cmp-s2-scan-bar">
             <div class="cmp-scan-input-wrap">
               <input id="cmp-scan-input" type="text" autocomplete="off" spellcheck="false"
                 placeholder="Escanear o buscar producto...">
-              <div class="cmp-dropdown" id="cmp-scan-dd"></div>
+              <div id="cmp-scan-dd"></div>
             </div>
           </div>
-          <div class="cmp-items-table-wrap" id="cmp-items-wrap">
-            <div class="cmp-items-empty" id="cmp-items-empty">
-              Escaneá o buscá un producto para comenzar.
+          <div class="cmp-cart-wrap">
+            <div class="cmp-cart-scroll" id="cmp-items-wrap">
+              <div class="cmp-items-empty" id="cmp-items-empty">
+                <div class="cmp-items-empty-icon">🛒</div>
+                Escaneá o buscá un producto para comenzar.
+              </div>
+              <table class="cmp-items-table" id="cmp-items-tbl" style="display:none">
+                <thead>
+                  <tr>
+                    <th>Producto</th>
+                    <th>Unidad</th>
+                    <th>Cant.</th>
+                    <th>Uds/paq.</th>
+                    <th>Costo ant.</th>
+                    <th>Costo nuevo</th>
+                    <th>Subtotal</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="cmp-items-tbody"></tbody>
+              </table>
             </div>
-            <table class="cmp-items-table" id="cmp-items-tbl" style="display:none">
-              <thead>
-                <tr>
-                  <th>Producto</th>
-                  <th>Unidad</th>
-                  <th>Cant.</th>
-                  <th>Uds/paq.</th>
-                  <th>Costo ant.</th>
-                  <th>Costo nuevo</th>
-                  <th>Subtotal</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="cmp-items-tbody"></tbody>
-            </table>
-          </div>
-          <div class="cmp-items-footer">
-            <div id="cmp-items-count" style="color:var(--color-text-secondary)">0 productos</div>
-            <div class="cmp-items-total" id="cmp-items-total">${fmt$(0)}</div>
+            <div class="cmp-items-footer">
+              <div class="cmp-items-count" id="cmp-items-count">0 productos</div>
+              <div>
+                <div class="cmp-items-total-label">TOTAL</div>
+                <div class="cmp-items-total" id="cmp-items-total">${fmt$(0)}</div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- RIGHT: proveedor info + pago + confirm -->
+        <!-- RIGHT: scroll area + fixed confirm at bottom -->
         <div class="cmp-step2-right">
-          <div class="cmp-s2-prov-card">
-            <div class="cmp-s2-prov-name">${esc(prov?.razon_social || n.proveedorNombre)}</div>
-            ${deuda > 0
-              ? `<div class="cmp-s2-deuda-badge">Deuda: ${fmt$(deuda)}</div>`
-              : `<div class="cmp-s2-saldo-ok">Sin deuda</div>`}
-          </div>
+          <div class="cmp-step2-right-scroll">
 
-          ${ordenes.length ? `
-            <div class="cmp-s2-section-label">Órdenes pendientes</div>
-            ${ordenes.map(o => `
-              <div class="cmp-s2-orden-item${n.vinculadaOrdenId === o.id ? ' selected' : ''}"
-                data-orden-id="${o.id}"
-                data-orden-label="OC ${o.id.slice(-6).toUpperCase()} — ${fmtFecha(o.fecha_creacion)}">
-                OC ${o.id.slice(-6).toUpperCase()} — ${fmtFecha(o.fecha_creacion)}
-                ${o.notas ? `<br><small style="color:var(--color-text-secondary)">${esc(o.notas)}</small>` : ''}
-              </div>
-            `).join('')}
-          ` : ''}
-
-          <button class="btn btn-ghost btn-sm" id="cmp-s2-nuevo-prod"
-            style="margin-top:8px;width:100%;text-align:left;font-size:12px">
-            + Nuevo producto
-          </button>
-          <div id="cmp-new-prod-wrap" style="display:none;margin-top:6px"></div>
-
-          <div class="cmp-s2-section-label">Forma de pago</div>
-          <div class="cmp-s2-pago-chips">
-            <button class="cmp-pago-chip${n.condicionPago==='efectivo'?' active':''}" data-pago="efectivo">💵 Efectivo</button>
-            <button class="cmp-pago-chip${n.condicionPago==='transferencia'?' active':''}" data-pago="transferencia">🏦 Trans.</button>
-            <button class="cmp-pago-chip${n.condicionPago==='pendiente'?' active':''}" data-pago="pendiente">⏳ Pendiente</button>
-          </div>
-
-          <div id="cmp-s2-efectivo-wrap" style="display:${n.condicionPago==='efectivo'?'':'none'}">
-            <div class="cmp-s2-entrego-row">
-              <label>Entregó</label>
-              <input type="number" id="cmp-s2-entrego" min="0" step="any" placeholder="0"
-                value="${n.entrego || ''}">
-            </div>
-            <div class="cmp-s2-vuelto-row">
-              Vuelto: <strong id="cmp-s2-vuelto">${fmt$(Math.max(0, (n.entrego||0) - _calcTotal()))}</strong>
-            </div>
-          </div>
-
-          <details class="cmp-s2-factura-details" ${n.numeroFactura ? 'open' : ''}>
-            <summary>📄 Datos de factura</summary>
-            <div class="cmp-s2-factura-fields">
-              <div class="cmp-form-group">
-                <label>Número de factura</label>
-                <input type="text" id="cmp-s2-factura" placeholder="Ej: A-0001-00012345"
-                  value="${esc(n.numeroFactura)}">
-              </div>
-              <div class="cmp-form-group">
-                <label>Fecha</label>
-                <input type="date" id="cmp-s2-fecha" value="${esc(n.fecha)}">
+            <!-- Proveedor card -->
+            <div class="cmp-s2-prov-card">
+              <div class="cmp-s2-prov-info">
+                <div class="cmp-s2-prov-name">${esc(prov?.razon_social || n.proveedorNombre)}</div>
+                ${deuda > 0
+                  ? `<div class="cmp-s2-deuda-badge">Deuda: ${fmt$(deuda)}</div>`
+                  : `<div class="cmp-s2-saldo-ok">Sin deuda ✓</div>`}
               </div>
             </div>
-          </details>
 
-          <div class="cmp-s2-confirm-area">
+            ${ordenes.length ? `
+              <div class="cmp-s2-section-label">Órdenes pendientes</div>
+              ${ordenes.map(o => `
+                <div class="cmp-s2-orden-item${n.vinculadaOrdenId === o.id ? ' selected' : ''}"
+                  data-orden-id="${o.id}"
+                  data-orden-label="OC ${o.id.slice(-6).toUpperCase()} — ${fmtFecha(o.fecha_creacion)}">
+                  <strong>OC ${o.id.slice(-6).toUpperCase()}</strong> — ${fmtFecha(o.fecha_creacion)}
+                  ${o.notas ? `<br><small style="color:#aaa">${esc(o.notas)}</small>` : ''}
+                  ${n.vinculadaOrdenId === o.id ? ' <span style="color:#667eea;float:right">✓</span>' : ''}
+                </div>
+              `).join('')}
+            ` : ''}
+
+            <button class="btn btn-ghost btn-sm" id="cmp-s2-nuevo-prod"
+              style="margin-top:8px;width:100%;text-align:left;font-size:0.82em;color:#667eea;border:1px dashed #c5cdf9;border-radius:6px;padding:5px 10px">
+              + Nuevo producto
+            </button>
+            <div id="cmp-new-prod-wrap" style="display:none;margin-top:6px"></div>
+
+            <div class="cmp-s2-section-label">Forma de pago</div>
+            <div class="cmp-s2-pago-chips">
+              <button class="cmp-pago-chip${n.condicionPago==='efectivo'?' active':''}" data-pago="efectivo">💵 Efectivo</button>
+              <button class="cmp-pago-chip${n.condicionPago==='transferencia'?' active':''}" data-pago="transferencia">🏦 Trans.</button>
+              <button class="cmp-pago-chip${n.condicionPago==='pendiente'?' active':''}" data-pago="pendiente">⏳ Pendiente</button>
+            </div>
+
+            <div id="cmp-s2-efectivo-wrap" style="display:${n.condicionPago==='efectivo'?'':'none'}">
+              <div class="cmp-pinput-row">
+                <div class="cmp-pinput-label">💵 Entregó</div>
+                <input type="number" class="cmp-pinput-field" id="cmp-s2-entrego"
+                  min="0" step="any" placeholder="0" value="${n.entrego || ''}">
+              </div>
+              <div class="cmp-vuelto-box" id="cmp-vuelto-box"
+                style="display:${(n.entrego||0) > 0 ? '' : 'none'}">
+                Vuelto: <span id="cmp-s2-vuelto">${fmt$(Math.max(0,(n.entrego||0)-_calcTotal()))}</span>
+              </div>
+            </div>
+
+            <details class="cmp-s2-factura-details" ${n.numeroFactura ? 'open' : ''}>
+              <summary>📄 Datos de factura (opcional)</summary>
+              <div class="cmp-s2-factura-fields">
+                <div class="cmp-form-group">
+                  <label>Número de factura</label>
+                  <input type="text" id="cmp-s2-factura" placeholder="Ej: A-0001-00012345"
+                    value="${esc(n.numeroFactura)}">
+                </div>
+                <div class="cmp-form-group">
+                  <label>Fecha</label>
+                  <input type="date" id="cmp-s2-fecha" value="${esc(n.fecha)}">
+                </div>
+              </div>
+            </details>
+
+          </div><!-- end right-scroll -->
+
+          <!-- Fixed confirm area -->
+          <div class="cmp-s2-confirm-wrap">
             <div class="cmp-s2-total-line">
-              Total: <span id="cmp-s2-total">${fmt$(_calcTotal())}</span>
+              <span class="cmp-s2-total-label">TOTAL COMPRA</span>
+              <span class="cmp-s2-total-amount" id="cmp-s2-total">${fmt$(_calcTotal())}</span>
             </div>
-            <button class="btn btn-primary cmp-s2-confirmar-btn" id="cmp-s2-confirmar">
-              ✓ CONFIRMAR COMPRA
-            </button>
-            <button class="btn btn-ghost cmp-s2-pausar-btn" id="cmp-s2-pausar">
-              ⏸ Pausar compra
-            </button>
+            <button class="cmp-s2-confirmar-btn" id="cmp-s2-confirmar">✓ CONFIRMAR COMPRA</button>
+            <button class="cmp-s2-pausar-btn" id="cmp-s2-pausar">⏸ Pausar compra</button>
           </div>
-        </div>
+
+        </div><!-- end right -->
       </div>
     `;
 
@@ -712,7 +739,7 @@ const Compras = (() => {
       scanInput.addEventListener('input', () => { _scanDdHighlighted = -1; _onScanInput(scanInput.value); });
       scanInput.addEventListener('keydown', e => {
         const dd   = ge('cmp-scan-dd');
-        const rows = dd?.querySelectorAll('.cmp-dd-item') || [];
+        const rows = dd?.querySelectorAll('.cmp-sri') || [];
         if (e.key === 'ArrowDown') {
           e.preventDefault();
           _scanDdHighlighted = Math.min(_scanDdHighlighted + 1, rows.length - 1);
@@ -730,11 +757,11 @@ const Compras = (() => {
           }
           scanInput.value = '';
           _scanDdHighlighted = -1;
-          if (dd) { dd.classList.remove('open'); dd.innerHTML = ''; }
+          if (dd) { dd.style.display = 'none'; dd.innerHTML = ''; }
         } else if (e.key === 'Escape') {
           scanInput.value = '';
           _scanDdHighlighted = -1;
-          if (dd) { dd.classList.remove('open'); }
+          if (dd) dd.style.display = 'none';
         }
       });
     }
@@ -907,22 +934,27 @@ const Compras = (() => {
     if (!results.length) { dd.classList.remove('open'); return; }
     _scanDdHighlighted = -1;
     dd.innerHTML = results.map((r, i) =>
-      `<div class="cmp-dd-item" data-i="${i}" data-id="${r.id}" data-nombre="${esc(r.nombre)}"
+      `<div class="cmp-sri" data-i="${i}" data-id="${r.id}" data-nombre="${esc(r.nombre)}"
         data-costo="${r.costo}" data-uc="${esc(r.unidad_compra || 'Unidad')}"
         data-udspaq="${r.unidades_por_paquete_compra || 1}"
-        data-barcode="${esc(r.barcode || '')}"
-      >${esc(r.nombre)}${r.barcode ? ` <small style="color:var(--color-text-secondary)">${esc(r.barcode)}</small>` : ''}</div>`
+        data-barcode="${esc(r.barcode || '')}">
+        <div class="cmp-sri-left">
+          <span class="cmp-sri-nombre">${esc(r.nombre)}</span>
+          ${r.barcode ? `<span class="cmp-sri-codigo">${esc(r.barcode)}</span>` : ''}
+        </div>
+        <span class="cmp-sri-costo">${fmt$(r.costo)}</span>
+      </div>`
     ).join('');
-    dd.classList.add('open');
+    dd.style.display = 'block';
 
-    dd.querySelectorAll('.cmp-dd-item').forEach(el => {
+    dd.querySelectorAll('.cmp-sri').forEach(el => {
       el.addEventListener('mousedown', e => {
         e.preventDefault();
         _addItemFromEl(el);
         const inp = ge('cmp-scan-input');
         if (inp) inp.value = '';
         _scanDdHighlighted = -1;
-        dd.classList.remove('open');
+        dd.style.display = 'none';
       });
     });
   }
@@ -1059,25 +1091,51 @@ const Compras = (() => {
     tbody.querySelectorAll('.cmp-uc-sel').forEach(sel => {
       sel.addEventListener('change', e => {
         state.nueva.items[+e.target.dataset.idx].unidadCompra = e.target.value;
-        _renderItemsTable();
+        _renderItemsTable();  // unit change affects udsPaq display — full re-render ok
       });
     });
     tbody.querySelectorAll('.cmp-cant').forEach(inp => {
       inp.addEventListener('input', e => {
-        state.nueva.items[+e.target.dataset.idx].cantidad = parseFloat(e.target.value) || 0;
-        _renderItemsTable();
+        const idx = +e.target.dataset.idx;
+        state.nueva.items[idx].cantidad = parseFloat(e.target.value) || 0;
+        _updateRowSubtotal(idx);
+        _updateFooterTotal();
+      });
+      inp.addEventListener('keydown', e => {
+        const idx = +e.target.dataset.idx;
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault();
+          const row = ge('cmp-items-tbody')?.querySelector(`tr[data-idx="${idx}"]`);
+          row?.querySelector('.cmp-costo-nvo')?.focus();
+        } else if (e.key === 'Escape') {
+          const scan = ge('cmp-scan-input');
+          if (scan) { scan.value = ''; scan.focus(); }
+          const dd = ge('cmp-scan-dd'); if (dd) dd.style.display = 'none';
+        }
       });
     });
     tbody.querySelectorAll('.cmp-udspaq').forEach(inp => {
       inp.addEventListener('input', e => {
-        state.nueva.items[+e.target.dataset.idx].udsPaquete = parseFloat(e.target.value) || 1;
-        _renderItemsTable();
+        const idx = +e.target.dataset.idx;
+        state.nueva.items[idx].udsPaquete = parseFloat(e.target.value) || 1;
+        _updateRowSubtotal(idx);
+        _updateFooterTotal();
       });
     });
     tbody.querySelectorAll('.cmp-costo-nvo').forEach(inp => {
       inp.addEventListener('input', e => {
-        state.nueva.items[+e.target.dataset.idx].costoNuevo = parseFloat(e.target.value) || 0;
-        _renderItemsTable();
+        const idx = +e.target.dataset.idx;
+        state.nueva.items[idx].costoNuevo = parseFloat(e.target.value) || 0;
+        _updateRowSubtotal(idx);
+        _updateFooterTotal();
+      });
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === 'Tab' || e.key === 'Escape') {
+          e.preventDefault();
+          const scan = ge('cmp-scan-input');
+          if (scan) { scan.value = ''; scan.focus(); }
+          const dd = ge('cmp-scan-dd'); if (dd) dd.style.display = 'none';
+        }
       });
     });
     tbody.querySelectorAll('.cmp-item-remove').forEach(btn => {
@@ -1092,12 +1150,60 @@ const Compras = (() => {
     _updateS2Vuelto();
   }
 
+  function _updateRowSubtotal(idx) {
+    const tbody = ge('cmp-items-tbody');
+    if (!tbody) return;
+    const row = tbody.querySelector(`tr[data-idx="${idx}"]`);
+    if (!row) return;
+    const it = state.nueva.items[idx];
+    if (!it) return;
+    const costoChanged = Math.abs((parseFloat(it.costoNuevo)||0) - (parseFloat(it.costoActual)||0)) > 0.001;
+    const subtotal     = _itemSubtotal(it);
+    const udsTotales   = (parseFloat(it.cantidad)||0) * (parseFloat(it.udsPaquete)||1);
+    const tds          = row.querySelectorAll('td');
+    // col 6: subtotal
+    if (tds[6]) tds[6].innerHTML = costoChanged
+      ? `<span class="cmp-costo-changed">${fmt$(subtotal)}</span>`
+      : fmt$(subtotal);
+    // col 3: "= X uds." text below udspaq input
+    if (tds[3]) {
+      const udsDiv = tds[3].querySelector('div');
+      if (udsDiv) udsDiv.textContent = `= ${udsTotales} uds.`;
+    }
+    // col 5: costo input class + cost-per-pack note
+    if (tds[5]) {
+      const inp = tds[5].querySelector('input');
+      if (inp) inp.classList.toggle('cmp-costo-changed-input', costoChanged);
+      let noteDiv = tds[5].querySelector('div');
+      if (it.unidadCompra !== 'Unidad') {
+        const noteText = `Por ${esc(it.unidadCompra)}: ${fmt$((parseFloat(it.costoNuevo)||0)*(parseFloat(it.udsPaquete)||1))}`;
+        if (noteDiv) { noteDiv.innerHTML = noteText; }
+        else {
+          noteDiv = document.createElement('div');
+          noteDiv.style.cssText = 'font-size:10px;color:var(--color-text-secondary);margin-top:2px';
+          noteDiv.innerHTML = noteText;
+          tds[5].appendChild(noteDiv);
+        }
+      } else if (noteDiv) { noteDiv.remove(); }
+    }
+  }
+
+  function _updateFooterTotal() {
+    const items       = state.nueva.items;
+    const totalUnidades = items.reduce((s, it) =>
+      s + (parseFloat(it.cantidad)||0) * (parseFloat(it.udsPaquete)||1), 0);
+    const count   = ge('cmp-items-count');
+    const totalEl = ge('cmp-items-total');
+    if (count)   count.textContent   = `${items.length} prod., ${totalUnidades} uds. totales`;
+    if (totalEl) totalEl.textContent = fmt$(_calcTotal());
+    _updateS2Vuelto();
+  }
+
   function _showNewProductForm(barcode) {
     const wrap = ge('cmp-new-prod-wrap');
     if (!wrap) return;
 
     const cats   = window.SGA_DB.query(`SELECT id, nombre FROM categorias ORDER BY nombre`);
-    const prods  = window.SGA_DB.query(`SELECT id, nombre FROM productos WHERE activo=1 ORDER BY nombre LIMIT 200`);
 
     wrap.style.display = '';
     wrap.innerHTML = `
@@ -1784,7 +1890,7 @@ const Compras = (() => {
 
   // ── INIT ──────────────────────────────────────────────────────────────────
 
-  function init(params) {
+  function init() {
     _migrate();
     state.user = window.SGA_Auth.getCurrentUser();
     if (!state.user) return;
