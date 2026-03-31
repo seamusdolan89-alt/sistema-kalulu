@@ -60,10 +60,26 @@ const Compras = (() => {
       'ALTER TABLE compras ADD COLUMN vinculada_orden_id TEXT',
       "ALTER TABLE compra_items ADD COLUMN unidad_compra TEXT DEFAULT 'Unidad'",
       'ALTER TABLE compra_items ADD COLUMN unidades_por_paquete REAL DEFAULT 1',
+      'ALTER TABLE cuenta_proveedor ADD COLUMN compra_id TEXT',
     ];
     for (const sql of alters) {
       try { window.SGA_DB.run(sql); } catch(e) { /* already exists */ }
     }
+    try {
+      window.SGA_DB.run(`
+        CREATE TABLE IF NOT EXISTS compras_pausadas (
+          id TEXT PRIMARY KEY,
+          sucursal_id TEXT NOT NULL,
+          usuario_id TEXT NOT NULL,
+          snapshot TEXT NOT NULL,
+          proveedor_nombre TEXT,
+          num_items INTEGER DEFAULT 0,
+          total_estimado REAL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `);
+    } catch(e) { /* already exists */ }
   }
 
   // ── DATA LAYER ─────────────────────────────────────────────────────────────
@@ -123,6 +139,7 @@ const Compras = (() => {
       for (const item of data.items) {
         const costoNvo = parseFloat(item.costoNuevo) || 0;
         const costoAnt = parseFloat(item.costoActual) || 0;
+        const udsPaq = parseFloat(item.udsPaquete) || 1;
         window.SGA_DB.run(`
           INSERT INTO compra_items
             (id,compra_id,producto_id,cantidad,costo_unitario,costo_anterior,subtotal,costo_modificado,unidad_compra,unidades_por_paquete)
@@ -130,10 +147,10 @@ const Compras = (() => {
         `, [uuid(), id, item.productoId,
             parseFloat(item.cantidad),
             costoNvo, costoAnt,
-            parseFloat(item.cantidad) * costoNvo,
+            parseFloat(item.cantidad) * udsPaq * costoNvo,
             Math.abs(costoNvo - costoAnt) > 0.001 ? 1 : 0,
             item.unidadCompra || 'Unidad',
-            parseFloat(item.udsPaquete) || 1]);
+            udsPaq]);
       }
       window.SGA_DB.commitBatch();
       return { success: true, id };
@@ -186,7 +203,7 @@ const Compras = (() => {
 
         const costoAnt = parseFloat(item.costo_anterior) || 0;
         const costoNvo = parseFloat(item.costo_unitario)  || 0;
-        total += costoNvo * cant;
+        total += costoNvo * cant * udsPaq;
 
         if (costoNvo > 0 && costoAnt > 0 && Math.abs(costoNvo - costoAnt) > 0.001) {
           const prod = window.SGA_DB.query(
@@ -222,9 +239,9 @@ const Compras = (() => {
       } else if (compra.condicion_pago === 'pendiente') {
         window.SGA_DB.run(`
           INSERT INTO cuenta_proveedor
-            (id,proveedor_id,orden_id,tipo,monto,descripcion,fecha,usuario_id,sync_status,updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?)
-        `, [uuid(), compra.proveedor_id, null, 'deuda', compra.total,
+            (id,proveedor_id,orden_id,compra_id,tipo,monto,descripcion,fecha,usuario_id,sync_status,updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        `, [uuid(), compra.proveedor_id, null, compraId, 'deuda', compra.total,
             `Compra ${compra.numero_factura || compraId.slice(-6).toUpperCase()}`,
             ts, user.id, 'pending', ts]);
       }
@@ -273,20 +290,25 @@ const Compras = (() => {
     crear:                   _crear,
     confirmar:               _confirmar,
     getResumenParaCompartir: _getResumenParaCompartir,
+    pausar:                  _pausarCompra,
+    retomar:                 _retomarCompra,
   };
 
   // ── UI HELPERS ─────────────────────────────────────────────────────────────
 
   function _calcTotal() {
     return state.nueva.items.reduce((sum, it) => {
-      const cant     = parseFloat(it.cantidad) || 0;
+      const cant     = parseFloat(it.cantidad)   || 0;
+      const udsPaq   = parseFloat(it.udsPaquete) || 1;
       const costoNvo = parseFloat(it.costoNuevo) || parseFloat(it.costoActual) || 0;
-      return sum + cant * costoNvo;
+      return sum + cant * udsPaq * costoNvo;
     }, 0);
   }
 
   function _itemSubtotal(it) {
-    return (parseFloat(it.cantidad) || 0) * (parseFloat(it.costoNuevo) || parseFloat(it.costoActual) || 0);
+    return (parseFloat(it.cantidad) || 0)
+         * (parseFloat(it.udsPaquete) || 1)
+         * (parseFloat(it.costoNuevo) || parseFloat(it.costoActual) || 0);
   }
 
   function _ucOptions(selected) {
@@ -305,10 +327,39 @@ const Compras = (() => {
 
   function renderLista() {
     state.view = 'lista';
+    const sucId   = state.user?.sucursal_id;
     const compras = _getAll();
     const tbody   = ge('cmp-tbody');
     const empty   = ge('cmp-empty');
     if (!tbody) return;
+
+    // Show paused compras if any
+    const pausadas = sucId ? window.SGA_DB.query(
+      `SELECT * FROM compras_pausadas WHERE sucursal_id=? ORDER BY updated_at DESC`,
+      [sucId]
+    ) : [];
+
+    const pausadasEl = document.querySelector('.cmp-pausadas-section');
+    if (pausadasEl) pausadasEl.remove();
+
+    if (pausadas.length) {
+      const section = document.createElement('div');
+      section.className = 'cmp-pausadas-section';
+      section.innerHTML = `
+        <h4>⏸ Compras pausadas (${pausadas.length})</h4>
+        ${pausadas.map(p => `
+          <div class="cmp-pausada-row">
+            <div>
+              <strong>${esc(p.proveedor_nombre || '—')}</strong>
+              <span> — ${p.num_items} prod. · ${fmt$(p.total_estimado)}</span>
+            </div>
+            <button class="btn btn-sm btn-primary" data-retomar="${p.id}">Retomar</button>
+          </div>
+        `).join('')}
+      `;
+      const wrap = document.querySelector('.cmp-table-wrap');
+      if (wrap) wrap.parentNode.insertBefore(section, wrap);
+    }
 
     if (!compras.length) {
       tbody.innerHTML = '';
@@ -349,10 +400,11 @@ const Compras = (() => {
   }
 
   function closeNuevaCompra(force = false) {
-    if (!force && state.nueva.items.length > 0 && !state.nueva.compraId) {
-      _showNavGuard(() => closeNuevaCompra(true));
+    if (!force && state.nueva?.items?.length > 0 && !state.nueva.compraId) {
+      _showNavGuard(null);  // guard handles actions itself
       return;
     }
+    document.removeEventListener('keydown', _docKeydownStep2);
     ge('cmp-nueva-overlay').style.display = 'none';
     state.view = 'lista';
     state.nueva = null;
@@ -361,12 +413,13 @@ const Compras = (() => {
 
   function renderStepIndicators() {
     const step = state.nueva.step;
+    // Step 3 (review) is removed from visible flow — confirm is now in step 2 right panel
+    // Internal: 1=Datos, 2=Productos, 4=Precios, 5=Resumen
     const steps = [
-      { n: 1, label: '1. Datos' },
-      { n: 2, label: '2. Productos' },
-      { n: 3, label: '3. Revisión' },
-      { n: 4, label: '4. Precios' },
-      { n: 5, label: '5. Resumen' },
+      { n: 1, vis: 1, label: '1. Datos' },
+      { n: 2, vis: 2, label: '2. Productos' },
+      { n: 4, vis: 3, label: '3. Precios' },
+      { n: 5, vis: 4, label: '4. Resumen' },
     ];
     ge('cmp-steps').innerHTML = steps.map(s => {
       let cls = 'cmp-step-ind';
@@ -381,10 +434,12 @@ const Compras = (() => {
     const body   = ge('cmp-nueva-body');
     const footer = ge('cmp-nueva-footer');
     if (!body || !footer) return;
+    // Reset body padding/overflow for step 2 (POS full-screen, no padding)
+    body.style.padding  = state.nueva.step === 2 ? '0' : '24px';
+    body.style.overflow = state.nueva.step === 2 ? 'hidden' : '';
     switch (state.nueva.step) {
       case 1: renderStep1(body, footer); break;
       case 2: renderStep2(body, footer); break;
-      case 3: renderStep3(body, footer); break;
       case 4: renderStep4(body, footer); break;
       case 5: renderStep5(body, footer); break;
     }
@@ -394,7 +449,6 @@ const Compras = (() => {
 
   function renderStep1(body, footer) {
     const n = state.nueva;
-    // Load proveedores & ordenes for dropdowns
     const provs = window.SGA_DB.query(
       `SELECT id, razon_social FROM proveedores WHERE activo=1 ORDER BY razon_social`
     );
@@ -412,37 +466,19 @@ const Compras = (() => {
             </div>
           </div>
           <div class="cmp-form-group">
-            <label>Número de factura</label>
-            <input type="text" id="cmp-factura" placeholder="Ej: A-0001-00012345"
-              value="${esc(n.numeroFactura)}">
-          </div>
-        </div>
-        <div class="cmp-form-row">
-          <div class="cmp-form-group">
             <label>Fecha <span class="req">*</span></label>
             <input type="date" id="cmp-fecha" value="${esc(n.fecha)}">
           </div>
-          <div class="cmp-form-group">
-            <label>Vinculada a orden de compra <span style="font-weight:400;color:var(--color-text-secondary)">(opcional)</span></label>
-            <div class="cmp-search-wrap">
-              <input type="text" id="cmp-orden-search" autocomplete="off"
-                placeholder="¿Corresponde a una orden previa?" value="${esc(n.vinculadaOrdenNombre)}">
-              <input type="hidden" id="cmp-orden-id" value="${esc(n.vinculadaOrdenId || '')}">
-              <div class="cmp-dropdown" id="cmp-orden-dd"></div>
-            </div>
-          </div>
         </div>
         <div class="cmp-form-group">
-          <label>Condición de pago <span class="req">*</span></label>
-          <div class="cmp-radio-group">
-            <label class="cmp-radio-label">
-              <input type="radio" name="cmp-pago" value="efectivo" ${n.condicionPago==='efectivo'?'checked':''}>
-              💵 Pagar ahora en efectivo
-            </label>
-            <label class="cmp-radio-label">
-              <input type="radio" name="cmp-pago" value="pendiente" ${n.condicionPago==='pendiente'?'checked':''}>
-              ⏳ Dejar pendiente de pago
-            </label>
+          <label>Vinculada a orden de compra <span style="font-weight:400;color:var(--color-text-secondary)">(opcional)</span></label>
+          <div class="cmp-search-wrap">
+            <input type="text" id="cmp-orden-search" autocomplete="off"
+              placeholder="${n.proveedorId ? '¿Corresponde a una orden previa?' : 'Seleccioná un proveedor primero'}"
+              value="${esc(n.vinculadaOrdenNombre)}"
+              ${n.proveedorId ? '' : 'disabled style="opacity:.5;cursor:not-allowed"'}>
+            <input type="hidden" id="cmp-orden-id" value="${esc(n.vinculadaOrdenId || '')}">
+            <div class="cmp-dropdown" id="cmp-orden-dd"></div>
           </div>
         </div>
       </div>
@@ -455,12 +491,20 @@ const Compras = (() => {
 
     // Proveedor search
     _attachSearch('cmp-prov-search', 'cmp-prov-id', 'cmp-prov-dd', provs, 'id', 'razon_social', (item) => {
-      n.proveedorId = item.id;
+      n.proveedorId    = item.id;
       n.proveedorNombre = item.razon_social;
+      // Enable orden field now that proveedor is selected
+      const ordenSearch = ge('cmp-orden-search');
+      if (ordenSearch) {
+        ordenSearch.disabled = false;
+        ordenSearch.style.opacity = '';
+        ordenSearch.style.cursor  = '';
+        ordenSearch.placeholder   = '¿Corresponde a una orden previa?';
+      }
       _loadOrdenesForProveedor(item.id);
     });
 
-    // Orden search (lazy — loaded after proveedor selected)
+    // Orden search (load if proveedor already selected)
     if (n.proveedorId) _loadOrdenesForProveedor(n.proveedorId);
 
     ge('cmp-next1').addEventListener('click', () => {
@@ -472,12 +516,10 @@ const Compras = (() => {
       if (!fecha) {
         window.SGA_Utils.showNotification('Ingresá la fecha', 'error'); return;
       }
-      n.proveedorId        = provId;
-      n.proveedorNombre    = ge('cmp-prov-search').value;
-      n.numeroFactura      = ge('cmp-factura').value.trim();
-      n.fecha              = fecha;
-      n.condicionPago      = document.querySelector('input[name="cmp-pago"]:checked')?.value || 'efectivo';
-      n.vinculadaOrdenId   = ge('cmp-orden-id').value || null;
+      n.proveedorId          = provId;
+      n.proveedorNombre      = ge('cmp-prov-search').value;
+      n.fecha                = fecha;
+      n.vinculadaOrdenId     = ge('cmp-orden-id').value || null;
       n.vinculadaOrdenNombre = ge('cmp-orden-search').value;
       n.step = 2;
       renderStep();
@@ -496,25 +538,65 @@ const Compras = (() => {
     const dd     = ge('cmp-orden-dd');
     if (!search || !dd) return;
 
-    _attachSearch('cmp-orden-search', 'cmp-orden-id', 'cmp-orden-dd', ordenes.map(o => ({
+    const mapped = ordenes.map(o => ({
       id: o.id,
       label: `OC ${o.id.slice(-6).toUpperCase()} — ${fmtFecha(o.fecha_creacion)}${o.notas ? ' — ' + o.notas : ''}`,
-    })), 'id', 'label', (item) => {
+    }));
+
+    // Auto-select if exactly one open orden
+    if (mapped.length === 1 && !state.nueva.vinculadaOrdenId) {
+      search.value = mapped[0].label;
+      ge('cmp-orden-id').value = mapped[0].id;
+      state.nueva.vinculadaOrdenId   = mapped[0].id;
+      state.nueva.vinculadaOrdenNombre = mapped[0].label;
+      return;
+    }
+
+    _attachSearch('cmp-orden-search', 'cmp-orden-id', 'cmp-orden-dd', mapped, 'id', 'label', (item) => {
       state.nueva.vinculadaOrdenId   = item.id;
       state.nueva.vinculadaOrdenNombre = item.label;
     });
   }
 
-  // ── STEP 2 — CARGA DE PRODUCTOS ────────────────────────────────────────────
+  // ── STEP 2 — CARGA DE PRODUCTOS (POS-STYLE) ───────────────────────────────
 
-  let _scanBuffer = '';
-  let _scanTimer  = null;
+  let _scanBuffer       = '';
+  let _scanTimer        = null;
+  let _scanDdHighlighted = -1;
 
   function renderStep2(body, footer) {
+    const n = state.nueva;
+
+    // Proveedor info & deuda
+    const prov = window.SGA_DB.query(
+      `SELECT razon_social FROM proveedores WHERE id=?`, [n.proveedorId]
+    )[0];
+    const deudaRow = window.SGA_DB.query(
+      `SELECT COALESCE(SUM(CASE WHEN tipo='deuda' THEN monto ELSE -monto END),0) AS saldo FROM cuenta_proveedor WHERE proveedor_id=?`,
+      [n.proveedorId]
+    )[0];
+    const deuda = deudaRow?.saldo || 0;
+
+    // Pending ordenes for this proveedor
+    const ordenes = window.SGA_DB.query(`
+      SELECT id, fecha_creacion, notas FROM ordenes_compra
+      WHERE proveedor_id=? AND estado IN ('enviada','recibiendo','recibida_parcial')
+      ORDER BY fecha_creacion DESC LIMIT 5
+    `, [n.proveedorId]);
+
+    if (!n.condicionPago) n.condicionPago = 'efectivo';
+
     body.innerHTML = `
       <div class="cmp-step2-layout">
-        <!-- LEFT: items table -->
+        <!-- LEFT: scan bar + items table + footer -->
         <div class="cmp-step2-left">
+          <div class="cmp-s2-scan-bar">
+            <div class="cmp-scan-input-wrap">
+              <input id="cmp-scan-input" type="text" autocomplete="off" spellcheck="false"
+                placeholder="Escanear o buscar producto...">
+              <div class="cmp-dropdown" id="cmp-scan-dd"></div>
+            </div>
+          </div>
           <div class="cmp-items-table-wrap" id="cmp-items-wrap">
             <div class="cmp-items-empty" id="cmp-items-empty">
               Escaneá o buscá un producto para comenzar.
@@ -523,10 +605,10 @@ const Compras = (() => {
               <thead>
                 <tr>
                   <th>Producto</th>
-                  <th>Unidad compra</th>
+                  <th>Unidad</th>
                   <th>Cant.</th>
                   <th>Uds/paq.</th>
-                  <th>Costo actual</th>
+                  <th>Costo ant.</th>
                   <th>Costo nuevo</th>
                   <th>Subtotal</th>
                   <th></th>
@@ -540,24 +622,85 @@ const Compras = (() => {
             <div class="cmp-items-total" id="cmp-items-total">${fmt$(0)}</div>
           </div>
         </div>
-        <!-- RIGHT: scanner + new product form -->
+
+        <!-- RIGHT: proveedor info + pago + confirm -->
         <div class="cmp-step2-right">
-          <div class="cmp-scan-panel">
-            <h4>Escanear / Buscar</h4>
-            <div class="cmp-scan-input-wrap">
-              <input id="cmp-scan-input" type="text" autocomplete="off" spellcheck="false"
-                placeholder="Escanear o buscar producto...">
-              <div class="cmp-dropdown" id="cmp-scan-dd"></div>
+          <div class="cmp-s2-prov-card">
+            <div class="cmp-s2-prov-name">${esc(prov?.razon_social || n.proveedorNombre)}</div>
+            ${deuda > 0
+              ? `<div class="cmp-s2-deuda-badge">Deuda: ${fmt$(deuda)}</div>`
+              : `<div class="cmp-s2-saldo-ok">Sin deuda</div>`}
+          </div>
+
+          ${ordenes.length ? `
+            <div class="cmp-s2-section-label">Órdenes pendientes</div>
+            ${ordenes.map(o => `
+              <div class="cmp-s2-orden-item${n.vinculadaOrdenId === o.id ? ' selected' : ''}"
+                data-orden-id="${o.id}"
+                data-orden-label="OC ${o.id.slice(-6).toUpperCase()} — ${fmtFecha(o.fecha_creacion)}">
+                OC ${o.id.slice(-6).toUpperCase()} — ${fmtFecha(o.fecha_creacion)}
+                ${o.notas ? `<br><small style="color:var(--color-text-secondary)">${esc(o.notas)}</small>` : ''}
+              </div>
+            `).join('')}
+          ` : ''}
+
+          <button class="btn btn-ghost btn-sm" id="cmp-s2-nuevo-prod"
+            style="margin-top:8px;width:100%;text-align:left;font-size:12px">
+            + Nuevo producto
+          </button>
+          <div id="cmp-new-prod-wrap" style="display:none;margin-top:6px"></div>
+
+          <div class="cmp-s2-section-label">Forma de pago</div>
+          <div class="cmp-s2-pago-chips">
+            <button class="cmp-pago-chip${n.condicionPago==='efectivo'?' active':''}" data-pago="efectivo">💵 Efectivo</button>
+            <button class="cmp-pago-chip${n.condicionPago==='transferencia'?' active':''}" data-pago="transferencia">🏦 Trans.</button>
+            <button class="cmp-pago-chip${n.condicionPago==='pendiente'?' active':''}" data-pago="pendiente">⏳ Pendiente</button>
+          </div>
+
+          <div id="cmp-s2-efectivo-wrap" style="display:${n.condicionPago==='efectivo'?'':'none'}">
+            <div class="cmp-s2-entrego-row">
+              <label>Entregó</label>
+              <input type="number" id="cmp-s2-entrego" min="0" step="any" placeholder="0"
+                value="${n.entrego || ''}">
+            </div>
+            <div class="cmp-s2-vuelto-row">
+              Vuelto: <strong id="cmp-s2-vuelto">${fmt$(Math.max(0, (n.entrego||0) - _calcTotal()))}</strong>
             </div>
           </div>
-          <div id="cmp-new-prod-wrap" style="display:none"></div>
+
+          <details class="cmp-s2-factura-details" ${n.numeroFactura ? 'open' : ''}>
+            <summary>📄 Datos de factura</summary>
+            <div class="cmp-s2-factura-fields">
+              <div class="cmp-form-group">
+                <label>Número de factura</label>
+                <input type="text" id="cmp-s2-factura" placeholder="Ej: A-0001-00012345"
+                  value="${esc(n.numeroFactura)}">
+              </div>
+              <div class="cmp-form-group">
+                <label>Fecha</label>
+                <input type="date" id="cmp-s2-fecha" value="${esc(n.fecha)}">
+              </div>
+            </div>
+          </details>
+
+          <div class="cmp-s2-confirm-area">
+            <div class="cmp-s2-total-line">
+              Total: <span id="cmp-s2-total">${fmt$(_calcTotal())}</span>
+            </div>
+            <button class="btn btn-primary cmp-s2-confirmar-btn" id="cmp-s2-confirmar">
+              ✓ CONFIRMAR COMPRA
+            </button>
+            <button class="btn btn-ghost cmp-s2-pausar-btn" id="cmp-s2-pausar">
+              ⏸ Pausar compra
+            </button>
+          </div>
         </div>
       </div>
     `;
 
     footer.innerHTML = `
-      <button class="btn btn-secondary" id="cmp-back2">← Anterior</button>
-      <button class="btn btn-primary" id="cmp-next2">Siguiente →</button>
+      <button class="btn btn-secondary" id="cmp-back2">← Volver a datos</button>
+      <div></div>
     `;
 
     _renderItemsTable();
@@ -566,45 +709,175 @@ const Compras = (() => {
     const scanInput = ge('cmp-scan-input');
     if (scanInput) {
       scanInput.focus();
-      scanInput.addEventListener('input', () => _onScanInput(scanInput.value));
+      scanInput.addEventListener('input', () => { _scanDdHighlighted = -1; _onScanInput(scanInput.value); });
       scanInput.addEventListener('keydown', e => {
-        if (e.key === 'Enter') {
+        const dd   = ge('cmp-scan-dd');
+        const rows = dd?.querySelectorAll('.cmp-dd-item') || [];
+        if (e.key === 'ArrowDown') {
           e.preventDefault();
-          _onScanEnter(scanInput.value.trim());
+          _scanDdHighlighted = Math.min(_scanDdHighlighted + 1, rows.length - 1);
+          rows.forEach((r, i) => r.classList.toggle('highlighted', i === _scanDdHighlighted));
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          _scanDdHighlighted = Math.max(_scanDdHighlighted - 1, -1);
+          rows.forEach((r, i) => r.classList.toggle('highlighted', i === _scanDdHighlighted));
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          if (_scanDdHighlighted >= 0 && rows[_scanDdHighlighted]) {
+            rows[_scanDdHighlighted].dispatchEvent(new Event('mousedown'));
+          } else {
+            _onScanEnter(scanInput.value.trim());
+          }
           scanInput.value = '';
-          ge('cmp-scan-dd').classList.remove('open');
-          ge('cmp-scan-dd').innerHTML = '';
-        }
-        if (e.key === 'Escape') {
+          _scanDdHighlighted = -1;
+          if (dd) { dd.classList.remove('open'); dd.innerHTML = ''; }
+        } else if (e.key === 'Escape') {
           scanInput.value = '';
-          ge('cmp-scan-dd').classList.remove('open');
+          _scanDdHighlighted = -1;
+          if (dd) { dd.classList.remove('open'); }
         }
       });
     }
 
-    // Document-level keydown fallback (barcode scanner redirect)
-    document.addEventListener('keydown', _docKeydownStep2);
+    // Orden item click
+    body.querySelectorAll('.cmp-s2-orden-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const id    = el.dataset.ordenId;
+        const label = el.dataset.ordenLabel;
+        if (n.vinculadaOrdenId === id) {
+          // Toggle off
+          n.vinculadaOrdenId   = null;
+          n.vinculadaOrdenNombre = '';
+          el.classList.remove('selected');
+        } else {
+          body.querySelectorAll('.cmp-s2-orden-item').forEach(x => x.classList.remove('selected'));
+          n.vinculadaOrdenId   = id;
+          n.vinculadaOrdenNombre = label;
+          el.classList.add('selected');
+        }
+      });
+    });
 
+    // Payment chips
+    body.querySelectorAll('.cmp-pago-chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        body.querySelectorAll('.cmp-pago-chip').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        n.condicionPago = btn.dataset.pago;
+        ge('cmp-s2-efectivo-wrap').style.display = n.condicionPago === 'efectivo' ? '' : 'none';
+        _updateS2Vuelto();
+      });
+    });
+
+    // Entrego input
+    const entregoInp = ge('cmp-s2-entrego');
+    if (entregoInp) {
+      entregoInp.addEventListener('input', () => {
+        n.entrego = parseFloat(entregoInp.value) || 0;
+        _updateS2Vuelto();
+      });
+    }
+
+    // Quick product button
+    ge('cmp-s2-nuevo-prod')?.addEventListener('click', () => _showNewProductForm(''));
+
+    // Factura fields sync
+    ge('cmp-s2-factura')?.addEventListener('input', e => { n.numeroFactura = e.target.value.trim(); });
+    ge('cmp-s2-fecha')?.addEventListener('change', e => { n.fecha = e.target.value; });
+
+    // Back button
     ge('cmp-back2').addEventListener('click', () => {
       document.removeEventListener('keydown', _docKeydownStep2);
       state.nueva.step = 1;
       renderStep();
     });
 
-    ge('cmp-next2').addEventListener('click', () => {
-      if (!state.nueva.items.length) {
-        window.SGA_Utils.showNotification('Agregá al menos un producto', 'error'); return;
-      }
-      document.removeEventListener('keydown', _docKeydownStep2);
-      state.nueva.step = 3;
-      renderStep();
+    // Pause button
+    ge('cmp-s2-pausar')?.addEventListener('click', () => _pausarCompra());
+
+    // CONFIRM button
+    ge('cmp-s2-confirmar').addEventListener('click', () => _confirmarDesdeStep2());
+
+    // Document-level keydown fallback (barcode scanner redirect)
+    document.addEventListener('keydown', _docKeydownStep2);
+  }
+
+  function _updateS2Vuelto() {
+    const n       = state.nueva;
+    const total   = _calcTotal();
+    const entrego = parseFloat(n.entrego) || 0;
+    const vueltoEl = ge('cmp-s2-vuelto');
+    const totalEl  = ge('cmp-s2-total');
+    if (vueltoEl) vueltoEl.textContent = fmt$(Math.max(0, entrego - total));
+    if (totalEl)  totalEl.textContent  = fmt$(total);
+  }
+
+  function _confirmarDesdeStep2() {
+    const n = state.nueva;
+    if (!n.items.length) {
+      window.SGA_Utils.showNotification('Agregá al menos un producto', 'error'); return;
+    }
+    const btn = ge('cmp-s2-confirmar');
+    btn.disabled = true;
+    btn.textContent = 'Guardando...';
+
+    // Save factura/fecha from right panel
+    const facturaInp = ge('cmp-s2-factura');
+    const fechaInp   = ge('cmp-s2-fecha');
+    if (facturaInp) n.numeroFactura = facturaInp.value.trim();
+    if (fechaInp)   n.fecha         = fechaInp.value || n.fecha;
+
+    const total = _calcTotal();
+    const crearRes = _crear({
+      sucursalId:       state.user.sucursal_id,
+      proveedorId:      n.proveedorId,
+      usuarioId:        state.user.id,
+      fecha:            n.fecha,
+      numeroFactura:    n.numeroFactura,
+      total,
+      condicionPago:    n.condicionPago,
+      vinculadaOrdenId: n.vinculadaOrdenId,
+      items:            n.items,
     });
+
+    if (!crearRes.success) {
+      window.SGA_Utils.showNotification('Error al guardar: ' + crearRes.error, 'error');
+      btn.disabled = false;
+      btn.textContent = '✓ CONFIRMAR COMPRA';
+      return;
+    }
+
+    n.compraId = crearRes.id;
+    const res  = _confirmar(crearRes.id);
+
+    if (!res.success) {
+      window.SGA_Utils.showNotification('Error al confirmar: ' + res.error, 'error');
+      btn.disabled = false;
+      btn.textContent = '✓ CONFIRMAR COMPRA';
+      return;
+    }
+
+    document.removeEventListener('keydown', _docKeydownStep2);
+    state.confirmarResult = res;
+    state.priceAdjustments = res.cambiosCosto.map(c => ({
+      ...c,
+      precioNuevo:    '',
+      incluir:        true,
+      aplicarFamilia: false,
+    }));
+
+    n.step = res.cambiosCosto.length > 0 ? 4 : 5;
+    renderStep();
   }
 
   function _docKeydownStep2(e) {
     const scanInput = ge('cmp-scan-input');
     if (!scanInput) return;
     if (document.activeElement === scanInput) return;
+    // Don't redirect if a number/text input in the items table is focused
+    const active = document.activeElement;
+    if (active && (active.matches('.cmp-cant, .cmp-udspaq, .cmp-costo-nvo') ||
+        active.closest('.cmp-s2-factura-details, #cmp-new-prod-wrap, .cmp-s2-entrego-row'))) return;
     // Ignore modifier-only keys
     if (['Shift','Control','Alt','Meta','Tab','CapsLock'].includes(e.key)) return;
     if (e.key === 'Enter') return;
@@ -612,8 +885,10 @@ const Compras = (() => {
   }
 
   function _onScanInput(val) {
+    const dd = ge('cmp-scan-dd');
+    if (!dd) return;
     if (val.length < 2) {
-      ge('cmp-scan-dd').classList.remove('open');
+      dd.classList.remove('open');
       return;
     }
     const results = window.SGA_DB.query(`
@@ -629,10 +904,10 @@ const Compras = (() => {
       ORDER BY p.nombre LIMIT 12
     `, [`%${val}%`, `${val}%`]);
 
-    const dd = ge('cmp-scan-dd');
     if (!results.length) { dd.classList.remove('open'); return; }
-    dd.innerHTML = results.map(r =>
-      `<div class="cmp-dd-item" data-id="${r.id}" data-nombre="${esc(r.nombre)}"
+    _scanDdHighlighted = -1;
+    dd.innerHTML = results.map((r, i) =>
+      `<div class="cmp-dd-item" data-i="${i}" data-id="${r.id}" data-nombre="${esc(r.nombre)}"
         data-costo="${r.costo}" data-uc="${esc(r.unidad_compra || 'Unidad')}"
         data-udspaq="${r.unidades_por_paquete_compra || 1}"
         data-barcode="${esc(r.barcode || '')}"
@@ -644,7 +919,9 @@ const Compras = (() => {
       el.addEventListener('mousedown', e => {
         e.preventDefault();
         _addItemFromEl(el);
-        ge('cmp-scan-input').value = '';
+        const inp = ge('cmp-scan-input');
+        if (inp) inp.value = '';
+        _scanDdHighlighted = -1;
         dd.classList.remove('open');
       });
     });
@@ -682,17 +959,17 @@ const Compras = (() => {
   }
 
   function _addItemById(productoId, nombre, costo, unidadCompra, udsPaquete, barcode) {
-    // If already in list, increment quantity
     const existing = state.nueva.items.find(it => it.productoId === productoId);
     if (existing) {
       existing.cantidad = (parseFloat(existing.cantidad) || 0) + 1;
       _renderItemsTable();
+      _focusLastCantidad();
       return;
     }
     state.nueva.items.push({
       productoId,
       nombre,
-      barcode: barcode || '',
+      barcode:      barcode || '',
       unidadCompra: unidadCompra || 'Unidad',
       udsPaquete:   parseFloat(udsPaquete) || 1,
       costoActual:  parseFloat(costo) || 0,
@@ -700,6 +977,16 @@ const Compras = (() => {
       cantidad:     1,
     });
     _renderItemsTable();
+    _focusLastCantidad();
+  }
+
+  function _focusLastCantidad() {
+    // Focus the cantidad input of the last row, then select its content
+    const rows = ge('cmp-items-tbody')?.querySelectorAll('tr');
+    if (!rows?.length) return;
+    const lastRow = rows[rows.length - 1];
+    const inp = lastRow?.querySelector('.cmp-cant');
+    if (inp) { inp.focus(); inp.select(); }
   }
 
   function _renderItemsTable() {
@@ -800,6 +1087,9 @@ const Compras = (() => {
         ge('cmp-new-prod-wrap') && (ge('cmp-new-prod-wrap').style.display = 'none');
       });
     });
+
+    // Also update the right panel total (step 2 POS)
+    _updateS2Vuelto();
   }
 
   function _showNewProductForm(barcode) {
@@ -1310,6 +1600,131 @@ const Compras = (() => {
     });
   }
 
+  // ── PAUSE / RESUME ─────────────────────────────────────────────────────────
+
+  function _pausarCompra() {
+    const n = state.nueva;
+    if (!n || !n.items.length) {
+      window.SGA_Utils.showNotification('No hay productos cargados para pausar', 'error');
+      return;
+    }
+    const id  = uuid();
+    const ts  = now();
+    try {
+      window.SGA_DB.run(`
+        INSERT INTO compras_pausadas
+          (id, sucursal_id, usuario_id, snapshot, proveedor_nombre, num_items, total_estimado, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?)
+      `, [id, state.user.sucursal_id, state.user.id,
+          JSON.stringify(n),
+          n.proveedorNombre, n.items.length, _calcTotal(),
+          ts, ts]);
+      _hideNavGuard();
+      ge('cmp-nueva-overlay').style.display = 'none';
+      document.removeEventListener('keydown', _docKeydownStep2);
+      state.view = 'lista';
+      state.nueva = null;
+      renderLista();
+      window.SGA_Utils.showNotification('Compra pausada. Podés retomar desde la lista.', 'success');
+    } catch(e) {
+      window.SGA_Utils.showNotification('Error al pausar: ' + e.message, 'error');
+    }
+  }
+
+  function _retomarCompra(pausadaId) {
+    const row = window.SGA_DB.query(`SELECT * FROM compras_pausadas WHERE id=?`, [pausadaId])[0];
+    if (!row) return;
+    try {
+      const snapshot = JSON.parse(row.snapshot);
+      state.nueva = { ...snapshot, step: 2 };
+      state.view  = 'nueva';
+      ge('cmp-nueva-overlay').style.display = 'flex';
+      renderStep();
+      window.SGA_DB.run(`DELETE FROM compras_pausadas WHERE id=?`, [pausadaId]);
+      window.SGA_Utils.showNotification('Compra retomada', 'success');
+    } catch(e) {
+      window.SGA_Utils.showNotification('Error al retomar: ' + e.message, 'error');
+    }
+  }
+
+  // ── DETALLE COMPRA ─────────────────────────────────────────────────────────
+
+  function renderDetalleCompra(compraId) {
+    const compra = _getById(compraId);
+    if (!compra) { window.SGA_Utils.showNotification('Compra no encontrada', 'error'); return; }
+
+    const overlay = ge('cmp-detalle-overlay');
+    const body    = ge('cmp-detalle-body');
+    if (!overlay || !body) return;
+
+    const estado = compra.estado || 'borrador';
+
+    body.innerHTML = `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px">
+        <span class="cmp-badge cmp-badge-${estado}">${ESTADO_LABEL[estado] || estado}</span>
+        <span style="font-size:13px;color:var(--color-text-secondary)">
+          ${fmtFecha(compra.fecha)} ·
+          ${esc(compra.proveedor_nombre || '—')}
+          ${compra.numero_factura ? ' · Fact. ' + esc(compra.numero_factura) : ''}
+        </span>
+        <span style="font-size:13px;color:var(--color-text-secondary)">
+          ${compra.condicion_pago === 'pendiente' ? '⏳ Pago pendiente' : '✓ ' + (compra.condicion_pago || 'efectivo')}
+        </span>
+      </div>
+
+      <table class="cmp-review-table" style="margin-bottom:16px">
+        <thead>
+          <tr>
+            <th>Producto</th>
+            <th>Cant.</th>
+            <th>Unidad</th>
+            <th>Costo unit.</th>
+            <th>Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${(compra.items || []).map(it => `
+            <tr>
+              <td>${esc(it.producto_nombre || '—')}</td>
+              <td>${it.cantidad}</td>
+              <td>${esc(it.unidad_compra || 'Unidad')}</td>
+              <td>${fmt$(it.costo_unitario)}</td>
+              <td>${fmt$((parseFloat(it.cantidad)||0) * (parseFloat(it.unidades_por_paquete)||1) * (parseFloat(it.costo_unitario)||0))}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+
+      <div class="cmp-totals-box">
+        <div class="cmp-totals-row grand">
+          <span>Total</span><span>${fmt$(compra.total)}</span>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+        ${estado === 'borrador'
+          ? `<button class="btn btn-primary" id="cmp-detalle-confirmar" data-id="${esc(compraId)}">✓ Confirmar compra</button>`
+          : ''}
+        ${estado === 'confirmada' && compra.condicion_pago === 'pendiente'
+          ? `<button class="btn btn-secondary" id="cmp-detalle-pagar" data-id="${esc(compraId)}">💳 Registrar pago</button>`
+          : ''}
+      </div>
+    `;
+
+    overlay.style.display = 'flex';
+
+    ge('cmp-detalle-confirmar')?.addEventListener('click', () => {
+      const res = _confirmar(compraId);
+      if (res.success) {
+        window.SGA_Utils.showNotification('Compra confirmada', 'success');
+        overlay.style.display = 'none';
+        renderLista();
+      } else {
+        window.SGA_Utils.showNotification('Error: ' + res.error, 'error');
+      }
+    });
+  }
+
   // ── ATTACH EVENTS ─────────────────────────────────────────────────────────
 
   function attachEvents() {
@@ -1322,18 +1737,38 @@ const Compras = (() => {
       if (e.target.matches('#cmp-nueva-close')) {
         closeNuevaCompra();
       }
-      // Navigation guard
-      if (e.target.matches('#cmp-guard-stay')) _hideNavGuard();
-      if (e.target.matches('#cmp-guard-leave')) {
+      // Navigation guard — 3 options
+      if (e.target.matches('#cmp-guard-stay')) {
         _hideNavGuard();
-        if (state.pendingNavAway) state.pendingNavAway();
+      }
+      if (e.target.matches('#cmp-guard-leave')) {
+        // Descartar — force close without saving
+        _hideNavGuard();
+        document.removeEventListener('keydown', _docKeydownStep2);
+        ge('cmp-nueva-overlay').style.display = 'none';
+        state.view = 'lista';
+        state.nueva = null;
+        renderLista();
+      }
+      if (e.target.matches('#cmp-guard-pausar')) {
+        _pausarCompra();
+      }
+      // Ver detalle
+      if (e.target.dataset.ver) {
+        renderDetalleCompra(e.target.dataset.ver);
+      }
+      // Cerrar detalle
+      if (e.target.matches('#cmp-detalle-close')) {
+        ge('cmp-detalle-overlay').style.display = 'none';
+      }
+      // Retomar pausada
+      if (e.target.dataset.retomar) {
+        _retomarCompra(e.target.dataset.retomar);
       }
       // Confirmar desde lista
       if (e.target.dataset.confirmar) {
         const id = e.target.dataset.confirmar;
         if (confirm('¿Confirmar esta compra? Se actualizará el stock y se registrará el pago.')) {
-          const compra = _getById(id);
-          if (!compra) return;
           state.user = state.user || window.SGA_Auth.getCurrentUser();
           const res = _confirmar(id);
           if (res.success) {

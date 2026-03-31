@@ -378,11 +378,13 @@ const Ordenes = (() => {
   }
 
   function _getConPagoPendiente(sucursalId) {
-    return window.SGA_DB.query(`
+    // Ordenes with estado='pendiente_pago'
+    const ordenes = window.SGA_DB.query(`
       SELECT o.*, p.razon_social AS proveedor_nombre,
         COALESCE(SUM(CASE WHEN cp.tipo='deuda' THEN cp.monto ELSE -cp.monto END),0) AS saldo_pendiente,
         COALESCE(SUM(CASE WHEN cp.tipo='pago' THEN cp.monto ELSE 0 END),0) AS total_pagado,
-        MAX(o.updated_at) AS fecha_recepcion
+        MAX(o.updated_at) AS fecha_recepcion,
+        'orden' AS origen
       FROM ordenes_compra o
       LEFT JOIN proveedores p ON p.id = o.proveedor_id
       LEFT JOIN cuenta_proveedor cp ON cp.orden_id = o.id
@@ -390,6 +392,25 @@ const Ordenes = (() => {
       GROUP BY o.id
       ORDER BY o.updated_at DESC
     `, [sucursalId]);
+
+    // Manual compras with condicion_pago='pendiente' and estado='confirmada'
+    // (tracked via cuenta_proveedor.compra_id)
+    const comprasPendientes = window.SGA_DB.query(`
+      SELECT c.id, c.proveedor_id, p.razon_social AS proveedor_nombre,
+        c.fecha AS updated_at, c.fecha AS fecha_recepcion,
+        c.total AS saldo_pendiente, 0 AS total_pagado,
+        c.numero_factura, 'compra' AS origen
+      FROM compras c
+      LEFT JOIN proveedores p ON p.id = c.proveedor_id
+      WHERE c.sucursal_id=? AND c.condicion_pago='pendiente' AND c.estado='confirmada'
+        AND NOT EXISTS (
+          SELECT 1 FROM cuenta_proveedor cp
+          WHERE cp.compra_id=c.id AND cp.tipo='pago'
+        )
+      ORDER BY c.fecha DESC
+    `, [sucursalId]);
+
+    return [...ordenes, ...comprasPendientes];
   }
 
   // Expose data layer
