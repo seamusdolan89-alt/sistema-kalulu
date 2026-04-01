@@ -535,6 +535,8 @@ export const POS = (() => {
       descuentoGlobal: 0,
       descItemIdx: null,
       descTipo: 'monto',
+      descuentoTotal: 0,
+      descTipoTotal: 'monto',
       ccCobrarDeuda: false,
       ccAplicarFavor: false,
       ccRegistrarDeuda: false,
@@ -585,7 +587,7 @@ export const POS = (() => {
     const saveCart = () => sessionStorage.setItem('pos_cart', JSON.stringify(state.cart));
 
     const getCartSubtotal = () => state.cart.reduce((s, i) => s + i.cantidad * i.precioUnitario, 0);
-    const getCartDescuento = () => state.cart.reduce((s, i) => s + (i.descuentoItem || 0), 0) + state.descuentoGlobal;
+    const getCartDescuento = () => state.cart.reduce((s, i) => s + (i.descuentoItem || 0), 0) + state.descuentoGlobal + state.descuentoTotal;
     const getCartTotal = () => Math.max(0, getCartSubtotal() - getCartDescuento());
     const getTotalAsignado = () => [...state.activeMedios].reduce((s, m) => s + (state.pagosAmounts[m] || 0), 0);
 
@@ -1203,6 +1205,7 @@ export const POS = (() => {
       sessionStorage.removeItem('sga_cart');
       sessionStorage.removeItem('sga_sale_mode');
       state.cart = [];
+      state.descuentoTotal = 0;
       state.pagosAmounts = { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0, cuenta_corriente: 0 };
       state.activeMedios = new Set(['efectivo']);
       state.recibeEfectivo = null;
@@ -1970,6 +1973,21 @@ export const POS = (() => {
       setTimeout(() => ge('desc-amount-input')?.focus(), 80);
     };
 
+    const showDescTotalModal = () => {
+      state.descTipoTotal = 'monto';
+      const sub = getCartSubtotal();
+      const descSubEl = ge('desc-total-subtotal');
+      if (descSubEl) descSubEl.textContent = formatCurrency(sub);
+      const labelEl = ge('desc-total-label');
+      if (labelEl) labelEl.textContent = 'Descuento ($)';
+      const inp = ge('desc-total-input');
+      if (inp) inp.value = state.descuentoTotal > 0 ? state.descuentoTotal : '';
+      ge('btn-desc-total-monto')?.classList.add('active');
+      ge('btn-desc-total-pct')?.classList.remove('active');
+      showModal('modal-desc-total');
+      setTimeout(() => ge('desc-total-input')?.focus(), 80);
+    };
+
     // ── CIERRE TAB SWITCHING ────────────────────────────────────────
     document.querySelectorAll('.ctab').forEach(tab => {
       tab.addEventListener('click', () => {
@@ -2011,6 +2029,7 @@ export const POS = (() => {
         });
         if (result.success) {
           state.cart = [];
+          state.descuentoTotal = 0;
           saveCart();
           clearCliente();
           modal.classList.add('hidden');
@@ -2024,6 +2043,7 @@ export const POS = (() => {
       ge('btn-nav-descartar').onclick = () => {
         if (!confirm('¿Seguro que querés descartar la venta en curso?')) return;
         state.cart = [];
+        state.descuentoTotal = 0;
         saveCart();
         clearCliente();
         modal.classList.add('hidden');
@@ -2054,6 +2074,7 @@ export const POS = (() => {
       ge('btn-recover-descartar').onclick = () => {
         if (!confirm('¿Seguro que querés descartar la venta sin finalizar?')) return;
         state.cart = [];
+        state.descuentoTotal = 0;
         saveCart();
         banner.style.display = 'none';
       };
@@ -2159,6 +2180,7 @@ export const POS = (() => {
       });
       if (result.success) {
         state.cart = [];
+        state.descuentoTotal = 0;
         saveCart();
         clearCliente();
         enterDashboard();
@@ -2208,12 +2230,14 @@ export const POS = (() => {
           if (!sriItems.length) return;
           searchHlIdx = Math.min(searchHlIdx + 1, sriItems.length - 1);
           sriItems.forEach((el, i) => el.classList.toggle('highlighted', i === searchHlIdx));
+          if (sriItems[searchHlIdx]) sriItems[searchHlIdx].scrollIntoView({ block: 'nearest', inline: 'nearest' });
           return;
         }
         if (e.key === 'ArrowUp') {
           e.preventDefault();
           searchHlIdx = Math.max(searchHlIdx - 1, -1);
           sriItems.forEach((el, i) => el.classList.toggle('highlighted', i === searchHlIdx));
+          if (sriItems[searchHlIdx]) sriItems[searchHlIdx].scrollIntoView({ block: 'nearest', inline: 'nearest' });
           return;
         }
         if (e.key === 'Enter') {
@@ -2481,15 +2505,61 @@ export const POS = (() => {
       hideModal('modal-desc');
     });
 
+    // Descuento total modal
+    safeOn('btn-desc-total-close',   'click', () => hideModal('modal-desc-total'));
+    safeOn('btn-desc-total-cancel',  'click', () => hideModal('modal-desc-total'));
+    safeOn('btn-desc-total-pct', 'click', () => {
+      state.descTipoTotal = 'pct';
+      ge('btn-desc-total-pct').classList.add('active');
+      ge('btn-desc-total-monto').classList.remove('active');
+      ge('desc-total-label').textContent = 'Descuento (%)';
+    });
+    safeOn('btn-desc-total-monto', 'click', () => {
+      state.descTipoTotal = 'monto';
+      ge('btn-desc-total-monto').classList.add('active');
+      ge('btn-desc-total-pct').classList.remove('active');
+      ge('desc-total-label').textContent = 'Descuento ($)';
+    });
+    safeOn('btn-desc-total-confirm', 'click', () => {
+      const raw = parseFloat(ge('desc-total-input')?.value) || 0;
+      if (state.descTipoTotal === 'pct') {
+        state.descuentoTotal = getCartSubtotal() * (raw / 100);
+      } else {
+        state.descuentoTotal = raw;
+      }
+      saveCart(); renderCart(); renderSaleTotals(); autoFillPayment();
+      hideModal('modal-desc-total');
+    });
+    safeOn('btn-abrir-desc-total', 'click', () => showDescTotalModal());
+
     // Devolucion — close button only; steps are rendered dynamically
     safeOn('btn-devolucion-close', 'click', () => hideModal('modal-devolucion'));
 
     // ── KEYBOARD SHORTCUTS ─────────────────────────────────────────
     document.addEventListener('keydown', e => {
-      if (e.key === 'F3') { e.preventDefault(); enterSaleMode(); }
+      if (e.key === 'F1' && state.mode === 'sale') { e.preventDefault(); ge('pos-search-input')?.focus(); }
+      if (e.key === 'F2' && state.mode === 'sale') {
+        e.preventDefault();
+        const clientInput = ge('client-search-input');
+        const noClient = !state.clienteId && (!clientInput || clientInput.value.trim() === '');
+        const firstChip = document.querySelector('#payment-chips .pchip');
+        const activeChip = document.querySelector('#payment-chips .pchip.active');
+        const recibeInput = ge('recibe-efectivo');
+        const recibeVal = parseFloat(recibeInput?.value) || 0;
+        if (noClient) {
+          if (clientInput) clientInput.focus();
+        } else if (!activeChip && firstChip) {
+          firstChip.focus();
+        } else if (recibeInput && recibeVal === 0) {
+          recibeInput.focus();
+        } else {
+          ge('btn-confirm-venta')?.click();
+        }
+      }
+      if (e.key === 'F3') { e.preventDefault(); if (state.mode === 'sale') showDescTotalModal(); }
       if (e.key === 'F4') { e.preventDefault(); showModalPedidos(); }
+      if (e.key === 'F5' && state.mode === 'sale') { e.preventDefault(); ge('client-search-input')?.focus(); }
       if (e.key === 'F10' && state.mode === 'sale') { e.preventDefault(); ge('btn-confirm-venta')?.click(); }
-      if (e.key === 'F2'  && state.mode === 'sale') { e.preventDefault(); ge('pos-search-input')?.focus(); }
       if (e.key === 'Escape') {
         // Close any open modal first
         const openModal = document.querySelector('.pbackdrop:not(.hidden)');
@@ -2526,6 +2596,11 @@ export const POS = (() => {
     enterDashboard();
     if (_hasOrphanCart) showRecoverBanner();
     if (!state.sesionActiva) showModalApertura();
+
+    // Handle deep-link actions passed via URL (e.g. #pos/devolucion)
+    if (params && params[0] === 'devolucion') {
+      showModalDevolucion();
+    }
   }
 
   /**

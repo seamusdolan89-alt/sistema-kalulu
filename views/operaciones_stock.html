@@ -1,0 +1,132 @@
+<style>
+  /* ── OPERACIONES DE STOCK ─────────────────────────────────────── */
+  .ops-root {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    background: var(--color-background);
+  }
+
+  .ops-header {
+    background: linear-gradient(135deg, #2e7d32 0%, #388e3c 100%);
+    color: white;
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    flex-shrink: 0;
+  }
+  .ops-header h2 { margin: 0; font-size: 1.15rem; color: white; font-weight: 600; }
+
+  .ops-body {
+    flex: 1;
+    padding: 32px 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    max-width: 720px;
+  }
+
+  /* Group card */
+  .ops-group {
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    border: 1px solid var(--color-border);
+  }
+
+  .ops-group-header {
+    background: #2e7d32;
+    color: white;
+    padding: 11px 20px;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ops-group-header.egreso { background: #c62828; }
+
+  .ops-group-body {
+    background: var(--color-background);
+    padding: 16px 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  /* Action buttons */
+  .ops-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 22px;
+    border-radius: 24px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  .ops-btn-active {
+    background: #e8f5e9;
+    border-color: #2e7d32;
+    color: #1b5e20;
+  }
+  .ops-btn-active:hover { background: #c8e6c9; }
+
+  .ops-btn-active.egreso {
+    background: #ffebee;
+    border-color: #c62828;
+    color: #b71c1c;
+  }
+  .ops-btn-active.egreso:hover { background: #ffcdd2; }
+
+  .ops-btn-disabled {
+    background: var(--color-hover);
+    border-color: var(--color-border);
+    color: var(--color-text-secondary);
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+</style>
+
+<div class="ops-root" id="ops-root">
+  <div class="ops-header">
+    <h2>📦 Operaciones de Stock</h2>
+  </div>
+
+  <div class="ops-body">
+
+    <!-- Ingreso -->
+    <div class="ops-group">
+      <div class="ops-group-header">+ Ingreso de mercadería</div>
+      <div class="ops-group-body">
+        <button class="ops-btn ops-btn-active" data-action="compras">🛒 Compras</button>
+        <button class="ops-btn ops-btn-active" data-action="devolucion">↩ Devolución</button>
+        <button class="ops-btn ops-btn-disabled" data-action="traspaso_ingreso">🔄 Traspaso entre tiendas</button>
+        <button class="ops-btn ops-btn-disabled" data-action="consignacion">📋 Consignación</button>
+      </div>
+    </div>
+
+    <!-- Egreso -->
+    <div class="ops-group">
+      <div class="ops-group-header egreso">− Egreso de mercadería</div>
+      <div class="ops-group-body">
+        <button class="ops-btn ops-btn-active egreso" data-action="ajuste_stock">📉 Ajuste de stock</button>
+        <button class="ops-btn ops-btn-disabled egreso" data-action="consumo_interno">🏠 Consumo interno</button>
+        <button class="ops-btn ops-btn-disabled egreso" data-action="vencimientos">⏰ Vencimientos</button>
+        <button class="ops-btn ops-btn-disabled egreso" data-action="roturas">💔 Roturas / producto defectuoso</button>
+        <button class="ops-btn ops-btn-disabled egreso" data-action="traspaso_egreso">🔄 Traspaso entre tiendas</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script type="module" src="./js/modules/operaciones_stock.js"></script>

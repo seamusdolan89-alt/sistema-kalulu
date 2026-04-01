@@ -1,0 +1,675 @@
+<style>
+  /* ── COMPRAS V2 ───────────────────────────────────────────────────────────── */
+  .cv2-root {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+    background: var(--color-background);
+  }
+
+  /* Header */
+  .cv2-header {
+    background: linear-gradient(135deg, #2e7d32 0%, #388e3c 100%);
+    color: white;
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    z-index: 10;
+  }
+  .cv2-header h2 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: white;
+    font-weight: 600;
+  }
+  .cv2-header-right { display: flex; gap: 8px; align-items: center; }
+  .cv2-header .btn-ghost {
+    background: rgba(255,255,255,0.15);
+    color: white;
+    border: 1px solid rgba(255,255,255,0.35);
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .cv2-header .btn-ghost:hover { background: rgba(255,255,255,0.25); }
+  .cv2-header .btn-success {
+    background: white;
+    color: #2e7d32;
+    border: none;
+    padding: 6px 18px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .cv2-header .btn-success:hover { background: #f1f8e9; }
+  .cv2-header .btn-success:disabled {
+    background: rgba(255,255,255,0.3);
+    color: rgba(255,255,255,0.6);
+    cursor: not-allowed;
+  }
+
+  /* Body split */
+  .cv2-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    gap: 0;
+  }
+
+  /* ── LEFT PANEL ──────────────────────────────────────────────────────────── */
+  .cv2-left {
+    flex: 3;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--color-border);
+    overflow: hidden;
+    min-width: 0;
+  }
+
+  /* Search bar */
+  .cv2-search-wrap {
+    position: relative;
+    padding: 12px 16px 0;
+    flex-shrink: 0;
+  }
+  .cv2-search-input {
+    width: 100%;
+    padding: 10px 14px;
+    font-size: 15px;
+    border: 2px solid var(--color-border);
+    border-radius: 8px;
+    background: var(--color-background);
+    color: var(--color-text);
+    box-sizing: border-box;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .cv2-search-input:focus { border-color: #2e7d32; }
+
+  /* Search dropdown */
+  .cv2-dropdown {
+    position: absolute;
+    top: calc(100% - 2px);
+    left: 16px;
+    right: 16px;
+    background: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    z-index: 100;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+  .cv2-dd-item {
+    padding: 9px 14px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .cv2-dd-item:last-child { border-bottom: none; }
+  .cv2-dd-item:hover { background: var(--color-hover); }
+  .cv2-dd-item-hl {
+    background: #e8f5e9;
+    border-left: 3px solid #2e7d32;
+    padding-left: 11px;
+  }
+  .cv2-dd-nombre { font-weight: 500; }
+  .cv2-dd-meta { color: var(--color-text-secondary); font-size: 12px; }
+  .cv2-dd-nuevo { color: #1565c0; font-style: italic; }
+
+  /* New product form */
+  .cv2-new-prod-form {
+    margin: 8px 16px;
+    border: 1px solid #c8e6c9;
+    border-radius: 8px;
+    background: #f9fbe7;
+    flex-shrink: 0;
+  }
+  .cv2-new-prod-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 14px;
+    font-weight: 600;
+    font-size: 13px;
+    border-bottom: 1px solid #c8e6c9;
+    color: #2e7d32;
+  }
+  .cv2-new-prod-close {
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    color: #666;
+    line-height: 1;
+    padding: 0 4px;
+  }
+  .cv2-new-prod-body { padding: 10px 14px; }
+  .cv2-field-row { display: flex; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+  .cv2-field { display: flex; flex-direction: column; gap: 3px; }
+  .cv2-field-wide { flex: 1; min-width: 200px; }
+  .cv2-field label { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); text-transform: uppercase; }
+  .cv2-field input, .cv2-field select {
+    padding: 6px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    font-size: 13px;
+    background: var(--color-background);
+    color: var(--color-text);
+  }
+  .cv2-field-wide input { width: 100%; box-sizing: border-box; }
+  .cv2-barcode-hint { font-size: 11px; color: var(--color-text-secondary); font-family: monospace; }
+  .cv2-new-prod-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+
+  /* Cart */
+  .cv2-cart-wrap {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 16px;
+    min-height: 0;
+  }
+  .cv2-cart-empty {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-secondary);
+    font-size: 14px;
+    gap: 8px;
+    padding: 40px 0;
+  }
+  .cv2-cart-empty-icon { font-size: 2.5rem; opacity: 0.4; }
+  .cv2-cart-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .cv2-cart-table th {
+    text-align: left;
+    padding: 6px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    border-bottom: 2px solid var(--color-border);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+  .cv2-cart-table th.cv2-th-right, .cv2-cart-table td.cv2-td-right {
+    text-align: right;
+  }
+  .cv2-cart-row td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--color-border);
+    vertical-align: middle;
+  }
+  .cv2-cart-row:hover td { background: var(--color-hover); }
+  .cv2-cart-nombre {
+    max-width: 200px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cv2-costo-changed {
+    display: inline-block;
+    margin-left: 4px;
+    color: #e65100;
+    font-weight: 700;
+    font-size: 11px;
+  }
+  .cv2-num-input {
+    padding: 4px 6px;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    font-size: 13px;
+    text-align: right;
+    background: var(--color-background);
+    color: var(--color-text);
+  }
+  .cv2-num-input:focus { border-color: #2e7d32; outline: none; }
+  .cv2-subtotal { font-weight: 500; text-align: right; }
+  .cv2-remove-btn {
+    background: none;
+    border: none;
+    color: #ccc;
+    font-size: 18px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    border-radius: 4px;
+  }
+  .cv2-remove-btn:hover { color: #c62828; background: #ffebee; }
+
+  /* Totals bar */
+  .cv2-totals-bar {
+    flex-shrink: 0;
+    border-top: 2px solid var(--color-border);
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--color-background);
+  }
+  .cv2-item-count { font-size: 12px; color: var(--color-text-secondary); }
+  .cv2-totals-right { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .cv2-total-display { display: flex; align-items: baseline; gap: 10px; }
+  .cv2-total-label { font-size: 12px; color: var(--color-text-secondary); text-transform: uppercase; font-weight: 600; }
+  .cv2-total-amount { font-size: 1.5rem; font-weight: 700; color: #2e7d32; }
+  .cv2-total-detalle { font-size: 11px; color: var(--color-text-secondary); }
+  .cv2-saldo-desc { color: #2e7d32; }
+  .cv2-total-bruto { text-decoration: line-through; }
+
+  /* ── RIGHT PANEL ─────────────────────────────────────────────────────────── */
+  .cv2-right {
+    flex: 2;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    min-width: 260px;
+    max-width: 360px;
+    background: var(--color-background);
+  }
+  .cv2-section {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+  }
+  .cv2-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 10px;
+  }
+
+  /* Proveedor search (right panel) */
+  .cv2-prov-search-wrap { position: relative; }
+  .cv2-prov-input {
+    width: 100%;
+    padding: 8px 12px;
+    font-size: 13px;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-background);
+    color: var(--color-text);
+    box-sizing: border-box;
+    outline: none;
+  }
+  .cv2-prov-input:focus { border-color: #2e7d32; }
+  .cv2-prov-card {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    background: #e8f5e9;
+    border-radius: 6px;
+    border: 1px solid #a5d6a7;
+    font-size: 13px;
+    font-weight: 600;
+    color: #1b5e20;
+  }
+  .cv2-prov-clear {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0 2px;
+    line-height: 1;
+  }
+  .cv2-prov-clear:hover { color: #c62828; }
+
+  /* Saldo badge */
+  .cv2-saldo-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .cv2-saldo-deuda { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+  .cv2-saldo-favor { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+  .cv2-checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    padding: 4px 0;
+  }
+  .cv2-checkbox-row input[type="checkbox"] { cursor: pointer; }
+  .cv2-saldo-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 0 0 20px;
+    font-size: 12px;
+    color: var(--color-text-secondary);
+  }
+
+  /* Payment chips */
+  .cv2-radio-chips { display: flex; gap: 8px; }
+  .cv2-chip {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border: 2px solid var(--color-border);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: border-color 0.15s, background 0.15s;
+    user-select: none;
+  }
+  .cv2-chip input[type="radio"] { display: none; }
+  .cv2-chip.cv2-chip-active {
+    border-color: #2e7d32;
+    background: #e8f5e9;
+    color: #1b5e20;
+  }
+  .cv2-chip:hover { border-color: #81c784; }
+
+  .cv2-efectivo-info { margin-top: 8px; }
+
+  /* Form fields (factura, fecha) */
+  .cv2-form-field { margin-bottom: 10px; }
+  .cv2-form-field:last-child { margin-bottom: 0; }
+  .cv2-form-field label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .cv2-form-field input {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    font-size: 13px;
+    background: var(--color-background);
+    color: var(--color-text);
+    box-sizing: border-box;
+  }
+  .cv2-form-field input:focus { outline: none; border-color: #2e7d32; }
+
+  /* Warnings / info */
+  .cv2-warning {
+    font-size: 12px;
+    color: #e65100;
+    background: #fff3e0;
+    border: 1px solid #ffcc80;
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin-top: 6px;
+  }
+
+  /* ── PAUSADAS OVERLAY ────────────────────────────────────────────────────── */
+  .cv2-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 400;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .cv2-overlay-box {
+    background: var(--color-background);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+    width: 90%;
+    max-width: 520px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .cv2-overlay-header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--color-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 600;
+    font-size: 15px;
+    flex-shrink: 0;
+  }
+  .cv2-overlay-close {
+    background: none;
+    border: none;
+    font-size: 20px;
+    color: #888;
+    cursor: pointer;
+    padding: 0 4px;
+  }
+  #cv2-pausadas-list { overflow-y: auto; flex: 1; }
+  .cv2-pausada-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--color-border);
+    gap: 12px;
+  }
+  .cv2-pausada-item:hover { background: var(--color-hover); }
+  .cv2-pausada-info { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+  .cv2-pausada-info strong { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cv2-pausada-info span { font-size: 12px; color: var(--color-text-secondary); }
+  .cv2-pausada-date { font-size: 11px !important; color: #bbb !important; }
+  .cv2-pausada-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+  /* ── SUCCESS SCREEN ──────────────────────────────────────────────────────── */
+  .cv2-success {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 24px;
+    text-align: center;
+    gap: 16px;
+    height: 100%;
+  }
+  .cv2-success-icon { font-size: 3rem; }
+  .cv2-success h2 { margin: 0; font-size: 1.4rem; color: #2e7d32; }
+  .cv2-success-details {
+    width: 100%;
+    max-width: 380px;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    overflow: hidden;
+    font-size: 14px;
+  }
+  .cv2-success-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 9px 16px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .cv2-success-row:last-child { border-bottom: none; }
+  .cv2-success-row span { color: var(--color-text-secondary); }
+  .cv2-success-favor span { color: #2e7d32; }
+  .cv2-success-total { background: #f1f8e9; }
+  .cv2-success-total span, .cv2-success-total strong { color: #2e7d32; font-size: 15px; }
+  .cv2-success-costos {
+    width: 100%;
+    max-width: 380px;
+    border: 1px solid #ffe082;
+    border-radius: 10px;
+    overflow: hidden;
+    font-size: 13px;
+  }
+  .cv2-success-sub-title {
+    padding: 7px 14px;
+    background: #fff8e1;
+    font-weight: 600;
+    font-size: 12px;
+    color: #e65100;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .cv2-success-cost-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 7px 14px;
+    border-top: 1px solid #ffe082;
+    justify-content: space-between;
+  }
+  .cv2-success-cost-row span:first-child { flex: 1; }
+  .cv2-cost-old { color: #bbb; text-decoration: line-through; }
+  .cv2-cost-new { color: #2e7d32; font-weight: 600; }
+  .cv2-success-actions { margin-top: 8px; }
+
+  /* Shared button styles */
+  .btn { border: none; border-radius: 6px; cursor: pointer; font-size: 13px; padding: 7px 14px; font-weight: 500; }
+  .btn-primary { background: #1565c0; color: white; }
+  .btn-primary:hover { background: #1976d2; }
+  .btn-success { background: #2e7d32; color: white; }
+  .btn-success:hover { background: #388e3c; }
+  .btn-ghost { background: transparent; color: var(--color-text); border: 1px solid var(--color-border); }
+  .btn-ghost:hover { background: var(--color-hover); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+</style>
+
+<div class="cv2-root" id="cv2-root">
+
+  <!-- Header -->
+  <div class="cv2-header">
+    <h2>📥 Compras</h2>
+    <div class="cv2-header-right">
+      <button class="btn-ghost" id="cv2-btn-pausadas">Pausadas</button>
+      <button class="btn-ghost" id="cv2-btn-pausar">Pausar</button>
+      <button class="btn-success" id="cv2-btn-confirmar" disabled>Confirmar compra</button>
+    </div>
+  </div>
+
+  <!-- Body -->
+  <div class="cv2-body">
+
+    <!-- LEFT: Scan + Cart -->
+    <div class="cv2-left">
+      <div class="cv2-search-wrap">
+        <input type="text" id="cv2-search" class="cv2-search-input"
+               placeholder="Escanear o buscar producto..." autocomplete="off" spellcheck="false">
+        <div id="cv2-dropdown" class="cv2-dropdown" style="display:none"></div>
+      </div>
+
+      <!-- New product inline form -->
+      <div id="cv2-new-prod-form" style="display:none"></div>
+
+      <!-- Cart -->
+      <div class="cv2-cart-wrap">
+        <div id="cv2-cart-empty" class="cv2-cart-empty">
+          <span class="cv2-cart-empty-icon">📦</span>
+          <span>Sin productos. Escaneá o buscá para agregar.</span>
+        </div>
+        <table class="cv2-cart-table" id="cv2-cart-table" style="display:none">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th>Cant.</th>
+              <th title="Unidades por paquete">Uds/paq</th>
+              <th class="cv2-th-right">Costo/u</th>
+              <th class="cv2-th-right">Subtotal</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="cv2-cart-body"></tbody>
+        </table>
+      </div>
+
+      <!-- Totals bar -->
+      <div class="cv2-totals-bar">
+        <span class="cv2-item-count" id="cv2-item-count">0 productos</span>
+        <div class="cv2-totals-right">
+          <div id="cv2-total-detalle" class="cv2-total-detalle" style="display:none"></div>
+          <div class="cv2-total-display">
+            <span class="cv2-total-label">Total</span>
+            <span class="cv2-total-amount" id="cv2-total">$0</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Supplier + Payment + Factura -->
+    <div class="cv2-right">
+
+      <!-- Proveedor -->
+      <div class="cv2-section">
+        <div class="cv2-section-title">Proveedor</div>
+        <div class="cv2-prov-search-wrap">
+          <input type="text" id="cv2-prov-search" class="cv2-prov-input"
+                 placeholder="Buscar proveedor..." autocomplete="off">
+          <div id="cv2-prov-dropdown" class="cv2-dropdown" style="display:none"></div>
+        </div>
+        <div id="cv2-prov-card" class="cv2-prov-card" style="display:none">
+          <span id="cv2-prov-nombre"></span>
+          <button class="cv2-prov-clear" id="cv2-prov-clear" title="Cambiar proveedor">×</button>
+        </div>
+        <div id="cv2-saldo-section" style="display:none; margin-top:8px;"></div>
+      </div>
+
+      <!-- Condición de pago -->
+      <div class="cv2-section">
+        <div class="cv2-section-title">Condición de pago</div>
+        <div class="cv2-radio-chips">
+          <label class="cv2-chip cv2-chip-active" id="cv2-chip-efectivo">
+            <input type="radio" name="cv2-pago" id="cv2-radio-efectivo" value="efectivo" checked>
+            💵 Efectivo
+          </label>
+          <label class="cv2-chip" id="cv2-chip-pendiente">
+            <input type="radio" name="cv2-pago" id="cv2-radio-pendiente" value="pendiente">
+            📋 Pendiente
+          </label>
+        </div>
+        <div id="cv2-efectivo-info" class="cv2-efectivo-info"></div>
+      </div>
+
+      <!-- Factura y fecha -->
+      <div class="cv2-section">
+        <div class="cv2-section-title">Datos de la compra</div>
+        <div class="cv2-form-field">
+          <label>N° Factura</label>
+          <input type="text" id="cv2-factura" placeholder="Opcional" autocomplete="off">
+        </div>
+        <div class="cv2-form-field">
+          <label>Fecha</label>
+          <input type="date" id="cv2-fecha">
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Pausadas overlay -->
+<div id="cv2-pausadas-overlay" class="cv2-overlay" style="display:none">
+  <div class="cv2-overlay-box">
+    <div class="cv2-overlay-header">
+      <span>Compras pausadas</span>
+      <button class="cv2-overlay-close" id="cv2-pausadas-close">×</button>
+    </div>
+    <div id="cv2-pausadas-list"></div>
+  </div>
+</div>
+
+<script type="module" src="./js/modules/compras_v2.js"></script>
