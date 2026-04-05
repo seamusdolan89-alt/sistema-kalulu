@@ -93,22 +93,22 @@
   async function loadView(moduleName, params) {
     try {
       const appContainer = document.getElementById('app');
-      const viewPath = `./views/${moduleName}.html`;
+      const v = Date.now();
 
-      // Fetch and render view
-      const response = await fetch(viewPath);
-      if (!response.ok) throw new Error(`View not found: ${viewPath}`);
-      
+      // Always fetch HTML fresh (no cache)
+      const response = await fetch(`./views/${moduleName}.html?v=${v}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`View not found: ${moduleName}`);
+
       const html = await response.text();
       appContainer.innerHTML = html;
 
-      // Load and initialize module
+      // Always import JS fresh (bust module registry cache with timestamp)
       if (modules[moduleName]) {
-        const moduleLoader = modules[moduleName];
-        const module = await moduleLoader();
+        const mod = await import(`./modules/${moduleName}.js?v=${v}`);
+        const module = mod.default;
         app.currentModule = module;
-        
-        if (module.init && typeof module.init === 'function') {
+
+        if (module && typeof module.init === 'function') {
           module.init(params);
         }
       }

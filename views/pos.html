@@ -210,6 +210,9 @@ main#app { overflow: hidden; }
   border-radius: 4px; text-align: center; font-size: 0.95em;
 }
 .qty-input:focus { border-color: #667eea; outline: none; }
+.qty-input::-webkit-inner-spin-button,
+.qty-input::-webkit-outer-spin-button { display: none; }
+.qty-input { -moz-appearance: textfield; }
 .disc-btn {
   background: none; border: 1px dashed #ccc; border-radius: 4px;
   padding: 2px 7px; cursor: pointer; font-size: 0.82em; color: #999; transition: all 0.15s;
@@ -563,8 +566,10 @@ main#app { overflow: hidden; }
       <button class="sale-back-btn" id="btn-volver-dashboard">← Volver</button>
       <span class="sale-topbar-title">Venta en curso</span>
       <div class="sale-shortcuts">
-        <span><span class="sk">F2</span> Buscar</span>
-        <span><span class="sk">F10</span> Confirmar</span>
+        <span><span class="sk">F1</span> Buscar</span>
+        <span><span class="sk">F2</span> Confirmar</span>
+        <span><span class="sk">F3</span> Descuento</span>
+        <span><span class="sk">F5</span> Cliente</span>
         <span><span class="sk">ESC</span> Volver</span>
       </div>
     </div>
@@ -607,6 +612,7 @@ main#app { overflow: hidden; }
                 <div class="cart-grand-amount" id="cart-total">$0,00</div>
               </div>
             </div>
+            <button class="btn-pausar" id="btn-abrir-desc-total">% Desc. total</button>
             <button class="btn-pausar" id="btn-pausar-venta">⏸ Pausar venta</button>
           </div>
         </div>
@@ -804,6 +810,31 @@ main#app { overflow: hidden; }
     <div class="pmodal-ftr">
       <button class="mbtn mbtn-secondary" id="btn-desc-cancel">Cancelar</button>
       <button class="mbtn mbtn-primary"   id="btn-desc-confirm">Aplicar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Descuento total -->
+<div id="modal-desc-total" class="pbackdrop hidden">
+  <div class="pmodal narrow">
+    <div class="pmodal-hdr">
+      <span class="pmodal-title">Descuento sobre el total</span>
+      <button class="pmodal-close" id="btn-desc-total-close">✕</button>
+    </div>
+    <div class="pmodal-body">
+      <p id="desc-total-subtotal" style="font-weight:700; margin-bottom:12px; color:#333;"></p>
+      <div class="desc-tipo-btns">
+        <button class="desc-tipo-btn"        id="btn-desc-total-pct">% Porcentaje</button>
+        <button class="desc-tipo-btn active"  id="btn-desc-total-monto">$ Monto fijo</button>
+      </div>
+      <div class="fg">
+        <label id="desc-total-label">Descuento ($)</label>
+        <input type="text" inputmode="numeric" id="desc-total-input" class="fi" placeholder="0">
+      </div>
+    </div>
+    <div class="pmodal-ftr">
+      <button class="mbtn mbtn-secondary" id="btn-desc-total-cancel">Cancelar</button>
+      <button class="mbtn mbtn-primary"   id="btn-desc-total-confirm">Aplicar</button>
     </div>
   </div>
 </div>

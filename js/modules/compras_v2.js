@@ -13,6 +13,17 @@ const ComprasV2 = (() => {
 
   const UNIDADES_COMPRA = ['Unidad', 'Pack', 'Caja', 'Display', 'Kg', 'Lt', 'Bolsa', 'Docena'];
 
+  function formatARS(n) {
+    const [intPart, decPart] = Math.abs(n).toFixed(2).split('.');
+    const intFormatted = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return '$ ' + intFormatted + ',' + decPart;
+  }
+  function parseARS(s) {
+    return parseFloat(
+      String(s).replace(/\$/g, '').trim().replace(/\./g, '').replace(',', '.')
+    ) || 0;
+  }
+
   // ── State ────────────────────────────────────────────────────────────────────
   const state = {
     proveedorId:        null,
@@ -20,8 +31,11 @@ const ComprasV2 = (() => {
     proveedorSaldo:     0,      // positive = nosotros le debemos | negative = nos deben
     aplicarSaldo:       false,
     condicionPago:      'efectivo',
+    facturaPv:          '',
     numeroFactura:      '',
     fecha:              todayDate(),
+    fechaVencimiento:   '',
+    totalFactura:       0,
     items:              [],     // cart items
     pausadaId:          null,
     sesionActiva:       null,
@@ -53,11 +67,25 @@ const ComprasV2 = (() => {
   }
 
   // ── Cart math ────────────────────────────────────────────────────────────────
-  // subtotal = cant × uds_por_paquete × costo_por_unidad
-  function itemSubtotal(item) {
+  function itemGross(item) {
     return (parseFloat(item.cantidad)   || 0)
          * (parseFloat(item.udsPaquete) || 1)
          * (parseFloat(item.costoNuevo) || parseFloat(item.costoActual) || 0);
+  }
+
+  // subtotal = gross × (1 - descuento%)
+  function itemSubtotal(item) {
+    const gross = itemGross(item);
+    const disc  = Math.min(100, Math.max(0, parseFloat(item.descuento) || 0));
+    return gross * (1 - disc / 100);
+  }
+
+  function calcGross() {
+    return state.items.reduce((s, it) => s + itemGross(it), 0);
+  }
+
+  function calcDescuentoTotal() {
+    return state.items.reduce((s, it) => s + (itemGross(it) - itemSubtotal(it)), 0);
   }
 
   function calcTotal() {
@@ -95,28 +123,36 @@ const ComprasV2 = (() => {
       const costoChanged = Math.abs((parseFloat(it.costoNuevo) || 0) - (parseFloat(it.costoActual) || 0)) > 0.001;
       return `
         <tr class="cv2-cart-row" data-idx="${i}">
+          <td class="cv2-td-num">${i + 1}</td>
+          <td class="cv2-td-cod">${esc(it.barcode || '')}</td>
           <td class="cv2-cart-nombre" title="${esc(it.nombre)}">
             ${esc(it.nombre)}
             ${costoChanged ? `<span class="cv2-costo-changed" title="Costo modificado">↑</span>` : ''}
           </td>
-          <td>
+          <td class="cv2-td-present">${parseFloat(it.udsPaquete) || 1} × ${esc(it.unidadCompra || 'Unidad')}</td>
+          <td class="cv2-td-right">
             <input type="number" class="cv2-num-input" value="${it.cantidad}"
                    min="0.001" step="any" style="width:62px"
                    data-idx="${i}" data-field="cantidad">
           </td>
-          <td>
-            <input type="number" class="cv2-num-input" value="${it.udsPaquete}"
-                   min="1" step="1" style="width:52px"
-                   data-idx="${i}" data-field="udsPaquete"
-                   title="${esc(it.unidadCompra)}">
-          </td>
+          <td class="cv2-td-costo-actual">${fmt$(it.costoActual)}</td>
           <td class="cv2-td-right">
-            <input type="number" class="cv2-num-input" value="${parseFloat(it.costoNuevo).toFixed(2)}"
+            <input type="number" class="cv2-num-input nuevo-costo" value="${parseFloat(it.costoNuevo).toFixed(2)}"
                    min="0" step="any" style="width:80px"
                    data-idx="${i}" data-field="costoNuevo">
           </td>
+          <td class="cv2-td-right">
+            <div style="display:flex;gap:3px;justify-content:flex-end">
+              <input type="number" class="cv2-num-input" value="${parseFloat(it.descuento || 0).toFixed(1)}"
+                     min="0" max="100" step="0.1" style="width:50px" placeholder="%"
+                     data-idx="${i}" data-field="descuento" title="Descuento (%)">
+              <input type="number" class="cv2-num-input" value="${parseFloat(it.descuentoMonto || 0).toFixed(2)}"
+                     min="0" step="any" style="width:66px" placeholder="$"
+                     data-idx="${i}" data-field="descuentoMonto" title="Descuento ($)">
+            </div>
+          </td>
           <td class="cv2-subtotal cv2-td-right">${fmt$(sub)}</td>
-          <td>
+          <td class="cv2-td-center">
             <button class="cv2-remove-btn" data-idx="${i}" title="Quitar">×</button>
           </td>
         </tr>
@@ -127,12 +163,23 @@ const ComprasV2 = (() => {
   }
 
   function renderTotals() {
+    const gross         = calcGross();
+    const descuento     = calcDescuentoTotal();
     const total         = calcTotal();
     const saldoAplicado = calcSaldoAplicado();
     const neto          = calcNeto();
 
     const countEl = ge('cv2-item-count');
     if (countEl) countEl.textContent = `${state.items.length} producto${state.items.length !== 1 ? 's' : ''}`;
+
+    const itemsEl = ge('cv2-summary-items');
+    if (itemsEl) itemsEl.textContent = state.items.length;
+
+    const subtotalEl = ge('cv2-summary-subtotal');
+    if (subtotalEl) subtotalEl.textContent = fmt$(gross);
+
+    const descEl = ge('cv2-summary-descuento');
+    if (descEl) descEl.textContent = descuento > 0.001 ? `− ${fmt$(descuento)}` : fmt$(0);
 
     const totalEl = ge('cv2-total');
     if (totalEl) totalEl.textContent = fmt$(neto);
@@ -141,7 +188,7 @@ const ComprasV2 = (() => {
     if (detalleEl) {
       if (saldoAplicado > 0.01) {
         detalleEl.innerHTML =
-          `<span class="cv2-total-bruto">Subtotal: ${fmt$(total)}</span>`
+          `<span class="cv2-total-bruto">Total s/saldo: ${fmt$(total)}</span>`
         + ` <span class="cv2-saldo-desc">Saldo aplicado: −${fmt$(saldoAplicado)}</span>`;
         detalleEl.style.display = 'block';
       } else {
@@ -216,6 +263,10 @@ const ComprasV2 = (() => {
     const btn = ge('cv2-btn-confirmar');
     if (!btn) return;
     btn.disabled = !(state.proveedorId && state.items.length > 0);
+    // Red alert when control total is set and doesn't match calculated total
+    const mismatch = state.totalFactura > 0.001
+      && Math.abs(state.totalFactura - calcNeto()) > 0.01;
+    btn.classList.toggle('cv2-btn-confirmar-alert', mismatch && !btn.disabled);
   }
 
   // ── Product search ───────────────────────────────────────────────────────────
@@ -290,6 +341,7 @@ const ComprasV2 = (() => {
     addToCart({
       productoId:   r.id,
       nombre:       r.nombre,
+      barcode:      r.barcode || '',
       unidadCompra: r.unidad_compra || 'Unidad',
       udsPaquete:   parseFloat(r.unidades_por_paquete_compra) || 1,
       costoActual:  parseFloat(r.costo) || 0,
@@ -307,13 +359,16 @@ const ComprasV2 = (() => {
       targetIdx = existing;
     } else {
       state.items.push({
-        productoId:   prod.productoId,
-        nombre:       prod.nombre,
-        unidadCompra: prod.unidadCompra,
-        udsPaquete:   prod.udsPaquete,
-        costoActual:  prod.costoActual,
-        costoNuevo:   prod.costoNuevo,
-        cantidad:     1,
+        productoId:      prod.productoId,
+        nombre:          prod.nombre,
+        barcode:         prod.barcode || '',
+        unidadCompra:    prod.unidadCompra,
+        udsPaquete:      prod.udsPaquete,
+        costoActual:     prod.costoActual,
+        costoNuevo:      prod.costoNuevo,
+        cantidad:        1,
+        descuento:       0,
+        descuentoMonto:  0,
       });
       targetIdx = state.items.length - 1;
     }
@@ -340,6 +395,19 @@ const ComprasV2 = (() => {
       it.costoNuevo = Math.max(0, v);
     } else if (field === 'udsPaquete') {
       it.udsPaquete = Math.max(1, v);
+    } else if (field === 'descuento') {
+      it.descuento = Math.min(100, Math.max(0, v));
+      it.descuentoMonto = itemGross(it) * it.descuento / 100;
+      // Sync the $ input
+      const montoInp = document.querySelector(`.cv2-cart-row[data-idx="${idx}"] input[data-field="descuentoMonto"]`);
+      if (montoInp) montoInp.value = it.descuentoMonto.toFixed(2);
+    } else if (field === 'descuentoMonto') {
+      it.descuentoMonto = Math.max(0, v);
+      const gross = itemGross(it);
+      it.descuento = gross > 0 ? Math.min(100, (it.descuentoMonto / gross) * 100) : 0;
+      // Sync the % input
+      const pctInp = document.querySelector(`.cv2-cart-row[data-idx="${idx}"] input[data-field="descuento"]`);
+      if (pctInp) pctInp.value = it.descuento.toFixed(1);
     }
 
     // Update just the affected subtotal cell instead of full re-render
@@ -461,7 +529,7 @@ const ComprasV2 = (() => {
     }
 
     hideNewProductForm();
-    addToCart({ productoId: prodId, nombre, unidadCompra: unidad, udsPaquete: udsPaq, costoActual: costo, costoNuevo: costo });
+    addToCart({ productoId: prodId, nombre, barcode: barcode || '', unidadCompra: unidad, udsPaquete: udsPaq, costoActual: costo, costoNuevo: costo });
   }
 
   // ── Proveedor search ─────────────────────────────────────────────────────────
@@ -533,16 +601,18 @@ const ComprasV2 = (() => {
   function pausar() {
     if (!state.items.length) {
       window.SGA_Utils.showNotification('No hay productos para pausar', 'warning');
-      return;
+      return false;
     }
 
     const snapshot = JSON.stringify({
-      proveedorId:    state.proveedorId,
-      proveedorNombre: state.proveedorNombre,
-      condicionPago:  state.condicionPago,
-      numeroFactura:  state.numeroFactura,
-      fecha:          state.fecha,
-      items:          state.items,
+      proveedorId:      state.proveedorId,
+      proveedorNombre:  state.proveedorNombre,
+      condicionPago:    state.condicionPago,
+      facturaPv:        state.facturaPv,
+      numeroFactura:    state.numeroFactura,
+      fecha:            state.fecha,
+      fechaVencimiento: state.fechaVencimiento,
+      items:            state.items,
     });
 
     const ts   = nowISO();
@@ -569,23 +639,27 @@ const ComprasV2 = (() => {
       }
     } catch (e) {
       alert('Error al pausar: ' + e.message);
-      return;
+      return false;
     }
 
     window.SGA_Utils.showNotification('Compra pausada', 'success');
     resetToNew();
+    return true;
   }
 
   function resetToNew() {
-    state.proveedorId     = null;
-    state.proveedorNombre = null;
-    state.proveedorSaldo  = 0;
-    state.aplicarSaldo    = false;
-    state.condicionPago   = 'efectivo';
-    state.numeroFactura   = '';
-    state.fecha           = todayDate();
-    state.items           = [];
-    state.pausadaId       = null;
+    state.proveedorId      = null;
+    state.proveedorNombre  = null;
+    state.proveedorSaldo   = 0;
+    state.aplicarSaldo     = false;
+    state.condicionPago    = 'efectivo';
+    state.facturaPv        = '';
+    state.numeroFactura    = '';
+    state.fecha            = todayDate();
+    state.fechaVencimiento = '';
+    state.totalFactura     = 0;
+    state.items            = [];
+    state.pausadaId        = null;
 
     // Reset UI
     const card = ge('cv2-prov-card');
@@ -600,10 +674,16 @@ const ComprasV2 = (() => {
     if (chipEf) chipEf.classList.add('cv2-chip-active');
     if (chipPe) chipPe.classList.remove('cv2-chip-active');
 
+    const pvInp = ge('cv2-factura-pv');
+    if (pvInp) pvInp.value = '';
     const facturaInp = ge('cv2-factura');
     if (facturaInp) facturaInp.value = '';
     const fechaInp = ge('cv2-fecha');
     if (fechaInp) fechaInp.value = todayDate();
+    const vencInp = ge('cv2-fecha-vencimiento');
+    if (vencInp) vencInp.value = '';
+    const tfInp = ge('cv2-total-factura');
+    if (tfInp) tfInp.value = '';
 
     renderCart();
     renderProveedorPanel();
@@ -658,13 +738,15 @@ const ComprasV2 = (() => {
     try { snap = JSON.parse(row.snapshot); }
     catch (e) { alert('Error al leer la compra pausada'); return; }
 
-    state.proveedorId     = snap.proveedorId     || null;
-    state.proveedorNombre = snap.proveedorNombre || null;
-    state.condicionPago   = snap.condicionPago   || 'efectivo';
-    state.numeroFactura   = snap.numeroFactura   || '';
-    state.fecha           = snap.fecha           || todayDate();
-    state.items           = snap.items           || [];
-    state.pausadaId       = pausadaId;
+    state.proveedorId      = snap.proveedorId      || null;
+    state.proveedorNombre  = snap.proveedorNombre  || null;
+    state.condicionPago    = snap.condicionPago    || 'efectivo';
+    state.facturaPv        = snap.facturaPv        || '';
+    state.numeroFactura    = snap.numeroFactura    || '';
+    state.fecha            = snap.fecha            || todayDate();
+    state.fechaVencimiento = snap.fechaVencimiento || '';
+    state.items            = snap.items            || [];
+    state.pausadaId        = pausadaId;
 
     if (state.proveedorId) {
       state.proveedorSaldo = getProveedorSaldo(state.proveedorId);
@@ -699,10 +781,14 @@ const ComprasV2 = (() => {
     }
 
     // Restore form fields
+    const pvInp = ge('cv2-factura-pv');
+    if (pvInp) pvInp.value = state.facturaPv;
     const facturaInp = ge('cv2-factura');
     if (facturaInp) facturaInp.value = state.numeroFactura;
     const fechaInp = ge('cv2-fecha');
     if (fechaInp) fechaInp.value = state.fecha;
+    const vencInp = ge('cv2-fecha-vencimiento');
+    if (vencInp) vencInp.value = state.fechaVencimiento;
 
     ge('cv2-pausadas-overlay').style.display = 'none';
 
@@ -735,6 +821,26 @@ const ComprasV2 = (() => {
     if (!btn) return;
     const count = loadPausadas().length;
     btn.textContent = count > 0 ? `Pausadas (${count})` : 'Pausadas';
+  }
+
+  // ── Volver modal ─────────────────────────────────────────────────────────────
+  function showVolverModal() {
+    if (!state.items.length) {
+      window.location.hash = '#pos';
+      return;
+    }
+    const overlay    = ge('cv2-volver-overlay');
+    const summaryEl  = ge('cv2-volver-summary');
+    if (summaryEl) {
+      const n = state.items.length;
+      summaryEl.textContent = `${n} ${n === 1 ? 'artículo' : 'artículos'} — ${fmt$(calcTotal())}`;
+    }
+    if (overlay) overlay.style.display = 'flex';
+  }
+
+  function hideVolverModal() {
+    const overlay = ge('cv2-volver-overlay');
+    if (overlay) overlay.style.display = 'none';
   }
 
   // ── Confirm ──────────────────────────────────────────────────────────────────
@@ -813,7 +919,10 @@ const ComprasV2 = (() => {
 
       // 3. Payment
       if (state.condicionPago === 'efectivo' && sesion) {
-        const desc = `Compra${state.numeroFactura ? ' Fact. ' + state.numeroFactura : ''} — ${state.proveedorNombre}`;
+        const factRef = state.facturaPv && state.numeroFactura
+          ? `${state.facturaPv}-${state.numeroFactura}`
+          : (state.numeroFactura || state.facturaPv || '');
+        const desc = `Compra${factRef ? ' Fact. ' + factRef : ''} — ${state.proveedorNombre}`;
         db().run(`
           INSERT INTO egresos_caja
             (id, sesion_caja_id, monto, descripcion, tipo, fecha, usuario_id, sync_status, updated_at)
@@ -830,7 +939,7 @@ const ComprasV2 = (() => {
             (id, proveedor_id, compra_id, tipo, monto, descripcion, fecha, usuario_id, sync_status, updated_at)
           VALUES (?, ?, ?, 'deuda', ?, ?, ?, ?, 'pending', ?)
         `, [uuid(), state.proveedorId, compraId, neto,
-            `Compra ${state.numeroFactura || compraId.slice(-6).toUpperCase()}`,
+            `Compra ${(state.facturaPv && state.numeroFactura ? state.facturaPv + '-' + state.numeroFactura : state.numeroFactura || compraId.slice(-6).toUpperCase())}`,
             ts, user.id, ts]);
       }
 
@@ -861,64 +970,495 @@ const ComprasV2 = (() => {
     }
   }
 
-  // ── Success screen ───────────────────────────────────────────────────────────
+  // ── Post-compra screen ───────────────────────────────────────────────────────
   function showSuccessScreen({ total, neto, saldoAplicado, sesion }) {
-    const costChanges = state.items.filter(
-      it => Math.abs((parseFloat(it.costoNuevo) || 0) - (parseFloat(it.costoActual) || 0)) > 0.001
-    );
-
     const root = ge('cv2-root');
     if (!root) return;
 
+    // Enrich items with current precio_venta from DB
+    const items = state.items.map(it => {
+      const row = db().query(
+        `SELECT precio_venta FROM productos WHERE id = ?`, [it.productoId]
+      )[0];
+      const costoAnt  = parseFloat(it.costoActual) || 0;
+      const costoNvo  = parseFloat(it.costoNuevo) || costoAnt;
+      const pvActual  = parseFloat(row?.precio_venta) || 0;
+      const cant      = parseFloat(it.cantidad) || 0;
+      const udsPaq    = parseFloat(it.udsPaquete) || 1;
+      const cantUds   = cant * udsPaq;
+      const varPct    = costoAnt > 0.001
+        ? ((costoNvo / costoAnt) - 1)
+        : (costoNvo > 0 ? 1 : 0);
+      const pvSugerido = pvActual > 0
+        ? pvActual * (1 + varPct)
+        : costoNvo * 1.3;
+      return { ...it, costoAnt, costoNvo, pvActual, cantUds, varPct, pvSugerido };
+    });
+
+    const totalArticulos = items.length;
+    const totalUds       = items.reduce((s, it) => s + it.cantUds, 0);
+    const facturaStr     = state.facturaPv && state.numeroFactura
+      ? `${state.facturaPv}-${state.numeroFactura}`
+      : (state.numeroFactura || state.facturaPv || '—');
+    const condStr        = state.condicionPago === 'efectivo' ? 'Contado' : 'Cta. Cte.';
+    const verifyMismatch = state.totalFactura > 0.001 && Math.abs(state.totalFactura - neto) > 0.01;
+
+    // Format date dd/mm/yyyy
+    const fechaFmt = (() => {
+      const [y, m, d] = state.fecha.split('-');
+      return d && m && y ? `${d}/${m}/${y}` : state.fecha;
+    })();
+
+    const rowsHtml = items.map((it, i) => {
+      const varAbs     = Math.abs(it.varPct * 100);
+      const varSign    = it.varPct > 0.001 ? '+' : it.varPct < -0.001 ? '' : '';
+      const varClass   = it.varPct > 0.001
+        ? 'cv2-post-var-up'
+        : it.varPct < -0.001 ? 'cv2-post-var-down' : 'cv2-post-var-zero';
+      const varIcon    = it.varPct > 0.001 ? '▲' : it.varPct < -0.001 ? '▼' : '';
+      const varText    = Math.abs(it.varPct) < 0.0001
+        ? '[0.0%]'
+        : `[${varIcon}${varSign}${(it.varPct * 100).toFixed(1)}%]`;
+      const pvSugFmt   = it.pvSugerido.toFixed(2);
+
+      return `
+        <tr class="cv2-post-tr" data-idx="${i}">
+          <td class="cv2-post-td-num">${i + 1}</td>
+          <td class="cv2-post-td-cod">${esc(it.barcode || '—')}</td>
+          <td class="cv2-post-td-nombre">${esc(it.nombre)}</td>
+          <td class="cv2-post-td-cant c">[${it.cantUds}]</td>
+          <td class="cv2-post-costo-ant r">${fmt$(it.costoAnt)}</td>
+          <td class="cv2-post-costo-nuevo r">${fmt$(it.costoNvo)}</td>
+          <td class="c"><span class="${varClass}">${varText}</span></td>
+          <td class="cv2-post-pv-actual r">${fmt$(it.pvActual)}</td>
+          <td>
+            <div class="cv2-post-precio-input-wrap">
+              <input type="number" class="cv2-post-precio-input" data-idx="${i}"
+                     data-sugerido="${pvSugFmt}" value="${pvSugFmt}" step="0.01" min="0">
+              <button class="cv2-post-recalc-btn" data-idx="${i}" title="Recalcular precio sugerido">&#x21bb;</button>
+            </div>
+          </td>
+          <td>
+            <button class="cv2-post-save-btn" data-idx="${i}" data-prodid="${esc(it.productoId)}">
+              ✓ Guardar Precio
+            </button>
+          </td>
+        </tr>`;
+    }).join('');
+
     root.innerHTML = `
-      <div class="cv2-success">
-        <div class="cv2-success-icon">✅</div>
-        <h2>Compra registrada</h2>
+      <div class="cv2-post-root">
 
-        <div class="cv2-success-details">
-          <div class="cv2-success-row"><span>Proveedor</span><strong>${esc(state.proveedorNombre)}</strong></div>
-          ${state.numeroFactura
-            ? `<div class="cv2-success-row"><span>Factura</span><strong>${esc(state.numeroFactura)}</strong></div>`
-            : ''}
-          <div class="cv2-success-row"><span>Fecha</span><strong>${esc(state.fecha)}</strong></div>
-          <div class="cv2-success-row"><span>Productos</span><strong>${state.items.length}</strong></div>
-          ${saldoAplicado > 0.01 ? `
-            <div class="cv2-success-row"><span>Subtotal</span><strong>${fmt$(total)}</strong></div>
-            <div class="cv2-success-row cv2-success-favor"><span>Saldo aplicado</span><strong>− ${fmt$(saldoAplicado)}</strong></div>
-          ` : ''}
-          <div class="cv2-success-row cv2-success-total">
-            <span>Total</span><strong>${fmt$(neto)}</strong>
+        <!-- Header -->
+        <div class="cv2-post-header">
+          <div>
+            <div class="cv2-post-header-title">Compras — Ingreso Confirmado</div>
+            <div class="cv2-post-header-sub">Resumen Post-Compra</div>
           </div>
-          <div class="cv2-success-row">
-            <span>Pago</span>
-            <strong>${state.condicionPago === 'efectivo' ? '💵 Efectivo' : '📋 Pendiente'}</strong>
-          </div>
-          ${state.condicionPago === 'efectivo' && !sesion
-            ? `<div style="padding:8px 16px"><div class="cv2-warning">⚠️ Sin sesión de caja abierta — egreso no registrado.</div></div>`
-            : ''}
         </div>
 
-        ${costChanges.length > 0 ? `
-          <div class="cv2-success-costos">
-            <div class="cv2-success-sub-title">Costos actualizados (${costChanges.length})</div>
-            ${costChanges.map(it => `
-              <div class="cv2-success-cost-row">
-                <span>${esc(it.nombre)}</span>
-                <span class="cv2-cost-old">${fmt$(it.costoActual)}</span>
-                <span>→</span>
-                <span class="cv2-cost-new">${fmt$(it.costoNuevo)}</span>
-              </div>
-            `).join('')}
+        <!-- Form bar: purchase summary -->
+        <div class="cv2-post-form-bar">
+          <div class="cv2-post-fb-field">
+            <div class="cv2-post-fb-label">Proveedor</div>
+            <div class="cv2-post-fb-value">${esc(state.proveedorNombre)}</div>
           </div>
-        ` : ''}
-
-        <div class="cv2-success-actions">
-          <button class="btn btn-success" id="cv2-btn-ok">OK</button>
+          <div class="cv2-post-fb-field">
+            <div class="cv2-post-fb-label">Nro. Factura</div>
+            <div class="cv2-post-fb-value">${esc(facturaStr)}</div>
+          </div>
+          <div class="cv2-post-fb-field">
+            <div class="cv2-post-fb-label">Fecha Emisión</div>
+            <div class="cv2-post-fb-value">${esc(fechaFmt)}</div>
+          </div>
+          <div class="cv2-post-fb-field">
+            <div class="cv2-post-fb-label">Condición de Pago</div>
+            <div class="${state.condicionPago === 'efectivo' ? 'cv2-post-chip-contado' : 'cv2-post-chip-cc'}">${esc(condStr)}</div>
+          </div>
+          <div class="cv2-post-total-block">
+            <div class="cv2-post-total-label">Total Compra: <span class="cv2-post-total-amount">${fmt$(neto)}</span></div>
+            <div class="${verifyMismatch ? 'cv2-post-verify-warn' : 'cv2-post-verify-ok'}">
+              ${verifyMismatch
+                ? '⚠ Advertencia: Total no coincide con Factura (Control)'
+                : '✓ Ingreso verificado: Coincide con Total Factura (Control)'}
+            </div>
+            ${state.condicionPago === 'efectivo' && !sesion
+              ? `<div class="cv2-post-verify-warn">⚠ Sin sesión de caja abierta — egreso no registrado</div>`
+              : ''}
+          </div>
         </div>
+
+        <!-- Impact banner -->
+        <div class="cv2-post-banner">
+          <span class="cv2-post-banner-icon">↻</span>
+          <span>
+            <strong>RESUMEN DE INGRESO DE STOCK:</strong>
+            Se procesaron <strong>${totalArticulos}</strong> artículos distintos,
+            sumando <strong>${totalUds} unidades totales</strong> al stock.
+          </span>
+        </div>
+
+        <!-- Table -->
+        <div class="cv2-post-table-section">
+          <div class="cv2-post-table-title">Listado de Productos con Cambios Aplicados</div>
+          <table class="cv2-post-table">
+            <thead>
+              <tr>
+                <th class="c">#</th>
+                <th>Código</th>
+                <th>Descripción</th>
+                <th class="c">Cant. Ingresada</th>
+                <th class="r">Costo Ant.</th>
+                <th class="r">Costo Actual</th>
+                <th class="c">Variación % Costo</th>
+                <th class="r">Precio Venta Actual</th>
+                <th class="r">NUEVO PRECIO Venta (Sugerido)</th>
+                <th>Acción</th>
+              </tr>
+            </thead>
+            <tbody id="cv2-post-tbody">
+              ${rowsHtml}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Footer -->
+        <div class="cv2-post-footer">
+          <button class="cv2-post-btn-save-all" id="cv2-post-btn-save-all">
+            ✓ Guardar Todos los Precios
+          </button>
+          <button class="cv2-post-btn-finish" id="cv2-post-btn-finish">
+            Finalizar · Ir al POS
+          </button>
+        </div>
+
       </div>
     `;
 
-    ge('cv2-btn-ok')?.addEventListener('click', () => { window.location.hash = '#pos'; });
+    // Wire up recalc buttons
+    root.querySelectorAll('.cv2-post-recalc-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx   = parseInt(btn.dataset.idx, 10);
+        const input = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
+        if (!input) return;
+        input.value = parseFloat(input.dataset.sugerido).toFixed(2);
+        input.classList.remove('modified');
+      });
+    });
+
+    // Mark input as modified when user edits it
+    root.querySelectorAll('.cv2-post-precio-input').forEach(input => {
+      input.addEventListener('input', () => {
+        const sugerido = parseFloat(input.dataset.sugerido).toFixed(2);
+        input.classList.toggle('modified', input.value !== sugerido);
+      });
+    });
+
+    // Per-row save
+    function markRowSaved(idx) {
+      const btn   = root.querySelector(`.cv2-post-save-btn[data-idx="${idx}"]`);
+      const input = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
+      if (btn)  { btn.textContent = '✓ Guardado'; btn.classList.add('saved'); btn.disabled = true; }
+      if (input){ input.disabled = true; input.style.opacity = '0.6'; }
+    }
+
+    root.querySelectorAll('.cv2-post-save-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (btn.classList.contains('saved')) return;
+        const idx       = parseInt(btn.dataset.idx, 10);
+        const prodId    = btn.dataset.prodid;
+        const input     = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
+        const nuevoPrecio = parseFloat(input?.value) || 0;
+        if (nuevoPrecio <= 0) { alert('Precio inválido'); return; }
+        // Get the enriched item to know the new cost
+        const item = items[idx];
+        const ts   = nowISO();
+        try {
+          db().run(
+            `UPDATE productos SET precio_venta=?, sync_status='pending', updated_at=? WHERE id=?`,
+            [nuevoPrecio, ts, prodId]
+          );
+        } catch (e) {
+          alert('Error al guardar precio: ' + e.message);
+          return;
+        }
+        // Check family
+        const hasFam = checkHasFamily(prodId);
+        if (hasFam) {
+          showHerenciaModal({
+            prodId,
+            prodNombre:  item.nombre,
+            nuevoCosto:  item.costoNvo,
+            nuevoPrecio,
+            onDone: () => markRowSaved(idx),
+          });
+        } else {
+          markRowSaved(idx);
+        }
+      });
+    });
+
+    // Save all
+    ge('cv2-post-btn-save-all')?.addEventListener('click', () => {
+      root.querySelectorAll('.cv2-post-save-btn:not(.saved)').forEach(btn => btn.click());
+    });
+
+    // Finish
+    ge('cv2-post-btn-finish')?.addEventListener('click', () => {
+      window.location.hash = '#pos';
+    });
+  }
+
+  // ── Family helpers ───────────────────────────────────────────────────────────
+  function checkHasFamily(prodId) {
+    const p = db().query(
+      `SELECT es_madre, producto_madre_id FROM productos WHERE id=?`, [prodId]
+    )[0];
+    if (!p) return false;
+    if (p.es_madre == 1) {
+      // Has children?
+      const cnt = db().query(`SELECT COUNT(*) AS n FROM productos WHERE producto_madre_id=?`, [prodId])[0]?.n || 0;
+      return cnt > 0;
+    }
+    return !!p.producto_madre_id;
+  }
+
+  function showHerenciaModal({ prodId, prodNombre, nuevoCosto, nuevoPrecio, onDone }) {
+    const thisProd = db().query(
+      `SELECT es_madre, producto_madre_id FROM productos WHERE id=?`, [prodId]
+    )[0];
+    if (!thisProd) { onDone(); return; }
+
+    const esMadre = thisProd.es_madre == 1;
+    const madreId = esMadre ? prodId : thisProd.producto_madre_id;
+
+    const madreProd = esMadre
+      ? { id: prodId, nombre: prodNombre }
+      : db().query(
+          `SELECT p.id, p.nombre, p.costo AS costo_actual, p.precio_venta AS precio_actual,
+                  COALESCE(s.cantidad, 0) AS stock_actual
+           FROM productos p
+           LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?
+           WHERE p.id = ?`,
+          [state.currentUser.sucursal_id, madreId]
+        )[0];
+
+    const familiaNombre = madreProd?.nombre || 'Familia';
+
+    // ── Build miembros list ──
+    // When saved product is MADRE  → show only hijos, madre is implicit
+    // When saved product is HIJO   → show MADRE first (es_lider=1), then all siblings
+    let miembros = [];
+
+    if (esMadre) {
+      miembros = db().query(`
+        SELECT p.id, p.nombre, p.costo AS costo_actual, p.precio_venta AS precio_actual,
+               COALESCE(p.hereda_costo, 1) AS hereda_costo,
+               COALESCE(p.hereda_precio, 1) AS hereda_precio,
+               COALESCE(s.cantidad, 0) AS stock_actual,
+               0 AS es_lider
+        FROM productos p
+        LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?
+        WHERE p.producto_madre_id = ?
+        ORDER BY p.nombre
+      `, [state.currentUser.sucursal_id, madreId]);
+    } else {
+      // Madre goes first, always checked (she has no hereda flags — she IS the source)
+      const madreRow = {
+        id:           madreProd.id,
+        nombre:       madreProd.nombre,
+        costo_actual: parseFloat(madreProd.costo_actual) || 0,
+        precio_actual: parseFloat(madreProd.precio_actual) || 0,
+        hereda_costo:  1,
+        hereda_precio: 1,
+        stock_actual:  parseFloat(madreProd.stock_actual) || 0,
+        es_lider:      1,
+      };
+      const siblings = db().query(`
+        SELECT p.id, p.nombre, p.costo AS costo_actual, p.precio_venta AS precio_actual,
+               COALESCE(p.hereda_costo, 1) AS hereda_costo,
+               COALESCE(p.hereda_precio, 1) AS hereda_precio,
+               COALESCE(s.cantidad, 0) AS stock_actual,
+               0 AS es_lider
+        FROM productos p
+        LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?
+        WHERE p.producto_madre_id = ? AND p.id != ?
+        ORDER BY p.nombre
+      `, [state.currentUser.sucursal_id, madreId, prodId]);
+      miembros = [madreRow, ...siblings];
+    }
+
+    if (miembros.length === 0) { onDone(); return; }
+
+    // ── Row renderer ──
+    function buildRow(m, i) {
+      const hc      = m.hereda_costo == 1;
+      const hp      = m.hereda_precio == 1;
+      const liderBadge = m.es_lider
+        ? `<span class="cv2-her-badge-lider">👑 MADRE</span> `
+        : '';
+      return `
+        <tr data-mid="${esc(m.id)}" ${m.es_lider ? 'class="cv2-her-row-lider"' : ''}>
+          <td class="cv2-her-td-num c">${i + 1}</td>
+          <td class="cv2-her-td-nombre">${liderBadge}${esc(m.nombre)}</td>
+          <td class="cv2-her-td-stock c">[${m.stock_actual}]</td>
+          <td class="cv2-her-td-readonly r">${fmt$(m.costo_actual)}</td>
+          <td class="c">
+            <input type="checkbox" class="cv2-her-chk cv2-her-chk-costo"
+                   data-mid="${esc(m.id)}" ${hc ? 'checked' : ''}>
+          </td>
+          <td class="cv2-her-td-readonly r">${fmt$(m.precio_actual)}</td>
+          <td class="c">
+            <input type="checkbox" class="cv2-her-chk cv2-her-chk-precio"
+                   data-mid="${esc(m.id)}" ${hp ? 'checked' : ''}>
+          </td>
+          <td class="c">
+            <span class="cv2-her-val cv2-her-nuevo-costo ${hc ? '' : 'unchanged'}">
+              ${hc ? fmt$(nuevoCosto) : fmt$(m.costo_actual)}
+            </span>
+          </td>
+          <td class="c">
+            <span class="cv2-her-val cv2-her-nuevo-precio ${hp ? '' : 'unchanged'}">
+              ${hp ? fmt$(nuevoPrecio) : fmt$(m.precio_actual)}
+            </span>
+          </td>
+          <td>
+            <button class="cv2-her-btn-sinc" data-mid="${esc(m.id)}">✓ Sincronizar</button>
+          </td>
+        </tr>`;
+    }
+
+    const rowsHtml = miembros.map((m, i) => buildRow(m, i)).join('');
+
+    // ── Overlay HTML ──
+    const overlay = document.createElement('div');
+    overlay.className = 'cv2-her-overlay';
+    overlay.innerHTML = `
+      <div class="cv2-her-box">
+        <div class="cv2-her-header">
+          <span class="cv2-her-header-icon">👪</span>
+          <span class="cv2-her-header-title">Gestión de Herencia por Familia: ${esc(familiaNombre)}</span>
+        </div>
+        <div class="cv2-her-warn">
+          ⚠️ El producto <strong>'${esc(prodNombre)}'</strong> que acabas de modificar pertenece a una familia.
+          ¿Deseas sincronizar los costos y precios de los miembros?
+        </div>
+        <div class="cv2-her-sync-all-wrap">
+          <button class="cv2-her-btn-sync-all">✓ SINCRONIZAR TODA LA FAMILIA</button>
+        </div>
+        <div class="cv2-her-table-wrap">
+          <table class="cv2-her-table">
+            <thead>
+              <tr>
+                <th class="c">#</th>
+                <th>Descripción</th>
+                <th class="c">Stock Actual</th>
+                <th class="r">Costo Actual<br><small style="font-weight:400;text-transform:none">(Read-only)</small></th>
+                <th class="c">Heredar<br>Costo?</th>
+                <th class="r">Precio Actual<br><small style="font-weight:400;text-transform:none">(Read-only)</small></th>
+                <th class="c">Heredar<br>Precio?</th>
+                <th class="c">Nuevo<br>Costo</th>
+                <th class="c">Nuevo<br>Precio</th>
+                <th>Acción</th>
+              </tr>
+            </thead>
+            <tbody id="cv2-her-tbody">${rowsHtml}</tbody>
+          </table>
+        </div>
+        <div class="cv2-her-footer">
+          <div class="cv2-her-summary">
+            <span>Miembros Sincronizados: <span class="cv2-her-summary-val" id="cv2-her-cnt">0</span></span>
+            <span>Ganancia por Revalorización de Stock:
+              <span class="cv2-her-summary-val cv2-her-summary-ganancia" id="cv2-her-gan">${fmt$(0)}</span>
+            </span>
+          </div>
+          <div class="cv2-her-footer-actions">
+            <button class="cv2-her-btn-cancel">cancel</button>
+            <button class="cv2-her-btn-apply">✓ FINALIZAR Y APLICAR CAMBIOS</button>
+          </div>
+        </div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+
+    // ── Helpers ──
+    function getMiembroData(mid) {
+      return miembros.find(m => m.id === mid);
+    }
+
+    function recalcSummary() {
+      let cnt = 0, gan = 0;
+      overlay.querySelectorAll('#cv2-her-tbody tr').forEach(tr => {
+        const mid = tr.dataset.mid;
+        const m   = getMiembroData(mid);
+        if (!m) return;
+        const hc  = tr.querySelector('.cv2-her-chk-costo')?.checked;
+        const hp  = tr.querySelector('.cv2-her-chk-precio')?.checked;
+        if (hc || hp) cnt++;
+        if (hc) gan += (nuevoCosto - m.costo_actual) * m.stock_actual;
+        const ncEl = tr.querySelector('.cv2-her-nuevo-costo');
+        const npEl = tr.querySelector('.cv2-her-nuevo-precio');
+        if (ncEl) { ncEl.textContent = hc ? fmt$(nuevoCosto) : fmt$(m.costo_actual); ncEl.classList.toggle('unchanged', !hc); }
+        if (npEl) { npEl.textContent = hp ? fmt$(nuevoPrecio) : fmt$(m.precio_actual); npEl.classList.toggle('unchanged', !hp); }
+      });
+      const cntEl = overlay.querySelector('#cv2-her-cnt');
+      const ganEl = overlay.querySelector('#cv2-her-gan');
+      if (cntEl) cntEl.textContent = cnt;
+      if (ganEl) { ganEl.textContent = (gan >= 0 ? '+' : '') + fmt$(gan); ganEl.style.color = gan >= 0 ? '#2e7d32' : '#c62828'; }
+    }
+
+    function sincRow(tr) {
+      const mid = tr.dataset.mid;
+      const m   = getMiembroData(mid);
+      if (!m) return;
+      const hc  = tr.querySelector('.cv2-her-chk-costo')?.checked;
+      const hp  = tr.querySelector('.cv2-her-chk-precio')?.checked;
+      const ts  = nowISO();
+      const fields = [], vals = [];
+      if (hc) { fields.push('costo=?', 'costo_paquete=?'); vals.push(nuevoCosto, nuevoCosto); }
+      if (hp) { fields.push('precio_venta=?'); vals.push(nuevoPrecio); }
+      if (!fields.length) return;
+      fields.push("sync_status='pending'", 'updated_at=?');
+      vals.push(ts, m.id);
+      db().run(`UPDATE productos SET ${fields.join(',')} WHERE id=?`, vals);
+      const sincBtn = tr.querySelector('.cv2-her-btn-sinc');
+      if (sincBtn) { sincBtn.textContent = '✓ Sincronizado'; sincBtn.classList.add('sinc-done'); sincBtn.disabled = true; }
+    }
+
+    // Init
+    recalcSummary();
+
+    overlay.querySelectorAll('.cv2-her-chk').forEach(chk => {
+      chk.addEventListener('change', recalcSummary);
+    });
+
+    overlay.querySelector('.cv2-her-btn-sync-all')?.addEventListener('click', () => {
+      overlay.querySelectorAll('.cv2-her-chk').forEach(chk => { chk.checked = true; });
+      recalcSummary();
+    });
+
+    overlay.querySelectorAll('.cv2-her-btn-sinc').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (btn.classList.contains('sinc-done')) return;
+        try { sincRow(btn.closest('tr')); } catch (e) { alert('Error: ' + e.message); }
+        recalcSummary();
+      });
+    });
+
+    overlay.querySelector('.cv2-her-btn-apply')?.addEventListener('click', () => {
+      overlay.querySelectorAll('#cv2-her-tbody tr').forEach(tr => {
+        if (!tr.querySelector('.cv2-her-btn-sinc')?.classList.contains('sinc-done')) {
+          try { sincRow(tr); } catch (e) { /* skip */ }
+        }
+      });
+      overlay.remove();
+      onDone();
+    });
+
+    overlay.querySelector('.cv2-her-btn-cancel')?.addEventListener('click', () => {
+      overlay.remove();
+      onDone();
+    });
   }
 
   // ── Keyboard ─────────────────────────────────────────────────────────────────
@@ -941,8 +1481,8 @@ const ComprasV2 = (() => {
         return;
       }
 
-      // Don't steal focus from provider search, factura, fecha, or cart row inputs
-      if (active?.id === 'cv2-prov-search' || active?.id === 'cv2-factura' || active?.id === 'cv2-fecha') return;
+      // Don't steal focus from provider search, factura, fecha, total, or cart row inputs
+      if (['cv2-prov-search','cv2-factura-pv','cv2-factura','cv2-fecha','cv2-fecha-vencimiento','cv2-total-factura'].includes(active?.id)) return;
       if (isInput && active?.closest?.('.cv2-cart-row')) return;
 
       // Redirect printable characters to scan input
@@ -963,15 +1503,18 @@ const ComprasV2 = (() => {
 
     state.currentUser  = window.SGA_Auth.getCurrentUser();
     state.sesionActiva = getSesionActiva(state.currentUser.sucursal_id);
-    state.proveedorId  = null;
-    state.proveedorNombre = null;
-    state.proveedorSaldo  = 0;
-    state.aplicarSaldo    = false;
-    state.condicionPago   = 'efectivo';
-    state.numeroFactura   = '';
-    state.fecha           = todayDate();
-    state.items           = [];
-    state.pausadaId       = null;
+    state.proveedorId      = null;
+    state.proveedorNombre  = null;
+    state.proveedorSaldo   = 0;
+    state.aplicarSaldo     = false;
+    state.condicionPago    = 'efectivo';
+    state.facturaPv        = '';
+    state.numeroFactura    = '';
+    state.fecha            = todayDate();
+    state.fechaVencimiento = '';
+    state.totalFactura     = 0;
+    state.items            = [];
+    state.pausadaId        = null;
     state.searchResults    = [];
     state.searchHighlight  = -1;
     state.searchQuerySaved = '';
@@ -1004,9 +1547,31 @@ const ComprasV2 = (() => {
       const r = ge('cv2-radio-pendiente'); if (r) r.click();
     });
 
-    // ── Factura / Fecha ──
-    ge('cv2-factura')?.addEventListener('input', e => { state.numeroFactura = e.target.value; });
-    ge('cv2-fecha')  ?.addEventListener('input', e => { state.fecha = e.target.value; });
+    // ── Factura / Fecha / Total ──
+    ge('cv2-factura-pv')        ?.addEventListener('input', e => { state.facturaPv = e.target.value; });
+    ge('cv2-factura')           ?.addEventListener('input', e => { state.numeroFactura = e.target.value; });
+    ge('cv2-fecha')             ?.addEventListener('input', e => { state.fecha = e.target.value; });
+    ge('cv2-fecha-vencimiento') ?.addEventListener('input', e => { state.fechaVencimiento = e.target.value; });
+
+    // Total factura: format as ARS currency on blur, raw on focus
+    const tfInp = ge('cv2-total-factura');
+    if (tfInp) {
+      tfInp.addEventListener('focus', () => {
+        if (state.totalFactura > 0) tfInp.value = String(state.totalFactura).replace('.', ',');
+        else tfInp.value = '';
+        tfInp.select();
+      });
+      tfInp.addEventListener('blur', () => {
+        const raw = parseARS(tfInp.value);
+        state.totalFactura = raw;
+        tfInp.value = raw > 0 ? formatARS(raw) : '';
+        updateConfirmBtn();
+      });
+      // Strip anything that's not a digit, comma or period while typing
+      tfInp.addEventListener('input', () => {
+        tfInp.value = tfInp.value.replace(/[^\d,.]/g, '');
+      });
+    }
 
     // ── Product search ──
     const searchInp = ge('cv2-search');
@@ -1084,8 +1649,8 @@ const ComprasV2 = (() => {
         const field = inp.dataset.field;
         const idx   = parseInt(inp.dataset.idx);
 
-        // Numeric-only filter for cantidad and costoNuevo
-        if (field === 'cantidad' || field === 'costoNuevo') {
+        // Numeric-only filter for cantidad, costoNuevo, descuento, descuentoMonto
+        if (['cantidad','costoNuevo','descuento','descuentoMonto'].includes(field)) {
           const allow = ['Backspace','Delete','Tab','Enter','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','.'];
           if (!allow.includes(e.key) && !/^\d$/.test(e.key) && !e.ctrlKey && !e.metaKey) {
             e.preventDefault();
@@ -1161,9 +1726,23 @@ const ComprasV2 = (() => {
     ge('cv2-prov-clear')?.addEventListener('click', clearProveedor);
 
     // ── Action buttons ──
+    ge('cv2-btn-volver')   ?.addEventListener('click', showVolverModal);
     ge('cv2-btn-pausar')   ?.addEventListener('click', pausar);
     ge('cv2-btn-confirmar')?.addEventListener('click', confirmar);
     ge('cv2-btn-pausadas') ?.addEventListener('click', showPausadasOverlay);
+
+    // ── Volver modal options ──
+    ge('cv2-volver-pausar')?.addEventListener('click', () => {
+      hideVolverModal();
+      if (pausar()) window.location.hash = '#pos';
+    });
+    ge('cv2-volver-descartar')?.addEventListener('click', () => {
+      window.location.hash = '#pos';
+    });
+    ge('cv2-volver-seguir')?.addEventListener('click', hideVolverModal);
+    ge('cv2-volver-overlay')?.addEventListener('click', e => {
+      if (e.target === ge('cv2-volver-overlay')) hideVolverModal();
+    });
 
     ge('cv2-pausadas-close')?.addEventListener('click', () => {
       ge('cv2-pausadas-overlay').style.display = 'none';

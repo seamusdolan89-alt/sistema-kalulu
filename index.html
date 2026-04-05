@@ -62,6 +62,9 @@
   <script src="./js/sync.js"></script>
   <script src="./js/print.js"></script>
   <script src="./js/seed.js" type="module"></script>
-  <script src="./js/app.js" type="module"></script>
+  <script type="module">
+    const v = Date.now();
+    await import(`./js/app.js?v=${v}`);
+  </script>
 </body>
 </html>

@@ -1,3 +1,13 @@
+# ⚠️ ARCHIVO LEGACY — NO USAR DIRECTAMENTE
+
+Este archivo contiene la especificación completa original del sistema.
+
+IMPORTANTE:
+- No usar este archivo como contexto completo en prompts
+- Usar la carpeta /spec modular en su lugar
+- Este archivo es solo de referencia histórica
+
+
 # SPEC.md — Sistema de Gestión de Almacén (SGA)
 
 > **Versión:** 1.1  
