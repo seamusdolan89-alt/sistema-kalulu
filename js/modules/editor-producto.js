@@ -420,7 +420,13 @@ const EditorProducto = (() => {
         </div>
       </div>
       <div class="form-group">
-        <label>Buscar madre para este producto</label>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <label style="margin:0">Buscar madre para este producto</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#607080;cursor:pointer">
+            <input type="checkbox" id="ed-buscar-madre-todos" style="width:14px;height:14px;cursor:pointer;accent-color:#1565c0">
+            Buscar en todos los productos
+          </label>
+        </div>
         <div style="position:relative">
           <input type="text" id="ed-buscar-madre-input" class="input-full" placeholder="Escribir nombre de producto madre..." autocomplete="off">
           <div id="ed-buscar-madre-results" class="ed-search-dropdown" style="display:none"></div>
@@ -712,6 +718,7 @@ const EditorProducto = (() => {
 }
 .ed-search-result-item:last-child { border-bottom: none; }
 .ed-search-result-item:hover { background: var(--color-primary-light); color: var(--color-primary); }
+.ed-sust-hl { background: var(--color-primary-light); color: var(--color-primary); }
 .ed-familia-modal-box {
   position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
   background: white; border-radius: 10px; padding: 24px;
@@ -1044,7 +1051,56 @@ const EditorProducto = (() => {
     // Referencia search input
     const refSearch = ge('ed-ref-search');
     if (refSearch) {
-      refSearch.addEventListener('input', () => renderRefDropdown(refSearch.value.trim()));
+      let refHl = -1;
+
+      const scrollRefHl = (idx) => {
+        const dd = ge('ed-ref-dropdown');
+        if (!dd) return;
+        const items = dd.querySelectorAll('.ed-search-result-item[data-id]');
+        refHl = Math.max(-1, Math.min(idx, items.length - 1));
+        items.forEach((el, i) => el.classList.toggle('ed-sust-hl', i === refHl));
+        if (refHl >= 0 && items[refHl]) items[refHl].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      };
+
+      refSearch.addEventListener('input', () => {
+        refHl = -1;
+        renderRefDropdown(refSearch.value.trim());
+      });
+
+      refSearch.addEventListener('keydown', (e) => {
+        const dd = ge('ed-ref-dropdown');
+        if (e.key === 'Escape') {
+          refSearch.value = '';
+          if (dd) dd.style.display = 'none';
+          refHl = -1;
+          return;
+        }
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          scrollRefHl(refHl + 1);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          scrollRefHl(refHl - 1);
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (refHl >= 0 && dd) {
+            const items = dd.querySelectorAll('.ed-search-result-item[data-id]');
+            if (items[refHl]) {
+              setReferencia(items[refHl].dataset.id);
+              refSearch.value = '';
+              const wrap = ge('ed-ref-search-wrap');
+              if (wrap) wrap.style.display = 'none';
+              dd.style.display = 'none';
+              refHl = -1;
+            }
+          }
+        }
+      });
+
       document.addEventListener('click', function closeRefDd(e) {
         if (!refSearch.isConnected) { document.removeEventListener('click', closeRefDd); return; }
         if (!refSearch.contains(e.target)) {
@@ -1057,25 +1113,66 @@ const EditorProducto = (() => {
     // Member (sustituto) search input
     const sustSearch = ge('ed-sustituto-search');
     if (sustSearch) {
-      sustSearch.addEventListener('input', () => renderSustitutoDropdown(sustSearch.value.trim()));
+      let sustHl = -1;
+
+      const scrollSustHl = (idx) => {
+        const dd = ge('ed-sustituto-dropdown');
+        if (!dd) return;
+        const items = dd.querySelectorAll('.ed-search-result-item[data-id]');
+        sustHl = Math.max(-1, Math.min(idx, items.length - 1));
+        items.forEach((el, i) => el.classList.toggle('ed-sust-hl', i === sustHl));
+        if (sustHl >= 0 && items[sustHl]) items[sustHl].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      };
+
+      sustSearch.addEventListener('input', () => {
+        sustHl = -1;
+        renderSustitutoDropdown(sustSearch.value.trim());
+      });
+
       sustSearch.addEventListener('keydown', (e) => {
+        const dd = ge('ed-sustituto-dropdown');
         if (e.key === 'Escape') {
           sustSearch.value = '';
-          const dd = ge('ed-sustituto-dropdown');
           if (dd) dd.style.display = 'none';
+          sustHl = -1;
+          return;
+        }
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          scrollSustHl(sustHl + 1);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          scrollSustHl(sustHl - 1);
+          return;
         }
         if (e.key === 'Enter') {
           e.preventDefault();
+          if (sustHl >= 0 && dd) {
+            const items = dd.querySelectorAll('.ed-search-result-item[data-id]');
+            if (items[sustHl]) {
+              const refRow = window.SGA_DB.query(
+                'SELECT referencia_id FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1',
+                [state.productoId]
+              );
+              addMiembroGrupo(items[sustHl].dataset.id, refRow.length ? refRow[0].referencia_id : null);
+              sustSearch.value = '';
+              dd.style.display = 'none';
+              sustHl = -1;
+            }
+            return;
+          }
+          // Fallback: barcode scan
           const q = sustSearch.value.trim();
           if (/^\d{6,}$/.test(q)) {
             const hit = window.SGA_DB.query(
-              'SELECT p.id FROM productos p JOIN codigos_barras cb ON cb.producto_id = p.id WHERE cb.codigo = ? AND p.activo = 1 LIMIT 1',
-              [q]
+              'SELECT p.id FROM productos p JOIN codigos_barras cb ON cb.producto_id = p.id WHERE cb.codigo = ? AND p.activo = 1 AND p.id != ? LIMIT 1',
+              [q, state.productoId]
             );
             if (hit.length) {
               addMiembroGrupo(hit[0].id, referenciaId);
               sustSearch.value = '';
-              const dd = ge('ed-sustituto-dropdown');
               if (dd) dd.style.display = 'none';
             }
           }
@@ -1144,9 +1241,9 @@ const EditorProducto = (() => {
       SELECT p.id, p.nombre, cb.codigo AS codigo_barras
       FROM productos p
       LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
-      WHERE p.activo = 1 AND (LOWER(p.nombre) LIKE ? OR cb.codigo LIKE ?)
+      WHERE p.activo = 1 AND p.id != ? AND (LOWER(p.nombre) LIKE ? OR cb.codigo LIKE ?)
       ORDER BY p.nombre LIMIT 10
-    `, [`%${q.toLowerCase()}%`, `%${q}%`]);
+    `, [state.productoId, `%${q.toLowerCase()}%`, `%${q}%`]);
 
     if (!results.length) {
       dropdown.innerHTML = '<div class="ed-search-result-item ed-text-muted">Sin resultados</div>';
@@ -1178,7 +1275,7 @@ const EditorProducto = (() => {
     if (!dropdown) return;
     if (!q || q.length < 2) { dropdown.style.display = 'none'; return; }
 
-    // Exclude products already in the group
+    // Exclude products already in the group AND the current product
     const existingIds = new Set(
       window.SGA_DB.query(
         'SELECT producto_id FROM producto_sustitutos WHERE referencia_id = (SELECT referencia_id FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1)',
@@ -1192,9 +1289,9 @@ const EditorProducto = (() => {
       FROM productos p
       LEFT JOIN categorias cat ON cat.id = p.categoria_id
       LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
-      WHERE p.activo = 1 AND (LOWER(p.nombre) LIKE ? OR cb.codigo LIKE ?)
-      ORDER BY p.nombre LIMIT 10
-    `, [`%${q.toLowerCase()}%`, `%${q}%`])
+      WHERE p.activo = 1 AND p.id != ? AND (LOWER(p.nombre) LIKE ? OR cb.codigo LIKE ?)
+      ORDER BY p.nombre LIMIT 15
+    `, [state.productoId, `%${q.toLowerCase()}%`, `%${q}%`])
     .filter(pr => !existingIds.has(pr.id));
 
     if (!results.length) {
@@ -1219,6 +1316,7 @@ const EditorProducto = (() => {
         const si = ge('ed-sustituto-search');
         if (si) si.value = '';
         dropdown.style.display = 'none';
+        sustHlIdx = -1;
       });
     });
   };
@@ -1384,32 +1482,44 @@ const EditorProducto = (() => {
       buscarInput.value = '';
       const newInput = buscarInput.cloneNode(true);
       buscarInput.parentNode.replaceChild(newInput, buscarInput);
-      newInput.addEventListener('input', () => {
+      const doSearch = () => {
         const q = newInput.value.trim().toLowerCase();
         const resultsDiv = ge('ed-buscar-madre-results');
         if (!resultsDiv) return;
         if (!q) { resultsDiv.style.display = 'none'; return; }
-        const madres = window.SGA_DB.query(
-          "SELECT id, nombre FROM productos WHERE es_madre = 1 AND id != ? AND LOWER(nombre) LIKE ? ORDER BY nombre LIMIT 10",
-          [state.productoId, '%' + q + '%']
-        );
-        if (!madres.length) {
+        const todosChk = ge('ed-buscar-madre-todos');
+        const todos = todosChk?.checked;
+        const resultados = todos
+          ? window.SGA_DB.query(
+              "SELECT id, nombre, es_madre FROM productos WHERE activo = 1 AND id != ? AND LOWER(nombre) LIKE ? ORDER BY nombre LIMIT 10",
+              [state.productoId, '%' + q + '%']
+            )
+          : window.SGA_DB.query(
+              "SELECT id, nombre, es_madre FROM productos WHERE es_madre = 1 AND id != ? AND LOWER(nombre) LIKE ? ORDER BY nombre LIMIT 10",
+              [state.productoId, '%' + q + '%']
+            );
+        if (!resultados.length) {
           resultsDiv.innerHTML = '<div class="ed-search-result-item ed-text-muted">Sin resultados</div>';
           resultsDiv.style.display = '';
           return;
         }
-        resultsDiv.innerHTML = madres.map(m =>
-          `<div class="ed-search-result-item" data-id="${escapeHtml(m.id)}" data-nombre="${escapeHtml(m.nombre)}">${escapeHtml(m.nombre)}</div>`
-        ).join('');
+        resultsDiv.innerHTML = resultados.map(m => {
+          const badge = !m.es_madre
+            ? `<span style="font-size:10px;color:#e65100;background:#fff3e0;padding:1px 5px;border-radius:4px;margin-left:6px">no es madre aún</span>`
+            : '';
+          return `<div class="ed-search-result-item" data-id="${escapeHtml(m.id)}" data-nombre="${escapeHtml(m.nombre)}" data-es-madre="${m.es_madre ? '1' : '0'}">${escapeHtml(m.nombre)}${badge}</div>`;
+        }).join('');
         resultsDiv.style.display = '';
         resultsDiv.querySelectorAll('.ed-search-result-item[data-id]').forEach(item => {
           item.addEventListener('click', () => {
             newInput.value = item.dataset.nombre;
             resultsDiv.style.display = 'none';
-            confirmAsignarMadre(item.dataset.id, item.dataset.nombre);
+            confirmAsignarMadre(item.dataset.id, item.dataset.nombre, item.dataset.esMadre === '1');
           });
         });
-      });
+      };
+      newInput.addEventListener('input', doSearch);
+      ge('ed-buscar-madre-todos')?.addEventListener('change', doSearch);
     }
   };
 
@@ -1593,10 +1703,16 @@ const EditorProducto = (() => {
     });
   };
 
-  const confirmAsignarMadre = (madreId, madreNombre) => {
+  const confirmAsignarMadre = (madreId, madreNombre, yaEsMadre = true) => {
+    const advertencia = !yaEsMadre
+      ? `<div style="margin-bottom:14px;padding:8px 12px;background:#fff3e0;border:1px solid #ffcc80;border-radius:6px;font-size:13px;color:#e65100">
+           ⚠ <strong>${escapeHtml(madreNombre)}</strong> no es madre actualmente. Al confirmar, se convertirá en producto madre automáticamente.
+         </div>`
+      : '';
     openFamiliaModal(`
       <h4 style="margin:0 0 12px;font-size:16px">¿Asignar madre?</h4>
       <p style="margin:0 0 14px;font-size:14px">Asignar <strong>${escapeHtml(madreNombre)}</strong> como madre de este producto.</p>
+      ${advertencia}
       <label class="checkbox-label" style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <input type="checkbox" id="fam-hereda-costo" checked> Heredar costo de la madre
       </label>
@@ -1608,9 +1724,16 @@ const EditorProducto = (() => {
         <button id="fam-btn-cancel" class="btn btn-outline btn-sm">Cancelar</button>
       </div>
     `, () => {
-      const hc = (ge('fam-hereda-costo')  || {}).checked ? 1 : 0;
-      const hp = (ge('fam-hereda-precio') || {}).checked ? 1 : 0;
+      const hc  = (ge('fam-hereda-costo')  || {}).checked ? 1 : 0;
+      const hp  = (ge('fam-hereda-precio') || {}).checked ? 1 : 0;
       const now = window.SGA_Utils.formatISODate(new Date());
+      // Si no era madre, convertirla
+      if (!yaEsMadre) {
+        window.SGA_DB.run(
+          "UPDATE productos SET es_madre = 1, sync_status = 'pending', updated_at = ? WHERE id = ?",
+          [now, madreId]
+        );
+      }
       window.SGA_DB.run(
         "UPDATE productos SET producto_madre_id = ?, hereda_costo = ?, hereda_precio = ?, es_madre = 0, fecha_modificacion = ?, sync_status = 'pending', updated_at = ? WHERE id = ?",
         [madreId, hc, hp, now, now, state.productoId]
@@ -1619,7 +1742,7 @@ const EditorProducto = (() => {
       state.producto.hereda_costo = hc;
       state.producto.hereda_precio = hp;
       closeFamiliaModal();
-      showToast('Madre asignada');
+      showToast(yaEsMadre ? 'Madre asignada' : 'Madre asignada y convertida a producto madre');
       renderMadreInfo();
     });
   };
@@ -2383,10 +2506,22 @@ const EditorProducto = (() => {
 
     state.dirty = false;
     showToast('✅ Cambios guardados');
+
+    const returnTo = sessionStorage.getItem('editor_returnTo');
+    if (returnTo) {
+      sessionStorage.removeItem('editor_returnTo');
+      window.location.hash = returnTo;
+    }
   };
 
   const handleCancel = () => {
     if (state.dirty && !confirm('¿Descartar los cambios sin guardar?')) return;
+    const returnTo = sessionStorage.getItem('editor_returnTo');
+    if (returnTo) {
+      sessionStorage.removeItem('editor_returnTo');
+      window.location.hash = returnTo;
+      return;
+    }
     window.location.hash = '#productos';
   };
 

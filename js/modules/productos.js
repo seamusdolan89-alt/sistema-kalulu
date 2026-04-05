@@ -2159,21 +2159,30 @@
   };
 
   const runMigrations = () => {
-    const migrations = [
-      `ALTER TABLE productos ADD COLUMN unidad_compra TEXT DEFAULT 'Unidad'`,
-      `ALTER TABLE productos ADD COLUMN unidades_por_paquete_compra REAL DEFAULT 1`,
-      `ALTER TABLE productos ADD COLUMN unidad_venta TEXT DEFAULT 'Unidad'`,
-      `ALTER TABLE productos ADD COLUMN precio_lista_por TEXT DEFAULT 'Por unidad de compra'`,
-      `ALTER TABLE productos ADD COLUMN precio_lista_divisor REAL DEFAULT 1`,
-      `ALTER TABLE productos ADD COLUMN costo_paquete REAL DEFAULT 0`,
-      `ALTER TABLE productos ADD COLUMN es_oferta INTEGER DEFAULT 0`,
-      `ALTER TABLE productos ADD COLUMN oferta_desde TEXT`,
-      `ALTER TABLE productos ADD COLUMN oferta_hasta TEXT`,
-      `ALTER TABLE producto_sustitutos ADD COLUMN referencia_id TEXT`,
-    ];
-    migrations.forEach(sql => {
-      try { window.SGA_DB.run(sql); } catch (e) { /* column already exists */ }
-    });
+    const existingColumns = (table) => {
+      const rows = window.SGA_DB.query(`PRAGMA table_info(${table})`);
+      return new Set(rows.map(r => r.name));
+    };
+
+    const colsProductos = existingColumns('productos');
+    const colsSustitutos = existingColumns('producto_sustitutos');
+
+    const addCol = (table, col, def, existing) => {
+      if (!existing.has(col)) {
+        window.SGA_DB.run(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+      }
+    };
+
+    addCol('productos', 'unidad_compra', "TEXT DEFAULT 'Unidad'", colsProductos);
+    addCol('productos', 'unidades_por_paquete_compra', 'REAL DEFAULT 1', colsProductos);
+    addCol('productos', 'unidad_venta', "TEXT DEFAULT 'Unidad'", colsProductos);
+    addCol('productos', 'precio_lista_por', "TEXT DEFAULT 'Por unidad de compra'", colsProductos);
+    addCol('productos', 'precio_lista_divisor', 'REAL DEFAULT 1', colsProductos);
+    addCol('productos', 'costo_paquete', 'REAL DEFAULT 0', colsProductos);
+    addCol('productos', 'es_oferta', 'INTEGER DEFAULT 0', colsProductos);
+    addCol('productos', 'oferta_desde', 'TEXT', colsProductos);
+    addCol('productos', 'oferta_hasta', 'TEXT', colsProductos);
+    addCol('producto_sustitutos', 'referencia_id', 'TEXT', colsSustitutos);
   };
 
   const init = () => {

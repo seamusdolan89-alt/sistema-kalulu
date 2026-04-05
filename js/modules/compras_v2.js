@@ -41,11 +41,12 @@ const ComprasV2 = (() => {
     sesionActiva:       null,
     currentUser:        null,
     // transient UI
-    searchResults:      [],
-    searchHighlight:    -1,
-    searchQuerySaved:   '',   // typed query before arrow navigation
-    provResults:        [],
-    provHighlight:      -1,
+    searchResults:        [],
+    searchHighlight:      -1,
+    searchQuerySaved:     '',   // typed query before arrow navigation
+    provResults:          [],
+    provHighlight:        -1,
+    herenciaSincronizados: [], // products synced via herencia modal during post-compra
   };
 
   // ── DB helpers ───────────────────────────────────────────────────────────────
@@ -510,12 +511,17 @@ const ComprasV2 = (() => {
     const user   = state.currentUser;
 
     try {
-      db().run(`
+      const ins = db().run(`
         INSERT INTO productos
           (id, nombre, costo, costo_paquete, unidad_compra, unidades_por_paquete_compra,
-           activo, sucursal_id, sync_status, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, 1, ?, 'pending', ?)
-      `, [prodId, nombre, costo, costo * udsPaq, unidad, udsPaq, user.sucursal_id, ts]);
+           activo, sync_status, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 1, 'pending', ?)
+      `, [prodId, nombre, costo, costo * udsPaq, unidad, udsPaq, ts]);
+
+      if (!ins || ins.changes === 0) {
+        alert('Error al crear el producto. Revisá la consola.');
+        return;
+      }
 
       if (barcode && barcode.trim()) {
         db().run(`
@@ -529,7 +535,7 @@ const ComprasV2 = (() => {
     }
 
     hideNewProductForm();
-    addToCart({ productoId: prodId, nombre, barcode: barcode || '', unidadCompra: unidad, udsPaquete: udsPaq, costoActual: costo, costoNuevo: costo });
+    addToCart({ productoId: prodId, nombre, barcode: barcode || '', unidadCompra: unidad, udsPaquete: udsPaq, costoActual: costo, costoNuevo: costo, isNuevo: true });
   }
 
   // ── Proveedor search ─────────────────────────────────────────────────────────
@@ -961,6 +967,7 @@ const ComprasV2 = (() => {
 
       db().commitBatch();
 
+      state.herenciaSincronizados = [];
       showSuccessScreen({ compraId, total, neto, saldoAplicado, sesion });
 
     } catch (e) {
@@ -1009,20 +1016,41 @@ const ComprasV2 = (() => {
       return d && m && y ? `${d}/${m}/${y}` : state.fecha;
     })();
 
+    // Ordenar: primero los que tienen cambio de costo o son nuevos, luego los demás; dentro de cada grupo, alfabético
+    items.sort((a, b) => {
+      const aNuevo   = a.isNuevo === true || (parseFloat(a.pvActual) || 0) === 0;
+      const bNuevo   = b.isNuevo === true || (parseFloat(b.pvActual) || 0) === 0;
+      const aRelevant = Math.abs(a.varPct) > 0.001 || aNuevo;
+      const bRelevant = Math.abs(b.varPct) > 0.001 || bNuevo;
+      if (aRelevant !== bRelevant) return aRelevant ? -1 : 1;
+      return a.nombre.localeCompare(b.nombre, 'es');
+    });
+
     const rowsHtml = items.map((it, i) => {
-      const varAbs     = Math.abs(it.varPct * 100);
-      const varSign    = it.varPct > 0.001 ? '+' : it.varPct < -0.001 ? '' : '';
-      const varClass   = it.varPct > 0.001
-        ? 'cv2-post-var-up'
-        : it.varPct < -0.001 ? 'cv2-post-var-down' : 'cv2-post-var-zero';
-      const varIcon    = it.varPct > 0.001 ? '▲' : it.varPct < -0.001 ? '▼' : '';
-      const varText    = Math.abs(it.varPct) < 0.0001
-        ? '[0.0%]'
-        : `[${varIcon}${varSign}${(it.varPct * 100).toFixed(1)}%]`;
-      const pvSugFmt   = it.pvSugerido.toFixed(2);
+      const esNuevoItem    = it.isNuevo === true || (parseFloat(it.pvActual) || 0) === 0;
+      const hasCostChange  = Math.abs(it.varPct) > 0.001;
+      const needsAttention = hasCostChange || esNuevoItem;
+      const pvSugFmt       = it.pvSugerido.toFixed(2);
+      const hasPriceChange = Math.abs(it.pvSugerido - it.pvActual) > 0.01 || esNuevoItem;
+      const varSign        = it.varPct > 0.001 ? '+' : '';
+      const varClass       = it.varPct > 0.001 ? 'cv2-post-var-up'
+                           : it.varPct < -0.001 ? 'cv2-post-var-down' : 'cv2-post-var-zero';
+      const varIcon        = it.varPct > 0.001 ? '▲' : it.varPct < -0.001 ? '▼' : '';
+      const varText        = Math.abs(it.varPct) < 0.0001
+        ? '[0.0%]' : `[${varIcon}${varSign}${(it.varPct * 100).toFixed(1)}%]`;
+      const rowClass       = needsAttention
+        ? 'cv2-post-tr cv2-post-tr-changed'
+        : 'cv2-post-tr cv2-post-tr-unchanged cv2-post-tr-aldia';
+
+      const actionHtml = !hasPriceChange
+        ? `<span class="cv2-post-badge-aldia">✓ Al día</span>`
+        : `<div class="cv2-post-action-wrap">
+             <button class="cv2-post-actualizar-btn" data-idx="${i}" data-prodid="${esc(it.productoId)}">✓ Actualizar</button>
+             <button class="cv2-post-ignorar-btn" data-idx="${i}">⊘ Ignorar</button>
+           </div>`;
 
       return `
-        <tr class="cv2-post-tr" data-idx="${i}">
+        <tr class="${rowClass}" data-idx="${i}" data-costo="${it.costoNvo}">
           <td class="cv2-post-td-num">${i + 1}</td>
           <td class="cv2-post-td-cod">${esc(it.barcode || '—')}</td>
           <td class="cv2-post-td-nombre">${esc(it.nombre)}</td>
@@ -1034,15 +1062,15 @@ const ComprasV2 = (() => {
           <td>
             <div class="cv2-post-precio-input-wrap">
               <input type="number" class="cv2-post-precio-input" data-idx="${i}"
-                     data-sugerido="${pvSugFmt}" value="${pvSugFmt}" step="0.01" min="0">
+                     data-sugerido="${pvSugFmt}" data-pvactual="${it.pvActual.toFixed(2)}"
+                     value="${pvSugFmt}" step="0.01" min="0">
               <button class="cv2-post-recalc-btn" data-idx="${i}" title="Recalcular precio sugerido">&#x21bb;</button>
             </div>
+            <div class="cv2-post-bajo-costo-warn" data-idx="${i}" style="display:none">
+              ⚠ Precio por debajo del costo
+            </div>
           </td>
-          <td>
-            <button class="cv2-post-save-btn" data-idx="${i}" data-prodid="${esc(it.productoId)}">
-              ✓ Guardar Precio
-            </button>
-          </td>
+          <td class="cv2-post-td-accion">${actionHtml}</td>
         </tr>`;
     }).join('');
 
@@ -1135,78 +1163,313 @@ const ComprasV2 = (() => {
       </div>
     `;
 
-    // Wire up recalc buttons
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    function checkBajoCosto(idx) {
+      const tr     = root.querySelector(`.cv2-post-tr[data-idx="${idx}"]`);
+      const input  = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
+      const warn   = root.querySelector(`.cv2-post-bajo-costo-warn[data-idx="${idx}"]`);
+      if (!tr || !input || !warn) return;
+      const costo  = parseFloat(tr.dataset.costo) || 0;
+      const precio = parseFloat(input.value) || 0;
+      const bajo   = precio > 0 && precio < costo;
+      warn.style.display = bajo ? 'block' : 'none';
+      input.classList.toggle('cv2-post-input-bajo-costo', bajo);
+    }
+
+    function markRowSaved(idx) {
+      const actWrap = root.querySelector(`.cv2-post-tr[data-idx="${idx}"] .cv2-post-td-accion`);
+      const input   = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
+      if (actWrap) actWrap.innerHTML = `<span class="cv2-post-badge-guardado">✓ Guardado</span>`;
+      if (input)   { input.disabled = true; input.style.opacity = '0.6'; }
+    }
+
+    function markRowIgnorado(idx) {
+      const actWrap  = root.querySelector(`.cv2-post-tr[data-idx="${idx}"] .cv2-post-td-accion`);
+      const input    = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
+      const tr       = root.querySelector(`.cv2-post-tr[data-idx="${idx}"]`);
+      const pvActual = parseFloat(input?.dataset.pvactual) || 0;
+      if (input)   { input.value = pvActual.toFixed(2); input.disabled = true; input.style.opacity = '0.5'; }
+      if (actWrap) actWrap.innerHTML = `<span class="cv2-post-badge-mantenido">Precio Mantenido</span>`;
+      if (tr)      tr.classList.add('cv2-post-tr-ignorado');
+      const warn = root.querySelector(`.cv2-post-bajo-costo-warn[data-idx="${idx}"]`);
+      if (warn) warn.style.display = 'none';
+    }
+
+    function doSaveRow(idx, prodId) {
+      const input = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
+      const nuevoPrecio = parseFloat(input?.value) || 0;
+      if (nuevoPrecio <= 0) { alert('Precio inválido'); return; }
+      const item = items[idx];
+      db().run(`UPDATE productos SET precio_venta=?, sync_status='pending', updated_at=? WHERE id=?`,
+               [nuevoPrecio, nowISO(), prodId]);
+      items[idx].pvGuardado = nuevoPrecio;
+      const hasFam = checkHasFamily(prodId);
+      if (hasFam) {
+        showHerenciaModal({ prodId, prodNombre: item.nombre, nuevoCosto: item.costoNvo,
+                            nuevoPrecio, onDone: () => markRowSaved(idx) });
+      } else {
+        markRowSaved(idx);
+      }
+    }
+
+    // ── Recalc buttons ────────────────────────────────────────────────────────
     root.querySelectorAll('.cv2-post-recalc-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        const idx   = parseInt(btn.dataset.idx, 10);
+        const idx = parseInt(btn.dataset.idx, 10);
         const input = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
         if (!input) return;
         input.value = parseFloat(input.dataset.sugerido).toFixed(2);
         input.classList.remove('modified');
+        checkBajoCosto(idx);
       });
     });
 
-    // Mark input as modified when user edits it
+    // ── Input: modified flag + bajo-costo ─────────────────────────────────────
     root.querySelectorAll('.cv2-post-precio-input').forEach(input => {
       input.addEventListener('input', () => {
         const sugerido = parseFloat(input.dataset.sugerido).toFixed(2);
         input.classList.toggle('modified', input.value !== sugerido);
+        checkBajoCosto(parseInt(input.dataset.idx, 10));
       });
     });
 
-    // Per-row save
-    function markRowSaved(idx) {
-      const btn   = root.querySelector(`.cv2-post-save-btn[data-idx="${idx}"]`);
-      const input = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
-      if (btn)  { btn.textContent = '✓ Guardado'; btn.classList.add('saved'); btn.disabled = true; }
-      if (input){ input.disabled = true; input.style.opacity = '0.6'; }
+    // ── Actualizar buttons ────────────────────────────────────────────────────
+    root.querySelectorAll('.cv2-post-actualizar-btn').forEach(btn => {
+      btn.addEventListener('click', () => doSaveRow(parseInt(btn.dataset.idx, 10), btn.dataset.prodid));
+    });
+
+    // ── Ignorar buttons ───────────────────────────────────────────────────────
+    root.querySelectorAll('.cv2-post-ignorar-btn').forEach(btn => {
+      btn.addEventListener('click', () => markRowIgnorado(parseInt(btn.dataset.idx, 10)));
+    });
+
+    // ── Save all: solo filas con Actualizar activo ────────────────────────────
+    ge('cv2-post-btn-save-all')?.addEventListener('click', () => {
+      root.querySelectorAll('.cv2-post-actualizar-btn').forEach(btn => btn.click());
+    });
+
+    // Finish → resumen final antes de ir al POS
+    ge('cv2-post-btn-finish')?.addEventListener('click', () => {
+      showResumenFinal({ items, herenciaSincs: state.herenciaSincronizados });
+    });
+  }
+
+  // ── Resumen Final (paso previo al POS) ──────────────────────────────────────
+  function showResumenFinal({ items, herenciaSincs }) {
+    const root = ge('cv2-root');
+    if (!root) return;
+
+    // Persistir para poder restaurar al volver del editor
+    sessionStorage.setItem('compras_resumen_pending', JSON.stringify({ items, herenciaSincs }));
+
+    // ── Preparar datos ────────────────────────────────────────────────────────
+    const esNuevo = (it) => it.isNuevo === true || (parseFloat(it.pvActual) || 0) === 0;
+
+    const conCambios = items.filter(it => {
+      if (esNuevo(it)) return false;
+      const costoCambio = Math.abs((parseFloat(it.costoNvo) || 0) - (parseFloat(it.costoAnt) || 0)) > 0.001;
+      return costoCambio || it.pvGuardado != null;
+    });
+    const cartIds      = new Set(items.map(it => it.productoId));
+    const herenciaExtra = herenciaSincs.filter(h => !cartIds.has(h.id));
+    const nuevos       = items.filter(it => esNuevo(it));
+    const hayCambios   = conCambios.length > 0 || herenciaExtra.length > 0;
+    const hayNuevos    = nuevos.length > 0;
+
+    // Unified list for share text generation
+    const allCambios = [
+      ...conCambios.map(it => ({
+        nombre: it.nombre, barcode: it.barcode || '',
+        costoAnt: parseFloat(it.costoAnt) || 0, costoNvo: parseFloat(it.costoNvo) || 0,
+        pvAnt: parseFloat(it.pvActual) || 0, pvNvo: it.pvGuardado ?? null,
+        badge: null,
+      })),
+      ...herenciaExtra.map(h => ({
+        nombre: h.nombre, barcode: '',
+        costoAnt: h.costoAnt, costoNvo: h.costoNvo,
+        pvAnt: h.pvAnt, pvNvo: h.hp ? h.pvNvo : null,
+        badge: 'Familia',
+      })),
+    ];
+
+    // ── Row builders ──────────────────────────────────────────────────────────
+    let rowIdx = 0;
+    const rowCambio = (p) => {
+      const i = rowIdx++;
+      const costoTag = Math.abs(p.costoNvo - p.costoAnt) > 0.001
+        ? `<span class="cv2-rf-chip cv2-rf-chip-costo">${fmt$(p.costoAnt)} → ${fmt$(p.costoNvo)}</span>`
+        : `<span class="cv2-rf-chip cv2-rf-chip-nc">Sin cambio de costo</span>`;
+      const precioTag = p.pvNvo != null && Math.abs(p.pvNvo - (p.pvAnt || 0)) > 0.001
+        ? `<span class="cv2-rf-chip cv2-rf-chip-precio">${fmt$(p.pvAnt)} → ${fmt$(p.pvNvo)}</span>`
+        : p.pvNvo != null
+          ? `<span class="cv2-rf-chip cv2-rf-chip-nc">Sin cambio de precio</span>`
+          : `<span class="cv2-rf-chip cv2-rf-chip-nc">Precio no modificado</span>`;
+      return `<tr>
+        <td class="cv2-rf-td-chk c"><input type="checkbox" class="cv2-rf-chk" data-sec="cambios" data-i="${i}" checked></td>
+        <td class="cv2-rf-td-nombre">${p.badge ? `<span class="cv2-rf-badge">${p.badge}</span> ` : ''}${esc(p.nombre)}</td>
+        <td class="cv2-rf-td-cod">${esc(p.barcode || '—')}</td>
+        <td>${costoTag}</td>
+        <td>${precioTag}</td>
+      </tr>`;
+    };
+
+    let nuevoIdx = 0;
+    const rowNuevo = (it) => {
+      const i = nuevoIdx++;
+      return `<tr>
+        <td class="cv2-rf-td-chk c"><input type="checkbox" class="cv2-rf-chk" data-sec="nuevos" data-i="${i}" checked></td>
+        <td class="cv2-rf-td-nombre">${esc(it.nombre)}</td>
+        <td class="cv2-rf-td-cod">${esc(it.barcode || '—')}</td>
+        <td>${fmt$(it.costoNvo)}</td>
+        <td>${it.pvGuardado != null ? fmt$(it.pvGuardado) : '—'}</td>
+        <td><button class="cv2-rf-btn-edit" data-prodid="${esc(it.productoId)}">✏ Editar</button></td>
+      </tr>`;
+    };
+
+    const cambiosRows = allCambios.map(p => rowCambio(p)).join('');
+    const nuevosRows  = nuevos.map(it => rowNuevo(it)).join('');
+
+    // ── Share text builder ────────────────────────────────────────────────────
+    function buildShareText() {
+      const lines = ['*Resumen de Cambios — Sistema Kalulu*', ''];
+      const checked = root.querySelectorAll('.cv2-rf-chk[data-sec="cambios"]:checked');
+      if (checked.length) {
+        lines.push('*Cambios de Costo y/o Precio:*');
+        checked.forEach(chk => {
+          const i = parseInt(chk.dataset.i, 10);
+          const p = allCambios[i];
+          if (!p) return;
+          const costoPart = Math.abs(p.costoNvo - p.costoAnt) > 0.001
+            ? `Costo: ${fmt$(p.costoAnt)} → ${fmt$(p.costoNvo)}`
+            : null;
+          const precioPart = p.pvNvo != null && Math.abs(p.pvNvo - (p.pvAnt || 0)) > 0.001
+            ? `Precio: ${fmt$(p.pvAnt)} → ${fmt$(p.pvNvo)}`
+            : null;
+          const cambioStr = [costoPart, precioPart].filter(Boolean).join(' | ');
+          lines.push(`• ${p.nombre}${p.barcode ? ` (${p.barcode})` : ''}: ${cambioStr || 'sin cambios'}`);
+        });
+        lines.push('');
+      }
+      const checkedN = root.querySelectorAll('.cv2-rf-chk[data-sec="nuevos"]:checked');
+      if (checkedN.length) {
+        lines.push('*Productos Nuevos:*');
+        checkedN.forEach(chk => {
+          const i = parseInt(chk.dataset.i, 10);
+          const it = nuevos[i];
+          if (!it) return;
+          lines.push(`• ${it.nombre}${it.barcode ? ` (${it.barcode})` : ''} — Costo: ${fmt$(it.costoNvo)}`);
+        });
+      }
+      return lines.join('\n');
     }
 
-    root.querySelectorAll('.cv2-post-save-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (btn.classList.contains('saved')) return;
-        const idx       = parseInt(btn.dataset.idx, 10);
-        const prodId    = btn.dataset.prodid;
-        const input     = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
-        const nuevoPrecio = parseFloat(input?.value) || 0;
-        if (nuevoPrecio <= 0) { alert('Precio inválido'); return; }
-        // Get the enriched item to know the new cost
-        const item = items[idx];
-        const ts   = nowISO();
-        try {
-          db().run(
-            `UPDATE productos SET precio_venta=?, sync_status='pending', updated_at=? WHERE id=?`,
-            [nuevoPrecio, ts, prodId]
-          );
-        } catch (e) {
-          alert('Error al guardar precio: ' + e.message);
-          return;
-        }
-        // Check family
-        const hasFam = checkHasFamily(prodId);
-        if (hasFam) {
-          showHerenciaModal({
-            prodId,
-            prodNombre:  item.nombre,
-            nuevoCosto:  item.costoNvo,
-            nuevoPrecio,
-            onDone: () => markRowSaved(idx),
-          });
-        } else {
-          markRowSaved(idx);
-        }
+    // ── HTML ──────────────────────────────────────────────────────────────────
+    root.innerHTML = `
+      <div class="cv2-rf-root">
+        <div class="cv2-rf-header">
+          <div>
+            <div class="cv2-rf-header-title">Resumen de Cambios</div>
+            <div class="cv2-rf-header-sub">Modificaciones aplicadas durante esta compra</div>
+          </div>
+          <div class="cv2-rf-header-actions">
+            <button class="cv2-rf-btn-share" id="cv2-rf-btn-wa" title="Compartir por WhatsApp">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+              WhatsApp
+            </button>
+            <button class="cv2-rf-btn-share cv2-rf-btn-share-mail" id="cv2-rf-btn-mail" title="Compartir por Email">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 7 10-7"/></svg>
+              Email
+            </button>
+          </div>
+        </div>
+
+        ${hayCambios ? `
+        <div class="cv2-rf-section">
+          <div class="cv2-rf-section-title">Cambios de Costo y/o Precio</div>
+          <table class="cv2-rf-table">
+            <thead><tr>
+              <th class="c"><input type="checkbox" class="cv2-rf-chk-all" data-sec="cambios" checked title="Seleccionar todos"></th>
+              <th>Producto</th><th>Código</th><th>Costo</th><th>Precio Venta</th>
+            </tr></thead>
+            <tbody>${cambiosRows}</tbody>
+          </table>
+        </div>` : `
+        <div class="cv2-rf-section cv2-rf-empty">
+          No hubo modificaciones de costo o precio en esta compra.
+        </div>`}
+
+        ${hayNuevos ? `
+        <div class="cv2-rf-section">
+          <div class="cv2-rf-section-title">Productos Nuevos</div>
+          <table class="cv2-rf-table">
+            <thead><tr>
+              <th class="c"><input type="checkbox" class="cv2-rf-chk-all" data-sec="nuevos" checked title="Seleccionar todos"></th>
+              <th>Producto</th><th>Código de Barras</th><th>Costo</th><th>Precio Venta</th><th></th>
+            </tr></thead>
+            <tbody>${nuevosRows}</tbody>
+          </table>
+        </div>` : ''}
+
+        <div class="cv2-rf-footer">
+          <button class="cv2-rf-btn-pos" id="cv2-rf-btn-pos">Ir al POS →</button>
+        </div>
+      </div>`;
+
+    // ── Eventos ───────────────────────────────────────────────────────────────
+    // Select-all por sección
+    root.querySelectorAll('.cv2-rf-chk-all').forEach(allChk => {
+      allChk.addEventListener('change', function() {
+        const sec = this.dataset.sec;
+        root.querySelectorAll(`.cv2-rf-chk[data-sec="${sec}"]`).forEach(c => { c.checked = this.checked; });
+      });
+    });
+    // Si se desmarca una fila, desmarcar el select-all
+    root.querySelectorAll('.cv2-rf-chk').forEach(chk => {
+      chk.addEventListener('change', function() {
+        const sec = this.dataset.sec;
+        const all = root.querySelector(`.cv2-rf-chk-all[data-sec="${sec}"]`);
+        if (all && !this.checked) all.checked = false;
       });
     });
 
-    // Save all
-    ge('cv2-post-btn-save-all')?.addEventListener('click', () => {
-      root.querySelectorAll('.cv2-post-save-btn:not(.saved)').forEach(btn => btn.click());
+    // Compartir
+    root.getElementById?.('cv2-rf-btn-wa') ?? root.querySelector('#cv2-rf-btn-wa');
+    root.querySelector('#cv2-rf-btn-wa')?.addEventListener('click', () => {
+      const text = buildShareText();
+      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    });
+    root.querySelector('#cv2-rf-btn-mail')?.addEventListener('click', () => {
+      const text = buildShareText();
+      const subject = encodeURIComponent('Resumen de Cambios — Sistema Kalulu');
+      const body    = encodeURIComponent(text);
+      window.open(`mailto:?subject=${subject}&body=${body}`, '_self');
     });
 
-    // Finish
-    ge('cv2-post-btn-finish')?.addEventListener('click', () => {
+    root.querySelector('#cv2-rf-btn-pos')?.addEventListener('click', () => {
+      sessionStorage.removeItem('compras_resumen_pending');
+      sessionStorage.removeItem('compras_resumen_editados');
       window.location.hash = '#pos';
     });
+
+    // Aplicar estado "editado" a botones de productos ya editados
+    const editados = JSON.parse(sessionStorage.getItem('compras_resumen_editados') || '[]');
+    root.querySelectorAll('.cv2-rf-btn-edit').forEach(btn => {
+      if (editados.includes(btn.dataset.prodid)) markBtnEditado(btn);
+
+      btn.addEventListener('click', () => {
+        const lista = JSON.parse(sessionStorage.getItem('compras_resumen_editados') || '[]');
+        if (!lista.includes(btn.dataset.prodid)) lista.push(btn.dataset.prodid);
+        sessionStorage.setItem('compras_resumen_editados', JSON.stringify(lista));
+        sessionStorage.setItem('editor_returnTo', '#compras_v2');
+        window.location.hash = `#editor-producto/${btn.dataset.prodid}`;
+      });
+    });
+
+    function markBtnEditado(btn) {
+      btn.textContent = '✓ Editado';
+      btn.classList.add('cv2-rf-btn-edit-done');
+      btn.disabled = true;
+    }
   }
 
   // ── Family helpers ───────────────────────────────────────────────────────────
@@ -1344,11 +1607,22 @@ const ComprasV2 = (() => {
           ¿Deseas sincronizar los costos y precios de los miembros?
         </div>
         <div class="cv2-her-sync-all-wrap">
-          <button class="cv2-her-btn-sync-all">✓ SINCRONIZAR TODA LA FAMILIA</button>
+          <button class="cv2-her-btn-sync-all">✓ SINCRONIZAR SELECCIONADOS</button>
         </div>
         <div class="cv2-her-table-wrap">
           <table class="cv2-her-table">
             <thead>
+              <tr class="cv2-her-thead-selall">
+                <th colspan="4"></th>
+                <th class="c">
+                  <input type="checkbox" class="cv2-her-chk cv2-her-chk-all-costo" checked title="Seleccionar todos">
+                </th>
+                <th></th>
+                <th class="c">
+                  <input type="checkbox" class="cv2-her-chk cv2-her-chk-all-precio" checked title="Seleccionar todos">
+                </th>
+                <th colspan="3"></th>
+              </tr>
               <tr>
                 <th class="c">#</th>
                 <th>Descripción</th>
@@ -1421,6 +1695,19 @@ const ComprasV2 = (() => {
       fields.push("sync_status='pending'", 'updated_at=?');
       vals.push(ts, m.id);
       db().run(`UPDATE productos SET ${fields.join(',')} WHERE id=?`, vals);
+      // Track for resumen final
+      if (!state.herenciaSincronizados.find(x => x.id === m.id)) {
+        state.herenciaSincronizados.push({
+          id:        m.id,
+          nombre:    m.nombre,
+          costoAnt:  m.costo_actual,
+          costoNvo:  hc ? nuevoCosto : m.costo_actual,
+          pvAnt:     m.precio_actual,
+          pvNvo:     hp ? nuevoPrecio : m.precio_actual,
+          hc: !!hc,
+          hp: !!hp,
+        });
+      }
       const sincBtn = tr.querySelector('.cv2-her-btn-sinc');
       if (sincBtn) { sincBtn.textContent = '✓ Sincronizado'; sincBtn.classList.add('sinc-done'); sincBtn.disabled = true; }
     }
@@ -1432,8 +1719,25 @@ const ComprasV2 = (() => {
       chk.addEventListener('change', recalcSummary);
     });
 
+    // Select-all checkboxes en el thead
+    overlay.querySelector('.cv2-her-chk-all-costo')?.addEventListener('change', function() {
+      overlay.querySelectorAll('#cv2-her-tbody .cv2-her-chk-costo').forEach(chk => { chk.checked = this.checked; });
+      recalcSummary();
+    });
+    overlay.querySelector('.cv2-her-chk-all-precio')?.addEventListener('change', function() {
+      overlay.querySelectorAll('#cv2-her-tbody .cv2-her-chk-precio').forEach(chk => { chk.checked = this.checked; });
+      recalcSummary();
+    });
+
+    // "Sincronizar seleccionados": aplica solo las filas con al menos un checkbox marcado
     overlay.querySelector('.cv2-her-btn-sync-all')?.addEventListener('click', () => {
-      overlay.querySelectorAll('.cv2-her-chk').forEach(chk => { chk.checked = true; });
+      overlay.querySelectorAll('#cv2-her-tbody tr').forEach(tr => {
+        const hc = tr.querySelector('.cv2-her-chk-costo')?.checked;
+        const hp = tr.querySelector('.cv2-her-chk-precio')?.checked;
+        if ((hc || hp) && !tr.querySelector('.cv2-her-btn-sinc')?.classList.contains('sinc-done')) {
+          try { sincRow(tr); } catch (e) { /* skip */ }
+        }
+      });
       recalcSummary();
     });
 
@@ -1500,6 +1804,18 @@ const ComprasV2 = (() => {
   // ── Init ─────────────────────────────────────────────────────────────────────
   function init() {
     teardownKeyboard();
+
+    // Restaurar resumen si volvemos del editor de producto
+    const pendingResumen = sessionStorage.getItem('compras_resumen_pending');
+    if (pendingResumen) {
+      sessionStorage.removeItem('compras_resumen_pending');
+      try {
+        const { items, herenciaSincs } = JSON.parse(pendingResumen);
+        state.currentUser = window.SGA_Auth.getCurrentUser();
+        showResumenFinal({ items, herenciaSincs });
+        return;
+      } catch (e) { /* si falla, continúa al init normal */ }
+    }
 
     state.currentUser  = window.SGA_Auth.getCurrentUser();
     state.sesionActiva = getSesionActiva(state.currentUser.sucursal_id);

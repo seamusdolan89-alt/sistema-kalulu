@@ -561,12 +561,45 @@
     font-size: 14px; padding: 2px 4px; line-height: 1; border-radius: 4px;
   }
   .cv2-post-recalc-btn:hover { color: #1565c0; background: #e3f2fd; }
-  .cv2-post-save-btn {
+  /* Filas con/sin cambio de costo */
+  .cv2-post-tr-changed td { background: #fffde7; }
+  .cv2-post-tr-changed td:first-child { border-left: 3px solid #f9a825; }
+  .cv2-post-tr-unchanged { opacity: 0.55; font-size: 12px; }
+  .cv2-post-tr-aldia td { padding-top: 4px; padding-bottom: 4px; }
+  .cv2-post-tr-ignorado td { opacity: 0.45; }
+
+  /* Botones de acción refactorizados */
+  .cv2-post-action-wrap { display: flex; align-items: center; gap: 6px; }
+  .cv2-post-actualizar-btn {
     background: #2e7d32; color: white; border: none; border-radius: 5px;
     padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
   }
-  .cv2-post-save-btn:hover { background: #388e3c; }
-  .cv2-post-save-btn.saved { background: #78909c; cursor: default; }
+  .cv2-post-actualizar-btn:hover { background: #388e3c; }
+  .cv2-post-ignorar-btn {
+    background: none; color: #9e9e9e; border: 1px solid #ccc; border-radius: 5px;
+    padding: 4px 9px; font-size: 11px; cursor: pointer; white-space: nowrap;
+  }
+  .cv2-post-ignorar-btn:hover { background: #f5f5f5; color: #616161; }
+
+  /* Badges de estado */
+  .cv2-post-badge-aldia {
+    display: inline-block; background: #e0e0e0; color: #757575;
+    border-radius: 5px; padding: 4px 10px; font-size: 12px; font-weight: 600;
+  }
+  .cv2-post-badge-guardado {
+    display: inline-block; background: #e8f5e9; color: #2e7d32;
+    border-radius: 5px; padding: 4px 10px; font-size: 12px; font-weight: 600;
+  }
+  .cv2-post-badge-mantenido {
+    display: inline-block; background: #f5f5f5; color: #757575;
+    border-radius: 5px; padding: 4px 10px; font-size: 12px; font-weight: 600; font-style: italic;
+  }
+
+  /* Alerta precio bajo costo */
+  .cv2-post-bajo-costo-warn {
+    font-size: 11px; color: #c62828; font-weight: 600; margin-top: 3px;
+  }
+  .cv2-post-input-bajo-costo { border-color: #c62828 !important; background: #fff8f8 !important; }
 
   /* Footer actions */
   .cv2-post-footer {
@@ -590,6 +623,74 @@
   }
   .cv2-post-btn-save-all:hover { background: #c8e6c9; }
 
+  /* ── RESUMEN FINAL ────────────────────────────────────────────────────────── */
+  .cv2-rf-root { display: flex; flex-direction: column; height: 100%; background: #f5f7fa; }
+  .cv2-rf-header {
+    background: #1a2744; color: white; padding: 16px 28px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  }
+  .cv2-rf-header-title { font-size: 20px; font-weight: 700; }
+  .cv2-rf-header-sub   { font-size: 13px; color: #90a4c0; margin-top: 2px; }
+  .cv2-rf-header-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  .cv2-rf-btn-share {
+    display: flex; align-items: center; gap: 6px;
+    background: #25d366; color: white; border: none; border-radius: 7px;
+    padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .cv2-rf-btn-share:hover { opacity: 0.88; }
+  .cv2-rf-btn-share-mail { background: #546e7a; }
+  .cv2-rf-section {
+    margin: 20px 28px 0; background: #fff; border-radius: 10px;
+    border: 1px solid #e0e6ef; overflow: hidden;
+  }
+  .cv2-rf-section-title {
+    padding: 10px 16px; background: #f0f4fb;
+    font-size: 13px; font-weight: 700; color: #1a2744;
+    border-bottom: 1px solid #e0e6ef; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .cv2-rf-empty { padding: 18px; color: #78909c; font-size: 13px; }
+  .cv2-rf-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .cv2-rf-table th {
+    padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 700;
+    color: #607080; text-transform: uppercase; background: #f8fafc;
+    border-bottom: 1px solid #e0e6ef;
+  }
+  .cv2-rf-table td { padding: 9px 12px; border-bottom: 1px solid #f0f2f6; vertical-align: middle; }
+  .cv2-rf-table tbody tr:last-child td { border-bottom: none; }
+  .cv2-rf-table tbody tr:hover td { background: #f5f9ff; }
+  .cv2-rf-td-chk    { width: 36px; }
+  .cv2-rf-chk, .cv2-rf-chk-all { width: 15px; height: 15px; cursor: pointer; accent-color: #1565c0; }
+  .cv2-rf-td-nombre { font-weight: 500; color: #1a2744; }
+  .cv2-rf-td-cod    { color: #78909c; font-size: 12px; }
+  .cv2-rf-chip {
+    display: inline-block; padding: 2px 9px; border-radius: 12px;
+    font-size: 12px; font-weight: 600; white-space: nowrap;
+  }
+  .cv2-rf-chip-costo  { background: #e8f5e9; color: #2e7d32; }
+  .cv2-rf-chip-precio { background: #e3f2fd; color: #1565c0; }
+  .cv2-rf-chip-nc     { background: #f5f5f5; color: #9e9e9e; }
+  .cv2-rf-badge {
+    display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px;
+    border-radius: 8px; background: #fff3e0; color: #e65100; margin-right: 4px;
+  }
+  .cv2-rf-footer {
+    margin-top: auto; padding: 16px 28px; display: flex; justify-content: flex-end;
+    background: #fff; border-top: 1px solid #e0e6ef; flex-shrink: 0;
+  }
+  .cv2-rf-btn-pos {
+    background: #1565c0; color: white; border: none; border-radius: 8px;
+    padding: 10px 28px; font-size: 14px; font-weight: 700; cursor: pointer;
+  }
+  .cv2-rf-btn-pos:hover { background: #1976d2; }
+  .cv2-rf-btn-edit {
+    background: none; color: #1565c0; border: 1px solid #1565c0; border-radius: 5px;
+    padding: 3px 10px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  .cv2-rf-btn-edit:hover { background: #e3f2fd; }
+  .cv2-rf-btn-edit-done {
+    background: #e8f5e9; color: #2e7d32; border-color: #2e7d32; cursor: default;
+  }
+
   /* ── HERENCIA MODAL ───────────────────────────────────────────────────────── */
   .cv2-her-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.55);
@@ -599,7 +700,7 @@
   .cv2-her-box {
     background: #fff; border-radius: 12px;
     box-shadow: 0 12px 48px rgba(0,0,0,0.28);
-    width: 100%; max-width: 860px; max-height: 90vh;
+    width: 100%; max-width: 1020px; max-height: 90vh;
     display: flex; flex-direction: column; overflow: hidden;
   }
   .cv2-her-header {
@@ -627,7 +728,10 @@
   .cv2-her-table {
     width: 100%; border-collapse: collapse; font-size: 13px;
   }
-  .cv2-her-table thead tr { background: #f8fafc; border-bottom: 2px solid #d0d7e3; }
+  .cv2-her-table thead tr { background: #f8fafc; }
+  .cv2-her-table thead tr:last-child { border-bottom: 2px solid #d0d7e3; }
+  .cv2-her-thead-selall th { padding: 4px 8px; background: #eef4ff; }
+  .cv2-her-thead-selall input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: #1565c0; }
   .cv2-her-table th {
     padding: 7px 8px; text-align: left;
     font-size: 11px; font-weight: 700; color: #607080;
