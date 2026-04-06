@@ -94,6 +94,35 @@
     cursor: not-allowed;
     opacity: 0.6;
   }
+
+  /* Pending resumen card */
+  .ops-pending-card {
+    border-radius: 12px; overflow: hidden;
+    box-shadow: 0 2px 12px rgba(255,143,0,0.18);
+    border: 2px solid #ffb300;
+  }
+  .ops-pending-header {
+    background: linear-gradient(135deg, #ff8f00, #ffa000);
+    color: white; padding: 11px 20px;
+    font-size: 14px; font-weight: 700;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .ops-pending-body {
+    background: #fff8e1; padding: 16px 20px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .ops-pending-text { flex: 1; font-size: 13px; color: #5d4037; line-height: 1.5; }
+  .ops-pending-btn {
+    background: #ff8f00; color: white; border: none;
+    border-radius: 24px; padding: 10px 24px;
+    font-size: 14px; font-weight: 700; cursor: pointer; white-space: nowrap;
+  }
+  .ops-pending-btn:hover { background: #ff6f00; }
+  .ops-pending-descartar {
+    background: none; border: 1px solid #ffb300; border-radius: 24px;
+    padding: 8px 16px; font-size: 13px; color: #8d6e63; cursor: pointer; white-space: nowrap;
+  }
+  .ops-pending-descartar:hover { background: #ffecb3; }
 </style>
 
 <div class="ops-root" id="ops-root">
@@ -102,6 +131,19 @@
   </div>
 
   <div class="ops-body">
+
+    <!-- Ajuste de precios pendiente (se muestra dinámicamente) -->
+    <div class="ops-pending-card" id="ops-pending-card" style="display:none">
+      <div class="ops-pending-header">⏸ Ajuste de precios pendiente</div>
+      <div class="ops-pending-body">
+        <div class="ops-pending-text">
+          Tenés un <strong>ajuste de precios sin finalizar</strong> de tu última compra.<br>
+          El stock ya fue ingresado. Solo resta actualizar los precios de venta.
+        </div>
+        <button class="ops-pending-btn" data-action="retomar">Retomar ahora →</button>
+        <button class="ops-pending-descartar" data-action="descartar-pendiente">Descartar</button>
+      </div>
+    </div>
 
     <!-- Ingreso -->
     <div class="ops-group">

@@ -626,10 +626,64 @@
       'ALTER TABLE clientes ADD COLUMN es_master INTEGER DEFAULT 0',
       'ALTER TABLE clientes ADD COLUMN ultima_visita TEXT',
       'ALTER TABLE productos ADD COLUMN pedido_unidades_por_paquete REAL DEFAULT NULL',
+      // Fix: compras_v2 uses these columns that were missing from the original schema
+      "ALTER TABLE compras ADD COLUMN condicion_pago TEXT",
+      "ALTER TABLE compras ADD COLUMN estado TEXT DEFAULT 'confirmada'",
+      "ALTER TABLE compras ADD COLUMN factura_pv TEXT",
+      "ALTER TABLE compra_items ADD COLUMN unidad_compra TEXT DEFAULT 'Unidad'",
+      "ALTER TABLE compra_items ADD COLUMN unidades_por_paquete REAL DEFAULT 1",
+      // Fix: compras_v2 inserts compra_id into cuenta_proveedor which was missing
+      "ALTER TABLE cuenta_proveedor ADD COLUMN compra_id TEXT REFERENCES compras(id)",
+      // Fix: egresos_caja needs proveedor_id for pagos adelantados
+      "ALTER TABLE egresos_caja ADD COLUMN proveedor_id TEXT REFERENCES proveedores(id)",
     ];
     for (const sql of columnAlterations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }
     }
+
+    // ── Cuenta Corriente Proveedores ──────────────────────────────────────────
+    // pagos_proveedores: payment header (who, when, notes)
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS pagos_proveedores (
+          id TEXT PRIMARY KEY,
+          proveedor_id TEXT NOT NULL REFERENCES proveedores(id),
+          fecha TEXT NOT NULL,
+          observaciones TEXT,
+          usuario_id TEXT REFERENCES usuarios(id),
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
+        )
+      `);
+    } catch(e) { console.warn('pagos_proveedores:', e.message); }
+
+    // pagos_proveedores_metodos: breakdown by payment method (one payment can have multiple)
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS pagos_proveedores_metodos (
+          id TEXT PRIMARY KEY,
+          pago_id TEXT NOT NULL REFERENCES pagos_proveedores(id),
+          metodo TEXT NOT NULL CHECK(metodo IN ('efectivo','transferencia')),
+          monto REAL NOT NULL,
+          referencia TEXT,
+          sesion_caja_id TEXT REFERENCES sesiones_caja(id)
+        )
+      `);
+    } catch(e) { console.warn('pagos_proveedores_metodos:', e.message); }
+
+    // imputaciones_pagos: links a payment (or portion) to a specific compra
+    // compra_id NULL means the credit is "orphan" (paid in advance, not yet matched)
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS imputaciones_pagos (
+          id TEXT PRIMARY KEY,
+          pago_id TEXT NOT NULL REFERENCES pagos_proveedores(id),
+          compra_id TEXT REFERENCES compras(id),
+          monto_imputado REAL NOT NULL,
+          fecha TEXT NOT NULL
+        )
+      `);
+    } catch(e) { console.warn('imputaciones_pagos:', e.message); }
 
     await saveDatabase();
     console.log('✅ All tables created');

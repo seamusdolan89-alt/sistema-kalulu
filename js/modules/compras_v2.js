@@ -306,8 +306,10 @@ const ComprasV2 = (() => {
 
     const val = inp?.value.trim() || '';
     const nuevoBtn = val.length > 0 ? `
-      <div class="cv2-dd-item cv2-dd-nuevo" data-action="nuevo">
-        <span>+ Crear producto nuevo</span>
+      <div class="cv2-dd-item cv2-dd-nuevo cv2-dd-acciones-row">
+        <span class="cv2-dd-accion" data-action="nuevo">+ Crear producto nuevo</span>
+        <span class="cv2-dd-accion-sep">|</span>
+        <span class="cv2-dd-accion cv2-dd-vincular" data-action="vincular">🔗 Vincular a producto existente</span>
         ${val.length >= 3 ? `<span class="cv2-dd-meta">Código: ${esc(val)}</span>` : ''}
       </div>
     ` : '';
@@ -525,9 +527,9 @@ const ComprasV2 = (() => {
 
       if (barcode && barcode.trim()) {
         db().run(`
-          INSERT INTO codigos_barras (id, producto_id, codigo, es_principal, sync_status, updated_at)
-          VALUES (?, ?, ?, 1, 'pending', ?)
-        `, [uuid(), prodId, barcode.trim(), ts]);
+          INSERT OR IGNORE INTO codigos_barras (id, producto_id, codigo, es_principal)
+          VALUES (?, ?, ?, 1)
+        `, [uuid(), prodId, barcode.trim()]);
       }
     } catch (e) {
       alert('Error al crear el producto: ' + e.message);
@@ -536,6 +538,272 @@ const ComprasV2 = (() => {
 
     hideNewProductForm();
     addToCart({ productoId: prodId, nombre, barcode: barcode || '', unidadCompra: unidad, udsPaquete: udsPaq, costoActual: costo, costoNuevo: costo, isNuevo: true });
+  }
+
+  // ── Nuevo proveedor modal ────────────────────────────────────────────────────
+  function showNuevoProveedorModal() {
+    const COND_OPTS = ['Contado', '15 días', '30 días', '60 días', 'Consignación'];
+    const condOpts  = COND_OPTS.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join('');
+
+    // Crear overlay si no existe
+    let overlay = ge('cv2-prov-modal-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'cv2-prov-modal-overlay';
+      overlay.className = 'cv2-prov-modal-overlay';
+      document.body.appendChild(overlay);
+    }
+
+    overlay.innerHTML = `
+      <div class="cv2-prov-modal">
+        <div class="cv2-prov-modal-hdr">
+          <span>Nuevo Proveedor</span>
+          <button id="cv2-pm-close" class="cv2-prov-modal-close">✕</button>
+        </div>
+        <div class="cv2-prov-modal-body">
+          <div class="cv2-pm-field">
+            <label>Razón social <span style="color:#f44336">*</span></label>
+            <input type="text" id="cv2-pm-razon" class="cv2-pm-input" placeholder="Nombre del proveedor" autocomplete="off">
+          </div>
+          <div class="cv2-pm-field-row">
+            <div class="cv2-pm-field">
+              <label>CUIT</label>
+              <input type="text" id="cv2-pm-cuit" class="cv2-pm-input" placeholder="20-12345678-9">
+            </div>
+            <div class="cv2-pm-field">
+              <label>Condición de pago</label>
+              <select id="cv2-pm-condicion" class="cv2-pm-input">
+                <option value="">— Sin definir —</option>
+                ${condOpts}
+              </select>
+            </div>
+          </div>
+          <div class="cv2-pm-field-row">
+            <div class="cv2-pm-field">
+              <label>Teléfono</label>
+              <input type="text" id="cv2-pm-telefono" class="cv2-pm-input" placeholder="011 4444-5555">
+            </div>
+            <div class="cv2-pm-field">
+              <label>Email</label>
+              <input type="email" id="cv2-pm-email" class="cv2-pm-input" placeholder="ventas@proveedor.com">
+            </div>
+          </div>
+          <div class="cv2-pm-field">
+            <label>Nombre de contacto</label>
+            <input type="text" id="cv2-pm-contacto" class="cv2-pm-input" placeholder="Nombre del vendedor">
+          </div>
+          <p id="cv2-pm-error" style="color:#f44336;font-size:13px;margin:6px 0 0;display:none"></p>
+        </div>
+        <div class="cv2-prov-modal-ftr">
+          <button class="btn btn-ghost" id="cv2-pm-cancel">Cancelar</button>
+          <button class="btn btn-primary" id="cv2-pm-save">+ Crear proveedor</button>
+        </div>
+      </div>
+    `;
+    overlay.style.display = 'flex';
+    setTimeout(() => ge('cv2-pm-razon')?.focus(), 60);
+
+    const close = () => { overlay.style.display = 'none'; overlay.innerHTML = ''; };
+    ge('cv2-pm-close')?.addEventListener('click', close);
+    ge('cv2-pm-cancel')?.addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+    const save = () => {
+      const razon = (ge('cv2-pm-razon')?.value || '').trim();
+      const errEl = ge('cv2-pm-error');
+      if (!razon) {
+        errEl.textContent = 'La razón social es obligatoria.';
+        errEl.style.display = 'block';
+        ge('cv2-pm-razon')?.focus();
+        return;
+      }
+      errEl.style.display = 'none';
+
+      const ts = nowISO();
+      const id = uuid();
+      db().run(`
+        INSERT INTO proveedores
+          (id, razon_social, cuit, telefono, email, contacto_nombre, condicion_pago, activo, sync_status, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'pending', ?)
+      `, [
+        id, razon,
+        (ge('cv2-pm-cuit')?.value     || '').trim() || null,
+        (ge('cv2-pm-telefono')?.value || '').trim() || null,
+        (ge('cv2-pm-email')?.value    || '').trim() || null,
+        (ge('cv2-pm-contacto')?.value || '').trim() || null,
+        ge('cv2-pm-condicion')?.value || null,
+        ts,
+      ]);
+
+      close();
+      // Auto-seleccionar el proveedor recién creado
+      selectProveedor({ id, razon_social: razon });
+      window.SGA_Utils.showNotification(`Proveedor "${razon}" creado y seleccionado`, 'success');
+    };
+
+    ge('cv2-pm-save')?.addEventListener('click', save);
+    overlay.querySelectorAll('input').forEach(inp => {
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
+    });
+  }
+
+  // ── Link product form ────────────────────────────────────────────────────────
+  function showLinkProductForm(barcode) {
+    const container = ge('cv2-new-prod-form');
+    if (!container) return;
+
+    container.style.display = 'block';
+    container.innerHTML = `
+      <div class="cv2-new-prod-header">
+        <span>🔗 Vincular código a producto existente</span>
+        <button class="cv2-new-prod-close" id="cv2-lp-close">×</button>
+      </div>
+      <div class="cv2-new-prod-body">
+        <div class="cv2-field-row">
+          <div class="cv2-field cv2-field-wide">
+            <label>Buscar producto existente (nombre o escanee otro código)</label>
+            <div style="position:relative">
+              <input type="text" id="cv2-lp-search" placeholder="Nombre o código de barras..." autocomplete="off"
+                     style="width:100%;box-sizing:border-box">
+              <div id="cv2-lp-dropdown" class="cv2-dropdown" style="display:none"></div>
+            </div>
+          </div>
+        </div>
+        ${barcode ? `<div class="cv2-field-row"><span class="cv2-barcode-hint">Código a vincular: ${esc(barcode)}</span></div>` : ''}
+        <div id="cv2-lp-selected" style="display:none;padding:6px 0;font-size:13px;color:#1565c0;font-weight:500"></div>
+        <div class="cv2-new-prod-footer">
+          <button class="btn btn-ghost" id="cv2-lp-cancel">Cancelar</button>
+          <button class="btn btn-primary" id="cv2-lp-vincular" disabled>Vincular y agregar</button>
+        </div>
+      </div>
+    `;
+
+    ge('cv2-lp-close')?.addEventListener('click', hideNewProductForm);
+    ge('cv2-lp-cancel')?.addEventListener('click', hideNewProductForm);
+    ge('cv2-lp-vincular')?.addEventListener('click', () => submitLinkProduct(barcode));
+
+    // Autocomplete for existing products
+    const lpSearch = ge('cv2-lp-search');
+    const lpDd = ge('cv2-lp-dropdown');
+    let lpResults = [];
+    let lpSelected = null;
+    let lpHighlight = -1;
+    let lpQuerySaved = '';
+
+    function lpSelectIdx(idx) {
+      lpSelected = lpResults[idx];
+      lpSearch.value = lpSelected.nombre;
+      lpHighlight = -1;
+      lpDd.style.display = 'none';
+      const selEl = ge('cv2-lp-selected');
+      if (selEl) { selEl.textContent = `Producto seleccionado: ${lpSelected.nombre}`; selEl.style.display = 'block'; }
+      const btn = ge('cv2-lp-vincular');
+      if (btn) btn.disabled = false;
+    }
+
+    lpSearch?.addEventListener('input', () => {
+      const q = lpSearch.value.trim();
+      lpQuerySaved = q;
+      lpHighlight = -1;
+      if (q.length < 2) { lpDd.style.display = 'none'; lpResults = []; return; }
+      // Search by name (LIKE) or any barcode (exact), including aliases
+      const like = `%${q}%`;
+      lpResults = db().query(`
+        SELECT p.id, p.nombre, p.costo, p.unidad_compra, p.unidades_por_paquete_compra,
+               (SELECT codigo FROM codigos_barras WHERE producto_id=p.id AND es_principal=1 LIMIT 1) AS barcode
+        FROM productos p
+        WHERE p.activo = 1 AND (
+          p.nombre LIKE ?
+          OR EXISTS (SELECT 1 FROM codigos_barras WHERE producto_id=p.id AND codigo=?)
+        )
+        GROUP BY p.id LIMIT 15
+      `, [like, q]);
+      if (!lpResults.length) { lpDd.style.display = 'none'; return; }
+      lpDd.innerHTML = lpResults.map((r, i) => `
+        <div class="cv2-dd-item" data-i="${i}">
+          <span class="cv2-dd-nombre">${esc(r.nombre)}</span>
+          <span class="cv2-dd-meta">${esc(r.unidad_compra || 'Unidad')} · ${fmt$(r.costo)}</span>
+        </div>
+      `).join('');
+      lpDd.style.display = 'block';
+    });
+
+    lpSearch?.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!lpResults.length) return;
+        lpHighlight = Math.min(lpHighlight + 1, lpResults.length - 1);
+        scrollHighlight('cv2-lp-dropdown', lpHighlight);
+        lpSearch.value = lpResults[lpHighlight]?.nombre ?? lpQuerySaved;
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!lpResults.length) return;
+        lpHighlight = Math.max(lpHighlight - 1, -1);
+        scrollHighlight('cv2-lp-dropdown', lpHighlight);
+        lpSearch.value = lpHighlight >= 0 ? (lpResults[lpHighlight]?.nombre ?? lpQuerySaved) : lpQuerySaved;
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (lpHighlight >= 0 && lpResults[lpHighlight]) {
+          lpSelectIdx(lpHighlight);
+        } else if (lpResults.length === 1) {
+          lpSelectIdx(0);
+        }
+      } else if (e.key === 'Escape') {
+        lpDd.style.display = 'none';
+        lpHighlight = -1;
+      }
+    });
+
+    lpDd?.addEventListener('click', e => {
+      const item = e.target.closest('.cv2-dd-item');
+      if (!item) return;
+      const idx = parseInt(item.dataset.i);
+      if (isNaN(idx)) return;
+      lpSelectIdx(idx);
+    });
+
+    lpSearch?.focus();
+
+    // Store selected product reference for submitLinkProduct
+    container._lpGetSelected = () => lpSelected;
+  }
+
+  function submitLinkProduct(barcode) {
+    const container = ge('cv2-new-prod-form');
+    const prod = container?._lpGetSelected?.();
+    if (!prod) { alert('Seleccioná un producto de la lista'); ge('cv2-lp-search')?.focus(); return; }
+    if (!barcode || !barcode.trim()) { alert('No hay código para vincular'); return; }
+
+    const ts = nowISO();
+    try {
+      // Check if barcode already exists to avoid duplicate
+      const existing = db().query(
+        `SELECT id FROM codigos_barras WHERE codigo = ? LIMIT 1`,
+        [barcode.trim()]
+      );
+      if (existing.length === 0) {
+        db().run(`
+          INSERT OR IGNORE INTO codigos_barras (id, producto_id, codigo, es_principal)
+          VALUES (?, ?, ?, 0)
+        `, [uuid(), prod.id, barcode.trim()]);
+        db().run(`UPDATE productos SET sync_status='pending', updated_at=? WHERE id=?`, [ts, prod.id]);
+      }
+    } catch (e) {
+      alert('Error al vincular el código: ' + e.message);
+      return;
+    }
+
+    hideNewProductForm();
+    addToCart({
+      productoId:   prod.id,
+      nombre:       prod.nombre,
+      barcode:      barcode,
+      unidadCompra: prod.unidad_compra || 'Unidad',
+      udsPaquete:   parseFloat(prod.unidades_por_paquete_compra) || 1,
+      costoActual:  parseFloat(prod.costo) || 0,
+      costoNuevo:   parseFloat(prod.costo) || 0,
+    });
+    window.SGA_Utils.showNotification(`Código vinculado a "${prod.nombre}"`, 'success');
   }
 
   // ── Proveedor search ─────────────────────────────────────────────────────────
@@ -978,12 +1246,12 @@ const ComprasV2 = (() => {
   }
 
   // ── Post-compra screen ───────────────────────────────────────────────────────
-  function showSuccessScreen({ total, neto, saldoAplicado, sesion }) {
+  function showSuccessScreen({ total, neto, saldoAplicado, sesion, preEnrichedItems = null, snap = null }) {
     const root = ge('cv2-root');
     if (!root) return;
 
-    // Enrich items with current precio_venta from DB
-    const items = state.items.map(it => {
+    // Enrich items with current precio_venta from DB (or use pre-enriched on retomar)
+    const items = preEnrichedItems || state.items.map(it => {
       const row = db().query(
         `SELECT precio_venta FROM productos WHERE id = ?`, [it.productoId]
       )[0];
@@ -1004,16 +1272,21 @@ const ComprasV2 = (() => {
 
     const totalArticulos = items.length;
     const totalUds       = items.reduce((s, it) => s + it.cantUds, 0);
-    const facturaStr     = state.facturaPv && state.numeroFactura
-      ? `${state.facturaPv}-${state.numeroFactura}`
-      : (state.numeroFactura || state.facturaPv || '—');
-    const condStr        = state.condicionPago === 'efectivo' ? 'Contado' : 'Cta. Cte.';
-    const verifyMismatch = state.totalFactura > 0.001 && Math.abs(state.totalFactura - neto) > 0.01;
+    // Use snap fields when restoring from a paused state
+    const _pv   = snap?.facturaPv   ?? state.facturaPv;
+    const _nf   = snap?.numeroFactura ?? state.numeroFactura;
+    const _cond = snap?.condicionPago ?? state.condicionPago;
+    const _tf   = snap?.totalFactura  ?? state.totalFactura;
+    const _prov = snap?.proveedorNombre ?? state.proveedorNombre;
+    const _fecha = snap?.fecha ?? state.fecha;
+    const facturaStr     = _pv && _nf ? `${_pv}-${_nf}` : (_nf || _pv || '—');
+    const condStr        = _cond === 'efectivo' ? 'Contado' : 'Cta. Cte.';
+    const verifyMismatch = _tf > 0.001 && Math.abs(_tf - neto) > 0.01;
 
     // Format date dd/mm/yyyy
     const fechaFmt = (() => {
-      const [y, m, d] = state.fecha.split('-');
-      return d && m && y ? `${d}/${m}/${y}` : state.fecha;
+      const [y, m, d] = _fecha.split('-');
+      return d && m && y ? `${d}/${m}/${y}` : _fecha;
     })();
 
     // Ordenar: primero los que tienen cambio de costo o son nuevos, luego los demás; dentro de cada grupo, alfabético
@@ -1083,13 +1356,14 @@ const ComprasV2 = (() => {
             <div class="cv2-post-header-title">Compras — Ingreso Confirmado</div>
             <div class="cv2-post-header-sub">Resumen Post-Compra</div>
           </div>
+          <button class="cv2-post-btn-volver" id="cv2-post-btn-volver">← Volver al POS</button>
         </div>
 
         <!-- Form bar: purchase summary -->
         <div class="cv2-post-form-bar">
           <div class="cv2-post-fb-field">
             <div class="cv2-post-fb-label">Proveedor</div>
-            <div class="cv2-post-fb-value">${esc(state.proveedorNombre)}</div>
+            <div class="cv2-post-fb-value">${esc(_prov)}</div>
           </div>
           <div class="cv2-post-fb-field">
             <div class="cv2-post-fb-label">Nro. Factura</div>
@@ -1101,7 +1375,7 @@ const ComprasV2 = (() => {
           </div>
           <div class="cv2-post-fb-field">
             <div class="cv2-post-fb-label">Condición de Pago</div>
-            <div class="${state.condicionPago === 'efectivo' ? 'cv2-post-chip-contado' : 'cv2-post-chip-cc'}">${esc(condStr)}</div>
+            <div class="${_cond === 'efectivo' ? 'cv2-post-chip-contado' : 'cv2-post-chip-cc'}">${esc(condStr)}</div>
           </div>
           <div class="cv2-post-total-block">
             <div class="cv2-post-total-label">Total Compra: <span class="cv2-post-total-amount">${fmt$(neto)}</span></div>
@@ -1154,6 +1428,9 @@ const ComprasV2 = (() => {
         <div class="cv2-post-footer">
           <button class="cv2-post-btn-save-all" id="cv2-post-btn-save-all">
             ✓ Guardar Todos los Precios
+          </button>
+          <button class="cv2-post-btn-pausar" id="cv2-post-btn-pausar">
+            ⏸ Pausar · Retomar después
           </button>
           <button class="cv2-post-btn-finish" id="cv2-post-btn-finish">
             Finalizar · Ir al POS
@@ -1248,6 +1525,38 @@ const ComprasV2 = (() => {
       root.querySelectorAll('.cv2-post-actualizar-btn').forEach(btn => btn.click());
     });
 
+    // Helper: construye el objeto a guardar en localStorage con el step y snap
+    function buildPendingPayload() {
+      return JSON.stringify({
+        step: 'post-compra',
+        items,
+        herenciaSincs: state.herenciaSincronizados,
+        snap: {
+          proveedorNombre: _prov,
+          facturaPv:       _pv,
+          numeroFactura:   _nf,
+          fecha:           _fecha,
+          condicionPago:   _cond,
+          totalFactura:    _tf,
+          neto,
+          saldoAplicado,
+        }
+      });
+    }
+
+    // Volver → guardar + ir al POS (misma semántica que Pausar, navegación explícita)
+    ge('cv2-post-btn-volver')?.addEventListener('click', () => {
+      localStorage.setItem('compras_resumen_pending', buildPendingPayload());
+      window.location.hash = '#pos';
+    });
+
+    // Pausar → guardar estado actual en localStorage y volver al POS
+    ge('cv2-post-btn-pausar')?.addEventListener('click', () => {
+      localStorage.setItem('compras_resumen_pending', buildPendingPayload());
+      window.SGA_Utils.showNotification('Ajuste pausado. Podés retomarlo desde Operaciones de Stock.', 'info');
+      setTimeout(() => { window.location.hash = '#pos'; }, 1200);
+    });
+
     // Finish → resumen final antes de ir al POS
     ge('cv2-post-btn-finish')?.addEventListener('click', () => {
       showResumenFinal({ items, herenciaSincs: state.herenciaSincronizados });
@@ -1259,8 +1568,8 @@ const ComprasV2 = (() => {
     const root = ge('cv2-root');
     if (!root) return;
 
-    // Persistir para poder restaurar al volver del editor
-    sessionStorage.setItem('compras_resumen_pending', JSON.stringify({ items, herenciaSincs }));
+    // Persistir para poder restaurar al volver del editor o reanudar más tarde
+    localStorage.setItem('compras_resumen_pending', JSON.stringify({ step: 'resumen-final', items, herenciaSincs }));
 
     // ── Preparar datos ────────────────────────────────────────────────────────
     const esNuevo = (it) => it.isNuevo === true || (parseFloat(it.pvActual) || 0) === 0;
@@ -1367,9 +1676,12 @@ const ComprasV2 = (() => {
     root.innerHTML = `
       <div class="cv2-rf-root">
         <div class="cv2-rf-header">
-          <div>
-            <div class="cv2-rf-header-title">Resumen de Cambios</div>
-            <div class="cv2-rf-header-sub">Modificaciones aplicadas durante esta compra</div>
+          <div style="display:flex;align-items:center;gap:16px">
+            <button class="cv2-rf-btn-volver" id="cv2-rf-btn-volver">← Volver</button>
+            <div>
+              <div class="cv2-rf-header-title">Resumen de Cambios</div>
+              <div class="cv2-rf-header-sub">Modificaciones aplicadas durante esta compra</div>
+            </div>
           </div>
           <div class="cv2-rf-header-actions">
             <button class="cv2-rf-btn-share" id="cv2-rf-btn-wa" title="Compartir por WhatsApp">
@@ -1411,7 +1723,8 @@ const ComprasV2 = (() => {
         </div>` : ''}
 
         <div class="cv2-rf-footer">
-          <button class="cv2-rf-btn-pos" id="cv2-rf-btn-pos">Ir al POS →</button>
+          <button class="cv2-rf-btn-pausar" id="cv2-rf-btn-pausar">⏸ Pausar · Retomar después</button>
+          <button class="cv2-rf-btn-pos" id="cv2-rf-btn-pos">Finalizar · Ir al POS →</button>
         </div>
       </div>`;
 
@@ -1445,22 +1758,48 @@ const ComprasV2 = (() => {
       window.open(`mailto:?subject=${subject}&body=${body}`, '_self');
     });
 
+    root.querySelector('#cv2-rf-btn-volver')?.addEventListener('click', () => {
+      // Volver al paso anterior (ajuste de precios) usando los items guardados
+      const raw = localStorage.getItem('compras_resumen_pending');
+      if (raw) {
+        try {
+          const saved = JSON.parse(raw);
+          showSuccessScreen({
+            total: saved.snap?.neto ?? 0,
+            neto: saved.snap?.neto ?? 0,
+            saldoAplicado: saved.snap?.saldoAplicado ?? 0,
+            sesion: null,
+            preEnrichedItems: saved.items,
+            snap: saved.snap ?? null,
+          });
+          return;
+        } catch(e) { /* fallback */ }
+      }
+      window.location.hash = '#pos';
+    });
+
+    root.querySelector('#cv2-rf-btn-pausar')?.addEventListener('click', () => {
+      window.SGA_Utils.showNotification('Ajuste pausado. Podés retomarlo desde Operaciones de Stock.', 'info');
+      setTimeout(() => { window.location.hash = '#pos'; }, 1200);
+    });
+
     root.querySelector('#cv2-rf-btn-pos')?.addEventListener('click', () => {
-      sessionStorage.removeItem('compras_resumen_pending');
-      sessionStorage.removeItem('compras_resumen_editados');
+      localStorage.removeItem('compras_resumen_pending');
+      localStorage.removeItem('compras_resumen_editados');
       window.location.hash = '#pos';
     });
 
     // Aplicar estado "editado" a botones de productos ya editados
-    const editados = JSON.parse(sessionStorage.getItem('compras_resumen_editados') || '[]');
+    const editados = JSON.parse(localStorage.getItem('compras_resumen_editados') || '[]');
     root.querySelectorAll('.cv2-rf-btn-edit').forEach(btn => {
       if (editados.includes(btn.dataset.prodid)) markBtnEditado(btn);
 
       btn.addEventListener('click', () => {
-        const lista = JSON.parse(sessionStorage.getItem('compras_resumen_editados') || '[]');
+        const lista = JSON.parse(localStorage.getItem('compras_resumen_editados') || '[]');
         if (!lista.includes(btn.dataset.prodid)) lista.push(btn.dataset.prodid);
-        sessionStorage.setItem('compras_resumen_editados', JSON.stringify(lista));
+        localStorage.setItem('compras_resumen_editados', JSON.stringify(lista));
         sessionStorage.setItem('editor_returnTo', '#compras_v2');
+        sessionStorage.setItem('compras_resumen_editor_return', '1');
         window.location.hash = `#editor-producto/${btn.dataset.prodid}`;
       });
     });
@@ -1805,16 +2144,34 @@ const ComprasV2 = (() => {
   function init() {
     teardownKeyboard();
 
-    // Restaurar resumen si volvemos del editor de producto
-    const pendingResumen = sessionStorage.getItem('compras_resumen_pending');
-    if (pendingResumen) {
-      sessionStorage.removeItem('compras_resumen_pending');
-      try {
-        const { items, herenciaSincs } = JSON.parse(pendingResumen);
-        state.currentUser = window.SGA_Auth.getCurrentUser();
-        showResumenFinal({ items, herenciaSincs });
-        return;
-      } catch (e) { /* si falla, continúa al init normal */ }
+    // Retomar desde operaciones_stock o desde el editor de producto
+    const fromEditor  = sessionStorage.getItem('compras_resumen_editor_return');
+    const fromRetomar = sessionStorage.getItem('compras_v2_retomar');
+    if (fromEditor || fromRetomar) {
+      sessionStorage.removeItem('compras_resumen_editor_return');
+      sessionStorage.removeItem('compras_v2_retomar');
+      const raw = localStorage.getItem('compras_resumen_pending');
+      if (raw) {
+        try {
+          const saved = JSON.parse(raw);
+          state.currentUser = window.SGA_Auth.getCurrentUser();
+          if (fromEditor || saved.step === 'resumen-final') {
+            // Retomar en el resumen final (último paso o retorno del editor)
+            showResumenFinal({ items: saved.items, herenciaSincs: saved.herenciaSincs || [] });
+          } else {
+            // Retomar en el paso de ajuste de precios (post-compra)
+            showSuccessScreen({
+              total:            saved.snap?.neto ?? 0,
+              neto:             saved.snap?.neto ?? 0,
+              saldoAplicado:    saved.snap?.saldoAplicado ?? 0,
+              sesion:           null,
+              preEnrichedItems: saved.items,
+              snap:             saved.snap ?? null,
+            });
+          }
+          return;
+        } catch (e) { /* si falla, continúa al init normal */ }
+      }
     }
 
     state.currentUser  = window.SGA_Auth.getCurrentUser();
@@ -1836,6 +2193,34 @@ const ComprasV2 = (() => {
     state.searchQuerySaved = '';
     state.provResults      = [];
     state.provHighlight    = -1;
+
+    // Mostrar banner si hay ajuste de precios pendiente de una compra anterior
+    const pendingBanner = ge('cv2-pending-resumen-banner');
+    const pendingRaw = localStorage.getItem('compras_resumen_pending');
+    if (pendingBanner) {
+      if (pendingRaw) {
+        pendingBanner.style.display = 'flex';
+        // Usar onclick para evitar listeners acumulados en recargas del módulo
+        const btnRetomar = ge('cv2-pending-resumen-btn');
+        const btnDescartar = ge('cv2-pending-resumen-descartar');
+        if (btnRetomar) btnRetomar.onclick = () => {
+          const raw = localStorage.getItem('compras_resumen_pending');
+          if (!raw) return;
+          try {
+            const { items, herenciaSincs } = JSON.parse(raw);
+            showResumenFinal({ items, herenciaSincs });
+          } catch(e) { alert('No se pudo restaurar el ajuste pendiente.'); }
+        };
+        if (btnDescartar) btnDescartar.onclick = () => {
+          if (!confirm('¿Descartás el ajuste de precios pendiente? Esta acción no se puede deshacer.')) return;
+          localStorage.removeItem('compras_resumen_pending');
+          localStorage.removeItem('compras_resumen_editados');
+          pendingBanner.style.display = 'none';
+        };
+      } else {
+        pendingBanner.style.display = 'none';
+      }
+    }
 
     // Set date default
     const fechaInp = ge('cv2-fecha');
@@ -1936,13 +2321,21 @@ const ComprasV2 = (() => {
     }
 
     ge('cv2-dropdown')?.addEventListener('click', e => {
-      const item = e.target.closest('.cv2-dd-item');
-      if (!item) return;
-      if (item.dataset.action === 'nuevo') {
-        showNewProductForm(ge('cv2-search')?.value.trim() || '');
-        clearSearch();
+      // Check if click was on a specific action span first
+      const accion = e.target.closest('[data-action]');
+      if (accion) {
+        const barcode = ge('cv2-search')?.value.trim() || '';
+        if (accion.dataset.action === 'nuevo') {
+          showNewProductForm(barcode);
+          clearSearch();
+        } else if (accion.dataset.action === 'vincular') {
+          showLinkProductForm(barcode);
+          clearSearch();
+        }
         return;
       }
+      const item = e.target.closest('.cv2-dd-item');
+      if (!item) return;
       const idx = parseInt(item.dataset.i);
       if (!isNaN(idx)) selectSearchResult(idx);
     });
@@ -2042,10 +2435,11 @@ const ComprasV2 = (() => {
     ge('cv2-prov-clear')?.addEventListener('click', clearProveedor);
 
     // ── Action buttons ──
-    ge('cv2-btn-volver')   ?.addEventListener('click', showVolverModal);
-    ge('cv2-btn-pausar')   ?.addEventListener('click', pausar);
-    ge('cv2-btn-confirmar')?.addEventListener('click', confirmar);
-    ge('cv2-btn-pausadas') ?.addEventListener('click', showPausadasOverlay);
+    ge('cv2-btn-volver')          ?.addEventListener('click', showVolverModal);
+    ge('cv2-btn-pausar')          ?.addEventListener('click', pausar);
+    ge('cv2-btn-confirmar')       ?.addEventListener('click', confirmar);
+    ge('cv2-btn-pausadas')        ?.addEventListener('click', showPausadasOverlay);
+    ge('cv2-btn-nuevo-proveedor') ?.addEventListener('click', showNuevoProveedorModal);
 
     // ── Volver modal options ──
     ge('cv2-volver-pausar')?.addEventListener('click', () => {

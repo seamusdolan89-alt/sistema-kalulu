@@ -35,6 +35,7 @@
     'etiquetas': () => import('./modules/etiquetas.js').then(m => m.default),
     'informes': () => import('./modules/informes.js').then(m => m.default),
     'editor-producto': () => import('./modules/editor-producto.js').then(m => m.default),
+    'cuenta_corriente_proveedores': () => import('./modules/cuenta_corriente_proveedores.js').then(m => m.default),
   };
 
   /**
@@ -136,14 +137,20 @@
       { name: 'operaciones_stock', label: '📦 Operaciones de Stock' },
       { name: 'ordenes', label: '📋 Órdenes' },
       { name: 'proveedores', label: '🏢 Proveedores' },
+      { name: 'cuenta_corriente_proveedores', label: '📒 Ctas. Ctes. Proveedores' },
       { name: 'promociones', label: '🏷️ Promociones' },
       { name: 'etiquetas', label: '🏷️ Etiquetas' },
       { name: 'informes', label: '📊 Informes' },
     ];
 
-    navContainer.innerHTML = moduleList.map(({ name, label }) => 
-      `<li><a href="#${name}" data-module="${name}" class="nav-link">${label}</a></li>`
-    ).join('');
+    const hasPendingResumen = !!localStorage.getItem('compras_resumen_pending');
+
+    navContainer.innerHTML = moduleList.map(({ name, label }) => {
+      const badge = (name === 'operaciones_stock' && hasPendingResumen)
+        ? ' <span style="display:inline-block;background:#ff8f00;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;vertical-align:middle;margin-left:4px;white-space:nowrap;">● Ajuste pendiente</span>'
+        : '';
+      return `<li><a href="#${name}" data-module="${name}" class="nav-link">${label}${badge}</a></li>`;
+    }).join('');
   }
 
   /**

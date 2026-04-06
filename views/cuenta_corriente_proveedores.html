@@ -1,0 +1,431 @@
+<style>
+  /* ── CUENTA CORRIENTE PROVEEDORES ────────────────────────────────────────── */
+  #ccprov-root {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+
+  /* ── HEADER ──────────────────────────────────────────────────────────────── */
+  .ccprov-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+    gap: 12px;
+  }
+  .ccprov-header-left { display: flex; align-items: center; gap: 12px; }
+  .ccprov-back-btn {
+    background: none;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--color-text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.15s;
+  }
+  .ccprov-back-btn:hover { background: var(--color-surface); color: var(--color-text); }
+  .ccprov-header h2 { margin: 0; font-size: 1.25rem; font-weight: 700; }
+  .ccprov-header-sub { font-size: 12px; color: var(--color-text-secondary); margin-top: 1px; }
+  .ccprov-header-right { display: flex; gap: 8px; }
+
+  /* ── SALDO BADGE ─────────────────────────────────────────────────────────── */
+  .saldo-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 14px;
+    font-size: 13px;
+    font-weight: 700;
+    vertical-align: middle;
+  }
+  .saldo-badge.deuda  { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+  .saldo-badge.saldado { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+  .saldo-badge.credito { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+
+  /* ── FILTERS / SEARCH ────────────────────────────────────────────────────── */
+  .ccprov-filters {
+    display: flex;
+    gap: 10px;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+    align-items: center;
+  }
+  .ccprov-search {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    outline: none;
+    background: var(--color-background);
+    color: var(--color-text);
+  }
+  .ccprov-search:focus { border-color: var(--color-primary); }
+  .ccprov-toggle {
+    padding: 7px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: 20px;
+    background: var(--color-surface);
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+    transition: all 0.15s;
+  }
+  .ccprov-toggle:hover { border-color: var(--color-primary); color: var(--color-primary); }
+  .ccprov-toggle.active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+
+  /* ── TABLE ───────────────────────────────────────────────────────────────── */
+  .ccprov-table-wrap {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 20px 20px;
+  }
+  .ccprov-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .ccprov-table thead th {
+    padding: 10px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    border-bottom: 2px solid var(--color-border);
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    background: var(--color-background);
+    z-index: 1;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+  }
+  .ccprov-table thead th.right { text-align: right; }
+  .ccprov-table tbody tr { border-bottom: 1px solid var(--color-border); transition: background 0.1s; }
+  .ccprov-table tbody tr:hover { background: var(--color-surface); }
+  .ccprov-table tbody td { padding: 10px; vertical-align: middle; }
+  .ccprov-table tbody td.right { text-align: right; font-variant-numeric: tabular-nums; }
+  .ccprov-table tfoot td {
+    padding: 10px;
+    font-weight: 700;
+    border-top: 2px solid var(--color-border);
+  }
+  .ccprov-table tfoot td.right { text-align: right; }
+
+  /* ── LEDGER SPECIFIC ─────────────────────────────────────────────────────── */
+  .ledger-row-compra { }
+  .ledger-row-pago td { color: var(--color-text-secondary); }
+  .ledger-debe  { color: #c62828; font-weight: 600; }
+  .ledger-haber { color: #2e7d32; font-weight: 600; }
+  .ledger-saldo-deuda   { color: #e65100; font-weight: 700; }
+  .ledger-saldo-saldado { color: #2e7d32; font-weight: 700; }
+  .ledger-type-badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .ledger-type-compra { background: #fff3e0; color: #e65100; }
+  .ledger-type-pago   { background: #e8f5e9; color: #2e7d32; }
+  .ledger-saldo-parcial { color: #f57c00; font-size: 11px; font-weight: 600; }
+
+  /* ── SALDO SUMMARY CARD ──────────────────────────────────────────────────── */
+  .ccprov-saldo-card {
+    margin: 16px 20px 0;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    display: flex;
+    gap: 32px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .ccprov-saldo-item { display: flex; flex-direction: column; gap: 2px; }
+  .ccprov-saldo-label { font-size: 11px; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+  .ccprov-saldo-value { font-size: 1.4rem; font-weight: 700; }
+  .ccprov-saldo-value.deuda   { color: #e65100; }
+  .ccprov-saldo-value.saldado { color: #2e7d32; }
+  .ccprov-saldo-value.credito { color: #1565c0; }
+
+  /* ── ORPHAN CREDIT ALERT ─────────────────────────────────────────────────── */
+  .ccprov-credito-alert {
+    margin: 8px 20px 0;
+    background: #e3f2fd;
+    border: 1px solid #90caf9;
+    border-radius: var(--radius-md);
+    padding: 10px 16px;
+    font-size: 13px;
+    color: #1565c0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  /* ── EMPTY STATE ─────────────────────────────────────────────────────────── */
+  .ccprov-empty {
+    text-align: center;
+    color: var(--color-text-secondary);
+    padding: 60px 20px;
+    font-size: 14px;
+  }
+  .ccprov-empty-icon { font-size: 2.5rem; margin-bottom: 10px; }
+
+  /* ── BUTTONS ─────────────────────────────────────────────────────────────── */
+  .ccprov-btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 8px 16px;
+    background: var(--color-primary);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    white-space: nowrap;
+  }
+  .ccprov-btn-primary:hover { opacity: 0.88; }
+  .ccprov-btn-secondary {
+    padding: 8px 16px;
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.1s;
+    white-space: nowrap;
+  }
+  .ccprov-btn-secondary:hover { background: var(--color-border); }
+  .ccprov-btn-icon {
+    padding: 5px 9px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-background);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    transition: background 0.1s;
+  }
+  .ccprov-btn-icon:hover { background: var(--color-surface); }
+  .ccprov-btn-link {
+    background: none;
+    border: none;
+    color: var(--color-primary);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0;
+    text-decoration: underline;
+  }
+
+  /* ── MODAL ───────────────────────────────────────────────────────────────── */
+  .ccprov-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.5);
+    z-index: var(--z-modal);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .ccprov-overlay.hidden { display: none; }
+  .ccprov-modal {
+    background: var(--color-background);
+    border-radius: var(--radius-lg);
+    width: 100%;
+    max-width: 580px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    flex-direction: column;
+  }
+  .ccprov-modal-hdr {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--color-border);
+    font-size: 1rem;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .ccprov-modal-close {
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    color: var(--color-text-secondary);
+    padding: 2px 6px;
+    line-height: 1;
+  }
+  .ccprov-modal-close:hover { color: var(--color-text); }
+  .ccprov-modal-body {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    flex: 1;
+    overflow-y: auto;
+  }
+  .ccprov-modal-ftr {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 20px;
+    border-top: 1px solid var(--color-border);
+    flex-shrink: 0;
+  }
+  .ccprov-modal-ftr-right { display: flex; gap: 10px; }
+
+  /* ── FORM FIELDS ─────────────────────────────────────────────────────────── */
+  .ccprov-field { display: flex; flex-direction: column; gap: 5px; }
+  .ccprov-field label { font-size: 13px; font-weight: 600; color: var(--color-text); }
+  .ccprov-field-row { display: flex; gap: 12px; }
+  .ccprov-field-row .ccprov-field { flex: 1; min-width: 0; }
+  .ccprov-input {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 8px 10px;
+    font-size: 14px;
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--color-background);
+    color: var(--color-text);
+  }
+  .ccprov-input:focus { outline: 2px solid var(--color-primary); border-color: transparent; }
+  .ccprov-input:disabled { background: var(--color-surface); color: var(--color-text-secondary); }
+
+  /* ── METODOS DE PAGO ─────────────────────────────────────────────────────── */
+  .ccprov-section-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--color-text-secondary);
+    font-weight: 700;
+    margin: 0 0 8px;
+  }
+  .ccprov-metodo-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    margin-bottom: 6px;
+  }
+  .ccprov-metodo-row.active { border-color: var(--color-primary); background: var(--color-primary-light, #e8f0fe); }
+  .ccprov-metodo-check { width: 16px; height: 16px; flex-shrink: 0; cursor: pointer; accent-color: var(--color-primary); }
+  .ccprov-metodo-label { font-size: 13px; font-weight: 600; min-width: 100px; flex-shrink: 0; }
+  .ccprov-metodo-inputs { display: flex; gap: 8px; flex: 1; align-items: center; }
+  .ccprov-metodo-inputs .ccprov-input { flex: 1; }
+  .ccprov-metodo-ref { flex: 1.5 !important; }
+  .ccprov-metodo-disabled { opacity: .5; pointer-events: none; }
+
+  /* ── TOTAL ───────────────────────────────────────────────────────────────── */
+  .ccprov-total-row {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 12px;
+    font-size: 15px;
+    font-weight: 700;
+    padding: 2px 4px;
+  }
+  .ccprov-total-monto { font-size: 1.3rem; color: var(--color-primary); }
+
+  /* ── IMPUTACION SECTION ──────────────────────────────────────────────────── */
+  .ccprov-imp-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .ccprov-imp-toggle input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--color-primary); cursor: pointer; }
+  .ccprov-pending-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-top: 8px;
+  }
+  .ccprov-pending-table th {
+    padding: 7px 8px;
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    color: var(--color-text-secondary);
+    border-bottom: 2px solid var(--color-border);
+    font-weight: 600;
+  }
+  .ccprov-pending-table th.right { text-align: right; }
+  .ccprov-pending-table td { padding: 7px 8px; border-bottom: 1px solid var(--color-border); vertical-align: middle; }
+  .ccprov-pending-table td.right { text-align: right; font-variant-numeric: tabular-nums; }
+  .ccprov-imp-amount {
+    width: 110px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: 5px 8px;
+    font-size: 13px;
+    text-align: right;
+    box-sizing: border-box;
+    background: var(--color-background);
+    color: var(--color-text);
+  }
+  .ccprov-imp-amount:focus { outline: 2px solid var(--color-primary); border-color: transparent; }
+  .ccprov-imp-amount:disabled { background: var(--color-surface); color: var(--color-text-secondary); }
+
+  /* ── CREDIT SOBRANTE PREVIEW ─────────────────────────────────────────────── */
+  .ccprov-sobrante {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    background: #e3f2fd;
+    border: 1px solid #90caf9;
+    color: #1565c0;
+  }
+  .ccprov-sobrante.warn {
+    background: #fff3e0;
+    border-color: #ffcc80;
+    color: #e65100;
+  }
+
+  /* ── ERROR MESSAGE ───────────────────────────────────────────────────────── */
+  .ccprov-error {
+    color: var(--color-danger);
+    font-size: 13px;
+    padding: 6px 10px;
+    background: #ffebee;
+    border-radius: var(--radius-sm);
+    border: 1px solid #ffcdd2;
+    display: none;
+  }
+  .ccprov-error.visible { display: block; }
+
+  /* ── ACCIONES TABLE COLUMN ───────────────────────────────────────────────── */
+  .ccprov-actions { display: flex; gap: 6px; align-items: center; }
+</style>
+
+<div id="ccprov-root"></div>
+<div id="ccprov-overlay" class="ccprov-overlay hidden"></div>
