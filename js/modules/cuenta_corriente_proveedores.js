@@ -343,13 +343,13 @@ const CuentaCorrienteProveedores = (() => {
 
   // ── VISTA LISTA ──────────────────────────────────────────────────────────────
 
-  function renderLista() {
-    const root = ge('ccprov-root');
-    if (!root) return;
+  // Renders only the table content — called on every filter change, preserves focus
+  function renderTabla() {
+    const wrap = ge('ccprov-table-wrap');
+    if (!wrap) return;
 
     let proveedores = data().getResumenProveedores();
 
-    // Filtros
     if (state.soloDeuda) proveedores = proveedores.filter(p => p.saldo > 0.01);
     if (state.search) {
       const q = state.search.toLowerCase();
@@ -359,7 +359,6 @@ const CuentaCorrienteProveedores = (() => {
       );
     }
 
-    // Sort: con deuda primero, luego alfabético
     proveedores.sort((a, b) => {
       if (b.saldo > 0.01 && !(a.saldo > 0.01)) return 1;
       if (a.saldo > 0.01 && !(b.saldo > 0.01)) return -1;
@@ -368,12 +367,78 @@ const CuentaCorrienteProveedores = (() => {
 
     const totalDeuda = proveedores.filter(p => p.saldo > 0.01).reduce((s, p) => s + p.saldo, 0);
 
+    // Update subtitle count
+    const sub = ge('ccprov-lista-sub');
+    if (sub) sub.textContent = `${proveedores.length} proveedor${proveedores.length !== 1 ? 'es' : ''}`;
+
+    wrap.innerHTML = `
+      ${totalDeuda > 0.01 ? `
+      <div style="padding:14px 0 2px;display:flex;justify-content:flex-end;align-items:center;gap:8px;font-size:13px;color:var(--color-text-secondary)">
+        Total adeudado: <strong style="color:#e65100;font-size:15px">${fmt$(totalDeuda)}</strong>
+      </div>` : ''}
+
+      ${!proveedores.length ? `
+        <div class="ccprov-empty">
+          <div class="ccprov-empty-icon">📒</div>
+          <p>${state.search ? 'Sin resultados.' : state.soloDeuda ? 'No hay proveedores con deuda pendiente.' : 'No hay proveedores registrados.'}</p>
+          ${state.soloDeuda ? `<button class="ccprov-btn-link" id="btn-ver-todos">Ver todos los proveedores</button>` : ''}
+        </div>
+      ` : `
+      <table class="ccprov-table">
+        <thead>
+          <tr>
+            <th>Proveedor</th>
+            <th>Contacto</th>
+            <th>Cond. pago</th>
+            <th class="right">Saldo</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${proveedores.map(p => `
+            <tr>
+              <td><strong>${esc(p.razon_social)}</strong></td>
+              <td>${esc(p.contacto_nombre || '—')}</td>
+              <td>${esc(p.condicion_pago || '—')}</td>
+              <td class="right">${saldoBadge(p.saldo)}</td>
+              <td>
+                <div class="ccprov-actions">
+                  <button class="ccprov-btn-icon btn-ver-detalle" data-id="${esc(p.id)}" data-nombre="${esc(p.razon_social)}" title="Ver cuenta corriente">📋</button>
+                  <button class="ccprov-btn-icon btn-pagar" data-id="${esc(p.id)}" data-nombre="${esc(p.razon_social)}" title="Registrar pago">💳</button>
+                </div>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      `}
+    `;
+
+    ge('btn-ver-todos')?.addEventListener('click', () => { state.soloDeuda = false; syncToggleBtn(); renderTabla(); });
+
+    wrap.querySelectorAll('.btn-ver-detalle').forEach(btn => {
+      btn.addEventListener('click', () => renderDetalle(btn.dataset.id, btn.dataset.nombre));
+    });
+    wrap.querySelectorAll('.btn-pagar').forEach(btn => {
+      btn.addEventListener('click', () => openModalPago(btn.dataset.id, btn.dataset.nombre));
+    });
+  }
+
+  function syncToggleBtn() {
+    ge('btn-toggle-deuda')?.classList.toggle('active', state.soloDeuda);
+  }
+
+  // Renders shell (header + filters) once; subsequent filter changes only update the table
+  function renderLista() {
+    const root = ge('ccprov-root');
+    if (!root) return;
+
     root.innerHTML = `
       <div class="ccprov-header">
         <div class="ccprov-header-left">
           <div>
             <h2>📒 Cuentas Corrientes</h2>
-            <span class="ccprov-header-sub">${proveedores.length} proveedor${proveedores.length !== 1 ? 'es' : ''}</span>
+            <span class="ccprov-header-sub" id="ccprov-lista-sub"></span>
           </div>
         </div>
         <div class="ccprov-header-right">
@@ -383,74 +448,36 @@ const CuentaCorrienteProveedores = (() => {
 
       <div class="ccprov-filters">
         <input type="text" class="ccprov-search" id="ccprov-search"
-          placeholder="Buscar proveedor…" value="${esc(state.search)}">
+          placeholder="Buscar proveedor…" autocomplete="off" spellcheck="false">
         <button class="ccprov-toggle ${state.soloDeuda ? 'active' : ''}" id="btn-toggle-deuda">
           Solo con deuda
         </button>
       </div>
 
-      <div class="ccprov-table-wrap">
-        ${totalDeuda > 0.01 ? `
-        <div style="padding:14px 0 2px;display:flex;justify-content:flex-end;align-items:center;gap:8px;font-size:13px;color:var(--color-text-secondary)">
-          Total adeudado: <strong style="color:#e65100;font-size:15px">${fmt$(totalDeuda)}</strong>
-        </div>` : ''}
-
-        ${!proveedores.length ? `
-          <div class="ccprov-empty">
-            <div class="ccprov-empty-icon">📒</div>
-            <p>${state.search ? 'Sin resultados.' : state.soloDeuda ? 'No hay proveedores con deuda pendiente.' : 'No hay proveedores registrados.'}</p>
-            ${state.soloDeuda ? `<button class="ccprov-btn-link" id="btn-ver-todos">Ver todos los proveedores</button>` : ''}
-          </div>
-        ` : `
-        <table class="ccprov-table">
-          <thead>
-            <tr>
-              <th>Proveedor</th>
-              <th>Contacto</th>
-              <th>Cond. pago</th>
-              <th class="right">Saldo</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${proveedores.map(p => `
-              <tr>
-                <td><strong>${esc(p.razon_social)}</strong></td>
-                <td>${esc(p.contacto_nombre || '—')}</td>
-                <td>${esc(p.condicion_pago || '—')}</td>
-                <td class="right">${saldoBadge(p.saldo)}</td>
-                <td>
-                  <div class="ccprov-actions">
-                    <button class="ccprov-btn-icon btn-ver-detalle" data-id="${esc(p.id)}" data-nombre="${esc(p.razon_social)}" title="Ver cuenta corriente">📋</button>
-                    <button class="ccprov-btn-icon btn-pagar" data-id="${esc(p.id)}" data-nombre="${esc(p.razon_social)}" title="Registrar pago">💳</button>
-                  </div>
-                </td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-        `}
-      </div>
+      <div class="ccprov-table-wrap" id="ccprov-table-wrap"></div>
     `;
 
-    // Events
+    // Populate table immediately
+    renderTabla();
+
+    // Search: debounced, updates only the table — focus never leaves the input
+    let searchTimer = null;
     ge('ccprov-search').addEventListener('input', e => {
-      state.search = e.target.value.trim();
-      renderLista();
+      state.search = e.target.value;
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => renderTabla(), 180);
     });
+
     ge('btn-toggle-deuda').addEventListener('click', () => {
       state.soloDeuda = !state.soloDeuda;
-      renderLista();
+      syncToggleBtn();
+      renderTabla();
     });
-    ge('btn-nuevo-pago-general')?.addEventListener('click', () => openModalPago(null, null));
-    ge('btn-ver-todos')?.addEventListener('click', () => { state.soloDeuda = false; renderLista(); });
 
-    root.querySelectorAll('.btn-ver-detalle').forEach(btn => {
-      btn.addEventListener('click', () => renderDetalle(btn.dataset.id, btn.dataset.nombre));
-    });
-    root.querySelectorAll('.btn-pagar').forEach(btn => {
-      btn.addEventListener('click', () => openModalPago(btn.dataset.id, btn.dataset.nombre));
-    });
+    ge('btn-nuevo-pago-general').addEventListener('click', () => openModalPago(null, null));
+
+    // Auto-focus search
+    ge('ccprov-search').focus();
   }
 
   // ── VISTA DETALLE ────────────────────────────────────────────────────────────
@@ -717,10 +744,14 @@ const CuentaCorrienteProveedores = (() => {
     const clearError = () => ge('mp-error').classList.remove('visible');
 
     // ── Actualizar total + sobrante ───────────────────────────────────────────
+    // onTotalChanged: hook for renderImpSection to react when total changes
+    let onTotalChanged = null;
+
     const updateTotal = () => {
       const total = getTotal();
       ge('mp-total').textContent = fmt$(total);
       updateSobrante(total);
+      if (onTotalChanged) onTotalChanged(total);
     };
 
     const updateSobrante = (total) => {
@@ -824,7 +855,7 @@ const CuentaCorrienteProveedores = (() => {
                     data-idx="${idx}"
                     data-saldo="${c.saldo}"
                     data-compra-id="${esc(c.id)}"
-                    placeholder="0,00"
+                    placeholder="${autoImputar ? '' : '0,00'}"
                     min="0" max="${c.saldo}" step="0.01"
                     ${autoImputar ? 'disabled' : ''}>
                 </td>
@@ -836,15 +867,48 @@ const CuentaCorrienteProveedores = (() => {
 
       cont.innerHTML = html;
 
+      // Calcula cuánto le corresponde a cada comprobante según oldest-first con el total actual
+      const calcAutoMontos = (total) => {
+        let restante = total;
+        return comprasPendientes.map(c => {
+          if (restante <= 0.01) return 0;
+          const monto = Math.min(restante, c.saldo);
+          restante -= monto;
+          return monto;
+        });
+      };
+
+      // Pobla los inputs con los montos calculados (auto) o los vacía (manual)
+      const syncInputValues = () => {
+        const inputs = document.querySelectorAll('.imp-monto-input');
+        if (autoImputar) {
+          const montos = calcAutoMontos(getTotal());
+          inputs.forEach((inp, i) => {
+            inp.value = montos[i] > 0.001 ? montos[i].toFixed(2) : '';
+            inp.disabled = true;
+            inp.placeholder = '';
+          });
+        } else {
+          inputs.forEach(inp => {
+            inp.value = '';
+            inp.disabled = false;
+            inp.placeholder = '0,00';
+          });
+        }
+      };
+
+      // Populate initial values if auto is on
+      syncInputValues();
+
       // Toggle auto/manual
       ge('chk-auto-imputar').addEventListener('change', e => {
         autoImputar = e.target.checked;
-        document.querySelectorAll('.imp-monto-input').forEach(inp => {
-          inp.disabled = autoImputar;
-          if (autoImputar) inp.value = '';
-        });
-        updateTotal();
+        syncInputValues();
+        updateSobrante(getTotal());
       });
+
+      // Re-calculate auto distribution whenever total changes
+      onTotalChanged = () => { if (autoImputar) syncInputValues(); };
 
       // Actualizar sobrante al cambiar montos manuales
       cont.querySelectorAll('.imp-monto-input').forEach(inp => {

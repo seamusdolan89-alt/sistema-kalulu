@@ -526,7 +526,10 @@ const Caja = (() => {
     el.innerHTML = `
       <div class="caja-ei-header">
         <h3>Egresos</h3>
-        ${canManage() ? `<button id="btn-nuevo-egreso" class="btn btn-sm btn-danger">+ Egreso</button>` : ''}
+        <div style="display:flex;gap:8px">
+          <button id="btn-pago-proveedor" class="btn btn-sm" style="background:#e3f2fd;color:#1565c0;border:1.5px solid #90caf9;font-weight:600">💳 Pago a Proveedor</button>
+          ${canManage() ? `<button id="btn-nuevo-egreso" class="btn btn-sm btn-danger">+ Egreso</button>` : ''}
+        </div>
       </div>
       ${eHtml}
       <div class="caja-ei-header" style="margin-top:24px">
@@ -536,6 +539,7 @@ const Caja = (() => {
       ${iHtml}
     `;
 
+    ge('btn-pago-proveedor').addEventListener('click', openPagoProveedorModal);
     if (canManage()) {
       const btnE = ge('btn-nuevo-egreso');
       const btnI = ge('btn-nuevo-ingreso');
@@ -655,6 +659,142 @@ const Caja = (() => {
         switchTab('egresos');
       } else {
         showToast(result.error, 'error');
+      }
+    });
+  }
+
+  // ── PAGO A PROVEEDOR MODAL ───────────────────────────────────────────────────
+
+  async function openPagoProveedorModal() {
+    // Lazy-load SGA_PagosProveedores data layer if not already available
+    if (!window.SGA_PagosProveedores) {
+      try {
+        await import('./cuenta_corriente_proveedores.js');
+      } catch (e) {
+        showToast('Error cargando módulo de pagos', 'error');
+        return;
+      }
+    }
+
+    const proveedores = window.SGA_DB.query(
+      `SELECT id, razon_social FROM proveedores WHERE activo=1 ORDER BY razon_social COLLATE NOCASE ASC`
+    );
+
+    if (!proveedores.length) {
+      showToast('No hay proveedores registrados', 'warn');
+      return;
+    }
+
+    const provOpts = proveedores.map(p =>
+      `<option value="${esc(p.id)}">${esc(p.razon_social)}</option>`
+    ).join('');
+
+    openModal(`
+      <button class="caja-modal-close" id="btn-close-pagoprov">✕</button>
+      <h3>💳 Pago a Proveedor</h3>
+      <div class="caja-form">
+        <label>Proveedor <span style="color:var(--color-danger)">*</span></label>
+        <select id="pp-proveedor">
+          <option value="">— Seleccionar —</option>
+          ${provOpts}
+        </select>
+
+        <div id="pp-pendientes-wrap" style="display:none">
+          <div id="pp-pendientes-info" style="
+            background:#fff3e0;border:1px solid #ffcc80;border-radius:6px;
+            padding:8px 12px;font-size:13px;color:#e65100;margin-top:2px
+          "></div>
+        </div>
+
+        <label>Monto <span style="color:var(--color-danger)">*</span></label>
+        <div class="caja-input-prefix">
+          <span>$</span>
+          <input type="number" id="pp-monto" min="1" step="0.01" placeholder="0">
+        </div>
+
+        <label>Observaciones</label>
+        <input type="text" id="pp-obs" placeholder="Nro. factura, descripción, etc.">
+
+        <div style="
+          background:#e3f2fd;border:1px solid #90caf9;border-radius:6px;
+          padding:8px 12px;font-size:12px;color:#1565c0;margin-top:4px
+        ">
+          💡 El monto se descontará de la caja y se imputará automáticamente
+          a los comprobantes pendientes del proveedor (de más antiguo a más nuevo).
+          Si no hay comprobantes pendientes, quedará como crédito a favor.
+        </div>
+      </div>
+      <div class="caja-modal-footer">
+        <button class="btn btn-outline" id="btn-cancel-pagoprov">Cancelar</button>
+        <button class="btn" id="btn-confirm-pagoprov"
+          style="background:#1565c0;color:white;border:none;font-weight:600">
+          Registrar Pago
+        </button>
+      </div>
+    `);
+
+    ge('btn-close-pagoprov').addEventListener('click', closeModal);
+    ge('btn-cancel-pagoprov').addEventListener('click', closeModal);
+
+    // When proveedor changes, show pending balance
+    ge('pp-proveedor').addEventListener('change', () => {
+      const provId = ge('pp-proveedor').value;
+      const wrap   = ge('pp-pendientes-wrap');
+      const info   = ge('pp-pendientes-info');
+      if (!provId) { wrap.style.display = 'none'; return; }
+
+      const pendientes = window.SGA_PagosProveedores.getComprasPendientes(provId);
+      const saldo      = window.SGA_PagosProveedores.getSaldoProveedor(provId);
+
+      if (saldo > 0.01) {
+        const fmt = n => window.SGA_Utils.formatCurrency(n);
+        const lines = pendientes.slice(0, 3).map(c => {
+          const ref = [c.factura_pv, c.numero_factura].filter(Boolean).join('-') || '—';
+          return `${ref}: ${fmt(c.saldo)}`;
+        });
+        const resto = pendientes.length > 3 ? ` y ${pendientes.length - 3} más…` : '';
+        info.innerHTML = `Deuda total: <strong>${fmt(saldo)}</strong> · ${lines.join(' · ')}${resto}`;
+        wrap.style.display = '';
+      } else {
+        info.innerHTML = 'Sin comprobantes pendientes. El pago quedará como crédito a favor.';
+        info.style.background = '#e8f5e9';
+        info.style.borderColor = '#a5d6a7';
+        info.style.color = '#2e7d32';
+        wrap.style.display = '';
+      }
+    });
+
+    ge('btn-confirm-pagoprov').addEventListener('click', () => {
+      const provId = ge('pp-proveedor').value;
+      const monto  = parseFloat(ge('pp-monto').value);
+      const obs    = ge('pp-obs').value.trim() || null;
+
+      if (!provId) { showToast('Seleccioná un proveedor', 'warn'); return; }
+      if (!monto || monto <= 0) { showToast('Ingresá un monto válido', 'warn'); return; }
+
+      const result = window.SGA_PagosProveedores.crearPago({
+        proveedor_id:  provId,
+        fecha:         new Date().toISOString().slice(0, 10),
+        observaciones: obs,
+        usuario_id:    state.user.id,
+        metodos: [{
+          metodo:        'efectivo',
+          monto,
+          sesion_caja_id: state.sesion.id,
+        }],
+        auto_imputar: true,
+      });
+
+      if (result.success) {
+        const sobrante = result.credito_sobrante || 0;
+        const msg = sobrante > 0.01
+          ? `Pago registrado. Crédito sobrante: ${window.SGA_Utils.formatCurrency(sobrante)}`
+          : 'Pago a proveedor registrado';
+        showToast(msg, 'success');
+        closeModal();
+        switchTab('egresos');
+      } else {
+        showToast('Error: ' + result.error, 'error');
       }
     });
   }

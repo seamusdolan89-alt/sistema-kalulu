@@ -30,7 +30,7 @@ const ComprasV2 = (() => {
     proveedorNombre:    null,
     proveedorSaldo:     0,      // positive = nosotros le debemos | negative = nos deben
     aplicarSaldo:       false,
-    condicionPago:      'efectivo',
+    condicionPago:      'pendiente',
     facturaPv:          '',
     numeroFactura:      '',
     fecha:              todayDate(),
@@ -264,9 +264,10 @@ const ComprasV2 = (() => {
     const btn = ge('cv2-btn-confirmar');
     if (!btn) return;
     btn.disabled = !(state.proveedorId && state.items.length > 0);
-    // Red alert when control total is set and doesn't match calculated total
-    const mismatch = state.totalFactura > 0.001
-      && Math.abs(state.totalFactura - calcNeto()) > 0.01;
+    // Red alert when control total doesn't match calculated total.
+    // Empty field (0) is treated as 0 — mismatches if neto > 0.
+    const neto = calcNeto();
+    const mismatch = Math.abs(state.totalFactura - neto) > 0.01 && neto > 0.001;
     btn.classList.toggle('cv2-btn-confirmar-alert', mismatch && !btn.disabled);
   }
 
@@ -1014,7 +1015,7 @@ const ComprasV2 = (() => {
 
     state.proveedorId      = snap.proveedorId      || null;
     state.proveedorNombre  = snap.proveedorNombre  || null;
-    state.condicionPago    = snap.condicionPago    || 'efectivo';
+    state.condicionPago    = snap.condicionPago    || 'pendiente';
     state.facturaPv        = snap.facturaPv        || '';
     state.numeroFactura    = snap.numeroFactura    || '';
     state.fecha            = snap.fecha            || todayDate();
@@ -1117,10 +1118,86 @@ const ComprasV2 = (() => {
     if (overlay) overlay.style.display = 'none';
   }
 
-  // ── Confirm ──────────────────────────────────────────────────────────────────
-  function confirmar() {
-    if (!state.proveedorId)   { alert('Seleccioná un proveedor'); ge('cv2-prov-search')?.focus(); return; }
-    if (!state.items.length)  { alert('Agregá al menos un producto'); ge('cv2-search')?.focus();   return; }
+  // ── Review screen (paso previo al commit) ────────────────────────────────────
+  function siguiente() {
+    if (!state.proveedorId)  { alert('Seleccioná un proveedor'); ge('cv2-prov-search')?.focus(); return; }
+    if (!state.items.length) { alert('Agregá al menos un producto'); ge('cv2-search')?.focus();   return; }
+
+    const neto    = calcNeto();
+    const total   = calcTotal();
+    const factStr = state.facturaPv && state.numeroFactura
+      ? `${state.facturaPv}-${state.numeroFactura}`
+      : (state.numeroFactura || state.facturaPv || '—');
+    const condStr = state.condicionPago === 'efectivo' ? 'Contado' : 'Cta. Cte.';
+    const fechaFmt = (() => {
+      const [y, m, d] = (state.fecha || '').split('-');
+      return d && m && y ? `${d}/${m}/${y}` : (state.fecha || '—');
+    })();
+    const mismatch = neto > 0.001 && Math.abs(state.totalFactura - neto) > 0.01;
+
+    // Form bar
+    const formBar = ge('cv2-rev-form-bar');
+    if (formBar) {
+      formBar.innerHTML = `
+        <div class="cv2-rev-fb-field">
+          <div class="cv2-rev-fb-label">Proveedor</div>
+          <div class="cv2-rev-fb-value">${esc(state.proveedorNombre || '—')}</div>
+        </div>
+        <div class="cv2-rev-fb-field">
+          <div class="cv2-rev-fb-label">Nro. Factura</div>
+          <div class="cv2-rev-fb-value">${esc(factStr)}</div>
+        </div>
+        <div class="cv2-rev-fb-field">
+          <div class="cv2-rev-fb-label">Fecha</div>
+          <div class="cv2-rev-fb-value">${esc(fechaFmt)}</div>
+        </div>
+        <div class="cv2-rev-fb-field">
+          <div class="cv2-rev-fb-label">Condición de Pago</div>
+          <div class="cv2-rev-fb-value">${esc(condStr)}</div>
+        </div>
+        <div class="cv2-rev-total-block">
+          <div class="cv2-rev-total-label">Total Compra</div>
+          <div class="cv2-rev-total-value">${fmt$(neto)}</div>
+          ${mismatch ? `<div class="cv2-rev-mismatch">⚠ No coincide con Total Factura (${fmt$(state.totalFactura)})</div>` : ''}
+        </div>
+      `;
+    }
+
+    // Items table
+    const tbody = ge('cv2-rev-tbody');
+    if (tbody) {
+      tbody.innerHTML = state.items.map((it, i) => {
+        const cant    = parseFloat(it.cantidad)   || 0;
+        const udsPaq  = parseFloat(it.udsPaquete) || 1;
+        const cantUds = cant * udsPaq;
+        const costo   = parseFloat(it.costoNuevo) || parseFloat(it.costoActual) || 0;
+        const subtotal = cantUds * costo;
+        return `<tr>
+          <td class="c">${i + 1}</td>
+          <td>${esc(it.barcode || '—')}</td>
+          <td>${esc(it.nombre)}</td>
+          <td class="c">${cant}</td>
+          <td class="c">${udsPaq}</td>
+          <td class="c"><strong>${cantUds}</strong></td>
+          <td class="r">${fmt$(costo)}</td>
+          <td class="r"><strong>${fmt$(subtotal)}</strong></td>
+        </tr>`;
+      }).join('');
+    }
+
+    // Show overlay
+    const overlay = ge('cv2-review-overlay');
+    if (overlay) overlay.style.display = 'flex';
+  }
+
+  function hideReviewOverlay() {
+    const overlay = ge('cv2-review-overlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  // ── Commit (ex-confirmar) ─────────────────────────────────────────────────────
+  function commitCompra() {
+    hideReviewOverlay();
 
     const total         = calcTotal();
     const saldoAplicado = calcSaldoAplicado();
@@ -1246,7 +1323,7 @@ const ComprasV2 = (() => {
   }
 
   // ── Post-compra screen ───────────────────────────────────────────────────────
-  function showSuccessScreen({ total, neto, saldoAplicado, sesion, preEnrichedItems = null, snap = null }) {
+  function showSuccessScreen({ compraId = null, total, neto, saldoAplicado, sesion, preEnrichedItems = null, snap = null }) {
     const root = ge('cv2-root');
     if (!root) return;
 
@@ -1281,7 +1358,7 @@ const ComprasV2 = (() => {
     const _fecha = snap?.fecha ?? state.fecha;
     const facturaStr     = _pv && _nf ? `${_pv}-${_nf}` : (_nf || _pv || '—');
     const condStr        = _cond === 'efectivo' ? 'Contado' : 'Cta. Cte.';
-    const verifyMismatch = _tf > 0.001 && Math.abs(_tf - neto) > 0.01;
+    const verifyMismatch = neto > 0.001 && Math.abs(_tf - neto) > 0.01;
 
     // Format date dd/mm/yyyy
     const fechaFmt = (() => {
@@ -1316,7 +1393,10 @@ const ComprasV2 = (() => {
         : 'cv2-post-tr cv2-post-tr-unchanged cv2-post-tr-aldia';
 
       const actionHtml = !hasPriceChange
-        ? `<span class="cv2-post-badge-aldia">✓ Al día</span>`
+        ? `<div class="cv2-post-aldia-wrap">
+             <span class="cv2-post-badge-aldia">✓ Al día</span>
+             <button class="cv2-post-editar-aldia-btn" data-idx="${i}" data-prodid="${esc(it.productoId)}" title="Editar precio manualmente">✎</button>
+           </div>`
         : `<div class="cv2-post-action-wrap">
              <button class="cv2-post-actualizar-btn" data-idx="${i}" data-prodid="${esc(it.productoId)}">✓ Actualizar</button>
              <button class="cv2-post-ignorar-btn" data-idx="${i}">⊘ Ignorar</button>
@@ -1353,10 +1433,9 @@ const ComprasV2 = (() => {
         <!-- Header -->
         <div class="cv2-post-header">
           <div>
-            <div class="cv2-post-header-title">Compras — Ingreso Confirmado</div>
-            <div class="cv2-post-header-sub">Resumen Post-Compra</div>
+            <div class="cv2-post-header-title">Compras — Ajuste de Precios</div>
+            <div class="cv2-post-header-sub">Ajuste Post-Compra</div>
           </div>
-          <button class="cv2-post-btn-volver" id="cv2-post-btn-volver">← Volver al POS</button>
         </div>
 
         <!-- Form bar: purchase summary -->
@@ -1389,6 +1468,9 @@ const ComprasV2 = (() => {
               : ''}
           </div>
         </div>
+
+        <!-- Orphan credit hook (populated after render) -->
+        <div id="cv2-post-credito-wrap"></div>
 
         <!-- Impact banner -->
         <div class="cv2-post-banner">
@@ -1433,12 +1515,119 @@ const ComprasV2 = (() => {
             ⏸ Pausar · Retomar después
           </button>
           <button class="cv2-post-btn-finish" id="cv2-post-btn-finish">
-            Finalizar · Ir al POS
+            Siguiente · F10
           </button>
         </div>
 
       </div>
     `;
+
+    // ── Orphan credit hook ────────────────────────────────────────────────────
+    // Only relevant when compra is on credit (saldo pendiente) and there are
+    // pre-existing orphan payments for this supplier.
+    if (compraId && state.condicionPago === 'pendiente') {
+      const creditoWrap = ge('cv2-post-credito-wrap');
+      if (creditoWrap) {
+        // Read orphan credits directly from DB (no dependency on external module)
+        const pagos = db().query(
+          `SELECT p.id, p.fecha,
+                  COALESCE((SELECT SUM(m.monto) FROM pagos_proveedores_metodos m WHERE m.pago_id = p.id), 0) AS total_pago
+           FROM pagos_proveedores p
+           WHERE p.proveedor_id = ?
+           ORDER BY p.fecha ASC`,
+          [state.proveedorId]
+        ).map(p => {
+          const imputado = parseFloat(
+            db().query(`SELECT COALESCE(SUM(monto_imputado),0) AS t FROM imputaciones_pagos WHERE pago_id=?`, [p.id])[0]?.t
+          ) || 0;
+          return { ...p, credito: (parseFloat(p.total_pago) || 0) - imputado };
+        }).filter(p => p.credito > 0.01);
+
+        const totalCredito = pagos.reduce((s, p) => s + p.credito, 0);
+
+        if (totalCredito > 0.01) {
+          const saldoCompra = neto; // condicion=pendiente, nada fue imputado aún
+          const aAplicar    = Math.min(totalCredito, saldoCompra);
+          const saldoResta  = Math.max(0, saldoCompra - aAplicar);
+          const sobrante    = Math.max(0, totalCredito - saldoCompra);
+
+          creditoWrap.innerHTML = `
+            <div class="cv2-post-credito-banner" id="cv2-credito-banner">
+              <div class="cv2-post-credito-icon">💡</div>
+              <div class="cv2-post-credito-body">
+                <strong>Pago adelantado disponible</strong>
+                <span>
+                  Hay <strong>${fmt$(totalCredito)}</strong> en pagos sin aplicar de
+                  <em>${esc(state.proveedorNombre)}</em>.
+                  ${aAplicar < saldoCompra
+                    ? `Aplicando quedaría un saldo de <strong>${fmt$(saldoResta)}</strong>.`
+                    : `Aplicando, la compra quedará <strong>completamente saldada</strong>.`}
+                  ${sobrante > 0.01 ? ` Sobrante: <strong>${fmt$(sobrante)}</strong> se mantiene como crédito a favor.` : ''}
+                </span>
+              </div>
+              <div class="cv2-post-credito-actions">
+                <button class="cv2-post-credito-btn-si" id="cv2-credito-btn-si">
+                  ✓ Aplicar ${fmt$(aAplicar)}
+                </button>
+                <button class="cv2-post-credito-btn-no" id="cv2-credito-btn-no">
+                  Dejar pendiente
+                </button>
+              </div>
+            </div>
+          `;
+
+          ge('cv2-credito-btn-si').addEventListener('click', () => {
+            // Apply orphan credits oldest-first up to compra saldo
+            let restante = saldoCompra;
+            try {
+              db().beginBatch();
+              for (const p of pagos) {
+                if (restante <= 0.01) break;
+                const monto = Math.min(restante, p.credito);
+                db().run(
+                  `INSERT INTO imputaciones_pagos (id, pago_id, compra_id, monto_imputado, fecha)
+                   VALUES (?, ?, ?, ?, ?)`,
+                  [uuid(), p.id, compraId, monto, todayDate()]
+                );
+                restante -= monto;
+              }
+              db().commitBatch();
+
+              const aplicado = saldoCompra - Math.max(0, restante);
+              const nuevoSaldo = Math.max(0, saldoCompra - aplicado);
+              creditoWrap.innerHTML = `
+                <div class="cv2-post-credito-banner cv2-post-credito-ok">
+                  <div class="cv2-post-credito-icon">✅</div>
+                  <div class="cv2-post-credito-body">
+                    <strong>Crédito aplicado</strong>
+                    <span>
+                      Se aplicaron <strong>${fmt$(aplicado)}</strong>.
+                      ${nuevoSaldo > 0.01
+                        ? `Saldo pendiente de esta compra: <strong>${fmt$(nuevoSaldo)}</strong>.`
+                        : `Esta compra quedó <strong>completamente saldada</strong>.`}
+                    </span>
+                  </div>
+                </div>
+              `;
+            } catch(e) {
+              db().rollbackBatch();
+              console.error('Error aplicando crédito:', e);
+            }
+          });
+
+          ge('cv2-credito-btn-no').addEventListener('click', () => {
+            creditoWrap.innerHTML = `
+              <div class="cv2-post-credito-banner cv2-post-credito-dismissed">
+                <div class="cv2-post-credito-icon">📋</div>
+                <div class="cv2-post-credito-body">
+                  <span>Crédito no aplicado. Podés imputarlo desde <strong>Cuentas Corrientes</strong> cuando quieras.</span>
+                </div>
+              </div>
+            `;
+          });
+        }
+      }
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
     function checkBajoCosto(idx) {
@@ -1520,6 +1709,45 @@ const ComprasV2 = (() => {
       btn.addEventListener('click', () => markRowIgnorado(parseInt(btn.dataset.idx, 10)));
     });
 
+    // ── Editar precio en filas "Al día" (event delegation) ───────────────────
+    function aldiaWrapHtml(idx, prodId) {
+      return `<div class="cv2-post-aldia-wrap">
+        <span class="cv2-post-badge-aldia">✓ Al día</span>
+        <button class="cv2-post-editar-aldia-btn" data-idx="${idx}" data-prodid="${prodId}" title="Editar precio manualmente">✎</button>
+      </div>`;
+    }
+
+    root.addEventListener('click', e => {
+      const editBtn   = e.target.closest('.cv2-post-editar-aldia-btn');
+      const cancelBtn = e.target.closest('.cv2-post-cancelar-aldia-btn');
+
+      if (editBtn) {
+        const idx    = parseInt(editBtn.dataset.idx, 10);
+        const prodId = editBtn.dataset.prodid;
+        const actWrap = root.querySelector(`.cv2-post-tr[data-idx="${idx}"] .cv2-post-td-accion`);
+        const input   = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
+        if (!actWrap) return;
+        actWrap.innerHTML = `
+          <div class="cv2-post-action-wrap">
+            <button class="cv2-post-actualizar-btn" data-idx="${idx}" data-prodid="${prodId}">✓ Actualizar</button>
+            <button class="cv2-post-cancelar-aldia-btn" data-idx="${idx}" data-prodid="${prodId}">✕ Cancelar</button>
+          </div>`;
+        // Wire Actualizar directly (delegation doesn't cover doSaveRow)
+        actWrap.querySelector('.cv2-post-actualizar-btn')
+          .addEventListener('click', () => doSaveRow(idx, prodId));
+        if (input) { input.focus(); input.select(); }
+      }
+
+      if (cancelBtn) {
+        const idx    = parseInt(cancelBtn.dataset.idx, 10);
+        const prodId = cancelBtn.dataset.prodid;
+        const actWrap = root.querySelector(`.cv2-post-tr[data-idx="${idx}"] .cv2-post-td-accion`);
+        const input   = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
+        if (input) input.value = parseFloat(input.dataset.pvactual).toFixed(2);
+        if (actWrap) actWrap.innerHTML = aldiaWrapHtml(idx, prodId);
+      }
+    });
+
     // ── Save all: solo filas con Actualizar activo ────────────────────────────
     ge('cv2-post-btn-save-all')?.addEventListener('click', () => {
       root.querySelectorAll('.cv2-post-actualizar-btn').forEach(btn => btn.click());
@@ -1544,11 +1772,6 @@ const ComprasV2 = (() => {
       });
     }
 
-    // Volver → guardar + ir al POS (misma semántica que Pausar, navegación explícita)
-    ge('cv2-post-btn-volver')?.addEventListener('click', () => {
-      localStorage.setItem('compras_resumen_pending', buildPendingPayload());
-      window.location.hash = '#pos';
-    });
 
     // Pausar → guardar estado actual en localStorage y volver al POS
     ge('cv2-post-btn-pausar')?.addEventListener('click', () => {
@@ -1724,7 +1947,7 @@ const ComprasV2 = (() => {
 
         <div class="cv2-rf-footer">
           <button class="cv2-rf-btn-pausar" id="cv2-rf-btn-pausar">⏸ Pausar · Retomar después</button>
-          <button class="cv2-rf-btn-pos" id="cv2-rf-btn-pos">Finalizar · Ir al POS →</button>
+          <button class="cv2-rf-btn-pos" id="cv2-rf-btn-pos">Finalizar · Ir al POS · F10</button>
         </div>
       </div>`;
 
@@ -2113,6 +2336,30 @@ const ComprasV2 = (() => {
       const tag    = active?.tagName;
       const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 
+      if (e.key === 'F10') {
+        e.preventDefault();
+        const reviewOverlay = ge('cv2-review-overlay');
+        if (reviewOverlay && reviewOverlay.style.display !== 'none') {
+          ge('cv2-rev-btn-confirmar')?.click();
+        } else if (ge('cv2-rf-btn-pos')) {
+          ge('cv2-rf-btn-pos').click();
+        } else if (ge('cv2-post-btn-finish')) {
+          ge('cv2-post-btn-finish').click();
+        } else {
+          const btn = ge('cv2-btn-confirmar');
+          if (btn && !btn.disabled) btn.click();
+        }
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        const reviewOverlay = ge('cv2-review-overlay');
+        if (reviewOverlay && reviewOverlay.style.display !== 'none') {
+          hideReviewOverlay();
+          return;
+        }
+      }
+
       if (e.key === 'Escape') {
         if (state.searchResults.length > 0) { e.preventDefault(); clearSearch(); return; }
         if (state.provResults.length > 0) {
@@ -2226,19 +2473,8 @@ const ComprasV2 = (() => {
     const fechaInp = ge('cv2-fecha');
     if (fechaInp) fechaInp.value = todayDate();
 
-    // ── Payment chip toggle ──
-    document.querySelectorAll('input[name="cv2-pago"]').forEach(radio => {
-      radio.addEventListener('change', e => {
-        if (!e.target.checked) return;
-        state.condicionPago = e.target.value;
-
-        ge('cv2-chip-efectivo') ?.classList.toggle('cv2-chip-active', state.condicionPago === 'efectivo');
-        ge('cv2-chip-pendiente')?.classList.toggle('cv2-chip-active', state.condicionPago === 'pendiente');
-
-        renderEfectivoInfo();
-        renderTotals();
-      });
-    });
+    // Condición de pago fija: siempre cuenta corriente
+    state.condicionPago = 'pendiente';
 
     // Chip label clicks toggle the radio
     ge('cv2-chip-efectivo') ?.addEventListener('click', () => {
@@ -2437,7 +2673,10 @@ const ComprasV2 = (() => {
     // ── Action buttons ──
     ge('cv2-btn-volver')          ?.addEventListener('click', showVolverModal);
     ge('cv2-btn-pausar')          ?.addEventListener('click', pausar);
-    ge('cv2-btn-confirmar')       ?.addEventListener('click', confirmar);
+    ge('cv2-btn-confirmar')       ?.addEventListener('click', siguiente);
+    ge('cv2-rev-btn-volver')      ?.addEventListener('click', hideReviewOverlay);
+    ge('cv2-rev-btn-volver-footer')?.addEventListener('click', hideReviewOverlay);
+    ge('cv2-rev-btn-confirmar')   ?.addEventListener('click', commitCompra);
     ge('cv2-btn-pausadas')        ?.addEventListener('click', showPausadasOverlay);
     ge('cv2-btn-nuevo-proveedor') ?.addEventListener('click', showNuevoProveedorModal);
 
