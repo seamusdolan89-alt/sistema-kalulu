@@ -214,6 +214,19 @@
     .modal-box h3 { margin: 0 0 16px; font-size: 1em; font-weight: 700; color: #1a1a2e; }
     .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 
+    /* Import results */
+    .result-item { padding: 7px 12px; border-radius: 5px; font-size: 0.85em;
+      margin-bottom: 6px; }
+    .result-success { background: #e8f5e9; color: #2e7d32; }
+    .result-error   { background: #ffebee; color: #c62828; }
+
+    /* Import preview table */
+    .import-preview-wrap { max-height: 220px; overflow-y: auto; margin-top: 10px; }
+    .import-preview-wrap table { width: 100%; border-collapse: collapse; font-size: 0.8em; }
+    .import-preview-wrap th { background: #f5f5f5; padding: 6px 8px; text-align: left;
+      font-weight: 600; color: #555; border-bottom: 1px solid #e0e0e0; }
+    .import-preview-wrap td { padding: 6px 8px; border-bottom: 1px solid #f0f0f0; }
+
     /* Shared helpers */
     .btn { padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer;
       font-size: 0.88em; font-weight: 600; transition: opacity 0.15s; }
@@ -245,6 +258,8 @@
       <h2>👥 Clientes</h2>
       <div class="cl-header-btns">
         <button class="btn btn-secondary" id="btn-tope-config">⚙️ Tope default</button>
+        <button class="btn btn-secondary" id="btn-descargar-clientes">⬇ Plantilla</button>
+        <button class="btn btn-secondary" id="btn-importar-clientes">⬆ Importar</button>
         <button class="btn btn-primary" id="btn-nuevo-cliente">+ Nuevo Cliente</button>
       </div>
     </div>
@@ -526,6 +541,44 @@
     <div class="modal-actions">
       <button class="btn btn-secondary" id="btn-mc-cancel">Cancelar</button>
       <button class="btn btn-primary" id="btn-mc-save">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Importar clientes -->
+<div class="modal-backdrop" id="modal-cl-import">
+  <div class="modal-box" style="max-width:600px; width:100%">
+    <h3 id="cl-import-title">⬆ Importar Clientes</h3>
+
+    <!-- Paso 1: subir archivo -->
+    <div id="cl-import-step1">
+      <p class="text-muted" style="margin-bottom:12px">
+        Descargá primero la plantilla, completala en Excel y volvé a importarla.<br>
+        El sistema identifica clientes existentes por <strong>nombre + apellido</strong>.
+      </p>
+      <div class="f-group">
+        <label>Archivo Excel (.xlsx / .xls)</label>
+        <input type="file" id="cl-import-file" accept=".xlsx,.xls">
+      </div>
+    </div>
+
+    <!-- Paso 2: preview + confirm -->
+    <div id="cl-import-step2" style="display:none">
+      <div id="cl-import-preview" class="import-preview-wrap"></div>
+      <div class="f-group mt-12" style="flex-direction:row; align-items:center; gap:8px">
+        <input type="checkbox" id="cl-import-update" checked style="width:auto">
+        <label style="font-size:0.88em; font-weight:normal; color:#333">
+          Actualizar datos de clientes ya existentes (por nombre + apellido)
+        </label>
+      </div>
+      <div id="cl-import-summary" style="margin-top:12px"></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="btn-cl-import-cancel">Cancelar</button>
+      <button class="btn btn-secondary" id="btn-cl-import-back" style="display:none">← Volver</button>
+      <button class="btn btn-primary"   id="btn-cl-import-confirm" style="display:none">Importar</button>
+      <button class="btn btn-primary"   id="btn-cl-import-done"    style="display:none">Listo</button>
     </div>
   </div>
 </div>

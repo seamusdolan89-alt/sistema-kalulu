@@ -881,6 +881,309 @@ const ClientesUI = (() => {
     }).join('');
   }
 
+  // ── EXPORT TEMPLATE ───────────────────────────────────────────────────────
+
+  function downloadTemplate() {
+    // col idx:  0        1          2      3           4          5       6     7            8        9          10
+    const headers = [
+      'nombre', 'apellido', 'lote', 'direccion', 'telefono',
+      'email', 'dni', 'tope_deuda', 'activo', 'es_master', 'familia_codigo'
+    ];
+
+    const colFormats = {
+      0:  { t: 's', z: '@' }, // nombre
+      1:  { t: 's', z: '@' }, // apellido
+      2:  { t: 's', z: '@' }, // lote
+      3:  { t: 's', z: '@' }, // direccion
+      4:  { t: 's', z: '@' }, // telefono
+      5:  { t: 's', z: '@' }, // email
+      6:  { t: 's', z: '@' }, // dni
+      7:  { t: 'n', z: '#,##0.00' }, // tope_deuda
+      8:  { t: 'n', z: '0' }, // activo
+      9:  { t: 'n', z: '0' }, // es_master
+      10: { t: 's', z: '@' }, // familia_codigo
+    };
+
+    const instrRow = Array(11).fill('');
+    instrRow[7]  = '→ Monto máximo de deuda';
+    instrRow[8]  = '→ 1=activo, 0=inactivo';
+    instrRow[9]  = '→ 1=master del lote, 0=no';
+    instrRow[10] = '→ Mismo código para master y sus miembros. Vacío = cliente independiente.';
+
+    const exportRows = window.SGA_DB.query(`
+      SELECT c.*,
+        CASE
+          WHEN c.es_master = 1 THEN COALESCE(c.lote, c.nombre)
+          WHEN c.cliente_master_id IS NOT NULL THEN COALESCE(m.lote, m.nombre)
+          ELSE ''
+        END AS familia_codigo
+      FROM clientes c
+      LEFT JOIN clientes m ON m.id = c.cliente_master_id
+      WHERE c.activo = 1
+      ORDER BY familia_codigo, c.es_master DESC, c.nombre
+    `);
+
+    let dataRows, filename;
+    if (exportRows.length > 0) {
+      dataRows = exportRows.map(c => [
+        c.nombre || '',
+        c.apellido || '',
+        c.lote || '',
+        c.direccion || '',
+        c.telefono || '',
+        c.email || '',
+        c.dni || '',
+        c.tope_deuda || 0,
+        c.activo != null ? c.activo : 1,
+        c.es_master ? 1 : 0,
+        c.familia_codigo || '',
+      ]);
+      filename = 'clientes_exportados.xlsx';
+    } else {
+      dataRows = [
+        ['Juan',  'García', 'M12 L3', 'Calle Falsa 123', '3415000000', 'juan@mail.com', '30000000', 50000, 1, 1, 'LOTE_M12'],
+        ['María', 'García', 'M12 L3', '',                '3415000001', '',               '',         50000, 1, 0, 'LOTE_M12'],
+        ['Pedro', 'López',  '',        '',                '3415000002', '',               '',         50000, 1, 0, ''],
+      ];
+      filename = 'plantilla_clientes.xlsx';
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet([headers, instrRow, ...dataRows]);
+
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let row = 1; row <= range.e.r; row++) {
+      Object.keys(colFormats).forEach(c => {
+        const addr = XLSX.utils.encode_cell({ r: row, c: Number(c) });
+        if (!ws[addr]) return;
+        ws[addr].t = colFormats[c].t;
+        ws[addr].z = colFormats[c].z;
+      });
+    }
+
+    ws['!cols'] = [
+      { wch: 18 }, // nombre
+      { wch: 18 }, // apellido
+      { wch: 12 }, // lote
+      { wch: 22 }, // direccion
+      { wch: 15 }, // telefono
+      { wch: 24 }, // email
+      { wch: 12 }, // dni
+      { wch: 14 }, // tope_deuda
+      { wch: 10 }, // activo
+      { wch: 10 }, // es_master
+      { wch: 24 }, // familia_codigo
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
+    XLSX.writeFile(wb, filename);
+  }
+
+  // ── IMPORT ─────────────────────────────────────────────────────────────────
+
+  let importClientes = { filas: [] };
+
+  function openImportModal() {
+    importClientes = { filas: [] };
+    ge('cl-import-step1').style.display = '';
+    ge('cl-import-step2').style.display = 'none';
+    ge('cl-import-file').value = '';
+    ge('cl-import-preview').innerHTML = '';
+    ge('cl-import-summary').innerHTML = '';
+    ge('btn-cl-import-confirm').style.display = 'none';
+    ge('btn-cl-import-back').style.display = 'none';
+    ge('btn-cl-import-done').style.display = 'none';
+    ge('modal-cl-import').classList.add('open');
+  }
+
+  function closeImportModal() {
+    ge('modal-cl-import').classList.remove('open');
+  }
+
+  function handleImportFile(file) {
+    if (!file.name.match(/\.(xlsx|xls)$/i)) {
+      alert('Por favor seleccioná un archivo Excel (.xlsx o .xls)');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 });
+        if (jsonData.length < 2) {
+          alert('El archivo no tiene datos suficientes');
+          return;
+        }
+
+        const headerRow = jsonData[0].map(h => String(h || '').trim().toLowerCase());
+        const idxOf = (name) => headerRow.indexOf(name);
+        const idx = {
+          nombre:         idxOf('nombre'),
+          apellido:       idxOf('apellido'),
+          lote:           idxOf('lote'),
+          direccion:      idxOf('direccion'),
+          telefono:       idxOf('telefono'),
+          email:          idxOf('email'),
+          dni:            idxOf('dni'),
+          tope_deuda:     idxOf('tope_deuda'),
+          activo:         idxOf('activo'),
+          es_master:      idxOf('es_master'),
+          familia_codigo: idxOf('familia_codigo'),
+        };
+
+        // Skip header + optional instruction row (instruction row has no nombre)
+        importClientes.filas = jsonData.slice(1)
+          .filter(row => row.some(c => c !== null && c !== undefined && String(c).trim() !== ''))
+          .map(row => ({
+            nombre:         idx.nombre >= 0         ? String(row[idx.nombre] || '').trim() : '',
+            apellido:       idx.apellido >= 0       ? String(row[idx.apellido] || '').trim() : '',
+            lote:           idx.lote >= 0           ? String(row[idx.lote] || '').trim() : '',
+            direccion:      idx.direccion >= 0      ? String(row[idx.direccion] || '').trim() : '',
+            telefono:       idx.telefono >= 0       ? String(row[idx.telefono] || '').trim() : '',
+            email:          idx.email >= 0          ? String(row[idx.email] || '').trim() : '',
+            dni:            idx.dni >= 0            ? String(row[idx.dni] || '').trim() : '',
+            tope_deuda:     idx.tope_deuda >= 0     ? (parseFloat(row[idx.tope_deuda]) || null) : null,
+            activo:         idx.activo >= 0         ? (parseInt(row[idx.activo]) === 0 ? 0 : 1) : 1,
+            es_master:      idx.es_master >= 0      ? (parseInt(row[idx.es_master]) === 1 ? 1 : 0) : 0,
+            familia_codigo: idx.familia_codigo >= 0 ? String(row[idx.familia_codigo] || '').trim() : '',
+          }))
+          .filter(r => r.nombre); // filter out instruction rows and blanks
+
+        if (!importClientes.filas.length) {
+          alert('No se encontraron filas con datos válidos (la columna "nombre" es obligatoria)');
+          return;
+        }
+
+        showImportPreview();
+      } catch (err) {
+        alert('Error al leer el archivo: ' + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function showImportPreview() {
+    const filas = importClientes.filas;
+    const previewRows = filas.slice(0, 6);
+
+    let html = `<p class="text-muted" style="margin-bottom:8px">
+      <strong>${filas.length}</strong> cliente(s) detectados. Vista previa:
+    </p>`;
+    html += '<table><thead><tr><th>Nombre</th><th>Apellido</th><th>Lote</th><th>Teléfono</th><th>Master</th><th>Familia</th></tr></thead><tbody>';
+    previewRows.forEach(r => {
+      html += `<tr>
+        <td>${esc(r.nombre)}</td>
+        <td>${esc(r.apellido)}</td>
+        <td>${esc(r.lote)}</td>
+        <td>${esc(r.telefono)}</td>
+        <td>${r.es_master ? '👑' : ''}</td>
+        <td>${esc(r.familia_codigo)}</td>
+      </tr>`;
+    });
+    if (filas.length > 6) {
+      html += `<tr><td colspan="6" class="text-muted" style="padding:6px 8px">… y ${filas.length - 6} más</td></tr>`;
+    }
+    html += '</tbody></table>';
+
+    ge('cl-import-preview').innerHTML = html;
+    ge('cl-import-step1').style.display = 'none';
+    ge('cl-import-step2').style.display = '';
+    ge('btn-cl-import-back').style.display = '';
+    ge('btn-cl-import-confirm').style.display = '';
+  }
+
+  function confirmarImport() {
+    const filas = importClientes.filas;
+    const updateExisting = ge('cl-import-update')?.checked ?? true;
+    const topeRow = window.SGA_DB.query(`SELECT value FROM system_config WHERE key = 'tope_deuda_default'`);
+    const topeDefault = topeRow.length ? parseFloat(topeRow[0].value) : 50000;
+    const n = window.SGA_Utils.formatISODate(new Date());
+
+    let nuevos = 0, actualizados = 0, omitidos = 0;
+    const errores = [];
+    const familiaMap = {}; // familia_codigo → master id
+
+    // Paso 1: upsert todos los clientes
+    filas.forEach((fila, i) => {
+      try {
+        const existing = window.SGA_DB.query(
+          `SELECT id FROM clientes WHERE nombre = ? AND COALESCE(apellido,'') = ? LIMIT 1`,
+          [fila.nombre, fila.apellido || '']
+        );
+
+        let id;
+        if (existing.length) {
+          id = existing[0].id;
+          if (updateExisting) {
+            window.SGA_DB.run(`
+              UPDATE clientes SET
+                apellido = ?, lote = ?, direccion = ?, telefono = ?, email = ?, dni = ?,
+                tope_deuda = COALESCE(?, tope_deuda), activo = ?, es_master = ?,
+                updated_at = ?, sync_status = 'pending'
+              WHERE id = ?
+            `, [
+              fila.apellido || null, fila.lote || null, fila.direccion || null,
+              fila.telefono || null, fila.email || null, fila.dni || null,
+              fila.tope_deuda, fila.activo, fila.es_master, n, id
+            ]);
+            actualizados++;
+          } else {
+            omitidos++;
+          }
+        } else {
+          id = window.SGA_Utils.generateUUID();
+          window.SGA_DB.run(`
+            INSERT INTO clientes
+              (id, nombre, apellido, lote, direccion, telefono, email, dni,
+               tope_deuda, activo, es_master, fecha_alta, updated_at, sync_status)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'pending')
+          `, [
+            id, fila.nombre, fila.apellido || null, fila.lote || null,
+            fila.direccion || null, fila.telefono || null, fila.email || null, fila.dni || null,
+            fila.tope_deuda ?? topeDefault, fila.activo, fila.es_master, n, n
+          ]);
+          nuevos++;
+        }
+
+        fila._id = id;
+        if (fila.familia_codigo && fila.es_master === 1) {
+          familiaMap[fila.familia_codigo] = id;
+        }
+      } catch (e) {
+        errores.push(`Fila ${i + 2}: ${e.message}`);
+      }
+    });
+
+    // Paso 2: vincular miembros a su master por familia_codigo
+    let vinculados = 0;
+    filas.forEach(fila => {
+      if (!fila._id || !fila.familia_codigo || fila.es_master === 1) return;
+      const masterId = familiaMap[fila.familia_codigo];
+      if (!masterId) return;
+      window.SGA_DB.run(
+        `UPDATE clientes SET cliente_master_id = ?, updated_at = ?, sync_status = 'pending' WHERE id = ?`,
+        [masterId, n, fila._id]
+      );
+      vinculados++;
+    });
+
+    // Resultado
+    let html = '';
+    if (nuevos > 0)       html += `<div class="result-item result-success">✅ ${nuevos} cliente(s) nuevos importados</div>`;
+    if (actualizados > 0) html += `<div class="result-item result-success">✏️ ${actualizados} cliente(s) actualizados</div>`;
+    if (vinculados > 0)   html += `<div class="result-item result-success">👨‍👩‍👧 ${vinculados} miembro(s) vinculados a su familia</div>`;
+    if (omitidos > 0)     html += `<div class="result-item" style="background:#fff8e1;color:#f57f17">⏭️ ${omitidos} cliente(s) omitidos (ya existen)</div>`;
+    errores.forEach(e  => { html += `<div class="result-item result-error">⚠️ ${esc(e)}</div>`; });
+
+    ge('cl-import-summary').innerHTML = html;
+    ge('btn-cl-import-confirm').style.display = 'none';
+    ge('btn-cl-import-back').style.display = 'none';
+    ge('btn-cl-import-done').style.display = '';
+
+    renderList();
+  }
+
   // ── SECTION SWITCHING ──────────────────────────────────────────────────────
   function activateFichaSection(sectionId) {
     document.querySelectorAll('.ficha-section').forEach(s => s.classList.remove('active'));
@@ -1135,6 +1438,32 @@ const ClientesUI = (() => {
       });
       renderComprasSection({ ...c, ventas_override: ventas });
     });
+
+    // Export template
+    ge('btn-descargar-clientes')?.addEventListener('click', downloadTemplate);
+
+    // Import modal
+    ge('btn-importar-clientes')?.addEventListener('click', openImportModal);
+    ge('btn-cl-import-cancel')?.addEventListener('click', closeImportModal);
+    ge('modal-cl-import')?.addEventListener('click', (e) => {
+      if (e.target === ge('modal-cl-import')) closeImportModal();
+    });
+    ge('cl-import-file')?.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) handleImportFile(file);
+    });
+    ge('btn-cl-import-back')?.addEventListener('click', () => {
+      ge('cl-import-step2').style.display = 'none';
+      ge('cl-import-step1').style.display = '';
+      ge('cl-import-file').value = '';
+      ge('cl-import-preview').innerHTML = '';
+      ge('cl-import-summary').innerHTML = '';
+      ge('btn-cl-import-back').style.display = 'none';
+      ge('btn-cl-import-confirm').style.display = 'none';
+      ge('btn-cl-import-done').style.display = 'none';
+    });
+    ge('btn-cl-import-confirm')?.addEventListener('click', confirmarImport);
+    ge('btn-cl-import-done')?.addEventListener('click', closeImportModal);
   }
 
   return { init };
