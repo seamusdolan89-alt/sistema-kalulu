@@ -165,7 +165,7 @@ const EditorProducto = (() => {
       `<option value="${u}" ${(p.unidad_medida || 'unidad') === u ? 'selected' : ''}>${u}</option>`
     ).join('');
 
-    const stockAlerta = p.stock_alerta != null ? p.stock_alerta : (p.stock_minimo || 0);
+    const stockAlerta = p.stock_minimo || 0;
     const cantPedido  = p.cant_pedido || 0;
     const isActivo    = p.activo === 1 || p.activo === '1';
 
@@ -449,14 +449,14 @@ const EditorProducto = (() => {
     <div class="form-row">
       <div class="form-group" id="ed-stock-alerta-wrap">
         ${esMiembroGrupo
-          ? `<label>Stock alerta</label>
+          ? `<label>Stock mínimo</label>
              <div style="padding:8px 12px;background:var(--color-background-secondary);border-radius:6px;font-size:13px;color:var(--color-text-secondary)">
                Este producto pertenece a un grupo de sustitutos.<br>
-               El stock alerta se configura en el <a href="#" class="ed-link-referencia" data-id="${referenciaGrupoId}">producto referencia</a>.
+               El stock mínimo se configura en el <a href="#" class="ed-link-referencia" data-id="${referenciaGrupoId}">producto referencia</a>.
              </div>`
-          : `<label for="ed-stock-alerta">Stock alerta</label>
+          : `<label for="ed-stock-alerta">Stock mínimo</label>
              <input type="number" id="ed-stock-alerta" class="input-full" step="1" min="0" value="${stockAlerta}">
-             <small class="ed-text-muted">Alerta cuando el stock cae por debajo de este valor</small>`
+             <small class="ed-text-muted">Genera orden de compra cuando el stock cae por debajo de este valor</small>`
         }
       </div>
       <div class="form-group">
@@ -887,6 +887,7 @@ const EditorProducto = (() => {
         [state.productoId, sucursalId, cantidad, now, now]
       );
     }
+    window.SGA_DB.registrarHistorialStock(state.productoId, sucursalId);
     showToast('Stock actualizado');
   };
 
@@ -2039,6 +2040,7 @@ const EditorProducto = (() => {
           [state.productoId, sucId, Math.max(0, delta), now, now]
         );
       }
+      window.SGA_DB.registrarHistorialStock(state.productoId, sucId);
       closeFamiliaModal();
       showToast('Movimiento registrado');
       renderTransacciones();

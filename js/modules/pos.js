@@ -152,6 +152,7 @@ export const POS = (() => {
              WHERE producto_id = ? AND sucursal_id = ?`,
             [old.cantidad, now, 'pending', now, old.producto_id, sucursalId]
           );
+          window.SGA_DB.registrarHistorialStock(old.producto_id, sucursalId);
         }
         window.SGA_DB.run('DELETE FROM venta_items WHERE venta_id = ?', [ventaId]);
         window.SGA_DB.run('DELETE FROM venta_pagos WHERE venta_id = ?', [ventaId]);
@@ -196,6 +197,7 @@ export const POS = (() => {
           item.productoId,
           sucursalId
         ]);
+        window.SGA_DB.registrarHistorialStock(item.productoId, sucursalId);
       }
 
       // INSERT venta_pagos and update payment method totals
@@ -2729,6 +2731,7 @@ export const POS = (() => {
           UPDATE stock SET cantidad = cantidad + ?, fecha_modificacion = ?, sync_status = 'pending'
           WHERE producto_id = ? AND sucursal_id = ?
         `, [item.cantidad, now, item.productoId, venta.sucursal_id]);
+        window.SGA_DB.registrarHistorialStock(item.productoId, venta.sucursal_id);
 
         // Record stock adjustment: reincorporation (always approved)
         window.SGA_DB.run(`
@@ -2817,6 +2820,7 @@ export const POS = (() => {
           item.producto_id,
           venta.sucursal_id
         ]);
+        window.SGA_DB.registrarHistorialStock(item.producto_id, venta.sucursal_id);
       }
 
       // Reverse cuenta_corriente

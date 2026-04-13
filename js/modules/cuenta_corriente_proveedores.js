@@ -272,6 +272,72 @@ const SGA_PagosProveedores = (() => {
     }
   }
 
+  function getLedgerAgrupado(proveedorId) {
+    const compras = db().query(
+      `SELECT id, fecha, numero_factura, factura_pv, total
+       FROM compras
+       WHERE proveedor_id = ? AND COALESCE(estado,'confirmada') != 'anulada'
+       ORDER BY fecha ASC, rowid ASC`,
+      [proveedorId]
+    ).map(c => {
+      const imps = db().query(
+        `SELECT ip.fecha, ip.monto_imputado, ip.pago_id, p.observaciones
+         FROM imputaciones_pagos ip
+         JOIN pagos_proveedores p ON p.id = ip.pago_id
+         WHERE ip.compra_id = ?
+         ORDER BY ip.fecha ASC`,
+        [c.id]
+      ).map(i => {
+        const metodos = db().query(
+          `SELECT metodo, referencia FROM pagos_proveedores_metodos WHERE pago_id = ?`,
+          [i.pago_id]
+        );
+        const desc = metodos.map(m =>
+          (m.metodo === 'efectivo' ? 'Efectivo' : 'Transferencia')
+          + (m.referencia ? ` (${m.referencia})` : '')
+        ).join(' + ') || i.observaciones || 'Pago';
+        return { fecha: i.fecha, monto: parseFloat(i.monto_imputado) || 0, desc, pago_id: i.pago_id };
+      });
+      const pagado = imps.reduce((s, i) => s + i.monto, 0);
+      return {
+        id:         c.id,
+        fecha:      c.fecha,
+        referencia: [c.factura_pv, c.numero_factura].filter(Boolean).join('-') || '—',
+        total:      parseFloat(c.total) || 0,
+        pagado,
+        saldo_item: (parseFloat(c.total) || 0) - pagado,
+        imputaciones: imps,
+      };
+    });
+
+    const pagos_sin_imputar = db().query(
+      `SELECT p.id, p.fecha, p.observaciones,
+              COALESCE((SELECT SUM(m.monto) FROM pagos_proveedores_metodos m WHERE m.pago_id = p.id), 0) AS total_pago
+       FROM pagos_proveedores p
+       WHERE p.proveedor_id = ?
+       ORDER BY p.fecha ASC`,
+      [proveedorId]
+    ).map(p => {
+      const metodos = db().query(
+        `SELECT metodo, referencia FROM pagos_proveedores_metodos WHERE pago_id = ?`,
+        [p.id]
+      );
+      const desc = metodos.map(m =>
+        (m.metodo === 'efectivo' ? 'Efectivo' : 'Transferencia')
+        + (m.referencia ? ` (${m.referencia})` : '')
+      ).join(' + ') || p.observaciones || 'Pago';
+      return {
+        id:                p.id,
+        fecha:             p.fecha,
+        desc,
+        total_pago:        parseFloat(p.total_pago) || 0,
+        credito_disponible: _getCreditoDisponibleDePago(p.id),
+      };
+    }).filter(p => p.credito_disponible > 0.01);
+
+    return { compras, pagos_sin_imputar };
+  }
+
   function getResumenProveedores() {
     const proveedores = db().query(
       `SELECT p.id, p.razon_social, p.condicion_pago, p.telefono, p.contacto_nombre
@@ -294,6 +360,7 @@ const SGA_PagosProveedores = (() => {
     getComprasPendientes,
     getCreditosDisponibles,
     getLedger,
+    getLedgerAgrupado,
     crearPago,
     imputar,
     getResumenProveedores,
@@ -329,6 +396,7 @@ const CuentaCorrienteProveedores = (() => {
     soloDeuda:   true,
     proveedorId: null,
     proveedorNombre: '',
+    ledgerMode:  'agrupado', // 'agrupado' | 'cronologico'
   };
 
   const data = () => window.SGA_PagosProveedores;
@@ -482,6 +550,148 @@ const CuentaCorrienteProveedores = (() => {
 
   // ── VISTA DETALLE ────────────────────────────────────────────────────────────
 
+  function buildTablaPlana(ledger, saldo) {
+    if (!ledger.length) return `
+      <div class="ccprov-empty">
+        <div class="ccprov-empty-icon">📋</div>
+        <p>Sin movimientos registrados.</p>
+      </div>`;
+    return `
+      <table class="ccprov-table">
+        <thead>
+          <tr>
+            <th>Fecha</th><th>Tipo</th><th>Referencia</th>
+            <th class="right">Debe</th><th class="right">Haber</th><th class="right">Saldo</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${ledger.map(e => `
+            <tr class="ledger-row-${e.tipo}">
+              <td>${fmtFecha(e.fecha)}</td>
+              <td><span class="ledger-type-badge ledger-type-${e.tipo}">${e.tipo === 'compra' ? 'Compra' : 'Pago'}</span></td>
+              <td>
+                ${esc(e.referencia)}
+                ${e.tipo === 'compra' && e.saldo_item > 0.01 ? `<span class="ledger-saldo-parcial"> · Saldo: ${fmt$(e.saldo_item)}</span>` : ''}
+              </td>
+              <td class="right">${e.debe > 0 ? `<span class="ledger-debe">${fmt$(e.debe)}</span>` : '—'}</td>
+              <td class="right">${e.haber > 0 ? `<span class="ledger-haber">${fmt$(e.haber)}</span>` : '—'}</td>
+              <td class="right">
+                <span class="${e.saldo_acumulado > 0.01 ? 'ledger-saldo-deuda' : 'ledger-saldo-saldado'}">
+                  ${fmt$(Math.abs(e.saldo_acumulado))}
+                </span>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="3" style="color:var(--color-text-secondary)">Total</td>
+            <td class="right ledger-debe">${fmt$(ledger.reduce((s,e) => s + e.debe, 0))}</td>
+            <td class="right ledger-haber">${fmt$(ledger.reduce((s,e) => s + e.haber, 0))}</td>
+            <td class="right">
+              <span class="${saldo > 0.01 ? 'ledger-saldo-deuda' : 'ledger-saldo-saldado'}">${fmt$(Math.abs(saldo))}</span>
+            </td>
+          </tr>
+        </tfoot>
+      </table>`;
+  }
+
+  function buildTablaAgrupada(agrupado, saldo) {
+    const { compras, pagos_sin_imputar } = agrupado;
+    if (!compras.length) return `
+      <div class="ccprov-empty">
+        <div class="ccprov-empty-icon">📋</div>
+        <p>Sin movimientos registrados.</p>
+      </div>`;
+
+    const totalDebe  = compras.reduce((s, c) => s + c.total, 0);
+    const totalHaber = compras.reduce((s, c) => s + c.pagado, 0)
+                     + pagos_sin_imputar.reduce((s, p) => s + p.credito_disponible, 0);
+
+    return `
+      <table class="ccprov-table">
+        <thead>
+          <tr>
+            <th>Fecha</th><th>Tipo</th><th>Referencia / Pago</th>
+            <th class="right">Debe</th><th class="right">Haber</th><th class="right">Saldo factura</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${compras.map(c => `
+            <tr class="ledger-row-compra${c.saldo_item < 0.01 ? ' ledger-row-compra-saldada' : ''}">
+              <td>${fmtFecha(c.fecha)}</td>
+              <td><span class="ledger-type-badge ledger-type-compra">Compra</span></td>
+              <td>${esc(c.referencia)}</td>
+              <td class="right"><span class="ledger-debe">${fmt$(c.total)}</span></td>
+              <td class="right">—</td>
+              <td class="right">
+                ${c.saldo_item < 0.01
+                  ? `<span class="ledger-saldo-cero">Saldada</span>`
+                  : `<span class="ledger-saldo-deuda">${fmt$(c.saldo_item)}</span>`}
+              </td>
+            </tr>
+            ${c.imputaciones.length
+              ? c.imputaciones.map(i => `
+                <tr class="ledger-row-imp">
+                  <td>${fmtFecha(i.fecha)}</td>
+                  <td><span class="ledger-type-badge ledger-type-pago">Pago</span></td>
+                  <td><span class="ledger-imp-ref">${esc(i.desc)}</span></td>
+                  <td class="right">—</td>
+                  <td class="right"><span class="ledger-haber">${fmt$(i.monto)}</span></td>
+                  <td class="right">—</td>
+                </tr>`).join('')
+              : `<tr class="ledger-row-imp">
+                  <td></td><td></td>
+                  <td><span class="ledger-sin-pagos">Sin pagos aplicados</span></td>
+                  <td></td><td></td><td></td>
+                </tr>`}
+          `).join('')}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="3" style="color:var(--color-text-secondary)">Total</td>
+            <td class="right ledger-debe">${fmt$(totalDebe)}</td>
+            <td class="right ledger-haber">${fmt$(totalHaber)}</td>
+            <td class="right">
+              <span class="${saldo > 0.01 ? 'ledger-saldo-deuda' : 'ledger-saldo-saldado'}">${fmt$(Math.abs(saldo))}</span>
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+      ${pagos_sin_imputar.length ? `
+        <div class="ledger-orphan-section">
+          <div class="ledger-orphan-title">💡 Pagos sin imputar a comprobantes</div>
+          <table class="ccprov-table" style="margin-top:0">
+            <tbody>
+              ${pagos_sin_imputar.map(p => `
+                <tr class="ledger-row-orphan">
+                  <td style="width:90px">${fmtFecha(p.fecha)}</td>
+                  <td><span class="ledger-type-badge ledger-type-pago">Pago</span></td>
+                  <td>${esc(p.desc)}</td>
+                  <td class="right">—</td>
+                  <td class="right"><span class="ledger-haber">${fmt$(p.credito_disponible)}</span></td>
+                  <td class="right">Crédito disponible</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>` : ''}`;
+  }
+
+  function renderLedgerContent(proveedorId, saldo) {
+    const wrap = ge('ccprov-ledger-wrap');
+    if (!wrap) return;
+    if (state.ledgerMode === 'agrupado') {
+      const agrupado = data().getLedgerAgrupado(proveedorId);
+      wrap.innerHTML = buildTablaAgrupada(agrupado, saldo);
+    } else {
+      const ledger = data().getLedger(proveedorId);
+      wrap.innerHTML = buildTablaPlana(ledger, saldo);
+    }
+    // Sync toggle buttons
+    ge('btn-ledger-agrupado')?.classList.toggle('active', state.ledgerMode === 'agrupado');
+    ge('btn-ledger-plano')?.classList.toggle('active', state.ledgerMode === 'cronologico');
+  }
+
   function renderDetalle(proveedorId, proveedorNombre) {
     state.view = 'detalle';
     state.proveedorId = proveedorId;
@@ -490,8 +700,8 @@ const CuentaCorrienteProveedores = (() => {
     const root = ge('ccprov-root');
     if (!root) return;
 
-    const saldo = data().getSaldoProveedor(proveedorId);
-    const ledger = data().getLedger(proveedorId);
+    const saldo    = data().getSaldoProveedor(proveedorId);
+    const ledger   = data().getLedger(proveedorId);
     const creditos = data().getCreditosDisponibles(proveedorId);
     const totalCredito = creditos.reduce((s, c) => s + c.credito_disponible, 0);
 
@@ -540,68 +750,20 @@ const CuentaCorrienteProveedores = (() => {
         💡 Hay <strong>${fmt$(totalCredito)}</strong> en pagos sin imputar (crédito disponible para aplicar a compras)
       </div>` : ''}
 
-      <div class="ccprov-table-wrap" style="margin-top:16px">
-        ${!ledger.length ? `
-          <div class="ccprov-empty">
-            <div class="ccprov-empty-icon">📋</div>
-            <p>Sin movimientos registrados.</p>
-          </div>
-        ` : `
-        <table class="ccprov-table">
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th>Tipo</th>
-              <th>Referencia</th>
-              <th class="right">Debe</th>
-              <th class="right">Haber</th>
-              <th class="right">Saldo</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${ledger.map(e => `
-              <tr class="ledger-row-${e.tipo}">
-                <td>${fmtFecha(e.fecha)}</td>
-                <td>
-                  <span class="ledger-type-badge ledger-type-${e.tipo}">
-                    ${e.tipo === 'compra' ? 'Compra' : 'Pago'}
-                  </span>
-                </td>
-                <td>
-                  ${esc(e.referencia)}
-                  ${e.tipo === 'compra' && e.saldo_item > 0.01 ? `
-                    <span class="ledger-saldo-parcial"> · Saldo: ${fmt$(e.saldo_item)}</span>
-                  ` : ''}
-                </td>
-                <td class="right">${e.debe > 0 ? `<span class="ledger-debe">${fmt$(e.debe)}</span>` : '—'}</td>
-                <td class="right">${e.haber > 0 ? `<span class="ledger-haber">${fmt$(e.haber)}</span>` : '—'}</td>
-                <td class="right">
-                  <span class="${e.saldo_acumulado > 0.01 ? 'ledger-saldo-deuda' : 'ledger-saldo-saldado'}">
-                    ${fmt$(Math.abs(e.saldo_acumulado))}
-                  </span>
-                </td>
-                <td></td>
-              </tr>
-            `).join('')}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td colspan="3" style="color:var(--color-text-secondary)">Total</td>
-              <td class="right ledger-debe">${fmt$(ledger.reduce((s,e) => s + e.debe, 0))}</td>
-              <td class="right ledger-haber">${fmt$(ledger.reduce((s,e) => s + e.haber, 0))}</td>
-              <td class="right">
-                <span class="${saldo > 0.01 ? 'ledger-saldo-deuda' : 'ledger-saldo-saldado'}">
-                  ${fmt$(Math.abs(saldo))}
-                </span>
-              </td>
-              <td></td>
-            </tr>
-          </tfoot>
-        </table>
-        `}
+      <div class="ccprov-ledger-bar">
+        <span class="ccprov-ledger-bar-label">Vista:</span>
+        <div class="ccprov-ledger-toggle">
+          <button id="btn-ledger-agrupado" class="${state.ledgerMode === 'agrupado' ? 'active' : ''}">Por factura</button>
+          <button id="btn-ledger-plano"    class="${state.ledgerMode === 'cronologico' ? 'active' : ''}">Cronológico</button>
+        </div>
+      </div>
+
+      <div class="ccprov-table-wrap" style="margin-top:8px">
+        <div id="ccprov-ledger-wrap"></div>
       </div>
     `;
+
+    renderLedgerContent(proveedorId, saldo);
 
     ge('btn-back').addEventListener('click', () => {
       state.view = 'lista';
@@ -610,6 +772,14 @@ const CuentaCorrienteProveedores = (() => {
       renderLista();
     });
     ge('btn-registrar-pago').addEventListener('click', () => openModalPago(proveedorId, proveedorNombre));
+    ge('btn-ledger-agrupado').addEventListener('click', () => {
+      state.ledgerMode = 'agrupado';
+      renderLedgerContent(proveedorId, saldo);
+    });
+    ge('btn-ledger-plano').addEventListener('click', () => {
+      state.ledgerMode = 'cronologico';
+      renderLedgerContent(proveedorId, saldo);
+    });
   }
 
   // ── MODAL PAGO ───────────────────────────────────────────────────────────────

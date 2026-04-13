@@ -119,6 +119,15 @@ aside.sidebar.editor-mode nav {
 }
 .ed-back-link:hover { opacity: 1; text-decoration: underline; }
 
+/* Ficha fullscreen mode — sidebar hidden, main spans full width */
+body.ficha-open aside.sidebar {
+  display: none;
+}
+body.ficha-open main#app {
+  grid-column: 1 / -1;
+  padding: 0;
+}
+
 /* Responsive: collapse sidebar on mobile */
 @media (max-width: 768px) {
   body {

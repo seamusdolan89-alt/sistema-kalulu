@@ -28,14 +28,17 @@ export default async function seed() {
   );
   console.log('✅ Sucursal created (id=1)');
 
-  // 2. Insert admin user
+  // 2. Insert admin user (username: admin, password: admin123)
   const admin_id = window.SGA_Utils.generateUUID();
+  // Hash SHA-256 de 'admin123'
+  const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('admin123'));
+  const adminHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
   window.SGA_DB.run(
-    `INSERT INTO usuarios (id, firebase_uid, nombre, rol, sucursal_id, activo, sync_status, updated_at)
-     VALUES (?, ?, ?, ?, ?, 1, 'pending', ?)`,
-    [admin_id, 'dev-admin', 'Admin Demo', 'admin', sucursal_id, now]
+    `INSERT INTO usuarios (id, firebase_uid, nombre, username, password_hash, rol, sucursal_id, activo, sync_status, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'pending', ?)`,
+    [admin_id, 'dev-admin', 'Admin Demo', 'admin', adminHash, 'admin', sucursal_id, now]
   );
-  console.log('✅ Admin user created');
+  console.log('✅ Admin user created (usuario: admin / contraseña: admin123)');
 
   // 3. Insert sample categories
   const categories = [

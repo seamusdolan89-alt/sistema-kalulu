@@ -138,6 +138,56 @@
   .ledger-type-pago   { background: #e8f5e9; color: #2e7d32; }
   .ledger-saldo-parcial { color: #f57c00; font-size: 11px; font-weight: 600; }
 
+  /* ── LEDGER AGRUPADO ─────────────────────────────────────────────────────── */
+  .ledger-row-imp { }
+  .ledger-row-imp td {
+    background: #f9fafb;
+    color: var(--color-text-secondary);
+    border-bottom: 1px dashed #e8e8e8;
+    font-size: 12px;
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+  .ledger-row-imp:last-of-type td { border-bottom: 1px solid var(--color-border); }
+  .ledger-imp-ref { display: flex; align-items: center; gap: 5px; padding-left: 14px; }
+  .ledger-imp-ref::before { content: '└'; color: #bbb; font-size: 13px; line-height: 1; }
+  .ledger-row-compra-saldada > td { opacity: 0.6; }
+  .ledger-saldo-cero { color: #2e7d32; font-weight: 700; }
+  .ledger-sin-pagos { font-size: 11px; color: #bbb; font-style: italic; padding-left: 14px; }
+
+  /* Sección pagos sin imputar al final */
+  .ledger-orphan-section { margin-top: 16px; }
+  .ledger-orphan-title {
+    font-size: 11px; font-weight: 700; color: #1565c0;
+    text-transform: uppercase; letter-spacing: .05em;
+    padding: 6px 0 4px; border-top: 2px solid #90caf9; margin-bottom: 0;
+  }
+  .ledger-row-orphan td { background: #e3f2fd; color: #1565c0; font-size: 12px; }
+
+  /* Toggle bar */
+  .ccprov-ledger-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 20px 0;
+    flex-shrink: 0;
+  }
+  .ccprov-ledger-bar-label { font-size: 12px; color: var(--color-text-secondary); }
+  .ccprov-ledger-toggle { display: flex; gap: 0; border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
+  .ccprov-ledger-toggle button {
+    padding: 5px 12px;
+    border: none;
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .ccprov-ledger-toggle button + button { border-left: 1px solid var(--color-border); }
+  .ccprov-ledger-toggle button.active { background: var(--color-primary); color: #fff; font-weight: 600; }
+
   /* ── SALDO SUMMARY CARD ──────────────────────────────────────────────────── */
   .ccprov-saldo-card {
     margin: 16px 20px 0;

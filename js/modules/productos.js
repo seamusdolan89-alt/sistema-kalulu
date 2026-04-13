@@ -1292,6 +1292,7 @@
               [producto_id, sucursal_id, stock_actual, now, now]
             );
           }
+          window.SGA_DB.registrarHistorialStock(producto_id, sucursal_id);
         }
 
         // Sustituto referencia — set group membership

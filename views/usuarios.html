@@ -1,0 +1,80 @@
+<!-- views/usuarios.html — Gestión de Usuarios (solo admin) -->
+<div class="page-header">
+  <h2>👤 Gestión de Usuarios</h2>
+  <button class="btn btn-primary" id="btn-nuevo-usuario">+ Nuevo Usuario</button>
+</div>
+
+<!-- Tabla de usuarios -->
+<div class="card" style="margin-top: var(--spacing-lg);">
+  <table class="table" id="tabla-usuarios">
+    <thead>
+      <tr>
+        <th>Nombre</th>
+        <th>Usuario</th>
+        <th>Rol</th>
+        <th>Estado</th>
+        <th style="text-align:center;">Acciones</th>
+      </tr>
+    </thead>
+    <tbody id="tbody-usuarios">
+      <tr><td colspan="5" style="text-align:center;color:var(--color-text-secondary);">Cargando...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Modal: Crear / Editar usuario -->
+<div id="modal-usuario" class="modal-overlay" style="display:none;">
+  <div class="modal-container" style="max-width:440px;">
+    <div class="modal-header">
+      <h3 id="modal-usuario-titulo">Nuevo Usuario</h3>
+      <button class="modal-close" id="btn-cerrar-modal-usuario">&times;</button>
+    </div>
+    <div class="modal-body">
+      <form id="form-usuario">
+        <input type="hidden" id="usuario-id">
+
+        <div class="form-group">
+          <label for="usuario-nombre">Nombre completo *</label>
+          <input type="text" id="usuario-nombre" placeholder="Ej: Juan Pérez" required>
+        </div>
+
+        <div class="form-group">
+          <label for="usuario-username">Nombre de usuario *</label>
+          <input type="text" id="usuario-username" placeholder="Ej: juan.perez" required
+                 autocomplete="off" style="text-transform:lowercase;">
+          <small style="color:var(--color-text-secondary);">Solo letras, números y puntos. Sin espacios.</small>
+        </div>
+
+        <div class="form-group">
+          <label for="usuario-rol">Rol *</label>
+          <select id="usuario-rol" required>
+            <option value="">— Seleccionar —</option>
+            <option value="admin">Administrador</option>
+            <option value="encargado">Encargado</option>
+            <option value="cajero">Cajero</option>
+          </select>
+        </div>
+
+        <div class="form-group" id="grupo-password">
+          <label for="usuario-password" id="label-password">Contraseña *</label>
+          <input type="password" id="usuario-password" placeholder="Mínimo 4 caracteres" autocomplete="new-password">
+          <small id="hint-password" style="color:var(--color-text-secondary);">Dejar vacío para no cambiar la contraseña.</small>
+        </div>
+
+        <div class="form-group">
+          <label for="usuario-activo">Estado</label>
+          <select id="usuario-activo">
+            <option value="1">Activo</option>
+            <option value="0">Inactivo</option>
+          </select>
+        </div>
+
+        <div id="error-usuario" class="alert alert-danger" style="display:none;"></div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="btn-cancelar-usuario">Cancelar</button>
+      <button class="btn btn-primary" id="btn-guardar-usuario">Guardar</button>
+    </div>
+  </div>
+</div>

@@ -439,10 +439,7 @@ const ClientesUI = (() => {
     ge('clientes-list-view').style.display = 'none';
     const fichaView = ge('clientes-ficha-view');
     fichaView.classList.add('active');
-
-    // Take over the app aside (same pattern as editor-producto)
-    const aside = document.querySelector('aside.sidebar');
-    if (aside) aside.classList.add('editor-mode');
+    document.body.classList.add('ficha-open');
 
     loadFichaData();
     activateFichaSection('datos');
@@ -451,9 +448,7 @@ const ClientesUI = (() => {
   function closeFicha() {
     ge('clientes-ficha-view').classList.remove('active');
     ge('clientes-list-view').style.display = '';
-
-    const aside = document.querySelector('aside.sidebar');
-    if (aside) aside.classList.remove('editor-mode');
+    document.body.classList.remove('ficha-open');
 
     renderList();
   }

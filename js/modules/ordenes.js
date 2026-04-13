@@ -1,1670 +1,1008 @@
 /**
- * ordenes.js — Purchase Orders Module
+ * ordenes.js — Módulo de Órdenes de Compra
  *
- * Manages the full purchase order lifecycle:
- * crear → enviar → recibir → confirmar → pagar
+ * Flujo: borrador → revisada → confirmada → enviada → recibiendo → recibida_parcial → cerrada
  */
 
 const Ordenes = (() => {
   'use strict';
 
-  // ── CONSTANTS ──────────────────────────────────────────────────────────────
-
-  const ESTADO_LABEL = {
-    borrador:         'Borrador',
-    enviada:          'Enviada',
-    recibiendo:       'Recibiendo',
-    recibida_parcial: 'Parcial',
-    cerrada:          'Cerrada',
-    pendiente_pago:   'Pago pendiente',
-  };
-
-  const ESTADO_BADGE = {
-    borrador:         'ord-badge ord-badge-borrador',
-    enviada:          'ord-badge ord-badge-enviada',
-    recibiendo:       'ord-badge ord-badge-recibiendo',
-    recibida_parcial: 'ord-badge ord-badge-recibida_parcial',
-    cerrada:          'ord-badge ord-badge-cerrada',
-    pendiente_pago:   'ord-badge ord-badge-pendiente_pago',
-  };
-
-  const ITEM_ESTADO_LABEL = {
-    pendiente:        'Pendiente',
-    recibido:         'Recibido',
-    recibido_parcial: 'Parcial',
-    no_entregado:     'No entregado',
-  };
-
-  // ── STATE ──────────────────────────────────────────────────────────────────
-
-  const state = {
-    user: null,
-    currentTab: 'activas',
-    view: 'lista',          // 'lista' | 'recepcion' | 'pagos'
-
-    nuevaOrden: {
-      active: false,
-      step: 1,
-      proveedorId: null,
-      proveedorNombre: '',
-      fechaEntrega: '',
-      notas: '',
-      items: [],            // [{productoId, nombre, cantidadPedida, costoUnitario}]
-    },
-
-    recepcion: {
-      orden: null,          // full order with items
-      costoChanges: [],
-    },
-
-    discrepancia: {
-      active: false,
-      codigo: '',
-      productoSeleccionado: null,
-      step: 'search',       // 'search' | 'options'
-    },
-
-    pago: {
-      active: false,
-      ordenId: null,
-      proveedorNombre: '',
-      total: 0,
-      pagado: 0,
-      modo: 'pendiente',    // 'efectivo' | 'pendiente'
-      monto: 0,
-    },
-
-    costos: {
-      active: false,
-      changes: [],          // [{productoId, nombre, costoAnterior, costoNuevo, esMadre, ...}]
-      ordenId: null,
-    },
-  };
-
-  // ── HELPERS ────────────────────────────────────────────────────────────────
-
-  const ge = (id) => document.getElementById(id);
-  const esc = (s) =>
-    String(s == null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
-  const fmtPeso = (n) => window.SGA_Utils.formatCurrency(n);
-  const fmtFecha = (str) => window.SGA_Utils.formatFecha(str);
-
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+  const db   = () => window.SGA_DB;
   const uuid = () => window.SGA_Utils.generateUUID();
   const now  = () => window.SGA_Utils.formatISODate(new Date());
 
-  function showToast(msg, type = 'success') {
-    const t = document.createElement('div');
-    t.className = `toast toast-${type}`;
-    t.textContent = msg;
-    document.body.appendChild(t);
-    setTimeout(() => t.remove(), 3000);
-  }
+  // ── DATA LAYER ───────────────────────────────────────────────────────────────
 
-  // ── DATA LAYER ─────────────────────────────────────────────────────────────
-
-  function _getAll(sucursalId, estadoFilter) {
-    const params = [];
-    const where  = [];
-    if (sucursalId) { where.push('o.sucursal_id = ?'); params.push(sucursalId); }
-    if (estadoFilter === 'activas') {
-      where.push(`o.estado IN ('borrador','enviada','recibiendo','recibida_parcial')`);
-    } else if (estadoFilter === 'cerradas') {
-      where.push(`o.estado IN ('cerrada','pendiente_pago')`);
+  /**
+   * Devuelve el stock efectivo de un producto en una sucursal.
+   * Si el producto pertenece a un grupo de sustitutos, suma el stock de todos los miembros.
+   */
+  function stockEfectivo(productoId, sucursalId) {
+    const inGroup = db().query(
+      `SELECT referencia_id FROM producto_sustitutos
+       WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1`,
+      [productoId]
+    );
+    if (inGroup.length) {
+      const r = db().query(`
+        SELECT COALESCE(SUM(st.cantidad), 0) AS total
+        FROM producto_sustitutos ps
+        LEFT JOIN stock st ON st.producto_id = ps.producto_id AND st.sucursal_id = ?
+        WHERE ps.referencia_id = ?
+      `, [sucursalId, inGroup[0].referencia_id]);
+      return r[0]?.total || 0;
     }
-    const w = where.length ? 'WHERE ' + where.join(' AND ') : '';
-    return window.SGA_DB.query(`
-      SELECT o.*, p.razon_social AS proveedor_nombre,
-        COUNT(oi.id) AS item_count,
-        COALESCE(SUM(oi.cantidad_pedida * oi.costo_unitario), 0) AS total_estimado
-      FROM ordenes_compra o
-      LEFT JOIN proveedores p ON p.id = o.proveedor_id
-      LEFT JOIN orden_compra_items oi ON oi.orden_id = o.id
-      ${w}
-      GROUP BY o.id
-      ORDER BY o.fecha_creacion DESC
-    `, params);
+    // Producto standalone o que es referencia del grupo — suma todos los miembros si los hay
+    const asRef = db().query(
+      `SELECT COALESCE(SUM(st.cantidad), 0) AS total
+       FROM producto_sustitutos ps
+       LEFT JOIN stock st ON st.producto_id = ps.producto_id AND st.sucursal_id = ?
+       WHERE ps.referencia_id = ?`,
+      [sucursalId, productoId]
+    );
+    if (asRef.length && (asRef[0].total || 0) > 0) return asRef[0].total;
+    // Sin grupo — stock propio
+    const own = db().query(
+      `SELECT COALESCE(cantidad, 0) AS qty FROM stock WHERE producto_id = ? AND sucursal_id = ?`,
+      [productoId, sucursalId]
+    );
+    return own[0]?.qty || 0;
   }
 
-  function _getById(id) {
-    const orden = window.SGA_DB.query(`
-      SELECT o.*, p.razon_social AS proveedor_nombre, p.telefono AS proveedor_tel
-      FROM ordenes_compra o
-      LEFT JOIN proveedores p ON p.id = o.proveedor_id
-      WHERE o.id = ?
-    `, [id])[0];
+  /**
+   * Unidades vendidas en los últimos N días para un producto.
+   * Excluye ventas anuladas.
+   */
+  function ventasUltimos(productoId, dias) {
+    const r = db().query(`
+      SELECT COALESCE(SUM(vi.cantidad), 0) AS total
+      FROM venta_items vi
+      JOIN ventas v ON v.id = vi.venta_id
+      WHERE vi.producto_id = ?
+        AND v.estado != 'anulada'
+        AND v.fecha >= datetime('now', ? || ' days')
+    `, [productoId, String(-dias)]);
+    return r[0]?.total || 0;
+  }
+
+  /**
+   * Genera una orden de compra en estado 'borrador' para un proveedor.
+   *
+   * Incluye todos los productos del proveedor cuyo stock efectivo
+   * sea <= stock_minimo. El stock efectivo considera el grupo de
+   * sustitutos para no pedir productos innecesariamente.
+   *
+   * @param {string} proveedorId
+   * @param {string} sucursalId
+   * @returns {{ success: boolean, ordenId: string|null, itemCount: number, message?: string }}
+   */
+  function generarOrdenCompra(proveedorId, sucursalId) {
+    const user = window.SGA_Auth.getCurrentUser();
+
+    // 1. Obtener todos los productos del proveedor (principal o alternativo)
+    const candidatos = db().query(`
+      SELECT p.id,
+             COALESCE(ps.referencia_id, p.id) AS ref_id
+      FROM productos p
+      LEFT JOIN producto_sustitutos ps
+             ON ps.producto_id = p.id AND ps.referencia_id IS NOT NULL
+      WHERE (p.proveedor_principal_id = ? OR p.proveedor_alternativo_id = ?)
+        AND p.activo = 1
+    `, [proveedorId, proveedorId]);
+
+    // 2. Deduplicar por ref_id — un solo item por producto/grupo
+    const refIds = [...new Set(candidatos.map(c => c.ref_id))];
+
+    // 3. Para cada referencia, evaluar si necesita reposición
+    const items = [];
+
+    for (const refId of refIds) {
+      const prod = db().query(`
+        SELECT id, nombre, stock_minimo, cant_pedido, unidad_medida,
+               pedido_unidad, pedido_unidades_por_paquete
+        FROM productos WHERE id = ? AND activo = 1
+      `, [refId])[0];
+
+      if (!prod) continue;  // referencia inactiva o no existe
+
+      const stockAct  = stockEfectivo(refId, sucursalId);
+      const stockMin  = prod.stock_minimo || 0;
+      const cantPedido = prod.cant_pedido || 0;
+
+      if (stockAct - stockMin > 0) continue;  // stock suficiente, no pedir
+
+      const v30d    = ventasUltimos(refId, 30);
+      const v6m     = ventasUltimos(refId, 180);
+      const diasSS  = db().calcularDiasSinStock6m(refId, sucursalId);
+
+      items.push({
+        productoId:       refId,
+        cantidadPedida:   cantPedido,
+        stockActual:      stockAct,
+        stockMinimo:      stockMin,
+        cantidadDeseada:  cantPedido,
+        ventas30d:        v30d,
+        ventasProm6m:     Math.round((v6m / 6) * 100) / 100,
+        diasSinStock6m:   diasSS,
+        cantidadSugerida: cantPedido,
+        unidadPedida:     prod.pedido_unidad || 'unidad',
+      });
+    }
+
+    if (items.length === 0) {
+      return {
+        success: true,
+        ordenId: null,
+        itemCount: 0,
+        message: 'No hay productos que necesiten reposición para este proveedor.',
+      };
+    }
+
+    // 4. Crear orden y sus items en una sola transacción
+    const ordenId = uuid();
+    const ts = now();
+
+    db().beginBatch();
+    try {
+      db().run(`
+        INSERT INTO ordenes_compra
+          (id, sucursal_id, proveedor_id, usuario_id, fecha_creacion, estado, notas, sync_status, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'borrador', NULL, 'pending', ?)
+      `, [ordenId, sucursalId, proveedorId, user.id, ts, ts]);
+
+      for (const it of items) {
+        db().run(`
+          INSERT INTO orden_compra_items
+            (id, orden_id, producto_id, cantidad_pedida, estado,
+             stock_actual, stock_minimo, cantidad_deseada,
+             ventas_30d, ventas_prom_6m, dias_sin_stock_6m,
+             cantidad_sugerida, cantidad_final, unidad_pedida)
+          VALUES (?, ?, ?, ?, 'pendiente', ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+        `, [
+          uuid(), ordenId, it.productoId, it.cantidadSugerida, it.stockActual,
+          it.stockMinimo, it.cantidadDeseada, it.ventas30d,
+          it.ventasProm6m, it.diasSinStock6m, it.cantidadSugerida, it.unidadPedida,
+        ]);
+      }
+
+      db().commitBatch();
+    } catch (e) {
+      db().rollbackBatch();
+      console.error('generarOrdenCompra error:', e);
+      return { success: false, ordenId: null, itemCount: 0, message: e.message };
+    }
+
+    return { success: true, ordenId, itemCount: items.length };
+  }
+
+  /**
+   * Devuelve todas las órdenes de compra de la sucursal, con nombre del proveedor.
+   */
+  function getOrdenes(sucursalId) {
+    return db().query(`
+      SELECT oc.id, oc.proveedor_id, oc.estado, oc.fecha_creacion,
+             oc.revisada_en, oc.confirmada_en, oc.notas,
+             p.razon_social AS proveedor_nombre,
+             (SELECT COUNT(*) FROM orden_compra_items oi WHERE oi.orden_id = oc.id) AS num_items
+      FROM ordenes_compra oc
+      LEFT JOIN proveedores p ON p.id = oc.proveedor_id
+      WHERE oc.sucursal_id = ?
+      ORDER BY oc.fecha_creacion DESC
+    `, [sucursalId]);
+  }
+
+  /**
+   * Devuelve una orden con todos sus items y datos de producto.
+   */
+  function getOrden(ordenId) {
+    const orden = db().query(`
+      SELECT oc.*, p.razon_social AS proveedor_nombre
+      FROM ordenes_compra oc
+      LEFT JOIN proveedores p ON p.id = oc.proveedor_id
+      WHERE oc.id = ?
+    `, [ordenId])[0];
+
     if (!orden) return null;
-    orden.items = window.SGA_DB.query(`
-      SELECT oi.*, pr.nombre AS producto_nombre, pr.costo AS costo_actual,
-        pr.producto_madre_id, pr.es_madre
+
+    orden.items = db().query(`
+      SELECT oi.*,
+             pr.nombre AS producto_nombre,
+             pr.unidad_medida,
+             pr.pedido_unidad AS prod_pedido_unidad,
+             pr.pedido_unidades_por_paquete AS prod_pedido_upp,
+             cb.codigo AS codigo_barras
       FROM orden_compra_items oi
       LEFT JOIN productos pr ON pr.id = oi.producto_id
+      LEFT JOIN codigos_barras cb ON cb.producto_id = oi.producto_id AND cb.es_principal = 1
       WHERE oi.orden_id = ?
       ORDER BY pr.nombre
-    `, [id]);
+    `, [ordenId]);
+
     return orden;
   }
 
-  function _crear(data) {
-    const id = uuid();
+  /**
+   * Cambia el estado de una orden, registrando timestamps donde corresponde.
+   * @param {string} ordenId
+   * @param {'revisada'|'confirmada'|'enviada'} nuevoEstado
+   */
+  function cambiarEstado(ordenId, nuevoEstado) {
     const ts = now();
-    try {
-      window.SGA_DB.beginBatch();
-      window.SGA_DB.run(`
-        INSERT INTO ordenes_compra
-          (id,sucursal_id,proveedor_id,usuario_id,fecha_creacion,fecha_entrega,estado,notas,sync_status,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`,
-        [id, data.sucursalId, data.proveedorId, data.usuarioId, ts,
-          data.fechaEntrega || null, 'borrador', data.notas || null, 'pending', ts]);
-      for (const item of data.items) {
-        window.SGA_DB.run(`
-          INSERT INTO orden_compra_items
-            (id,orden_id,producto_id,cantidad_pedida,cantidad_recibida,costo_unitario,costo_anterior,estado)
-          VALUES (?,?,?,?,0,?,0,'pendiente')`,
-          [uuid(), id, item.productoId, item.cantidadPedida, parseFloat(item.costoUnitario) || 0]);
-      }
-      window.SGA_DB.commitBatch();
-      return { success: true, ordenId: id };
-    } catch (e) {
-      window.SGA_DB.rollbackBatch();
-      return { success: false, error: e.message };
-    }
-  }
+    const extraCols = {
+      revisada:   ', revisada_en = ?',
+      confirmada: ', confirmada_en = ?',
+    };
+    const extra = extraCols[nuevoEstado] || '';
+    const params = extra
+      ? [nuevoEstado, ts, ts, ordenId]
+      : [nuevoEstado, ts, ordenId];
 
-  function _enviar(ordenId) {
-    window.SGA_DB.run(
-      `UPDATE ordenes_compra SET estado='enviada', updated_at=? WHERE id=?`,
-      [now(), ordenId]
+    db().run(
+      `UPDATE ordenes_compra SET estado = ?, updated_at = ?${extra} WHERE id = ?`,
+      params
     );
   }
 
-  function _iniciarRecepcion(ordenId) {
-    window.SGA_DB.run(
-      `UPDATE ordenes_compra SET estado='recibiendo', updated_at=? WHERE id=?`,
-      [now(), ordenId]
+  /**
+   * Guarda cantidad_final y notas de un item.
+   */
+  function guardarItem(itemId, cantidadFinal, notas) {
+    db().run(
+      `UPDATE orden_compra_items SET cantidad_final = ?, notas = ? WHERE id = ?`,
+      [cantidadFinal, notas || null, itemId]
     );
   }
 
-  function _recibirItem(itemId, cantidadRecibida, costoUnitario) {
-    const item = window.SGA_DB.query(
-      `SELECT * FROM orden_compra_items WHERE id=?`, [itemId]
+  /**
+   * Elimina un item de la orden (solo en borrador/revisada).
+   */
+  function eliminarItem(itemId) {
+    db().run(`DELETE FROM orden_compra_items WHERE id = ?`, [itemId]);
+  }
+
+  /**
+   * Agrega un producto manualmente a una orden.
+   */
+  function agregarItem(ordenId, productoId, sucursalId) {
+    const prod = db().query(
+      `SELECT id, nombre, stock_minimo, cant_pedido, pedido_unidad FROM productos WHERE id = ?`,
+      [productoId]
     )[0];
-    if (!item) return;
-    const cant  = parseFloat(cantidadRecibida) || 0;
-    const costo = parseFloat(costoUnitario)    || 0;
-    const est   = cant === 0 ? 'no_entregado'
-                : cant >= parseFloat(item.cantidad_pedida) ? 'recibido'
-                : 'recibido_parcial';
-    window.SGA_DB.run(
-      `UPDATE orden_compra_items
-       SET cantidad_recibida=?, costo_unitario=?, costo_anterior=?, estado=?
-       WHERE id=?`,
-      [cant, costo, parseFloat(item.costo_actual || item.costo_unitario) || costo, est, itemId]
-    );
-  }
+    if (!prod) return false;
 
-  function _confirmarRecepcion(ordenId, modo, montoEfectivo) {
-    const orden   = _getById(ordenId);
-    const user    = state.user;
-    const ts      = now();
-    const sucId   = user.sucursal_id;
-
-    const sesion = window.SGA_DB.query(
-      `SELECT id FROM sesiones_caja WHERE sucursal_id=? AND estado='abierta' LIMIT 1`,
-      [sucId]
-    )[0];
-
-    let totalRecibido  = 0;
-    const costoChanges = [];
-
-    try {
-      window.SGA_DB.beginBatch();
-
-      for (const item of orden.items) {
-        const cantR = parseFloat(item.cantidad_recibida) || 0;
-        if (cantR <= 0 || item.estado === 'no_entregado') continue;
-
-        // Update stock
-        const existing = window.SGA_DB.query(
-          `SELECT cantidad FROM stock WHERE producto_id=? AND sucursal_id=?`,
-          [item.producto_id, sucId]
-        )[0];
-        if (existing) {
-          window.SGA_DB.run(
-            `UPDATE stock SET cantidad=cantidad+?, fecha_modificacion=? WHERE producto_id=? AND sucursal_id=?`,
-            [cantR, ts, item.producto_id, sucId]
-          );
-        } else {
-          window.SGA_DB.run(
-            `INSERT INTO stock (producto_id,sucursal_id,cantidad,fecha_modificacion) VALUES (?,?,?,?)`,
-            [item.producto_id, sucId, cantR, ts]
-          );
-        }
-
-        const itemCosto   = parseFloat(item.costo_unitario)  || 0;
-        const costoActual = parseFloat(item.costo_actual)     || 0;
-        totalRecibido    += cantR * itemCosto;
-
-        if (itemCosto > 0 && costoActual > 0 && Math.abs(costoActual - itemCosto) > 0.01) {
-          costoChanges.push({
-            productoId:       item.producto_id,
-            nombre:           item.producto_nombre,
-            costoAnterior:    costoActual,
-            costoNuevo:       itemCosto,
-            esMadre:          item.es_madre,
-            productaMadreId:  item.producto_madre_id,
-            actualizarCosto:  true,
-            actualizarPrecio: false,
-            aplicarFamilia:   false,
-          });
-        }
-      }
-
-      // Compra record
-      const compraId = uuid();
-      window.SGA_DB.run(`
-        INSERT INTO compras (id,sucursal_id,proveedor_id,usuario_id,fecha,total,sync_status,updated_at)
-        VALUES (?,?,?,?,?,?,?,?)`,
-        [compraId, sucId, orden.proveedor_id, user.id, ts, totalRecibido, 'pending', ts]);
-
-      for (const item of orden.items) {
-        const cantR = parseFloat(item.cantidad_recibida) || 0;
-        if (cantR <= 0) continue;
-        window.SGA_DB.run(`
-          INSERT INTO compra_items
-            (id,compra_id,producto_id,cantidad,costo_unitario,costo_anterior,subtotal,costo_modificado)
-          VALUES (?,?,?,?,?,?,?,?)`,
-          [uuid(), compraId, item.producto_id, cantR,
-            parseFloat(item.costo_unitario) || 0,
-            parseFloat(item.costo_anterior) || 0,
-            cantR * (parseFloat(item.costo_unitario) || 0),
-            costoChanges.some(c => c.productoId === item.producto_id) ? 1 : 0]);
-      }
-
-      // Payment
-      const monto = parseFloat(montoEfectivo) || totalRecibido;
-      if (modo === 'efectivo' && sesion) {
-        window.SGA_DB.run(`
-          INSERT INTO egresos_caja
-            (id,sesion_caja_id,monto,descripcion,tipo,fecha,usuario_id,sync_status,updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?)`,
-          [uuid(), sesion.id, monto,
-            `Pago proveedor — OC ${ordenId.slice(-6).toUpperCase()}`,
-            'pago_proveedor', ts, user.id, 'pending', ts]);
-      }
-
-      const saldo = totalRecibido - (modo === 'efectivo' ? monto : 0);
-      if (saldo > 0.01) {
-        window.SGA_DB.run(`
-          INSERT INTO cuenta_proveedor
-            (id,proveedor_id,orden_id,tipo,monto,descripcion,fecha,usuario_id,sync_status,updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?)`,
-          [uuid(), orden.proveedor_id, ordenId, 'deuda', saldo,
-            `Deuda OC ${ordenId.slice(-6).toUpperCase()}`, ts, user.id, 'pending', ts]);
-        window.SGA_DB.run(
-          `UPDATE ordenes_compra SET estado='pendiente_pago', updated_at=? WHERE id=?`,
-          [ts, ordenId]
-        );
-      } else {
-        window.SGA_DB.run(
-          `UPDATE ordenes_compra SET estado='cerrada', updated_at=? WHERE id=?`,
-          [ts, ordenId]
-        );
-      }
-
-      window.SGA_DB.commitBatch();
-      return { success: true, totalRecibido, costoChanges, compraId };
-    } catch (e) {
-      window.SGA_DB.rollbackBatch();
-      return { success: false, error: e.message };
-    }
-  }
-
-  function _registrarPago(ordenId, monto, usuarioId) {
+    const stockAct = stockEfectivo(productoId, sucursalId);
     const ts = now();
-    const user = state.user;
-    const sucId = user.sucursal_id;
 
-    const sesion = window.SGA_DB.query(
-      `SELECT id FROM sesiones_caja WHERE sucursal_id=? AND estado='abierta' LIMIT 1`,
-      [sucId]
-    )[0];
+    db().run(`
+      INSERT INTO orden_compra_items
+        (id, orden_id, producto_id, cantidad_pedida, estado,
+         stock_actual, stock_minimo, cantidad_deseada,
+         ventas_30d, ventas_prom_6m, dias_sin_stock_6m,
+         cantidad_sugerida, cantidad_final, unidad_pedida)
+      VALUES (?, ?, ?, ?, 'pendiente', ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+    `, [
+      uuid(), ordenId, productoId, prod.cant_pedido || 0,
+      stockAct, prod.stock_minimo || 0, prod.cant_pedido || 0,
+      ventasUltimos(productoId, 30),
+      Math.round((ventasUltimos(productoId, 180) / 6) * 100) / 100,
+      db().calcularDiasSinStock6m(productoId, sucursalId),
+      prod.cant_pedido || 0,
+      prod.pedido_unidad || 'unidad',
+    ]);
 
-    const orden = _getById(ordenId);
-    if (!orden) return { success: false, error: 'Orden no encontrada' };
-
-    try {
-      window.SGA_DB.beginBatch();
-
-      if (sesion) {
-        window.SGA_DB.run(`
-          INSERT INTO egresos_caja
-            (id,sesion_caja_id,monto,descripcion,tipo,fecha,usuario_id,sync_status,updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?)`,
-          [uuid(), sesion.id, parseFloat(monto),
-            `Pago proveedor — OC ${ordenId.slice(-6).toUpperCase()}`,
-            'pago_proveedor', ts, usuarioId, 'pending', ts]);
-      }
-
-      window.SGA_DB.run(`
-        INSERT INTO cuenta_proveedor
-          (id,proveedor_id,orden_id,tipo,monto,descripcion,fecha,usuario_id,sync_status,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`,
-        [uuid(), orden.proveedor_id, ordenId, 'pago', parseFloat(monto),
-          `Pago OC ${ordenId.slice(-6).toUpperCase()}`, ts, usuarioId, 'pending', ts]);
-
-      // Check if fully paid
-      const deudaTotal = (window.SGA_DB.query(
-        `SELECT COALESCE(SUM(CASE WHEN tipo='deuda' THEN monto ELSE -monto END),0) AS saldo
-         FROM cuenta_proveedor WHERE orden_id=?`,
-        [ordenId]
-      )[0] || {}).saldo || 0;
-
-      if (deudaTotal <= 0.01) {
-        window.SGA_DB.run(
-          `UPDATE ordenes_compra SET estado='cerrada', updated_at=? WHERE id=?`,
-          [ts, ordenId]
-        );
-      }
-
-      window.SGA_DB.commitBatch();
-      return { success: true };
-    } catch (e) {
-      window.SGA_DB.rollbackBatch();
-      return { success: false, error: e.message };
-    }
+    db().run(
+      `UPDATE ordenes_compra SET updated_at = ? WHERE id = ?`,
+      [ts, ordenId]
+    );
+    return true;
   }
 
-  function _getConPagoPendiente(sucursalId) {
-    // Ordenes with estado='pendiente_pago'
-    const ordenes = window.SGA_DB.query(`
-      SELECT o.*, p.razon_social AS proveedor_nombre,
-        COALESCE(SUM(CASE WHEN cp.tipo='deuda' THEN cp.monto ELSE -cp.monto END),0) AS saldo_pendiente,
-        COALESCE(SUM(CASE WHEN cp.tipo='pago' THEN cp.monto ELSE 0 END),0) AS total_pagado,
-        MAX(o.updated_at) AS fecha_recepcion,
-        'orden' AS origen
-      FROM ordenes_compra o
-      LEFT JOIN proveedores p ON p.id = o.proveedor_id
-      LEFT JOIN cuenta_proveedor cp ON cp.orden_id = o.id
-      WHERE o.sucursal_id=? AND o.estado='pendiente_pago'
-      GROUP BY o.id
-      ORDER BY o.updated_at DESC
-    `, [sucursalId]);
+  // ── UI STATE ─────────────────────────────────────────────────────────────────
 
-    // Manual compras with condicion_pago='pendiente' and estado='confirmada'
-    // (tracked via cuenta_proveedor.compra_id)
-    const comprasPendientes = window.SGA_DB.query(`
-      SELECT c.id, c.proveedor_id, p.razon_social AS proveedor_nombre,
-        c.fecha AS updated_at, c.fecha AS fecha_recepcion,
-        c.total AS saldo_pendiente, 0 AS total_pagado,
-        c.numero_factura, 'compra' AS origen
-      FROM compras c
-      LEFT JOIN proveedores p ON p.id = c.proveedor_id
-      WHERE c.sucursal_id=? AND c.condicion_pago='pendiente' AND c.estado='confirmada'
-        AND NOT EXISTS (
-          SELECT 1 FROM cuenta_proveedor cp
-          WHERE cp.compra_id=c.id AND cp.tipo='pago'
-        )
-      ORDER BY c.fecha DESC
-    `, [sucursalId]);
-
-    return [...ordenes, ...comprasPendientes];
-  }
-
-  // Expose data layer
-  window.SGA_Ordenes = {
-    getAll:                  _getAll,
-    getById:                 _getById,
-    crear:                   _crear,
-    enviar:                  _enviar,
-    iniciarRecepcion:        _iniciarRecepcion,
-    recibirItem:             _recibirItem,
-    confirmarRecepcion:      _confirmarRecepcion,
-    registrarPagoOrden:      _registrarPago,
-    getOrdenesConPagoPendiente: _getConPagoPendiente,
+  const ui = {
+    view:         'lista',   // 'lista' | 'orden'
+    filtroLista:  'activas',
+    tabOrdenIds:  [],        // IDs de órdenes activas mostradas como tabs
+    ordenActiva:  null,      // ID de la orden en el tab activo
+    user:         null,
+    kbHandler:    null,
   };
 
-  // ── UI — LISTA ─────────────────────────────────────────────────────────────
+  const ge  = id => document.getElementById(id);
+  const esc = s  => String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const fmt$ = n => window.SGA_Utils.formatCurrency(n);
+  const fmtN = n => (n == null ? '—' : Number(n).toLocaleString('es-AR', { maximumFractionDigits: 1 }));
+
+  const DIAS_SEMANA = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+
+  const PEDIDO_UNIDAD_LABEL = {
+    unidad: 'Unidad', kg: 'Kg',
+    bulto_cerrado: 'Bulto cerrado', pack: 'Pack', display: 'Display', bolsa: 'Bolsa',
+  };
+  const PEDIDO_UNIDAD_OPTIONS = [
+    { v: 'unidad', l: 'Unidad' }, { v: 'kg', l: 'Kg' },
+    { v: 'bulto_cerrado', l: 'Bulto cerrado' }, { v: 'pack', l: 'Pack' },
+    { v: 'display', l: 'Display' }, { v: 'bolsa', l: 'Bolsa' },
+  ];
+
+  function labelApedir(cant, unidad) {
+    const u = PEDIDO_UNIDAD_LABEL[unidad] || unidad || 'Unidad';
+    return `${cant != null ? cant : '—'} ${u}`;
+  }
+  const ESTADO_LABEL = {
+    borrador: 'Borrador', revisada: 'Revisada', confirmada: 'Confirmada',
+    enviada: 'Enviada', recibiendo: 'Recibiendo',
+    recibida_parcial: 'Parcial', cerrada: 'Cerrada',
+  };
+  const EDITABLE_ESTADOS = new Set(['borrador', 'revisada']);
+
+  function showToast(msg, type = 'success') {
+    window.SGA_Utils.showNotification(msg, type);
+  }
+
+  // ── VISTA LISTA ──────────────────────────────────────────────────────────────
+
+  function showLista() {
+    ui.view = 'lista';
+    ge('ord-view-lista').style.display = '';
+    ge('ord-view-orden').style.display = 'none';
+    ge('ord-btn-back').style.display = 'none';
+    ge('ord-header-title').textContent = 'Órdenes de Compra';
+    teardownKeyboard();
+    renderLista();
+  }
 
   function renderLista() {
-    const ordenes = _getAll(state.user.sucursal_id, state.currentTab);
-    const tbody   = ge('ord-tbody');
-    const empty   = ge('ord-empty');
-    if (!tbody) return;
+    const sucId  = ui.user.sucursal_id;
+    const filtro = ui.filtroLista;
 
-    if (!ordenes.length) {
-      tbody.innerHTML = '';
-      if (empty) empty.style.display = '';
-      return;
-    }
-    if (empty) empty.style.display = 'none';
+    const estadosFiltro = {
+      activas:   ['borrador', 'revisada', 'confirmada'],
+      enviadas:  ['enviada', 'recibiendo', 'recibida_parcial'],
+      historial: ['cerrada'],
+    };
 
-    tbody.innerHTML = ordenes.map(o => {
-      const acciones = [];
-      acciones.push(`<button class="btn btn-ghost" style="font-size:12px" data-action="ver" data-id="${esc(o.id)}">Ver</button>`);
-      if (o.estado === 'enviada') {
-        acciones.push(`<button class="btn btn-secondary" style="font-size:12px" data-action="recibir" data-id="${esc(o.id)}">📦 Recibir</button>`);
-      }
-      if (o.estado === 'recibiendo') {
-        acciones.push(`<button class="btn btn-secondary" style="font-size:12px" data-action="recibir" data-id="${esc(o.id)}">📦 Continuar</button>`);
-      }
-      if (o.estado === 'pendiente_pago') {
-        acciones.push(`<button class="btn btn-primary" style="font-size:12px" data-action="pagar" data-id="${esc(o.id)}">💰 Pagar</button>`);
-      }
-      if (o.estado === 'borrador') {
-        acciones.push(`<button class="btn btn-secondary" style="font-size:12px" data-action="enviar" data-id="${esc(o.id)}">Enviar</button>`);
-      }
-      return `<tr>
-        <td>${esc(fmtFecha(o.fecha_creacion))}</td>
-        <td>${esc(o.proveedor_nombre || '—')}</td>
-        <td>${esc(o.item_count || 0)}</td>
-        <td>${esc(fmtPeso(o.total_estimado))}</td>
-        <td><span class="${esc(ESTADO_BADGE[o.estado] || 'ord-badge ord-badge-borrador')}">${esc(ESTADO_LABEL[o.estado] || o.estado)}</span></td>
-        <td style="white-space:nowrap">${acciones.join(' ')}</td>
-      </tr>`;
-    }).join('');
-
-    // Pagos pendientes count
-    const pending = _getConPagoPendiente(state.user.sucursal_id);
-    const countEl = ge('ord-pagos-count');
-    if (countEl) countEl.textContent = pending.length;
-  }
-
-  // ── UI — NUEVA ORDEN WIZARD ────────────────────────────────────────────────
-
-  function openNuevaOrden() {
-    state.nuevaOrden = { active: true, step: 1, proveedorId: null, proveedorNombre: '', fechaEntrega: '', notas: '', items: [] };
-    const overlay = ge('ord-nueva-overlay');
-    if (overlay) overlay.style.display = 'flex';
-    renderNuevaOrdenStep();
-  }
-
-  function closeNuevaOrden() {
-    state.nuevaOrden.active = false;
-    const overlay = ge('ord-nueva-overlay');
-    if (overlay) overlay.style.display = 'none';
-  }
-
-  function renderNuevaOrdenStep() {
-    const n = state.nuevaOrden;
-    renderStepsIndicator();
-    const body   = ge('ord-nueva-body');
-    const footer = ge('ord-nueva-footer');
-    if (!body || !footer) return;
-
-    if (n.step === 1) {
-      body.innerHTML = `
-        <div class="ord-form-group">
-          <label>Proveedor</label>
-          <div class="ord-search-wrap">
-            <input id="ord-prov-search" placeholder="Buscar proveedor..." autocomplete="off" value="${esc(n.proveedorNombre)}">
-            <div id="ord-prov-dropdown" class="ord-dropdown" style="display:none"></div>
-          </div>
-          <input type="hidden" id="ord-prov-id" value="${esc(n.proveedorId || '')}">
-        </div>
-        <div class="ord-form-group">
-          <label>Fecha estimada de entrega</label>
-          <input type="date" id="ord-fecha-entrega" value="${esc(n.fechaEntrega)}">
-        </div>
-        <div class="ord-form-group">
-          <label>Notas (opcional)</label>
-          <textarea id="ord-notas" rows="2" placeholder="Instrucciones especiales...">${esc(n.notas)}</textarea>
-        </div>`;
-
-      footer.innerHTML = `
-        <button class="btn btn-secondary" id="ord-nueva-cancel-btn">Cancelar</button>
-        <button class="btn btn-primary" id="ord-nueva-next1">Siguiente →</button>`;
-
-      attachNuevaOrdenStep1Events();
-
-    } else if (n.step === 2) {
-      const subtotal = n.items.reduce((s, i) => s + i.cantidadPedida * i.costoUnitario, 0);
-      body.innerHTML = `
-        <div class="ord-form-group">
-          <label>Buscar producto (nombre o código de barras)</label>
-          <div class="ord-search-wrap">
-            <input id="ord-prod-search" placeholder="Buscar..." autocomplete="off">
-            <div id="ord-prod-dropdown" class="ord-dropdown" style="display:none"></div>
-          </div>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <strong style="font-size:13px">Productos agregados (${n.items.length})</strong>
-          <label class="btn btn-ghost" style="font-size:12px;cursor:pointer">
-            📥 Importar CSV/Excel
-            <input type="file" id="ord-import-file" accept=".csv,.xlsx,.xls" style="display:none">
-          </label>
-        </div>
-        <div class="ord-items-list" id="ord-items-list">
-          ${renderItemsList()}
-        </div>
-        <div class="ord-subtotal">Subtotal estimado: ${esc(fmtPeso(subtotal))}</div>`;
-
-      footer.innerHTML = `
-        <button class="btn btn-secondary" id="ord-nueva-back2">← Anterior</button>
-        <button class="btn btn-primary" id="ord-nueva-next2">Siguiente →</button>`;
-
-      attachNuevaOrdenStep2Events();
-
-    } else if (n.step === 3) {
-      const subtotal = n.items.reduce((s, i) => s + i.cantidadPedida * i.costoUnitario, 0);
-      const provRows = n.items.map(i =>
-        `<tr>
-           <td>${esc(i.nombre)}</td>
-           <td style="text-align:right">${esc(i.cantidadPedida)}</td>
-           <td style="text-align:right">${esc(fmtPeso(i.costoUnitario))}</td>
-           <td style="text-align:right">${esc(fmtPeso(i.cantidadPedida * i.costoUnitario))}</td>
-         </tr>`
-      ).join('');
-      body.innerHTML = `
-        <div style="margin-bottom:16px">
-          <strong>Proveedor:</strong> ${esc(n.proveedorNombre)}<br>
-          <strong>Entrega estimada:</strong> ${esc(n.fechaEntrega ? fmtFecha(n.fechaEntrega) : 'No especificada')}<br>
-          ${n.notas ? `<strong>Notas:</strong> ${esc(n.notas)}` : ''}
-        </div>
-        <table class="ord-table">
-          <thead><tr><th>Producto</th><th style="text-align:right">Cant.</th><th style="text-align:right">Costo</th><th style="text-align:right">Subtotal</th></tr></thead>
-          <tbody>${provRows}</tbody>
-        </table>
-        <div class="ord-subtotal" style="margin-top:12px">Total estimado: ${esc(fmtPeso(subtotal))}</div>`;
-
-      footer.innerHTML = `
-        <button class="btn btn-secondary" id="ord-nueva-back3">← Anterior</button>
-        <button class="btn btn-secondary" id="ord-nueva-borrador">Guardar borrador</button>
-        <button class="btn btn-primary" id="ord-nueva-enviar">Enviar orden</button>`;
-
-      attachNuevaOrdenStep3Events();
-    }
-  }
-
-  function renderStepsIndicator() {
-    const n = state.nuevaOrden;
-    const steps = [
-      { label: 'Proveedor' },
-      { label: 'Productos' },
-      { label: 'Confirmar' },
-    ];
-    const stepsEl = ge('ord-nueva-steps');
-    if (!stepsEl) return;
-    stepsEl.innerHTML = steps.map((s, i) => {
-      const idx = i + 1;
-      const cls = idx < n.step ? 'done' : idx === n.step ? 'active' : '';
-      const num = idx < n.step ? '✓' : idx;
-      return `<div class="ord-step-item ${cls}"><span class="ord-step-num">${num}</span>${esc(s.label)}</div>`;
-    }).join('');
-  }
-
-  function renderItemsList() {
-    const items = state.nuevaOrden.items;
-    if (!items.length) return '<p style="font-size:13px;color:var(--color-text-secondary);margin:0">No se agregaron productos.</p>';
-    return items.map((item, idx) => `
-      <div class="ord-item-row">
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(item.nombre)}</span>
-        <input type="number" min="1" value="${esc(item.cantidadPedida)}" data-item-qty="${idx}" style="padding:4px 6px;font-size:13px;border:1px solid var(--color-border);border-radius:4px">
-        <div style="display:flex;align-items:center;gap:3px;font-size:13px">
-          <span style="color:var(--color-text-secondary)">$</span>
-          <input type="number" min="0" step="0.01" value="${esc(item.costoUnitario)}" data-item-costo="${idx}" style="width:80px;padding:4px 6px;font-size:13px;border:1px solid var(--color-border);border-radius:4px">
-        </div>
-        <button class="ord-item-remove" data-item-remove="${idx}">✕</button>
-      </div>`).join('');
-  }
-
-  function attachNuevaOrdenStep1Events() {
-    const provSearch = ge('ord-prov-search');
-    const provDd     = ge('ord-prov-dropdown');
-
-    provSearch && provSearch.addEventListener('input', () => {
-      const q = provSearch.value.trim();
-      if (q.length < 1) { provDd.style.display = 'none'; return; }
-      const rows = window.SGA_DB.query(
-        `SELECT id, razon_social FROM proveedores WHERE razon_social LIKE ? AND activo=1 ORDER BY razon_social LIMIT 8`,
-        [`%${q}%`]
-      );
-      if (!rows.length) { provDd.style.display = 'none'; return; }
-      provDd.innerHTML = rows.map(r =>
-        `<div class="ord-dropdown-item" data-prov-id="${esc(r.id)}" data-prov-nombre="${esc(r.razon_social)}">${esc(r.razon_social)}</div>`
-      ).join('');
-      provDd.style.display = '';
-    });
-
-    provDd && provDd.addEventListener('click', (e) => {
-      const item = e.target.closest('[data-prov-id]');
-      if (!item) return;
-      state.nuevaOrden.proveedorId     = item.dataset.provId;
-      state.nuevaOrden.proveedorNombre = item.dataset.provNombre;
-      provSearch.value     = item.dataset.provNombre;
-      ge('ord-prov-id').value = item.dataset.provId;
-      provDd.style.display = 'none';
-    });
-
-    document.addEventListener('click', function closeProvDd(e) {
-      if (!provSearch.contains(e.target) && !provDd.contains(e.target)) {
-        provDd.style.display = 'none';
-      }
-    }, { once: false });
-
-    ge('ord-nueva-cancel-btn') && ge('ord-nueva-cancel-btn').addEventListener('click', closeNuevaOrden);
-
-    ge('ord-nueva-next1') && ge('ord-nueva-next1').addEventListener('click', () => {
-      const provId   = ge('ord-prov-id').value;
-      const nombre   = ge('ord-prov-search').value.trim();
-      const fecha    = ge('ord-fecha-entrega').value;
-      const notas    = ge('ord-notas').value.trim();
-      if (!provId) { showToast('Seleccioná un proveedor', 'error'); return; }
-      state.nuevaOrden.proveedorId     = provId;
-      state.nuevaOrden.proveedorNombre = nombre;
-      state.nuevaOrden.fechaEntrega    = fecha;
-      state.nuevaOrden.notas           = notas;
-      state.nuevaOrden.step            = 2;
-      renderNuevaOrdenStep();
-    });
-  }
-
-  function attachNuevaOrdenStep2Events() {
-    const prodSearch = ge('ord-prod-search');
-    const prodDd     = ge('ord-prod-dropdown');
-
-    prodSearch && prodSearch.addEventListener('input', () => {
-      const q = prodSearch.value.trim();
-      if (q.length < 2) { prodDd.style.display = 'none'; return; }
-      const rows = window.SGA_DB.query(`
-        SELECT DISTINCT p.id, p.nombre, p.costo
-        FROM productos p
-        LEFT JOIN codigos_barras cb ON cb.producto_id = p.id
-        WHERE p.activo=1 AND (p.nombre LIKE ? OR cb.codigo LIKE ?)
-        ORDER BY p.nombre LIMIT 8
-      `, [`%${q}%`, `%${q}%`]);
-      if (!rows.length) { prodDd.style.display = 'none'; return; }
-      prodDd.innerHTML = rows.map(r =>
-        `<div class="ord-dropdown-item"
-          data-prod-id="${esc(r.id)}"
-          data-prod-nombre="${esc(r.nombre)}"
-          data-prod-costo="${esc(r.costo || 0)}">
-          ${esc(r.nombre)} <span style="color:var(--color-text-secondary);font-size:12px">${esc(fmtPeso(r.costo))}</span>
-        </div>`
-      ).join('');
-      prodDd.style.display = '';
-    });
-
-    prodSearch && prodSearch.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        const q = prodSearch.value.trim();
-        if (/^\d{6,}$/.test(q)) {
-          const row = window.SGA_DB.query(
-            `SELECT p.id, p.nombre, p.costo FROM productos p
-             JOIN codigos_barras cb ON cb.producto_id=p.id
-             WHERE cb.codigo=? AND p.activo=1 LIMIT 1`,
-            [q]
-          )[0];
-          if (row) { addItemToOrden(row.id, row.nombre, 1, row.costo || 0); prodSearch.value = ''; prodDd.style.display = 'none'; }
-        }
-      }
-    });
-
-    prodDd && prodDd.addEventListener('click', (e) => {
-      const item = e.target.closest('[data-prod-id]');
-      if (!item) return;
-      addItemToOrden(item.dataset.prodId, item.dataset.prodNombre, 1, parseFloat(item.dataset.prodCosto) || 0);
-      prodSearch.value     = '';
-      prodDd.style.display = 'none';
-    });
-
-    // Items list events (qty / costo / remove)
-    const list = ge('ord-items-list');
-    list && list.addEventListener('change', (e) => {
-      const qtyIdx   = e.target.dataset.itemQty;
-      const costoIdx = e.target.dataset.itemCosto;
-      if (qtyIdx != null) {
-        state.nuevaOrden.items[parseInt(qtyIdx)].cantidadPedida = parseFloat(e.target.value) || 1;
-        updateSubtotal();
-      }
-      if (costoIdx != null) {
-        state.nuevaOrden.items[parseInt(costoIdx)].costoUnitario = parseFloat(e.target.value) || 0;
-        updateSubtotal();
-      }
-    });
-
-    list && list.addEventListener('click', (e) => {
-      const rmBtn = e.target.closest('[data-item-remove]');
-      if (rmBtn) {
-        state.nuevaOrden.items.splice(parseInt(rmBtn.dataset.itemRemove), 1);
-        list.innerHTML = renderItemsList();
-        updateSubtotal();
-      }
-    });
-
-    // Import file
-    const importFile = ge('ord-import-file');
-    importFile && importFile.addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (file) handleImportFile(file);
-      importFile.value = '';
-    });
-
-    ge('ord-nueva-back2') && ge('ord-nueva-back2').addEventListener('click', () => {
-      state.nuevaOrden.step = 1;
-      renderNuevaOrdenStep();
-    });
-
-    ge('ord-nueva-next2') && ge('ord-nueva-next2').addEventListener('click', () => {
-      if (!state.nuevaOrden.items.length) { showToast('Agregá al menos un producto', 'error'); return; }
-      state.nuevaOrden.step = 3;
-      renderNuevaOrdenStep();
-    });
-  }
-
-  function updateSubtotal() {
-    const subtotal = state.nuevaOrden.items.reduce((s, i) => s + i.cantidadPedida * i.costoUnitario, 0);
-    const el = document.querySelector('.ord-subtotal');
-    if (el) el.textContent = `Subtotal estimado: ${fmtPeso(subtotal)}`;
-  }
-
-  function addItemToOrden(productoId, nombre, cantidadPedida, costoUnitario) {
-    const existing = state.nuevaOrden.items.find(i => i.productoId === productoId);
-    if (existing) { existing.cantidadPedida += cantidadPedida; }
-    else { state.nuevaOrden.items.push({ productoId, nombre, cantidadPedida, costoUnitario: parseFloat(costoUnitario) || 0 }); }
-    const list = ge('ord-items-list');
-    if (list) list.innerHTML = renderItemsList();
-    updateSubtotal();
-  }
-
-  function attachNuevaOrdenStep3Events() {
-    ge('ord-nueva-back3') && ge('ord-nueva-back3').addEventListener('click', () => {
-      state.nuevaOrden.step = 2;
-      renderNuevaOrdenStep();
-    });
-    ge('ord-nueva-borrador') && ge('ord-nueva-borrador').addEventListener('click', () => saveOrden(false));
-    ge('ord-nueva-enviar')   && ge('ord-nueva-enviar').addEventListener('click',   () => saveOrden(true));
-  }
-
-  function saveOrden(enviar) {
-    const n = state.nuevaOrden;
-    const result = _crear({
-      sucursalId:   state.user.sucursal_id,
-      proveedorId:  n.proveedorId,
-      usuarioId:    state.user.id,
-      fechaEntrega: n.fechaEntrega,
-      notas:        n.notas,
-      items:        n.items,
-    });
-    if (!result.success) { showToast('Error al guardar: ' + result.error, 'error'); return; }
-    if (enviar) { _enviar(result.ordenId); }
-    closeNuevaOrden();
-    showToast(enviar ? 'Orden enviada al proveedor ✓' : 'Borrador guardado ✓');
-    renderLista();
-  }
-
-  async function handleImportFile(file) {
-    const ext = file.name.split('.').pop().toLowerCase();
-    if (ext === 'csv' || ext === 'txt') {
-      const text = await file.text();
-      parseCSVImport(text);
-    } else if (ext === 'xlsx' || ext === 'xls') {
-      if (!window.XLSX) {
-        await new Promise((resolve, reject) => {
-          const s = document.createElement('script');
-          s.src = 'https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js';
-          s.onload = resolve; s.onerror = reject;
-          document.head.appendChild(s);
-        }).catch(() => null);
-      }
-      if (!window.XLSX) { showToast('No se pudo cargar la librería Excel', 'error'); return; }
-      const buf  = await file.arrayBuffer();
-      const wb   = window.XLSX.read(buf);
-      const ws   = wb.Sheets[wb.SheetNames[0]];
-      const rows = window.XLSX.utils.sheet_to_json(ws, { header: 1 });
-      const lines = rows.slice(1).map(r => `${r[0] || ''},${r[1] || ''}`).join('\n');
-      parseCSVImport(lines);
-    }
-  }
-
-  function parseCSVImport(text) {
-    let added = 0;
-    for (const line of text.split('\n')) {
-      const parts = line.split(/[,;\t]/);
-      const barcode  = String(parts[0] || '').trim();
-      const cantidad = parseFloat(parts[1]) || 1;
-      if (!barcode) continue;
-      const prod = window.SGA_DB.query(
-        `SELECT p.id, p.nombre, p.costo FROM productos p
-         JOIN codigos_barras cb ON cb.producto_id=p.id
-         WHERE cb.codigo=? AND p.activo=1 LIMIT 1`,
-        [barcode]
-      )[0];
-      if (prod) { addItemToOrden(prod.id, prod.nombre, cantidad, prod.costo || 0); added++; }
-    }
-    showToast(`${added} producto${added !== 1 ? 's' : ''} importado${added !== 1 ? 's' : ''}`);
-  }
-
-  // ── UI — RECEPCIÓN ─────────────────────────────────────────────────────────
-
-  function openRecepcion(ordenId) {
-    const orden = _getById(ordenId);
-    if (!orden) return;
-    _iniciarRecepcion(ordenId);
-    orden.estado  = 'recibiendo';
-    // Initialize costo_unitario from product costo if missing
-    for (const item of orden.items) {
-      if (!parseFloat(item.costo_unitario)) {
-        item.costo_unitario = item.costo_actual || 0;
-      }
-    }
-    state.recepcion.orden        = orden;
-    state.recepcion.costoChanges = [];
-    ge('ord-main').style.display           = 'none';
-    ge('ord-recepcion-overlay').style.display = 'flex';
-    ge('ord-rec-titulo').textContent = `📦 Recepción — ${orden.proveedor_nombre} — OC #${ordenId.slice(-6).toUpperCase()}`;
-    renderRecepcion();
-    setTimeout(() => ge('ord-scanner-input') && ge('ord-scanner-input').focus(), 100);
-  }
-
-  function closeRecepcion() {
-    ge('ord-recepcion-overlay').style.display = 'none';
-    ge('ord-main').style.display              = '';
-    state.recepcion.orden = null;
-    renderLista();
-  }
-
-  function renderRecepcion() {
-    renderRecItems();
-    renderRecSummary();
-  }
-
-  function renderRecItems() {
-    const tbody = ge('ord-rec-tbody');
-    if (!tbody || !state.recepcion.orden) return;
-    const items = state.recepcion.orden.items;
-
-    tbody.innerHTML = items.map(item => {
-      const est  = item.estado || 'pendiente';
-      const rowCls = est === 'recibido'          ? 'ord-rec-row-recibido'
-                   : est === 'recibido_parcial'   ? 'ord-rec-row-parcial'
-                   : est === 'no_entregado'        ? 'ord-rec-row-no_entregado'
-                   : '';
-      const cantR = parseFloat(item.cantidad_recibida) || 0;
-      const costo = parseFloat(item.costo_unitario)    || parseFloat(item.costo_actual) || 0;
-      const noEntBtnTxt = est === 'no_entregado' ? '↩' : '✕';
-      return `<tr class="${rowCls}" data-item-id="${esc(item.id)}">
-        <td>${esc(item.producto_nombre || '—')}</td>
-        <td style="text-align:right">${esc(item.cantidad_pedida)}</td>
-        <td>
-          <div class="ord-rec-qty-ctrl">
-            <button data-qty-dec="${esc(item.id)}">−</button>
-            <input type="number" min="0" value="${cantR}" data-qty-input="${esc(item.id)}" class="ord-rec-qty-ctrl">
-            <button data-qty-inc="${esc(item.id)}">+</button>
-          </div>
-        </td>
-        <td>
-          <input type="number" min="0" step="0.01" value="${esc(costo.toFixed(2))}" class="ord-rec-costo-input" data-costo-input="${esc(item.id)}">
-        </td>
-        <td><span class="ord-badge ${est === 'recibido' ? 'ord-badge-cerrada' : est === 'recibido_parcial' ? 'ord-badge-recibida_parcial' : est === 'no_entregado' ? 'ord-badge-pendiente_pago' : 'ord-badge-borrador'}">${esc(ITEM_ESTADO_LABEL[est] || est)}</span></td>
-        <td>
-          <button class="btn btn-ghost" style="font-size:11px" data-no-entregado="${esc(item.id)}" title="${est === 'no_entregado' ? 'Restablecer' : 'No entregado'}">${noEntBtnTxt}</button>
-        </td>
-      </tr>`;
-    }).join('');
-  }
-
-  function renderRecSummary() {
-    const orden = state.recepcion.orden;
-    if (!orden) return;
-    const items     = orden.items;
-    const total     = items.length;
-    const recibidos = items.filter(i => i.estado === 'recibido' || i.estado === 'recibido_parcial').length;
-    const noEntregados = items.filter(i => i.estado === 'no_entregado').length;
-    const pendientes   = items.filter(i => i.estado === 'pendiente').length;
-    const totalRecibido = items.reduce((s, i) => {
-      const cantR = parseFloat(i.cantidad_recibida) || 0;
-      const costo = parseFloat(i.costo_unitario)    || 0;
-      return s + cantR * costo;
-    }, 0);
-
-    const pct     = total ? Math.round(((recibidos + noEntregados) / total) * 100) : 0;
-    const allDone = pendientes === 0;
-
-    const statsEl = ge('ord-rec-stats');
-    if (statsEl) statsEl.innerHTML = `
-      <div class="ord-rec-stat"><span>Recibidos</span><span class="ord-rec-stat-val">${recibidos} / ${total}</span></div>
-      <div class="ord-rec-stat"><span>No entregados</span><span class="ord-rec-stat-val">${noEntregados}</span></div>
-      <div class="ord-rec-stat"><span>Pendientes</span><span class="ord-rec-stat-val">${pendientes}</span></div>
-      <div class="ord-rec-stat"><span>Total recibido</span><span class="ord-rec-stat-val">${fmtPeso(totalRecibido)}</span></div>`;
-
-    const fill = ge('ord-rec-progress-fill');
-    const pctEl = ge('ord-rec-pct');
-    if (fill) fill.style.width = pct + '%';
-    if (pctEl) pctEl.textContent = pct + '% completado';
-
-    // Pending items
-    const pendEl = ge('ord-rec-pendientes');
-    if (pendEl) {
-      const pendItems = items.filter(i => i.estado === 'pendiente');
-      pendEl.innerHTML = pendItems.length
-        ? pendItems.map(i => `
-            <div class="ord-rec-pendiente-item">
-              <span>${esc(i.producto_nombre)}</span>
-              <div style="display:flex;gap:6px;align-items:center">
-                <span style="color:var(--color-text-secondary);font-size:12px">falta ${esc(i.cantidad_pedida - (parseFloat(i.cantidad_recibida) || 0))}</span>
-                <button class="btn btn-ghost" style="font-size:11px;padding:2px 6px" data-no-entregado="${esc(i.id)}">✕</button>
-              </div>
-            </div>`).join('')
-        : '<p style="font-size:13px;color:var(--color-text-secondary);margin:0">Todos procesados.</p>';
-    }
-
-    const confirmarBtn = ge('ord-rec-confirmar');
-    if (confirmarBtn) confirmarBtn.disabled = !allDone;
-  }
-
-  function updateItemInState(itemId, fields) {
-    if (!state.recepcion.orden) return;
-    const item = state.recepcion.orden.items.find(i => i.id === itemId);
-    if (!item) return;
-    Object.assign(item, fields);
-    // Recalculate estado
-    const cantR  = parseFloat(item.cantidad_recibida) || 0;
-    const cantP  = parseFloat(item.cantidad_pedida)   || 0;
-    item.estado  = cantR === 0         ? 'no_entregado'
-                 : cantR >= cantP      ? 'recibido'
-                 : 'recibido_parcial';
-    _recibirItem(itemId, item.cantidad_recibida, item.costo_unitario);
-    renderRecItems();
-    renderRecSummary();
-  }
-
-  function clearScanAlert() {
-    const wrap = ge('ord-scan-alert-wrap');
-    if (wrap) wrap.innerHTML = '';
-  }
-
-  function showScanAlert(html, type) {
-    const wrap = ge('ord-scan-alert-wrap');
-    if (!wrap) return;
-    wrap.innerHTML = `<div class="ord-scan-alert ord-scan-alert-${type}">${html}</div>`;
-  }
-
-  function handleScan(e) {
-    if (e.key !== 'Enter') return;
-    const input = ge('ord-scanner-input');
-    const code  = (input ? input.value : '').trim();
-    if (!code) return;
-    if (input) input.value = '';
-    e.preventDefault();
-    clearScanAlert();
-    processScannedCode(code);
-  }
-
-  function processScannedCode(code) {
-    const rows = window.SGA_DB.query(
-      `SELECT p.id, p.nombre FROM productos p
-       JOIN codigos_barras cb ON cb.producto_id=p.id
-       WHERE cb.codigo=? AND p.activo=1 LIMIT 1`,
-      [code]
+    const ordenes = getOrdenes(sucId).filter(o =>
+      (estadosFiltro[filtro] || []).includes(o.estado)
     );
-    if (!rows.length) {
-      // Not in DB → discrepancy
-      openDiscrepanciaModal(code);
-      return;
-    }
-    const producto = rows[0];
-    const orden    = state.recepcion.orden;
-    const item     = orden.items.find(i => i.producto_id === producto.id);
-    if (!item) {
-      // Product found in DB but not in this order
-      showScanAlert(
-        `<div><strong>${esc(producto.nombre)}</strong> no estaba en esta orden. ¿Agregarlo?</div>
-         <div class="ord-scan-alert-actions">
-           <button class="btn btn-secondary" style="font-size:12px" data-add-extra="${esc(producto.id)}" data-add-nombre="${esc(producto.nombre)}">Agregar</button>
-           <button class="btn btn-ghost" style="font-size:12px" id="ord-scan-ignorar">Ignorar</button>
-         </div>`,
-        'yellow'
-      );
-      return;
-    }
-    // Increment received quantity
-    const newQty = (parseFloat(item.cantidad_recibida) || 0) + 1;
-    updateItemInState(item.id, { cantidad_recibida: newQty });
-    // Highlight row briefly
-    const row = document.querySelector(`[data-item-id="${CSS.escape(item.id)}"]`);
-    if (row) {
-      row.style.outline = '2px solid var(--color-primary)';
-      setTimeout(() => { row.style.outline = ''; }, 600);
-    }
-    ge('ord-scanner-input') && ge('ord-scanner-input').focus();
-  }
 
-  function addExtraItemToRecepcion(productoId, nombre) {
-    const orden = state.recepcion.orden;
-    // Add as new item
-    const newItem = {
-      id:                uuid(),
-      orden_id:          orden.id,
-      producto_id:       productoId,
-      producto_nombre:   nombre,
-      cantidad_pedida:   1,
-      cantidad_recibida: 1,
-      costo_unitario:    0,
-      costo_anterior:    0,
-      estado:            'recibido',
-      costo_actual:      0,
-      es_madre:          0,
-      producto_madre_id: null,
-    };
-    // Insert into DB
-    window.SGA_DB.run(`
-      INSERT INTO orden_compra_items
-        (id,orden_id,producto_id,cantidad_pedida,cantidad_recibida,costo_unitario,costo_anterior,estado)
-      VALUES (?,?,?,1,1,0,0,'recibido')`,
-      [newItem.id, orden.id, productoId]);
-    orden.items.push(newItem);
-    clearScanAlert();
-    renderRecepcion();
-  }
+    const tbody = ge('ord-lista-tbody');
+    const empty = ge('ord-lista-empty');
 
-  // ── UI — DISCREPANCIA MODAL ────────────────────────────────────────────────
-
-  function openDiscrepanciaModal(codigo) {
-    state.discrepancia = { active: true, codigo, productoSeleccionado: null, step: 'search' };
-    ge('ord-disc-overlay').style.display = 'flex';
-    renderDiscrepanciaModal();
-    setTimeout(() => ge('ord-scanner-input') && ge('ord-scanner-input').blur(), 0);
-  }
-
-  function closeDiscrepanciaModal() {
-    state.discrepancia.active = false;
-    ge('ord-disc-overlay').style.display = 'none';
-    setTimeout(() => ge('ord-scanner-input') && ge('ord-scanner-input').focus(), 100);
-  }
-
-  function renderDiscrepanciaModal() {
-    const disc = state.discrepancia;
-    const body = ge('ord-disc-body');
-    if (!body) return;
-
-    if (disc.step === 'search') {
-      body.innerHTML = `
-        <p style="margin:0 0 12px;font-size:14px">
-          Código escaneado: <strong>${esc(disc.codigo)}</strong>
-        </p>
-        <p style="font-size:13px;color:var(--color-text-secondary);margin:0 0 8px">¿A qué producto corresponde?</p>
-        <div class="ord-form-group" style="margin-bottom:8px">
-          <div class="ord-search-wrap">
-            <input id="ord-disc-search" placeholder="Buscar producto..." autocomplete="off" style="border:1px solid var(--color-border);border-radius:var(--radius-md);padding:8px 10px;width:100%;box-sizing:border-box">
-            <div id="ord-disc-dropdown" class="ord-dropdown" style="display:none"></div>
-          </div>
-        </div>
-        <button class="btn btn-ghost" style="width:100%;font-size:13px" id="ord-disc-cancelar">✕ Cancelar — ignorar código</button>`;
-
-      const discSearch = ge('ord-disc-search');
-      const discDd     = ge('ord-disc-dropdown');
-
-      discSearch && discSearch.addEventListener('input', () => {
-        const q = discSearch.value.trim();
-        if (q.length < 2) { discDd.style.display = 'none'; return; }
-        const rows = window.SGA_DB.query(`
-          SELECT DISTINCT p.id, p.nombre, p.costo
-          FROM productos p
-          LEFT JOIN codigos_barras cb ON cb.producto_id=p.id
-          WHERE p.activo=1 AND (p.nombre LIKE ? OR cb.codigo LIKE ?)
-          ORDER BY p.nombre LIMIT 8
-        `, [`%${q}%`, `%${q}%`]);
-        if (!rows.length) { discDd.style.display = 'none'; return; }
-        discDd.innerHTML = rows.map(r =>
-          `<div class="ord-dropdown-item" data-disc-prod-id="${esc(r.id)}" data-disc-prod-nombre="${esc(r.nombre)}" data-disc-prod-costo="${esc(r.costo || 0)}">
-            ${esc(r.nombre)}
-          </div>`
-        ).join('');
-        discDd.style.display = '';
-      });
-
-      discSearch && discSearch.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          const q = discSearch.value.trim();
-          const row = window.SGA_DB.query(
-            `SELECT p.id, p.nombre, p.costo FROM productos p
-             JOIN codigos_barras cb ON cb.producto_id=p.id
-             WHERE cb.codigo=? AND p.activo=1 LIMIT 1`,
-            [q]
-          )[0];
-          if (row) {
-            state.discrepancia.productoSeleccionado = row;
-            state.discrepancia.step = 'options';
-            renderDiscrepanciaModal();
-          }
-        }
-      });
-
-      discDd && discDd.addEventListener('click', (e) => {
-        const item = e.target.closest('[data-disc-prod-id]');
-        if (!item) return;
-        state.discrepancia.productoSeleccionado = {
-          id:     item.dataset.discProdId,
-          nombre: item.dataset.discProdNombre,
-          costo:  parseFloat(item.dataset.discProdCosto) || 0,
-        };
-        state.discrepancia.step = 'options';
-        renderDiscrepanciaModal();
-      });
-
-      ge('ord-disc-cancelar') && ge('ord-disc-cancelar').addEventListener('click', closeDiscrepanciaModal);
-      setTimeout(() => discSearch && discSearch.focus(), 50);
-
-    } else if (disc.step === 'options') {
-      const prod = disc.productoSeleccionado;
-
-      body.innerHTML = `
-        <p style="margin:0 0 4px;font-size:13px;color:var(--color-text-secondary)">Código: <strong>${esc(disc.codigo)}</strong></p>
-        <p style="margin:0 0 14px;font-size:14px">Producto: <strong>${esc(prod ? prod.nombre : '—')}</strong></p>
-        <div class="ord-disc-options">
-          <button class="ord-disc-option" data-disc-opt="mismo_producto_nuevo_codigo">
-            <span class="ord-disc-option-icon">📎</span>
-            <div>
-              <div class="ord-disc-option-label">Es el mismo producto (código alternativo)</div>
-              <div class="ord-disc-option-desc">Agrega el código escaneado al producto seleccionado</div>
-            </div>
-          </button>
-          <button class="ord-disc-option" data-disc-opt="sustituto">
-            <span class="ord-disc-option-icon">🔄</span>
-            <div>
-              <div class="ord-disc-option-label">Es un sustituto de otro producto</div>
-              <div class="ord-disc-option-desc">Vincula este producto como sustituto</div>
-            </div>
-          </button>
-          <button class="ord-disc-option" data-disc-opt="producto_nuevo">
-            <span class="ord-disc-option-icon">✨</span>
-            <div>
-              <div class="ord-disc-option-label">Es un producto nuevo</div>
-              <div class="ord-disc-option-desc">Crea el producto con este código de barras</div>
-            </div>
-          </button>
-          <button class="ord-disc-option" data-disc-opt="cancelar">
-            <span class="ord-disc-option-icon">❌</span>
-            <div>
-              <div class="ord-disc-option-label">Cancelar</div>
-              <div class="ord-disc-option-desc">No registrar este código</div>
-            </div>
-          </button>
-        </div>`;
-
-      body.querySelectorAll('[data-disc-opt]').forEach(btn => {
-        btn.addEventListener('click', () => resolveDiscrepancia(btn.dataset.discOpt));
-      });
-    }
-  }
-
-  function resolveDiscrepancia(tipo) {
-    const disc = state.discrepancia;
-    const prod = disc.productoSeleccionado;
-
-    if (tipo === 'cancelar') {
-      closeDiscrepanciaModal();
-      return;
-    }
-
-    if (tipo === 'mismo_producto_nuevo_codigo' && prod) {
-      // Add barcode to existing product
-      window.SGA_DB.run(
-        `INSERT OR IGNORE INTO codigos_barras (id,producto_id,codigo,es_principal) VALUES (?,?,?,0)`,
-        [uuid(), prod.id, disc.codigo]
-      );
-      // Increment received qty for this product in the order
-      const orden = state.recepcion.orden;
-      const item  = orden.items.find(i => i.producto_id === prod.id);
-      if (item) {
-        const newQty = (parseFloat(item.cantidad_recibida) || 0) + 1;
-        updateItemInState(item.id, { cantidad_recibida: newQty });
-      } else {
-        addExtraItemToRecepcion(prod.id, prod.nombre);
-      }
-      showToast(`Código agregado a "${prod.nombre}" ✓`);
-      closeDiscrepanciaModal();
-
-    } else if (tipo === 'sustituto' && prod) {
-      // Link as substitute
-      const orden = state.recepcion.orden;
-      if (orden.items.length > 0) {
-        const ref = orden.items.find(i => i.producto_id !== prod.id);
-        if (ref) {
-          window.SGA_DB.run(`
-            INSERT OR IGNORE INTO producto_sustitutos (producto_id,sustituto_id,activo,fecha_asignacion)
-            VALUES (?,?,1,?)`,
-            [ref.producto_id, prod.id, now()]
-          );
-          showToast(`"${prod.nombre}" vinculado como sustituto ✓`);
-        }
-      }
-      addExtraItemToRecepcion(prod.id, prod.nombre);
-      closeDiscrepanciaModal();
-
-    } else if (tipo === 'producto_nuevo') {
-      // Mini form for new product
-      const body = ge('ord-disc-body');
-      body.innerHTML = `
-        <p style="font-size:13px;color:var(--color-text-secondary);margin:0 0 12px">
-          Código: <strong>${esc(disc.codigo)}</strong>
-        </p>
-        <div class="ord-form-group"><label>Nombre</label><input id="ord-np-nombre" placeholder="Nombre del producto"></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-          <div class="ord-form-group"><label>Costo ($)</label><input type="number" id="ord-np-costo" min="0" step="0.01" placeholder="0.00"></div>
-          <div class="ord-form-group"><label>Precio venta ($)</label><input type="number" id="ord-np-precio" min="0" step="0.01" placeholder="0.00"></div>
-        </div>
-        <div style="display:flex;gap:8px;margin-top:8px">
-          <button class="btn btn-secondary" id="ord-np-cancelar">Cancelar</button>
-          <button class="btn btn-primary" id="ord-np-crear">Crear producto</button>
-        </div>`;
-
-      ge('ord-np-cancelar') && ge('ord-np-cancelar').addEventListener('click', closeDiscrepanciaModal);
-      ge('ord-np-crear') && ge('ord-np-crear').addEventListener('click', () => {
-        const nombre = (ge('ord-np-nombre').value || '').trim();
-        const costo  = parseFloat(ge('ord-np-costo').value)  || 0;
-        const precio = parseFloat(ge('ord-np-precio').value) || 0;
-        if (!nombre) { showToast('Ingresá el nombre del producto', 'error'); return; }
-        const prodId = uuid();
-        const ts = now();
-        window.SGA_DB.run(`
-          INSERT INTO productos (id,nombre,costo,precio_venta,activo,fecha_alta,fecha_modificacion)
-          VALUES (?,?,?,?,1,?,?)`,
-          [prodId, nombre, costo, precio, ts, ts]);
-        window.SGA_DB.run(`
-          INSERT INTO codigos_barras (id,producto_id,codigo,es_principal) VALUES (?,?,?,1)`,
-          [uuid(), prodId, disc.codigo]);
-        addExtraItemToRecepcion(prodId, nombre);
-        showToast(`Producto "${nombre}" creado ✓`);
-        closeDiscrepanciaModal();
-      });
-    }
-  }
-
-  // ── UI — PAYMENT MODAL ─────────────────────────────────────────────────────
-
-  function openPaymentModal(ordenId, proveedorNombre, total) {
-    state.pago = { active: true, ordenId, proveedorNombre, total, pagado: 0, modo: 'pendiente', monto: total };
-    ge('ord-pago-titulo').textContent = `💳 Registrar pago — ${proveedorNombre}`;
-    renderPaymentModal();
-    ge('ord-pago-overlay').style.display = 'flex';
-    // Set confirm handler for this specific call (reception flow)
-    ge('ord-pago-confirmar').onclick = confirmarPago;
-  }
-
-  function renderPaymentModal() {
-    const p    = state.pago;
-    const body = ge('ord-pago-body');
-    if (!body) return;
-    body.innerHTML = `
-      <div class="ord-pago-total">Total recepción: ${esc(fmtPeso(p.total))}</div>
-      <div class="ord-pago-opts">
-        <label class="ord-pago-opt ${p.modo === 'efectivo' ? 'selected' : ''}">
-          <input type="radio" name="ord-pago-modo" value="efectivo" ${p.modo === 'efectivo' ? 'checked' : ''}> Pagar ahora en efectivo
-        </label>
-        <label class="ord-pago-opt ${p.modo === 'pendiente' ? 'selected' : ''}">
-          <input type="radio" name="ord-pago-modo" value="pendiente" ${p.modo === 'pendiente' ? 'checked' : ''}> Queda pendiente de pago
-        </label>
-      </div>
-      <div id="ord-pago-monto-wrap" style="${p.modo !== 'efectivo' ? 'display:none' : ''}">
-        <div class="ord-pago-monto-row">
-          <label>Monto a pagar ($):</label>
-          <input type="number" id="ord-pago-monto" min="0" step="0.01" value="${esc(p.total.toFixed(2))}">
-        </div>
-        <p style="font-size:12px;color:var(--color-text-secondary);margin:6px 0 0">
-          Si el monto es menor al total, la diferencia queda como deuda pendiente.
-        </p>
-      </div>`;
-
-    body.querySelectorAll('[name="ord-pago-modo"]').forEach(radio => {
-      radio.addEventListener('change', () => {
-        state.pago.modo = radio.value;
-        const montoWrap = ge('ord-pago-monto-wrap');
-        if (montoWrap) montoWrap.style.display = state.pago.modo === 'efectivo' ? '' : 'none';
-        body.querySelectorAll('.ord-pago-opt').forEach(opt => {
-          opt.classList.toggle('selected', opt.querySelector('input').value === state.pago.modo);
-        });
-      });
-    });
-  }
-
-  function confirmarPago() {
-    const p = state.pago;
-    const monto = p.modo === 'efectivo' ? parseFloat(ge('ord-pago-monto').value) || p.total : 0;
-    const result = _confirmarRecepcion(p.ordenId, p.modo, monto);
-    if (!result.success) { showToast('Error: ' + result.error, 'error'); return; }
-
-    ge('ord-pago-overlay').style.display = 'none';
-    closeRecepcion();
-
-    if (result.costoChanges && result.costoChanges.length) {
-      showCostChangesModal(result.costoChanges, p.ordenId);
-    } else {
-      showToast('Recepción confirmada ✓');
-      renderLista();
-    }
-  }
-
-  // ── UI — COST CHANGES MODAL ────────────────────────────────────────────────
-
-  function showCostChangesModal(changes, ordenId) {
-    state.costos = { active: true, changes, ordenId };
-    const body = ge('ord-costos-body');
-    if (!body) return;
-    body.innerHTML = `
-      <p style="font-size:14px;margin:0 0 12px">Los siguientes productos tienen un costo diferente al registrado:</p>
-      <table class="ord-costos-table">
-        <thead><tr><th>Producto</th><th>Costo anterior</th><th>Costo nuevo</th><th>Diferencia</th><th>Opciones</th></tr></thead>
-        <tbody>
-          ${changes.map((c, idx) => {
-            const diff = c.costoNuevo - c.costoAnterior;
-            const pct  = c.costoAnterior ? ((diff / c.costoAnterior) * 100).toFixed(1) : '—';
-            const cls  = diff > 0 ? 'ord-costos-diff-pos' : 'ord-costos-diff-neg';
-            return `<tr>
-              <td>${esc(c.nombre)}</td>
-              <td>${esc(fmtPeso(c.costoAnterior))}</td>
-              <td>${esc(fmtPeso(c.costoNuevo))}</td>
-              <td class="${cls}">${diff > 0 ? '+' : ''}${esc(pct)}%</td>
-              <td>
-                <div class="ord-costos-check-row">
-                  <label><input type="checkbox" data-cost-actualizar="${idx}" checked> Actualizar costo</label>
-                </div>
-                <div class="ord-costos-check-row">
-                  <label><input type="checkbox" data-cost-precio="${idx}"> Actualizar precio venta proporcionalmente</label>
-                </div>
-                ${(c.esMadre || c.productaMadreId) ? `<div class="ord-costos-check-row"><label><input type="checkbox" data-cost-familia="${idx}"> Aplicar a toda la familia</label></div>` : ''}
-              </td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>`;
-
-    ge('ord-costos-overlay').style.display = 'flex';
-  }
-
-  function confirmarCostChanges() {
-    const changes = state.costos.changes;
-    const ts = now();
-
-    for (let idx = 0; idx < changes.length; idx++) {
-      const c = changes[idx];
-      const actualizarCosto  = document.querySelector(`[data-cost-actualizar="${idx}"]`);
-      const actualizarPrecio = document.querySelector(`[data-cost-precio="${idx}"]`);
-      const familia          = document.querySelector(`[data-cost-familia="${idx}"]`);
-
-      if (!actualizarCosto || !actualizarCosto.checked) continue;
-
-      const pctChange = c.costoAnterior ? c.costoNuevo / c.costoAnterior : 1;
-
-      if (familia && familia.checked) {
-        // Update entire family
-        const madreId = c.productaMadreId || c.productoId;
-        const ids = window.SGA_DB.query(
-          `SELECT id, precio_venta FROM productos WHERE id=? OR producto_madre_id=?`,
-          [madreId, madreId]
-        );
-        for (const p of ids) {
-          const nuevoPrecio = actualizarPrecio && actualizarPrecio.checked
-            ? (parseFloat(p.precio_venta) || 0) * pctChange : null;
-          const setClause = nuevoPrecio != null
-            ? 'costo=?, precio_venta=?, fecha_modificacion=?'
-            : 'costo=?, fecha_modificacion=?';
-          const params = nuevoPrecio != null
-            ? [c.costoNuevo, nuevoPrecio, ts, p.id]
-            : [c.costoNuevo, ts, p.id];
-          window.SGA_DB.run(`UPDATE productos SET ${setClause} WHERE id=?`, params);
-        }
-      } else {
-        const prod = window.SGA_DB.query(`SELECT precio_venta FROM productos WHERE id=?`, [c.productoId])[0];
-        const nuevoPrecio = actualizarPrecio && actualizarPrecio.checked && prod
-          ? (parseFloat(prod.precio_venta) || 0) * pctChange : null;
-        const setClause = nuevoPrecio != null
-          ? 'costo=?, precio_venta=?, fecha_modificacion=?'
-          : 'costo=?, fecha_modificacion=?';
-        const params = nuevoPrecio != null
-          ? [c.costoNuevo, nuevoPrecio, ts, c.productoId]
-          : [c.costoNuevo, ts, c.productoId];
-        window.SGA_DB.run(`UPDATE productos SET ${setClause} WHERE id=?`, params);
-      }
-    }
-
-    ge('ord-costos-overlay').style.display = 'none';
-    showToast('Costos actualizados ✓');
-    renderLista();
-  }
-
-  // ── UI — PAGOS PENDIENTES VIEW ─────────────────────────────────────────────
-
-  function openPagosPendientes() {
-    state.view = 'pagos';
-    ge('ord-main').style.display          = 'none';
-    ge('ord-pagos-overlay').style.display = 'flex';
-    renderPagosPendientes();
-  }
-
-  function closePagosPendientes() {
-    state.view = 'lista';
-    ge('ord-pagos-overlay').style.display = 'none';
-    ge('ord-main').style.display          = '';
-    renderLista();
-  }
-
-  function renderPagosPendientes() {
-    const ordenes = _getConPagoPendiente(state.user.sucursal_id);
-    const tbody   = ge('ord-pagos-tbody');
-    const empty   = ge('ord-pagos-empty');
-    if (!tbody) return;
     if (!ordenes.length) {
       tbody.innerHTML = '';
-      if (empty) empty.style.display = '';
+      empty.style.display = '';
       return;
     }
-    if (empty) empty.style.display = 'none';
+    empty.style.display = 'none';
+
     tbody.innerHTML = ordenes.map(o => {
-      const total   = parseFloat(o.total_estimado) || 0;
-      const pagado  = parseFloat(o.total_pagado)   || 0;
-      const saldo   = parseFloat(o.saldo_pendiente) || 0;
+      const fecha = o.fecha_creacion ? o.fecha_creacion.slice(0, 10) : '—';
       return `<tr>
-        <td>${esc(o.proveedor_nombre || '—')}</td>
-        <td>${esc(fmtFecha(o.updated_at))}</td>
-        <td>${esc(fmtPeso(total))}</td>
-        <td>${esc(fmtPeso(pagado))}</td>
-        <td style="color:#C62828;font-weight:600">${esc(fmtPeso(saldo))}</td>
-        <td>
-          <button class="btn btn-primary" style="font-size:12px" data-pagar-orden="${esc(o.id)}" data-pagar-proveedor="${esc(o.proveedor_nombre)}" data-pagar-saldo="${esc(saldo)}">
-            Registrar pago
-          </button>
+        <td>${esc(fecha)}</td>
+        <td style="font-weight:600">${esc(o.proveedor_nombre || '—')}</td>
+        <td style="text-align:center">${o.num_items || 0}</td>
+        <td><span class="ord-badge ord-badge-${esc(o.estado)}">${esc(ESTADO_LABEL[o.estado] || o.estado)}</span></td>
+        <td style="display:flex;gap:6px">
+          <button class="ord-btn-sm-primary" data-abrir="${esc(o.id)}">Ver</button>
+          <button class="ord-btn-sm ord-btn-eliminar" data-eliminar="${esc(o.id)}"
+            data-prov="${esc(o.proveedor_nombre || '')}" title="Eliminar orden">🗑</button>
         </td>
       </tr>`;
     }).join('');
-  }
 
-  function openPagoOrden(ordenId, proveedorNombre, saldo) {
-    state.pago = { active: true, ordenId, proveedorNombre, total: saldo, pagado: 0, modo: 'efectivo', monto: saldo };
-    ge('ord-pago-titulo').textContent = `💳 Pago a ${proveedorNombre}`;
-    renderPaymentModal();
-    ge('ord-pago-overlay').style.display = 'flex';
-    // On confirm: call _registrarPago
-    ge('ord-pago-confirmar').onclick = () => {
-      const monto = parseFloat(ge('ord-pago-monto') ? ge('ord-pago-monto').value : saldo) || saldo;
-      const result = _registrarPago(ordenId, monto, state.user.id);
-      if (!result.success) { showToast('Error: ' + result.error, 'error'); return; }
-      ge('ord-pago-overlay').style.display = 'none';
-      showToast('Pago registrado ✓');
-      renderPagosPendientes();
-    };
-  }
+    tbody.querySelectorAll('[data-abrir]').forEach(btn =>
+      btn.addEventListener('click', () => abrirOrden(btn.dataset.abrir))
+    );
 
-  // ── EVENTS ─────────────────────────────────────────────────────────────────
-
-  function attachEvents() {
-    // Tab switching
-    document.querySelectorAll('.ord-tab').forEach(btn => {
+    tbody.querySelectorAll('[data-eliminar]').forEach(btn =>
       btn.addEventListener('click', () => {
-        document.querySelectorAll('.ord-tab').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        state.currentTab = btn.dataset.tab;
+        const prov = btn.dataset.prov || 'esta orden';
+        if (!confirm(`¿Eliminar la orden de ${prov}? Esta acción no se puede deshacer.`)) return;
+        const ordenId = btn.dataset.eliminar;
+        db().run(`DELETE FROM orden_compra_items WHERE orden_id = ?`, [ordenId]);
+        db().run(`DELETE FROM ordenes_compra WHERE id = ?`, [ordenId]);
         renderLista();
+      })
+    );
+  }
+
+  // ── VISTA ORDEN ───────────────────────────────────────────────────────────────
+
+  function abrirOrden(ordenId) {
+    ui.view = 'orden';
+
+    // Cargar todos los tabs activos (borrador + revisada + confirmada)
+    const sucId = ui.user.sucursal_id;
+    const activas = getOrdenes(sucId).filter(o =>
+      ['borrador', 'revisada', 'confirmada', 'enviada'].includes(o.estado)
+    );
+    ui.tabOrdenIds = activas.map(o => o.id);
+
+    // Si la orden pedida no está en activas, la agrego al inicio
+    if (!ui.tabOrdenIds.includes(ordenId)) ui.tabOrdenIds.unshift(ordenId);
+    ui.ordenActiva = ordenId;
+
+    ge('ord-view-lista').style.display = 'none';
+    ge('ord-view-orden').style.display = '';
+    ge('ord-btn-back').style.display = '';
+    ge('ord-header-title').textContent = 'Órdenes de Compra';
+
+    renderTabs();
+    renderOrden();
+    setupKeyboard();
+  }
+
+  function renderTabs() {
+    const tabBar = ge('ord-tab-bar');
+    const ordenes = getOrdenes(ui.user.sucursal_id).filter(o =>
+      ui.tabOrdenIds.includes(o.id)
+    );
+    // Mantener orden de tabOrdenIds
+    const map = Object.fromEntries(ordenes.map(o => [o.id, o]));
+
+    tabBar.innerHTML = ui.tabOrdenIds.map(id => {
+      const o = map[id];
+      if (!o) return '';
+      const active = id === ui.ordenActiva ? ' active' : '';
+      return `<button class="ord-tab${active}" data-tab="${esc(id)}">
+        ${esc(o.proveedor_nombre || '—')}
+        <span class="ord-tab-badge">${o.num_items || 0}</span>
+      </button>`;
+    }).join('');
+
+    tabBar.querySelectorAll('[data-tab]').forEach(btn =>
+      btn.addEventListener('click', () => {
+        ui.ordenActiva = btn.dataset.tab;
+        renderTabs();
+        renderOrden();
+      })
+    );
+  }
+
+  function renderOrden() {
+    const orden = getOrden(ui.ordenActiva);
+    if (!orden) return;
+
+    const editable = EDITABLE_ESTADOS.has(orden.estado);
+
+    // Info bar
+    ge('ord-infobar-proveedor').textContent = orden.proveedor_nombre || '—';
+    const badge = ge('ord-infobar-badge');
+    badge.textContent = ESTADO_LABEL[orden.estado] || orden.estado;
+    badge.className = `ord-badge ord-badge-${orden.estado}`;
+    ge('ord-infobar-fecha').textContent = orden.fecha_creacion
+      ? 'Creada: ' + orden.fecha_creacion.slice(0, 10) : '';
+
+    const notasInput = ge('ord-notas-input');
+    notasInput.value = orden.notas || '';
+    notasInput.disabled = !editable;
+    notasInput.onblur = () => {
+      if (editable) {
+        db().run(
+          `UPDATE ordenes_compra SET notas = ?, updated_at = ? WHERE id = ?`,
+          [notasInput.value || null, now(), orden.id]
+        );
+      }
+    };
+
+    // Items table
+    renderItems(orden, editable);
+
+    // Action buttons
+    renderActionBtns(orden, editable);
+
+    // Agregar producto — solo en editable
+    ge('ord-btn-add-item').style.display = editable ? '' : 'none';
+  }
+
+  function renderItems(orden, editable) {
+    const tbody = ge('ord-items-tbody');
+    const thead = ge('ord-items-thead');
+
+    if (editable) {
+      thead.innerHTML = `<tr>
+        <th style="text-align:left;min-width:90px">Cód. prov.</th>
+        <th style="text-align:left">Descripción</th>
+        <th>Stock act.</th>
+        <th>Stock mín.</th>
+        <th style="min-width:120px">A pedir</th>
+        <th>Vtas 30d</th>
+        <th>Prom. 6m</th>
+        <th>Días s/stock</th>
+        <th style="text-align:left;min-width:140px">Notas</th>
+        <th></th>
+      </tr>`;
+    } else {
+      thead.innerHTML = `<tr>
+        <th style="text-align:left;min-width:90px">Cód. prov.</th>
+        <th style="text-align:left">Descripción</th>
+        <th style="min-width:120px">A pedir</th>
+        <th style="text-align:left;min-width:140px">Notas</th>
+        <th></th>
+      </tr>`;
+    }
+
+    if (!orden.items.length) {
+      tbody.innerHTML = `<tr><td colspan="${editable ? 10 : 5}" style="text-align:center;padding:24px;color:#8090a0">Sin productos en esta orden.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = orden.items.map(it => {
+      const dias = it.dias_sin_stock_6m || 0;
+      const diasCls = dias === 0 ? 'ord-dias-ok' : dias <= 5 ? 'ord-dias-warn' : 'ord-dias-crit';
+      const cantFinal = it.cantidad_final != null ? it.cantidad_final : it.cantidad_sugerida;
+      const unidad    = it.unidad_pedida || it.prod_pedido_unidad || 'unidad';
+
+      if (editable) {
+        return `<tr data-item-id="${esc(it.id)}">
+          <td><input class="ord-cell-input ord-cell-input-cod" type="text"
+            value="${esc(it.codigo_proveedor || '')}" placeholder="—"
+            style="width:80px;text-align:left"></td>
+          <td>${esc(it.producto_nombre || '—')}</td>
+          <td>${fmtN(it.stock_actual)}</td>
+          <td>${fmtN(it.stock_minimo)}</td>
+          <td>
+            <div class="ord-apedir-wrap">
+              <span class="ord-apedir-label">${esc(labelApedir(cantFinal, unidad))}</span>
+              <button class="ord-btn-edit-cant" data-edit-cant="${esc(it.id)}"
+                data-cant="${cantFinal}" data-unidad="${esc(unidad)}"
+                title="Editar cantidad">✏</button>
+            </div>
+          </td>
+          <td>${fmtN(it.ventas_30d)}</td>
+          <td>${fmtN(it.ventas_prom_6m)}</td>
+          <td class="${diasCls}">${dias}</td>
+          <td><input class="ord-cell-input ord-cell-input-text" type="text"
+            value="${esc(it.notas || '')}" placeholder="—"></td>
+          <td><button class="ord-btn-del" data-del="${esc(it.id)}" title="Eliminar">×</button></td>
+        </tr>`;
+      } else {
+        return `<tr>
+          <td>${esc(it.codigo_proveedor || '—')}</td>
+          <td>${esc(it.producto_nombre || '—')}</td>
+          <td style="font-weight:700">${esc(labelApedir(cantFinal, unidad))}</td>
+          <td>${esc(it.notas || '—')}</td>
+          <td></td>
+        </tr>`;
+      }
+    }).join('');
+
+    if (!editable) return;
+
+    // Auto-save notas y código proveedor on blur
+    tbody.querySelectorAll('tr[data-item-id]').forEach(row => {
+      const itemId  = row.dataset.itemId;
+      const inputCod   = row.querySelector('.ord-cell-input-cod');
+      const inputNotas = row.querySelector('.ord-cell-input-text');
+
+      const saveRow = () => {
+        const notas = inputNotas?.value?.trim() || null;
+        const cod   = inputCod?.value?.trim() || null;
+        db().run(
+          `UPDATE orden_compra_items SET notas = ?, codigo_proveedor = ? WHERE id = ?`,
+          [notas, cod, itemId]
+        );
+        db().run(`UPDATE ordenes_compra SET updated_at = ? WHERE id = ?`, [now(), ui.ordenActiva]);
+      };
+
+      inputNotas?.addEventListener('blur', saveRow);
+      inputCod?.addEventListener('blur', saveRow);
+    });
+
+    // Botón lápiz → overlay editar cantidad
+    tbody.querySelectorAll('[data-edit-cant]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        openEditCantOverlay(btn.dataset.editCant, Number(btn.dataset.cant), btn.dataset.unidad);
       });
     });
 
-    // Nueva orden
-    ge('ord-btn-nueva') && ge('ord-btn-nueva').addEventListener('click', openNuevaOrden);
-    ge('ord-nueva-close') && ge('ord-nueva-close').addEventListener('click', closeNuevaOrden);
+    // Eliminar item
+    tbody.querySelectorAll('[data-del]').forEach(btn =>
+      btn.addEventListener('click', () => {
+        if (!confirm('¿Eliminar este producto de la orden?')) return;
+        eliminarItem(btn.dataset.del);
+        renderOrden();
+        renderTabs();
+      })
+    );
+  }
 
-    // Pagos pendientes
-    ge('ord-btn-pagos') && ge('ord-btn-pagos').addEventListener('click', openPagosPendientes);
-    ge('ord-pagos-volver') && ge('ord-pagos-volver').addEventListener('click', closePagosPendientes);
+  // ── OVERLAY: EDITAR CANTIDAD ──────────────────────────────────────────────────
 
-    // Table row actions (delegated)
-    ge('ord-tbody') && ge('ord-tbody').addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-action]');
-      if (!btn) return;
-      const id = btn.dataset.id;
-      if (btn.dataset.action === 'recibir') { openRecepcion(id); }
-      else if (btn.dataset.action === 'enviar') {
-        _enviar(id);
-        showToast('Orden enviada al proveedor ✓');
+  function openEditCantOverlay(itemId, cantActual, unidadActual) {
+    const overlay = ge('ord-edit-cant-overlay');
+    const inputCant   = ge('ord-editcant-cant');
+    const selectUnidad = ge('ord-editcant-unidad');
+
+    inputCant.value = cantActual != null ? cantActual : '';
+    selectUnidad.value = unidadActual || 'unidad';
+    overlay.style.display = 'flex';
+    setTimeout(() => inputCant.focus(), 60);
+
+    const doSave = () => {
+      const cant   = parseFloat(inputCant.value);
+      const unidad = selectUnidad.value;
+      if (isNaN(cant) || cant < 0) { showToast('Ingresá una cantidad válida', 'error'); return; }
+      db().run(
+        `UPDATE orden_compra_items SET cantidad_final = ?, unidad_pedida = ? WHERE id = ?`,
+        [cant, unidad, itemId]
+      );
+      db().run(`UPDATE ordenes_compra SET updated_at = ? WHERE id = ?`, [now(), ui.ordenActiva]);
+      overlay.style.display = 'none';
+      renderOrden();
+    };
+
+    ge('ord-editcant-ok').onclick  = doSave;
+    ge('ord-editcant-cancel').onclick = () => { overlay.style.display = 'none'; };
+    inputCant.onkeydown = e => { if (e.key === 'Enter') doSave(); if (e.key === 'Escape') overlay.style.display = 'none'; };
+  }
+
+  function renderActionBtns(orden, editable) {
+    const cont = ge('ord-action-btns');
+    const btns = [];
+
+    if (editable) {
+      btns.push(`<button class="ord-btn-action ord-btn-save" id="ord-btn-guardar">✓ Guardar borrador</button>`);
+    }
+    if (orden.estado === 'borrador') {
+      btns.push(`<button class="ord-btn-action ord-btn-revisar" id="ord-btn-revisar">Marcar revisada</button>`);
+    }
+    if (orden.estado === 'revisada') {
+      btns.push(`<button class="ord-btn-action ord-btn-confirmar" id="ord-btn-confirmar">Confirmar</button>`);
+    }
+    if (orden.estado === 'confirmada') {
+      btns.push(`<button class="ord-btn-action ord-btn-enviar" id="ord-btn-enviar">Enviar</button>`);
+    }
+    if (!editable) {
+      btns.push(`<button class="ord-btn-action ord-btn-exportar" id="ord-btn-exportar">📷 Exportar imagen</button>`);
+    }
+
+    cont.innerHTML = btns.join('');
+
+    ge('ord-btn-guardar')?.addEventListener('click', () => {
+      showToast('Orden guardada');
+    });
+
+    ge('ord-btn-revisar')?.addEventListener('click', () => {
+      if (!confirm('¿Marcar esta orden como revisada?')) return;
+      cambiarEstado(ui.ordenActiva, 'revisada');
+      renderOrden();
+      renderTabs();
+      showToast('Orden marcada como revisada');
+    });
+
+    ge('ord-btn-confirmar')?.addEventListener('click', () => {
+      if (!confirm('¿Confirmar esta orden? Quedará en solo lectura hasta el envío.')) return;
+      cambiarEstado(ui.ordenActiva, 'confirmada');
+      renderOrden();
+      renderTabs();
+      showToast('Orden confirmada');
+    });
+
+    ge('ord-btn-enviar')?.addEventListener('click', () => {
+      if (!confirm('¿Marcar esta orden como enviada al proveedor?')) return;
+      cambiarEstado(ui.ordenActiva, 'enviada');
+      renderOrden();
+      renderTabs();
+      showToast('Orden enviada');
+    });
+
+    ge('ord-btn-exportar')?.addEventListener('click', () => exportarImagen(orden));
+  }
+
+  // ── EXPORTAR IMAGEN ───────────────────────────────────────────────────────────
+
+  async function exportarImagen(orden) {
+    if (!window.html2canvas) {
+      showToast('html2canvas no disponible', 'error');
+      return;
+    }
+
+    const btn = ge('ord-btn-exportar');
+    btn.disabled = true;
+    btn.textContent = 'Generando…';
+
+    try {
+      const fecha = (orden.fecha_creacion || '').slice(0, 10);
+      const prov  = orden.proveedor_nombre || '—';
+
+      // Construir tabla limpia para exportar
+      const filas = orden.items.map(it => {
+        const cantFinal = it.cantidad_final != null ? it.cantidad_final : it.cantidad_sugerida;
+        const unidad    = it.unidad_pedida || it.prod_pedido_unidad || 'unidad';
+        return `<tr>
+          <td>${esc(it.producto_nombre || '—')}</td>
+          <td>${esc(labelApedir(cantFinal, unidad))}</td>
+        </tr>`;
+      }).join('');
+
+      const html = `
+        <div id="ord-export-wrap" style="
+          font-family: Arial, sans-serif;
+          background: #fff;
+          padding: 24px 28px;
+          display: inline-block;
+          box-sizing: border-box;
+        ">
+          <div style="margin-bottom: 16px;">
+            <div style="font-size: 20px; font-weight: 800; color: #000; margin-bottom: 4px;">${esc(prov)}</div>
+            <div style="font-size: 13px; color: #444;">${fecha}</div>
+          </div>
+          <table style="
+            width: auto; border-collapse: collapse;
+            font-size: 13px; color: #000; white-space: nowrap;
+          ">
+            <thead>
+              <tr style="background: #1a2e4a;">
+                <th style="
+                  padding: 9px 12px; text-align: left; color: #fff;
+                  font-weight: 700; font-size: 12px; text-transform: uppercase;
+                  letter-spacing: 0.04em; border: 1px solid #1a2e4a;
+                ">Descripción</th>
+                <th style="
+                  padding: 9px 12px; text-align: right; color: #fff;
+                  font-weight: 700; font-size: 12px; text-transform: uppercase;
+                  letter-spacing: 0.04em; border: 1px solid #1a2e4a;
+                ">Pedido</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${orden.items.map((it, i) => {
+                const cantFinal = it.cantidad_final != null ? it.cantidad_final : it.cantidad_sugerida;
+                const unidad    = it.unidad_pedida || it.prod_pedido_unidad || 'unidad';
+                const bg = i % 2 === 0 ? '#fff' : '#f4f6f9';
+                return `<tr style="background:${bg}">
+                  <td style="padding: 8px 12px; border: 1px solid #d0d7e3; color: #000;">${esc(it.producto_nombre || '—')}</td>
+                  <td style="padding: 8px 12px; border: 1px solid #d0d7e3; color: #000; text-align: right; font-weight: 600;">${esc(labelApedir(cantFinal, unidad))}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+
+      // Insertar en DOM oculto, capturar, eliminar
+      const container = document.createElement('div');
+      container.style.cssText = 'position:fixed;left:-9999px;top:0;z-index:-1';
+      container.innerHTML = html;
+      document.body.appendChild(container);
+      const target = container.querySelector('#ord-export-wrap');
+
+      const canvas = await window.html2canvas(target, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      });
+
+      document.body.removeChild(container);
+
+      const provFile = prov.replace(/[^a-zA-Z0-9áéíóúñÁÉÍÓÚÑ ]/g, '').trim().replace(/\s+/g, '_');
+      const filename = `orden_${provFile}_${fecha}.png`;
+
+      canvas.toBlob(blob => {
+        const url = URL.createObjectURL(blob);
+        const a   = document.createElement('a');
+        a.href     = url;
+        a.download = filename;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      }, 'image/png');
+
+      showToast('Imagen exportada');
+    } catch (e) {
+      console.error('exportarImagen:', e);
+      showToast('Error al exportar imagen', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '📷 Exportar imagen';
+    }
+  }
+
+  // ── TECLADO ──────────────────────────────────────────────────────────────────
+
+  function setupKeyboard() {
+    teardownKeyboard();
+    ui.kbHandler = (e) => {
+      if (!e.ctrlKey) return;
+      if (e.key === 'PageDown') { e.preventDefault(); moveTab(1); }
+      if (e.key === 'PageUp')   { e.preventDefault(); moveTab(-1); }
+    };
+    document.addEventListener('keydown', ui.kbHandler);
+  }
+
+  function teardownKeyboard() {
+    if (ui.kbHandler) {
+      document.removeEventListener('keydown', ui.kbHandler);
+      ui.kbHandler = null;
+    }
+  }
+
+  function moveTab(delta) {
+    const idx = ui.tabOrdenIds.indexOf(ui.ordenActiva);
+    if (idx === -1) return;
+    const next = Math.max(0, Math.min(ui.tabOrdenIds.length - 1, idx + delta));
+    if (next === idx) return;
+    ui.ordenActiva = ui.tabOrdenIds[next];
+    renderTabs();
+    renderOrden();
+  }
+
+  // ── MODAL: GENERAR ÓRDENES ───────────────────────────────────────────────────
+
+  function openGenerarModal() {
+    const sucId = ui.user.sucursal_id;
+    const todayWd = (new Date().getDay() + 6) % 7; // 0=Lun…6=Dom
+
+    const proveedores = db().query(`
+      SELECT p.id, p.razon_social, p.order_day,
+        EXISTS(
+          SELECT 1 FROM ordenes_compra oc
+          WHERE oc.proveedor_id = p.id AND oc.sucursal_id = ?
+            AND oc.estado IN ('borrador','revisada','confirmada','enviada')
+            AND date(oc.fecha_creacion) = date('now')
+        ) AS tiene_orden_hoy
+      FROM proveedores p
+      WHERE p.activo = 1
+      ORDER BY p.razon_social
+    `, [sucId]);
+
+    const body = ge('ord-generar-body');
+    if (!proveedores.length) {
+      body.innerHTML = '<p style="color:#8090a0;text-align:center;padding:20px 0">No hay proveedores activos.</p>';
+    } else {
+      body.innerHTML = proveedores.map(p => {
+        const esHoy = p.order_day === todayWd && !p.tiene_orden_hoy;
+        const dayLabel = p.order_day != null ? DIAS_SEMANA[p.order_day] : '';
+        return `<label class="ord-prov-item${esHoy ? ' today' : ''}">
+          <input type="checkbox" value="${esc(p.id)}" ${esHoy ? 'checked' : ''}>
+          <span class="ord-prov-name">${esc(p.razon_social)}</span>
+          ${dayLabel ? `<span class="ord-prov-day">📅 ${dayLabel}</span>` : ''}
+          ${p.tiene_orden_hoy ? '<span style="font-size:11px;color:#607080">Ya tiene orden hoy</span>' : ''}
+        </label>`;
+      }).join('');
+    }
+
+    ge('ord-generar-overlay').style.display = 'flex';
+  }
+
+  function ejecutarGenerar() {
+    const checks = ge('ord-generar-body').querySelectorAll('input[type=checkbox]:checked');
+    const ids = [...checks].map(c => c.value);
+    if (!ids.length) { showToast('Seleccioná al menos un proveedor', 'error'); return; }
+
+    const sucId = ui.user.sucursal_id;
+    const nuevasIds = [];
+    const msgs = [];
+
+    for (const provId of ids) {
+      const res = generarOrdenCompra(provId, sucId);
+      if (!res.success) {
+        msgs.push(`Error: ${res.message}`);
+      } else if (!res.ordenId) {
+        msgs.push(res.message);
+      } else {
+        nuevasIds.push(res.ordenId);
+      }
+    }
+
+    ge('ord-generar-overlay').style.display = 'none';
+
+    if (msgs.length) showToast(msgs.join(' | '), 'info');
+
+    if (nuevasIds.length) {
+      showToast(`${nuevasIds.length} orden(es) generada(s)`);
+      // Abrir la primera orden generada (el resto queda en tabs)
+      abrirOrden(nuevasIds[0]);
+    }
+  }
+
+  // ── MODAL: AGREGAR PRODUCTO ───────────────────────────────────────────────────
+
+  function openAgregarModal() {
+    ge('ord-agregar-search').value = '';
+    ge('ord-agregar-results').innerHTML = '';
+    ge('ord-agregar-overlay').style.display = 'flex';
+    setTimeout(() => ge('ord-agregar-search')?.focus(), 80);
+  }
+
+  function buscarProductosAgregar(q) {
+    if (!q.trim()) { ge('ord-agregar-results').innerHTML = ''; return; }
+    const res = db().query(`
+      SELECT p.id, p.nombre, COALESCE(st.cantidad, 0) AS stock
+      FROM productos p
+      LEFT JOIN stock st ON st.producto_id = p.id AND st.sucursal_id = ?
+      LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
+      WHERE p.activo = 1
+        AND (p.nombre LIKE ? OR cb.codigo = ?)
+      LIMIT 20
+    `, [ui.user.sucursal_id, `%${q}%`, q]);
+
+    ge('ord-agregar-results').innerHTML = res.length
+      ? res.map(p => `
+          <div class="ord-search-result" data-add-prod="${esc(p.id)}">
+            <span style="font-weight:600">${esc(p.nombre)}</span>
+            <span style="color:#607080;font-size:11px">Stock: ${fmtN(p.stock)}</span>
+          </div>`).join('')
+      : '<p style="color:#8090a0;padding:8px 0">Sin resultados.</p>';
+
+    ge('ord-agregar-results').querySelectorAll('[data-add-prod]').forEach(el =>
+      el.addEventListener('click', () => {
+        const ok = agregarItem(ui.ordenActiva, el.dataset.addProd, ui.user.sucursal_id);
+        ge('ord-agregar-overlay').style.display = 'none';
+        if (ok) { renderOrden(); renderTabs(); showToast('Producto agregado'); }
+        else showToast('Error al agregar producto', 'error');
+      })
+    );
+  }
+
+  // ── INIT ─────────────────────────────────────────────────────────────────────
+
+  function init() {
+    ui.user = window.SGA_Auth.getCurrentUser();
+
+    // ── Botones header
+    ge('ord-btn-back')?.addEventListener('click', showLista);
+    ge('ord-btn-generar')?.addEventListener('click', openGenerarModal);
+
+    // ── Filtros lista
+    ge('ord-view-lista')?.querySelectorAll('[data-filter]').forEach(btn =>
+      btn.addEventListener('click', () => {
+        ui.filtroLista = btn.dataset.filter;
+        ge('ord-view-lista').querySelectorAll('[data-filter]').forEach(b =>
+          b.classList.toggle('active', b === btn)
+        );
         renderLista();
-      }
-      else if (btn.dataset.action === 'pagar') {
-        const orden = _getById(id);
-        const saldo = (window.SGA_DB.query(
-          `SELECT COALESCE(SUM(CASE WHEN tipo='deuda' THEN monto ELSE -monto END),0) AS s FROM cuenta_proveedor WHERE orden_id=?`,
-          [id]
-        )[0] || {}).s || 0;
-        openPagoOrden(id, orden ? orden.proveedor_nombre : '', saldo);
-      }
+      })
+    );
+
+    // ── Modal generar
+    const closeGenerar = () => ge('ord-generar-overlay').style.display = 'none';
+    ge('ord-generar-close')?.addEventListener('click', closeGenerar);
+    ge('ord-generar-cancel')?.addEventListener('click', closeGenerar);
+    ge('ord-generar-overlay')?.addEventListener('click', e => {
+      if (e.target === ge('ord-generar-overlay')) closeGenerar();
+    });
+    ge('ord-generar-ok')?.addEventListener('click', ejecutarGenerar);
+
+    // ── Modal agregar producto
+    const closeAgregar = () => ge('ord-agregar-overlay').style.display = 'none';
+    ge('ord-agregar-close')?.addEventListener('click', closeAgregar);
+    ge('ord-agregar-overlay')?.addEventListener('click', e => {
+      if (e.target === ge('ord-agregar-overlay')) closeAgregar();
+    });
+    ge('ord-agregar-search')?.addEventListener('input', e =>
+      buscarProductosAgregar(e.target.value)
+    );
+    ge('ord-btn-add-item')?.addEventListener('click', openAgregarModal);
+
+    // ── Overlay editar cantidad
+    ge('ord-editcant-close')?.addEventListener('click', () => {
+      ge('ord-edit-cant-overlay').style.display = 'none';
+    });
+    ge('ord-edit-cant-overlay')?.addEventListener('click', e => {
+      if (e.target === ge('ord-edit-cant-overlay')) ge('ord-edit-cant-overlay').style.display = 'none';
     });
 
-    // Pagos pendientes table row actions (delegated)
-    ge('ord-pagos-tbody') && ge('ord-pagos-tbody').addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-pagar-orden]');
-      if (!btn) return;
-      openPagoOrden(btn.dataset.pagarOrden, btn.dataset.pagarProveedor, parseFloat(btn.dataset.pagarSaldo) || 0);
-    });
-
-    // Reception volver
-    ge('ord-rec-volver') && ge('ord-rec-volver').addEventListener('click', () => {
-      const hasActivity = state.recepcion.orden &&
-        state.recepcion.orden.items.some(i => parseFloat(i.cantidad_recibida) > 0);
-      if (hasActivity && !confirm('¿Salir? La recepción quedará en estado "recibiendo".')) return;
-      closeRecepcion();
-    });
-
-    // Scanner input
-    ge('ord-scanner-input') && ge('ord-scanner-input').addEventListener('keydown', handleScan);
-
-    // Reception items (delegated)
-    const recLeft = document.querySelector('.ord-rec-left');
-    recLeft && recLeft.addEventListener('click', (e) => {
-      // qty dec
-      const decBtn = e.target.closest('[data-qty-dec]');
-      if (decBtn) {
-        const id   = decBtn.dataset.qtyDec;
-        const item = state.recepcion.orden.items.find(i => i.id === id);
-        if (item) {
-          const v = Math.max(0, (parseFloat(item.cantidad_recibida) || 0) - 1);
-          updateItemInState(id, { cantidad_recibida: v });
-        }
-        return;
-      }
-      // qty inc
-      const incBtn = e.target.closest('[data-qty-inc]');
-      if (incBtn) {
-        const id   = incBtn.dataset.qtyInc;
-        const item = state.recepcion.orden.items.find(i => i.id === id);
-        if (item) {
-          const v = (parseFloat(item.cantidad_recibida) || 0) + 1;
-          updateItemInState(id, { cantidad_recibida: v });
-        }
-        return;
-      }
-      // no entregado
-      const noBtn = e.target.closest('[data-no-entregado]');
-      if (noBtn) {
-        const id   = noBtn.dataset.noEntregado;
-        const item = state.recepcion.orden.items.find(i => i.id === id);
-        if (item) {
-          if (item.estado === 'no_entregado') {
-            // Restore to pendiente — bypass updateItemInState (would recalc to no_entregado for qty=0)
-            item.estado           = 'pendiente';
-            item.cantidad_recibida = 0;
-            window.SGA_DB.run(`UPDATE orden_compra_items SET estado='pendiente', cantidad_recibida=0 WHERE id=?`, [id]);
-            renderRecItems();
-            renderRecSummary();
-          } else {
-            item.estado           = 'no_entregado';
-            item.cantidad_recibida = 0;
-            window.SGA_DB.run(`UPDATE orden_compra_items SET estado='no_entregado', cantidad_recibida=0 WHERE id=?`, [id]);
-            renderRecItems();
-            renderRecSummary();
-          }
-        }
-        return;
-      }
-      // scan alert buttons
-      const addExtra = e.target.closest('[data-add-extra]');
-      if (addExtra) {
-        addExtraItemToRecepcion(addExtra.dataset.addExtra, addExtra.dataset.addNombre);
-        return;
-      }
-      const ignorar = ge('ord-scan-ignorar');
-      if (e.target === ignorar) { clearScanAlert(); ge('ord-scanner-input') && ge('ord-scanner-input').focus(); }
-    });
-
-    // Reception qty input (change)
-    const recLeftEl = document.querySelector('.ord-rec-left');
-    recLeftEl && recLeftEl.addEventListener('change', (e) => {
-      const qtyInput   = e.target.dataset.qtyInput;
-      const costoInput = e.target.dataset.costoInput;
-      if (qtyInput) {
-        updateItemInState(qtyInput, { cantidad_recibida: parseFloat(e.target.value) || 0 });
-      }
-      if (costoInput) {
-        updateItemInState(costoInput, { costo_unitario: parseFloat(e.target.value) || 0 });
-      }
-    });
-
-    // Confirmar recepcion
-    ge('ord-rec-confirmar') && ge('ord-rec-confirmar').addEventListener('click', () => {
-      const orden = state.recepcion.orden;
-      if (!orden) return;
-      const total = orden.items.reduce((s, i) => {
-        const cantR = parseFloat(i.cantidad_recibida) || 0;
-        return cantR > 0 && i.estado !== 'no_entregado' ? s + cantR * (parseFloat(i.costo_unitario) || 0) : s;
-      }, 0);
-      openPaymentModal(orden.id, orden.proveedor_nombre, total);
-    });
-
-    // Payment modal — confirm handler is set per-caller via .onclick (openPaymentModal / openPagoOrden)
-    ge('ord-pago-close')    && ge('ord-pago-close').addEventListener('click', () => { ge('ord-pago-overlay').style.display = 'none'; });
-    ge('ord-pago-cancelar') && ge('ord-pago-cancelar').addEventListener('click', () => { ge('ord-pago-overlay').style.display = 'none'; });
-
-    // Discrepancia close
-    ge('ord-disc-close') && ge('ord-disc-close').addEventListener('click', closeDiscrepanciaModal);
-
-    // Cost changes confirm
-    ge('ord-costos-confirmar') && ge('ord-costos-confirmar').addEventListener('click', confirmarCostChanges);
-
-    // Refocus scanner when clicking anywhere in reception left panel
-    const recepcionOverlay = ge('ord-recepcion-overlay');
-    recepcionOverlay && recepcionOverlay.addEventListener('click', (e) => {
-      const scanner = ge('ord-scanner-input');
-      const disc    = ge('ord-disc-overlay');
-      const pago    = ge('ord-pago-overlay');
-      if (!scanner) return;
-      if (disc && disc.style.display !== 'none') return;
-      if (pago && pago.style.display !== 'none') return;
-      if (!e.target.matches('input,button,select,textarea')) {
-        scanner.focus();
-      }
-    });
+    // ── Vista inicial
+    showLista();
   }
 
-  // ── INIT ───────────────────────────────────────────────────────────────────
-
-  function init(params) {
-    state.user = window.SGA_Auth.getCurrentUser();
-    if (!state.user) return;
-    attachEvents();
-    renderLista();
-  }
-
-  return { init };
+  return {
+    init,
+    // Data API — accesible desde otros módulos si se necesita
+    generarOrdenCompra,
+    getOrdenes,
+    getOrden,
+    cambiarEstado,
+    guardarItem,
+    eliminarItem,
+    agregarItem,
+    stockEfectivo,
+  };
 })();
 
+window.SGA_Ordenes = Ordenes;
 export default Ordenes;

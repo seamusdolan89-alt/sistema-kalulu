@@ -123,6 +123,26 @@
     padding: 8px 16px; font-size: 13px; color: #8d6e63; cursor: pointer; white-space: nowrap;
   }
   .ops-pending-descartar:hover { background: #ffecb3; }
+
+  /* Historial overlay */
+  .ops-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center; z-index: 200;
+  }
+  .ops-overlay-box {
+    background: white; border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .ops-overlay-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 20px; border-bottom: 1px solid #e0e6ee;
+    font-weight: 700; font-size: 15px; color: #1a2e4a;
+  }
+  .ops-overlay-close {
+    background: none; border: none; font-size: 22px; color: #8090a0; cursor: pointer; line-height: 1;
+  }
+  .ops-overlay-close:hover { color: #445566; }
 </style>
 
 <div class="ops-root" id="ops-root">
@@ -150,6 +170,7 @@
       <div class="ops-group-header">+ Ingreso de mercadería</div>
       <div class="ops-group-body">
         <button class="ops-btn ops-btn-active" data-action="compras">🛒 Compras</button>
+        <button class="ops-btn ops-btn-active" data-action="historial_compras">📋 Historial de compras</button>
         <button class="ops-btn ops-btn-active" data-action="devolucion">↩ Devolución</button>
         <button class="ops-btn ops-btn-disabled" data-action="traspaso_ingreso">🔄 Traspaso entre tiendas</button>
         <button class="ops-btn ops-btn-disabled" data-action="consignacion">📋 Consignación</button>
@@ -161,13 +182,47 @@
       <div class="ops-group-header egreso">− Egreso de mercadería</div>
       <div class="ops-group-body">
         <button class="ops-btn ops-btn-active egreso" data-action="ajuste_stock">📉 Ajuste de stock</button>
-        <button class="ops-btn ops-btn-disabled egreso" data-action="consumo_interno">🏠 Consumo interno</button>
-        <button class="ops-btn ops-btn-disabled egreso" data-action="vencimientos">⏰ Vencimientos</button>
-        <button class="ops-btn ops-btn-disabled egreso" data-action="roturas">💔 Roturas / producto defectuoso</button>
+        <button class="ops-btn ops-btn-active egreso" data-action="consumo_interno">🏠 Consumo interno</button>
+        <button class="ops-btn ops-btn-active egreso" data-action="vencimientos">⏰ Vencimientos</button>
+        <button class="ops-btn ops-btn-active egreso" data-action="roturas">💔 Roturas / producto defectuoso</button>
         <button class="ops-btn ops-btn-disabled egreso" data-action="traspaso_egreso">🔄 Traspaso entre tiendas</button>
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- ── HISTORIAL DE COMPRAS OVERLAY ── -->
+<div id="ops-historial-overlay" class="ops-overlay" style="display:none">
+  <div class="ops-overlay-box" style="width:880px;max-width:95vw;max-height:88vh">
+    <div class="ops-overlay-header">
+      <span>Historial de compras</span>
+      <button class="ops-overlay-close" id="ops-historial-close">×</button>
+    </div>
+    <div style="padding:12px 16px;border-bottom:1px solid #e0e6ee;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <label style="font-size:10px;font-weight:700;color:#607080;text-transform:uppercase">Desde</label>
+        <input type="date" id="ops-hist-desde" style="padding:5px 8px;border:1px solid #c8d0dc;border-radius:5px;font-size:13px">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <label style="font-size:10px;font-weight:700;color:#607080;text-transform:uppercase">Hasta</label>
+        <input type="date" id="ops-hist-hasta" style="padding:5px 8px;border:1px solid #c8d0dc;border-radius:5px;font-size:13px">
+      </div>
+      <button id="ops-hist-filtrar" style="padding:5px 14px;background:#2e7d32;color:white;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-weight:600">Filtrar</button>
+      <button id="ops-hist-limpiar" style="padding:5px 14px;background:#eef0f3;color:#445566;border:none;border-radius:5px;cursor:pointer;font-size:13px">Limpiar</button>
+    </div>
+    <div id="ops-historial-body" style="overflow-y:auto;flex:1;padding:12px 16px"></div>
+  </div>
+</div>
+
+<!-- ── DETALLE COMPRA OVERLAY ── -->
+<div id="ops-detalle-overlay" class="ops-overlay" style="display:none">
+  <div class="ops-overlay-box" style="width:720px;max-width:95vw;max-height:88vh">
+    <div class="ops-overlay-header">
+      <span>Detalle de compra</span>
+      <button class="ops-overlay-close" id="ops-detalle-close">×</button>
+    </div>
+    <div id="ops-detalle-body" style="overflow-y:auto;flex:1;padding:20px"></div>
   </div>
 </div>
 

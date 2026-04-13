@@ -553,6 +553,38 @@
       }
     } catch(e) { console.warn('ordenes_compra migration:', e.message); }
 
+    // Migrate ordenes_compra: add 'revisada' and 'confirmada' to estado CHECK + new timestamp columns
+    try {
+      const ocStmt2 = database.prepare(
+        `SELECT sql FROM sqlite_master WHERE type='table' AND name='ordenes_compra'`
+      );
+      let ocRow2 = null;
+      if (ocStmt2.step()) ocRow2 = ocStmt2.getAsObject();
+      ocStmt2.free();
+      if (ocRow2 && ocRow2.sql && !ocRow2.sql.includes('revisada')) {
+        database.run(`ALTER TABLE ordenes_compra RENAME TO ordenes_compra_bak2`);
+        database.run(`CREATE TABLE ordenes_compra (
+          id TEXT PRIMARY KEY,
+          sucursal_id TEXT REFERENCES sucursales(id),
+          proveedor_id TEXT REFERENCES proveedores(id),
+          usuario_id TEXT REFERENCES usuarios(id),
+          fecha_creacion TEXT,
+          fecha_entrega TEXT,
+          estado TEXT DEFAULT 'borrador' CHECK(estado IN ('borrador','revisada','confirmada','enviada','recibiendo','recibida_parcial','cerrada','pendiente_pago')),
+          notas TEXT,
+          revisada_en TEXT,
+          confirmada_en TEXT,
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
+        )`);
+        database.run(`INSERT INTO ordenes_compra
+          (id,sucursal_id,proveedor_id,usuario_id,fecha_creacion,fecha_entrega,estado,notas,sync_status,updated_at)
+          SELECT id,sucursal_id,proveedor_id,usuario_id,fecha_creacion,fecha_entrega,estado,notas,sync_status,updated_at
+          FROM ordenes_compra_bak2`);
+        database.run(`DROP TABLE ordenes_compra_bak2`);
+      }
+    } catch(e) { console.warn('ordenes_compra revisada migration:', e.message); }
+
     // Migrate venta_pagos: add 'saldo_favor' to medio CHECK constraint
     try {
       const vpStmt = database.prepare(
@@ -636,10 +668,42 @@
       "ALTER TABLE cuenta_proveedor ADD COLUMN compra_id TEXT REFERENCES compras(id)",
       // Fix: egresos_caja needs proveedor_id for pagos adelantados
       "ALTER TABLE egresos_caja ADD COLUMN proveedor_id TEXT REFERENCES proveedores(id)",
+      // Ordenes de compra — nuevo módulo
+      "ALTER TABLE proveedores ADD COLUMN order_day INTEGER DEFAULT NULL",
+      "ALTER TABLE ordenes_compra ADD COLUMN revisada_en TEXT",
+      "ALTER TABLE ordenes_compra ADD COLUMN confirmada_en TEXT",
+      // orden_compra_items — columnas para el nuevo flujo de sugerencia
+      "ALTER TABLE orden_compra_items ADD COLUMN codigo_proveedor TEXT",
+      "ALTER TABLE orden_compra_items ADD COLUMN stock_actual REAL",
+      "ALTER TABLE orden_compra_items ADD COLUMN stock_minimo REAL",
+      "ALTER TABLE orden_compra_items ADD COLUMN cantidad_deseada REAL",
+      "ALTER TABLE orden_compra_items ADD COLUMN ventas_30d REAL DEFAULT 0",
+      "ALTER TABLE orden_compra_items ADD COLUMN ventas_prom_6m REAL DEFAULT 0",
+      "ALTER TABLE orden_compra_items ADD COLUMN dias_sin_stock_6m INTEGER DEFAULT 0",
+      "ALTER TABLE orden_compra_items ADD COLUMN cantidad_sugerida REAL",
+      "ALTER TABLE orden_compra_items ADD COLUMN cantidad_final REAL",
+      "ALTER TABLE orden_compra_items ADD COLUMN unidad_pedida TEXT DEFAULT 'unidad'",
     ];
     for (const sql of columnAlterations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }
     }
+
+    // ── historial_stock — snapshot of stock per product+branch after every change ─
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS historial_stock (
+          id TEXT PRIMARY KEY,
+          producto_id TEXT NOT NULL REFERENCES productos(id),
+          sucursal_id TEXT NOT NULL REFERENCES sucursales(id),
+          stock_valor REAL NOT NULL,
+          registrado_en TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      database.run(`
+        CREATE INDEX IF NOT EXISTS idx_historial_stock
+          ON historial_stock(producto_id, sucursal_id, registrado_en)
+      `);
+    } catch(e) { console.warn('historial_stock:', e.message); }
 
     // ── Cuenta Corriente Proveedores ──────────────────────────────────────────
     // pagos_proveedores: payment header (who, when, notes)
@@ -684,6 +748,83 @@
         )
       `);
     } catch(e) { console.warn('imputaciones_pagos:', e.message); }
+
+    // ── Usuarios — autenticación local (username + password_hash) ─────────────
+    const usuariosMigrations = [
+      `ALTER TABLE usuarios ADD COLUMN username TEXT`,
+      `ALTER TABLE usuarios ADD COLUMN password_hash TEXT`,
+    ];
+    for (const sql of usuariosMigrations) {
+      try { database.run(sql); } catch(e) { /* column already exists */ }
+    }
+
+    // Migración: poblar username para usuarios legacy (creados sin username)
+    // Usamos database.prepare() directamente (query() exige isInitialized=true, que aún es false aquí)
+    try {
+      database.run(
+        `UPDATE usuarios SET username = 'admin' WHERE (username IS NULL OR username = '') AND firebase_uid = 'dev-admin'`
+      );
+      // Para cualquier otro usuario sin username, generar uno desde el nombre
+      const stmtSinUser = database.prepare(
+        `SELECT id, nombre FROM usuarios WHERE username IS NULL OR username = ''`
+      );
+      const sinUsername = [];
+      while (stmtSinUser.step()) sinUsername.push(stmtSinUser.getAsObject());
+      stmtSinUser.free();
+
+      for (const u of sinUsername) {
+        const generated = (u.nombre || 'usuario')
+          .toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-z0-9]/g, '.').replace(/\.+/g, '.').replace(/^\.|\.$/g, '');
+        database.run(
+          `UPDATE usuarios SET username = ? WHERE id = ?`,
+          [generated || u.id.slice(0, 8), u.id]
+        );
+      }
+    } catch(e) { console.warn('username migration:', e.message); }
+
+    // Migración: asignar contraseña por defecto ('kalulu123') a usuarios sin password_hash
+    try {
+      const stmtSinPass = database.prepare(
+        `SELECT id FROM usuarios WHERE password_hash IS NULL OR password_hash = ''`
+      );
+      const sinPass = [];
+      while (stmtSinPass.step()) sinPass.push(stmtSinPass.getAsObject());
+      stmtSinPass.free();
+
+      if (sinPass.length > 0) {
+        const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('kalulu123'));
+        const defaultHash = Array.from(new Uint8Array(buf))
+          .map(b => b.toString(16).padStart(2, '0')).join('');
+        for (const u of sinPass) {
+          database.run(
+            `UPDATE usuarios SET password_hash = ? WHERE id = ?`,
+            [defaultHash, u.id]
+          );
+        }
+        console.log(`🔑 ${sinPass.length} usuario(s) sin contraseña recibieron la clave por defecto: kalulu123`);
+      }
+    } catch(e) { console.warn('password_hash migration:', e.message); }
+
+    // ── Consumo Interno — tabla dedicada para mayor trazabilidad ──────────────
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS consumo_interno (
+          id TEXT PRIMARY KEY,
+          producto_id TEXT NOT NULL REFERENCES productos(id),
+          sucursal_id TEXT REFERENCES sucursales(id),
+          usuario_id TEXT NOT NULL REFERENCES usuarios(id),
+          cantidad REAL NOT NULL,
+          costo_unitario REAL DEFAULT 0,
+          motivo TEXT,
+          observaciones TEXT,
+          fecha TEXT NOT NULL,
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
+        )
+      `);
+    } catch(e) { console.warn('consumo_interno:', e.message); }
 
     await saveDatabase();
     console.log('✅ All tables created');
@@ -747,6 +888,56 @@
     }
   }
 
+  /**
+   * Insert a snapshot of the current stock into historial_stock.
+   * Call this immediately after any UPDATE/INSERT to the `stock` table.
+   * @param {string} productoId
+   * @param {string} sucursalId
+   */
+  function registrarHistorialStock(productoId, sucursalId) {
+    try {
+      const rows = query(
+        'SELECT cantidad FROM stock WHERE producto_id = ? AND sucursal_id = ?',
+        [productoId, sucursalId]
+      );
+      if (!rows.length) return;
+      const id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2) + Date.now().toString(36);
+      run(
+        `INSERT INTO historial_stock (id, producto_id, sucursal_id, stock_valor, registrado_en)
+         VALUES (?, ?, ?, ?, datetime('now'))`,
+        [id, productoId, sucursalId, rows[0].cantidad]
+      );
+    } catch(e) {
+      console.warn('registrarHistorialStock error:', e.message);
+    }
+  }
+
+  /**
+   * Count distinct calendar days in the last 6 months where stock was 0
+   * for a given product+branch.
+   * @param {string} productoId
+   * @param {string} sucursalId
+   * @returns {number}
+   */
+  function calcularDiasSinStock6m(productoId, sucursalId) {
+    try {
+      const rows = query(`
+        SELECT COUNT(DISTINCT DATE(registrado_en)) AS dias
+        FROM historial_stock
+        WHERE producto_id = ?
+          AND sucursal_id = ?
+          AND stock_valor = 0
+          AND registrado_en >= datetime('now', '-6 months')
+      `, [productoId, sucursalId]);
+      return rows.length ? (rows[0].dias || 0) : 0;
+    } catch(e) {
+      console.warn('calcularDiasSinStock6m error:', e.message);
+      return 0;
+    }
+  }
+
   function beginBatch() {
     batchMode = true;
     database.run('BEGIN TRANSACTION');
@@ -774,5 +965,7 @@
     isInitialized: () => db.isInitialized,
     usingOPFS: () => db.usingOPFS,
     useFeature: () => db.useFeature,
+    registrarHistorialStock,
+    calcularDiasSinStock6m,
   };
 })();

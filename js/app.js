@@ -26,7 +26,6 @@
     'pos': () => import('./modules/pos.js').then(m => m.default),
     'clientes': () => import('./modules/clientes.js').then(m => m.default),
     'caja': () => import('./modules/caja.js').then(m => m.default),
-    'compras': () => import('./modules/compras.js').then(m => m.default),
     'compras_v2': () => import('./modules/compras_v2.js').then(m => m.default),
     'operaciones_stock': () => import('./modules/operaciones_stock.js').then(m => m.default),
     'ordenes': () => import('./modules/ordenes.js').then(m => m.default),
@@ -36,6 +35,10 @@
     'informes': () => import('./modules/informes.js').then(m => m.default),
     'editor-producto': () => import('./modules/editor-producto.js').then(m => m.default),
     'cuenta_corriente_proveedores': () => import('./modules/cuenta_corriente_proveedores.js').then(m => m.default),
+    'usuarios': () => import('./modules/usuarios.js').then(m => m.default),
+    'consumo_interno': () => import('./modules/consumo_interno.js').then(m => m.default),
+    'vencimientos':    () => import('./modules/vencimientos.js').then(m => m.default),
+    'roturas':         () => import('./modules/roturas.js').then(m => m.default),
   };
 
   /**
@@ -133,7 +136,7 @@
       { name: 'productos', label: '📦 Productos' },
       { name: 'clientes', label: '👥 Clientes' },
       { name: 'caja', label: '💰 Caja' },
-      { name: 'compras', label: '📥 Compras' },
+      { name: 'compras_v2', label: '📥 Compras' },
       { name: 'operaciones_stock', label: '📦 Operaciones de Stock' },
       { name: 'ordenes', label: '📋 Órdenes' },
       { name: 'proveedores', label: '🏢 Proveedores' },
@@ -141,16 +144,20 @@
       { name: 'promociones', label: '🏷️ Promociones' },
       { name: 'etiquetas', label: '🏷️ Etiquetas' },
       { name: 'informes', label: '📊 Informes' },
+      { name: 'usuarios', label: '👤 Usuarios', adminOnly: true },
     ];
 
     const hasPendingResumen = !!localStorage.getItem('compras_resumen_pending');
+    const currentUserRole = app.user?.rol || window.SGA_Auth.getCurrentUser()?.rol;
 
-    navContainer.innerHTML = moduleList.map(({ name, label }) => {
-      const badge = (name === 'operaciones_stock' && hasPendingResumen)
-        ? ' <span style="display:inline-block;background:#ff8f00;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;vertical-align:middle;margin-left:4px;white-space:nowrap;">● Ajuste pendiente</span>'
-        : '';
-      return `<li><a href="#${name}" data-module="${name}" class="nav-link">${label}${badge}</a></li>`;
-    }).join('');
+    navContainer.innerHTML = moduleList
+      .filter(({ adminOnly }) => !adminOnly || currentUserRole === 'admin')
+      .map(({ name, label }) => {
+        const badge = (name === 'operaciones_stock' && hasPendingResumen)
+          ? ' <span style="display:inline-block;background:#ff8f00;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;vertical-align:middle;margin-left:4px;white-space:nowrap;">● Ajuste pendiente</span>'
+          : '';
+        return `<li><a href="#${name}" data-module="${name}" class="nav-link">${label}${badge}</a></li>`;
+      }).join('');
   }
 
   /**
@@ -232,7 +239,10 @@
       // Initialize database
       console.log('🔄 Initializing database...');
       await window.SGA_DB.initialize();
-      
+
+      // Restore session (must happen before checkAuth)
+      await window.SGA_Auth.initialize();
+
       // Auto-seed in dev mode if database is empty
       if (localStorage.getItem('dev_mode') === 'true') {
         const hasSucursales = window.SGA_DB.query('SELECT COUNT(*) as count FROM sucursales');

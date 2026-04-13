@@ -1,11 +1,229 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SGA - Etiquetas</title>
-</head>
-<body>
-  <div id="app-content"></div>
-</body>
-</html>
+<style>
+  /* ── ETIQUETAS ─────────────────────────────────────────────────── */
+  .etiq-root {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    background: var(--color-background);
+  }
+
+  .etiq-header {
+    background: linear-gradient(135deg, #1565c0 0%, #1976d2 100%);
+    color: white;
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    flex-shrink: 0;
+  }
+  .etiq-header h2 { margin: 0; font-size: 1.15rem; color: white; font-weight: 600; }
+  .etiq-header-actions { display: flex; gap: 8px; align-items: center; }
+
+  .etiq-body {
+    flex: 1;
+    padding: 24px 32px;
+    display: flex;
+    gap: 24px;
+    max-width: 900px;
+  }
+
+  /* Left column: search */
+  .etiq-col-search {
+    width: 380px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .etiq-section-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #888;
+    margin-bottom: 4px;
+  }
+
+  .etiq-search-wrap {
+    position: relative;
+  }
+
+  #etiq-busqueda {
+    width: 100%;
+    padding: 10px 14px;
+    font-size: 0.95rem;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    outline: none;
+    background: #fff;
+    box-sizing: border-box;
+  }
+  #etiq-busqueda:focus { border-color: #1976d2; box-shadow: 0 0 0 3px rgba(25,118,210,.12); }
+
+  .etiq-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: #fff;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.12);
+    z-index: 100;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+  .etiq-drop-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 0.88rem;
+  }
+  .etiq-drop-item:last-child { border-bottom: none; }
+  .etiq-drop-item:hover { background: #e3f2fd; }
+  .etiq-drop-item--focused { background: #bbdefb; outline: none; }
+  .etiq-drop-nombre { font-weight: 600; color: #222; line-height: 1.3; flex: 1; }
+  .etiq-drop-cod { font-size: 0.78rem; color: #888; }
+  .etiq-drop-precio { font-weight: 700; color: #1565c0; white-space: nowrap; }
+  .etiq-no-results { padding: 12px 14px; color: #999; font-size: 0.88rem; }
+
+  /* Right column: selected list */
+  .etiq-col-list {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .etiq-empty {
+    color: #aaa;
+    font-size: 0.9rem;
+    padding: 24px;
+    text-align: center;
+    border: 2px dashed #e0e0e0;
+    border-radius: 10px;
+  }
+
+  .etiq-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .etiq-item {
+    background: #fff;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.88rem;
+  }
+  .etiq-item-nombre { flex: 1; font-weight: 600; color: #222; line-height: 1.3; min-width: 0; word-wrap: break-word; }
+  .etiq-item-cod { font-size: 0.78rem; color: #888; white-space: nowrap; }
+  .etiq-item-precio { font-weight: 700; color: #1565c0; white-space: nowrap; }
+  .etiq-item-qty {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .etiq-item-qty button {
+    width: 26px;
+    height: 26px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #f5f5f5;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .etiq-item-qty button:hover { background: #e3f2fd; border-color: #1976d2; }
+  .etiq-item-qty input {
+    width: 40px;
+    text-align: center;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 3px 2px;
+    font-size: 0.9rem;
+  }
+  .etiq-item-remove {
+    width: 26px;
+    height: 26px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    color: #bbb;
+    font-size: 1rem;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+  }
+  .etiq-item-remove:hover { background: #ffebee; color: #c62828; }
+
+  .etiq-total-badge {
+    font-size: 0.78rem;
+    background: #1976d2;
+    color: white;
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-weight: 700;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+
+  .etiq-pending-banner {
+    background: #fff3e0;
+    border: 1px solid #ffcc02;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.88rem;
+    color: #e65100;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Print button states */
+  .btn-print {
+    background: #2e7d32;
+    color: white;
+    padding: 8px 18px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn-print:hover { background: #1b5e20; }
+  .btn-print:disabled { background: #aaa; cursor: not-allowed; }
+  .btn-clear {
+    background: transparent;
+    color: rgba(255,255,255,0.8);
+    border: 1px solid rgba(255,255,255,0.4);
+    padding: 7px 14px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .btn-clear:hover { background: rgba(255,255,255,0.1); color: white; }
+</style>
+
+<div id="app-content"></div>

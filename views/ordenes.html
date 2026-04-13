@@ -1,594 +1,450 @@
 <style>
-  /* ── ORDENES MODULE ─────────────────────────────────────────────────────── */
-  .ord-toolbar {
+  /* ── ÓRDENES DE COMPRA ─────────────────────────────────────────────────── */
+  .ord-root {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    background: var(--color-background-secondary, #f0f2f5);
+    font-size: 13px;
+  }
+
+  /* Header */
+  .ord-header {
+    background: linear-gradient(135deg, #1a2e4a 0%, #1e3a5f 100%);
+    color: white;
+    padding: 12px 24px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--color-border);
-    background: var(--color-background);
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    gap: 12px;
   }
-  .ord-toolbar h2 { margin: 0; font-size: 1.35rem; }
-  .ord-toolbar-right { display: flex; gap: 8px; }
+  .ord-header-left { display: flex; align-items: center; gap: 12px; }
+  .ord-header-title { font-size: 15px; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; }
+  .ord-btn-back {
+    background: rgba(255,255,255,0.12); color: white;
+    border: 1px solid rgba(255,255,255,0.3); padding: 5px 14px;
+    border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 500;
+  }
+  .ord-btn-back:hover { background: rgba(255,255,255,0.22); }
+  .ord-btn-primary {
+    background: #43a047; color: white; border: none;
+    padding: 7px 18px; border-radius: 6px; font-size: 13px;
+    font-weight: 700; cursor: pointer;
+  }
+  .ord-btn-primary:hover { background: #388e3c; }
 
-  /* Tabs */
-  .ord-tabs {
-    display: flex;
-    gap: 0;
-    border-bottom: 1px solid var(--color-border);
-    padding: 0 20px;
-    background: var(--color-background);
-  }
-  .ord-tab {
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    padding: 10px 18px;
-    font-size: 14px;
-    cursor: pointer;
-    color: var(--color-text-secondary);
-    margin-bottom: -1px;
-  }
-  .ord-tab.active {
-    color: var(--color-primary);
-    border-bottom-color: var(--color-primary);
-    font-weight: 600;
-  }
+  /* ── LISTA VIEW ────────────────────────────────────────────────────────── */
+  .ord-lista-wrap { flex: 1; padding: 24px 28px; }
 
-  /* Table */
-  .ord-table-wrap { padding: 20px; overflow-x: auto; }
-  .ord-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .ord-filter-bar {
+    display: flex; gap: 4px; margin-bottom: 18px;
+    border-bottom: 2px solid #d0d7e3;
+  }
+  .ord-filter-tab {
+    padding: 7px 18px; border: none; background: none;
+    font-size: 13px; font-weight: 600; color: #607080;
+    cursor: pointer; border-radius: 6px 6px 0 0;
+    border-bottom: 3px solid transparent; margin-bottom: -2px;
+  }
+  .ord-filter-tab.active {
+    color: #1e3a5f; border-bottom-color: #1e3a5f; background: white;
+  }
+  .ord-filter-tab:hover:not(.active) { background: #e8ecf0; }
+
+  .ord-table-wrap { background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 6px rgba(0,0,0,0.08); }
+  .ord-table { width: 100%; border-collapse: collapse; }
   .ord-table th {
-    text-align: left;
-    padding: 8px 12px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--color-text-secondary);
-    border-bottom: 1px solid var(--color-border);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    padding: 9px 12px; text-align: left; font-weight: 700; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    color: #607080; border-bottom: 2px solid #e0e6ee; background: #f8f9fb;
   }
-  .ord-table td { padding: 10px 12px; border-bottom: 1px solid var(--color-border); vertical-align: middle; }
+  .ord-table td { padding: 10px 12px; border-bottom: 1px solid #eef0f3; color: #2a3a4a; }
   .ord-table tr:last-child td { border-bottom: none; }
-  .ord-table tr:hover td { background: var(--color-surface); }
-  .ord-empty { padding: 48px; text-align: center; color: var(--color-text-secondary); }
+  .ord-table tr:hover td { background: #f5f7fa; }
+  .ord-empty {
+    text-align: center; padding: 48px 0; color: #8090a0; font-size: 14px;
+  }
 
   /* Estado badges */
   .ord-badge {
-    display: inline-block;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 12px;
+    display: inline-block; padding: 2px 10px; border-radius: 10px;
+    font-size: 11px; font-weight: 700; white-space: nowrap;
+  }
+  .ord-badge-borrador   { background: #fff3e0; color: #e65100; }
+  .ord-badge-revisada   { background: #e3f2fd; color: #1565c0; }
+  .ord-badge-confirmada { background: #e8f5e9; color: #2e7d32; }
+  .ord-badge-enviada    { background: #f3e5f5; color: #6a1b9a; }
+  .ord-badge-recibiendo { background: #fce4ec; color: #880e4f; }
+  .ord-badge-cerrada    { background: #eceff1; color: #546e7a; }
+
+  .ord-btn-sm {
+    padding: 4px 12px; border: 1px solid #c8d0dc; background: white;
+    border-radius: 4px; cursor: pointer; font-size: 12px; color: #445566;
+  }
+  .ord-btn-sm:hover { background: #f0f4f8; }
+  .ord-btn-sm-primary {
+    padding: 4px 12px; border: none; background: #1e3a5f;
+    border-radius: 4px; cursor: pointer; font-size: 12px; color: white;
+  }
+  .ord-btn-sm-primary:hover { background: #162d4a; }
+  .ord-btn-eliminar { color: #c0392b; border-color: #e8b4b0; padding: 4px 8px; }
+  .ord-btn-eliminar:hover { background: #fde8e8; border-color: #c0392b; }
+
+  /* ── ORDEN VIEW ────────────────────────────────────────────────────────── */
+  .ord-orden-root { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+  /* Tab bar */
+  .ord-tab-bar {
+    display: flex; align-items: flex-end; gap: 2px;
+    padding: 8px 16px 0; background: #1e3a5f;
+    overflow-x: auto; flex-shrink: 0;
+  }
+  .ord-tab-bar::-webkit-scrollbar { height: 4px; }
+  .ord-tab-bar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.3); border-radius: 2px; }
+
+  .ord-tab {
+    padding: 7px 16px; border-radius: 6px 6px 0 0;
+    font-size: 12px; font-weight: 600; cursor: pointer;
+    white-space: nowrap; border: none; transition: background 0.12s;
+    flex-shrink: 0;
+    background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.7);
+  }
+  .ord-tab:hover { background: rgba(255,255,255,0.22); color: white; }
+  .ord-tab.active { background: white; color: #1e3a5f; }
+  .ord-tab-badge {
+    display: inline-block; margin-left: 6px; padding: 0 6px;
+    border-radius: 8px; font-size: 10px;
+    background: rgba(255,255,255,0.25); color: inherit;
+  }
+  .ord-tab.active .ord-tab-badge { background: #e0e6ee; }
+
+  /* Orden body */
+  .ord-orden-body {
+    flex: 1; display: flex; flex-direction: column;
+    overflow: hidden; background: white;
+  }
+
+  /* Orden info bar */
+  .ord-orden-infobar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 10px 20px; border-bottom: 1px solid #e0e6ee;
+    background: #f8f9fb; flex-shrink: 0;
+  }
+  .ord-orden-infobar-proveedor { font-size: 15px; font-weight: 800; color: #1a2e4a; }
+  .ord-orden-infobar-fecha { font-size: 12px; color: #607080; }
+  .ord-notas-input {
+    flex: 1; min-width: 180px; padding: 4px 8px;
+    border: 1px solid #d0d7e3; border-radius: 5px;
+    font-size: 12px; color: #445566;
+  }
+  .ord-notas-input:focus { outline: none; border-color: #1e3a5f; }
+
+  /* Items table */
+  .ord-items-wrap { flex: 1; overflow: auto; }
+  .ord-items-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .ord-items-table th {
+    position: sticky; top: 0; z-index: 2;
+    padding: 8px 8px; text-align: right;
+    font-weight: 700; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.03em; color: #607080;
+    background: #f0f2f5; border-bottom: 2px solid #d0d7e3;
     white-space: nowrap;
   }
-  .ord-badge-borrador      { background: #e0e0e0; color: #424242; }
-  .ord-badge-enviada       { background: #1565C0; color: white; }
-  .ord-badge-recibiendo    { background: #E65100; color: white; }
-  .ord-badge-recibida_parcial { background: #F57F17; color: white; }
-  .ord-badge-cerrada       { background: #2E7D32; color: white; }
-  .ord-badge-pendiente_pago { background: #C62828; color: white; }
+  .ord-items-table th:first-child,
+  .ord-items-table th:nth-child(2) { text-align: left; }
+  .ord-items-table td {
+    padding: 6px 8px; border-bottom: 1px solid #eef0f3;
+    text-align: right; color: #2a3a4a; white-space: nowrap;
+  }
+  .ord-items-table td:first-child,
+  .ord-items-table td:nth-child(2) { text-align: left; white-space: normal; }
+  .ord-items-table td:nth-child(2) { min-width: 160px; }
+  .ord-items-table tr:hover td { background: #f8f9fb; }
 
-  /* ── MODAL SHARED ───────────────────────────────────────────────────────── */
+  .ord-cell-input {
+    width: 72px; padding: 3px 6px;
+    border: 1px solid #d0d7e3; border-radius: 4px;
+    font-size: 12px; text-align: right; background: white;
+  }
+  .ord-cell-input:focus { outline: none; border-color: #1e3a5f; background: #f0f4ff; }
+  .ord-cell-input-text { text-align: left; width: 130px; }
+  .ord-cell-apedir {
+    background: #fffde7; border-color: #f9a825; font-weight: 700; width: 72px;
+  }
+  .ord-cell-apedir:focus { background: #fff9c4; border-color: #f57f17; }
+
+  .ord-dias-ok   { color: #2e7d32; }
+  .ord-dias-warn { color: #e65100; font-weight: 600; }
+  .ord-dias-crit { color: #b71c1c; font-weight: 700; }
+
+  .ord-btn-del {
+    background: none; border: none; cursor: pointer;
+    color: #c0392b; font-size: 16px; padding: 2px 4px;
+    border-radius: 4px; line-height: 1;
+  }
+  .ord-btn-del:hover { background: #fde8e8; }
+
+  /* A pedir — display bloqueado + lápiz */
+  .ord-apedir-wrap {
+    display: flex; align-items: center; gap: 5px;
+    background: #fffde7; border: 1px solid #f9a825;
+    border-radius: 4px; padding: 3px 7px;
+    white-space: nowrap;
+  }
+  .ord-apedir-label { font-weight: 700; font-size: 12px; color: #2a3a4a; flex: 1; }
+  .ord-btn-edit-cant {
+    background: none; border: none; cursor: pointer;
+    color: #8090a0; font-size: 13px; padding: 0 2px; line-height: 1;
+    flex-shrink: 0;
+  }
+  .ord-btn-edit-cant:hover { color: #1e3a5f; }
+  .ord-btn-exportar { background: #e8eaf6; color: #3949ab; border: 1px solid #c5cae9; }
+  .ord-btn-exportar:hover { background: #c5cae9; }
+  .ord-btn-exportar:disabled { opacity: 0.6; cursor: default; }
+
+  /* Overlay editar cantidad */
+  .ord-editcant-box {
+    background: white; border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    width: 320px; max-width: 95vw;
+  }
+  .ord-editcant-body {
+    padding: 20px; display: flex; flex-direction: column; gap: 12px;
+  }
+  .ord-editcant-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.04em; color: #607080; margin-bottom: 4px;
+  }
+  .ord-editcant-row {
+    display: flex; gap: 10px; align-items: flex-end;
+  }
+  .ord-editcant-input {
+    flex: 0 0 90px; padding: 7px 10px; border: 1px solid #d0d7e3;
+    border-radius: 6px; font-size: 14px; font-weight: 700; text-align: right;
+  }
+  .ord-editcant-input:focus { outline: none; border-color: #1e3a5f; background: #f0f4ff; }
+  .ord-editcant-select {
+    flex: 1; padding: 7px 10px; border: 1px solid #d0d7e3;
+    border-radius: 6px; font-size: 13px; background: white;
+  }
+  .ord-editcant-select:focus { outline: none; border-color: #1e3a5f; }
+
+  /* Action bar */
+  .ord-action-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 12px 20px; border-top: 1px solid #e0e6ee;
+    background: #f8f9fb; flex-shrink: 0;
+  }
+  .ord-action-bar-left { flex: 1; display: flex; gap: 8px; align-items: center; }
+  .ord-action-bar-right { display: flex; gap: 8px; }
+
+  .ord-btn-action {
+    padding: 8px 20px; border-radius: 6px; font-size: 13px;
+    font-weight: 700; cursor: pointer; border: none;
+  }
+  .ord-btn-save      { background: #e8f5e9; color: #2e7d32; }
+  .ord-btn-save:hover { background: #c8e6c9; }
+  .ord-btn-revisar   { background: #e3f2fd; color: #1565c0; }
+  .ord-btn-revisar:hover { background: #bbdefb; }
+  .ord-btn-confirmar { background: #1e3a5f; color: white; }
+  .ord-btn-confirmar:hover { background: #162d4a; }
+  .ord-btn-enviar    { background: #6a1b9a; color: white; }
+  .ord-btn-enviar:hover { background: #4a148c; }
+  .ord-btn-add       { background: #fff8e1; color: #f57f17; border: 1px solid #ffcc02; }
+  .ord-btn-add:hover { background: #fff3cd; }
+
+  /* ── MODALES ───────────────────────────────────────────────────────────── */
   .ord-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.45);
-    z-index: 300;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center; z-index: 300;
   }
-  .ord-modal {
-    background: var(--color-background);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg);
-    width: 100%;
-    max-width: 640px;
-    max-height: 90vh;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
+  .ord-overlay-box {
+    background: white; border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    display: flex; flex-direction: column; overflow: hidden;
   }
-  .ord-modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--color-border);
-    position: sticky;
-    top: 0;
-    background: var(--color-background);
-    z-index: 1;
+  .ord-overlay-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 20px; border-bottom: 1px solid #e0e6ee;
+    font-weight: 700; font-size: 15px; color: #1a2e4a; flex-shrink: 0;
   }
-  .ord-modal-header h3 { margin: 0; font-size: 1.05rem; }
-  .ord-modal-body { padding: 20px; flex: 1; }
-  .ord-modal-footer {
-    padding: 14px 20px;
-    border-top: 1px solid var(--color-border);
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    position: sticky;
-    bottom: 0;
-    background: var(--color-background);
+  .ord-overlay-close {
+    background: none; border: none; font-size: 22px;
+    color: #8090a0; cursor: pointer; line-height: 1;
   }
+  .ord-overlay-close:hover { color: #445566; }
+  .ord-overlay-body { overflow-y: auto; flex: 1; padding: 16px 20px; }
+  .ord-overlay-footer {
+    padding: 12px 20px; border-top: 1px solid #e0e6ee;
+    display: flex; justify-content: flex-end; gap: 10px; flex-shrink: 0;
+  }
+  .ord-btn-cancel {
+    padding: 8px 20px; border-radius: 6px; font-size: 13px;
+    font-weight: 600; cursor: pointer; background: #eef0f3;
+    color: #445566; border: none;
+  }
+  .ord-btn-cancel:hover { background: #e0e4e8; }
 
-  /* Steps indicator */
-  .ord-steps {
-    display: flex;
-    gap: 0;
-    padding: 14px 20px;
-    border-bottom: 1px solid var(--color-border);
+  /* Generar modal — provider list */
+  .ord-prov-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: 8px; cursor: pointer;
+    border: 1px solid #e0e6ee; margin-bottom: 6px; transition: background 0.1s;
   }
-  .ord-step-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    color: var(--color-text-secondary);
-    flex: 1;
-  }
-  .ord-step-item.active { color: var(--color-primary); font-weight: 600; }
-  .ord-step-item.done { color: #2E7D32; }
-  .ord-step-num {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: var(--color-border);
-    color: var(--color-text-secondary);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 11px;
-    font-weight: 700;
-    flex-shrink: 0;
-  }
-  .ord-step-item.active .ord-step-num { background: var(--color-primary); color: white; }
-  .ord-step-item.done .ord-step-num { background: #2E7D32; color: white; }
+  .ord-prov-item:hover { background: #f5f7fa; }
+  .ord-prov-item.today { border-color: #43a047; background: #f1f8e9; }
+  .ord-prov-item input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; flex-shrink: 0; }
+  .ord-prov-name { font-weight: 600; color: #1a2e4a; flex: 1; }
+  .ord-prov-day  { font-size: 11px; color: #43a047; font-weight: 700; }
 
-  /* Form helpers */
-  .ord-form-group { margin-bottom: 16px; }
-  .ord-form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
-  .ord-form-group input,
-  .ord-form-group select,
-  .ord-form-group textarea {
-    width: 100%;
+  /* Buscar producto */
+  .ord-search-input {
+    width: 100%; padding: 8px 12px; border: 1px solid #d0d7e3;
+    border-radius: 6px; font-size: 13px; margin-bottom: 10px;
     box-sizing: border-box;
-    padding: 8px 10px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    font-size: 14px;
-    background: var(--color-background);
-    color: var(--color-text);
   }
-  .ord-search-wrap { position: relative; }
-  .ord-dropdown {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    background: var(--color-background);
-    border: 1px solid var(--color-border);
-    border-top: none;
-    border-radius: 0 0 var(--radius-md) var(--radius-md);
-    box-shadow: var(--shadow-md);
-    max-height: 200px;
-    overflow-y: auto;
-    z-index: 10;
+  .ord-search-result {
+    padding: 8px 12px; border-radius: 6px; cursor: pointer;
+    border: 1px solid #e0e6ee; margin-bottom: 4px;
+    display: flex; justify-content: space-between; align-items: center;
   }
-  .ord-dropdown-item {
-    padding: 8px 12px;
-    cursor: pointer;
-    font-size: 13px;
-  }
-  .ord-dropdown-item:hover { background: var(--color-surface); }
-
-  /* Items list in nueva orden */
-  .ord-items-list { margin-top: 12px; }
-  .ord-item-row {
-    display: grid;
-    grid-template-columns: 1fr 100px 110px 32px;
-    gap: 8px;
-    align-items: center;
-    padding: 8px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    margin-bottom: 6px;
-    font-size: 13px;
-  }
-  .ord-item-row input { padding: 4px 6px; font-size: 13px; }
-  .ord-item-remove {
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: var(--color-text-secondary);
-    font-size: 16px;
-    padding: 0;
-    line-height: 1;
-  }
-  .ord-item-remove:hover { color: #C62828; }
-  .ord-subtotal { font-size: 14px; font-weight: 600; margin-top: 12px; text-align: right; }
-
-  /* ── RECEPCIÓN FULL-SCREEN ──────────────────────────────────────────────── */
-  #ord-recepcion-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 400;
-    background: var(--color-background);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .ord-rec-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 20px;
-    border-bottom: 1px solid var(--color-border);
-    background: var(--color-background);
-    flex-shrink: 0;
-  }
-  .ord-rec-header h2 { margin: 0; font-size: 1.1rem; }
-  .ord-rec-layout {
-    display: grid;
-    grid-template-columns: 60% 40%;
-    flex: 1;
-    overflow: hidden;
-  }
-  .ord-rec-left {
-    display: flex;
-    flex-direction: column;
-    border-right: 1px solid var(--color-border);
-    overflow: hidden;
-  }
-  .ord-rec-scanner-wrap {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--color-border);
-    background: var(--color-surface);
-    flex-shrink: 0;
-  }
-  .ord-rec-scanner-wrap input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 10px 14px;
-    border: 2px solid var(--color-primary);
-    border-radius: var(--radius-md);
-    font-size: 15px;
-    background: var(--color-background);
-    color: var(--color-text);
-    outline: none;
-  }
-  .ord-rec-items-wrap { flex: 1; overflow-y: auto; }
-  .ord-rec-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .ord-rec-table th {
-    position: sticky;
-    top: 0;
-    background: var(--color-surface);
-    padding: 8px 10px;
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--color-text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    border-bottom: 1px solid var(--color-border);
-    text-align: left;
-  }
-  .ord-rec-table td { padding: 8px 10px; border-bottom: 1px solid var(--color-border); vertical-align: middle; }
-  .ord-rec-row-recibido td { background: #E8F5E9; }
-  .ord-rec-row-parcial td { background: #FFF8E1; }
-  .ord-rec-row-no_entregado td { background: #FFEBEE; color: #999; }
-  .ord-rec-qty-ctrl { display: flex; align-items: center; gap: 4px; }
-  .ord-rec-qty-ctrl button {
-    width: 24px; height: 24px;
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    background: var(--color-surface);
-    cursor: pointer;
-    font-size: 14px;
-    line-height: 1;
-    display: flex; align-items: center; justify-content: center;
-  }
-  .ord-rec-qty-ctrl input {
-    width: 52px; text-align: center;
-    padding: 3px 4px;
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: 13px;
-  }
-  .ord-rec-costo-input {
-    width: 80px;
-    padding: 3px 6px;
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: 13px;
-  }
-  .ord-rec-right {
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto;
-    padding: 16px;
-    gap: 12px;
-  }
-  .ord-rec-summary-card {
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    padding: 14px;
-  }
-  .ord-rec-summary-card h3 { margin: 0 0 12px; font-size: 0.95rem; }
-  .ord-rec-stat { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
-  .ord-rec-stat-val { font-weight: 600; }
-  .ord-rec-progress-bar {
-    height: 8px;
-    background: var(--color-border);
-    border-radius: 4px;
-    overflow: hidden;
-    margin-top: 10px;
-  }
-  .ord-rec-progress-fill { height: 100%; background: var(--color-primary); border-radius: 4px; transition: width 0.3s; }
-  .ord-rec-pct { font-size: 12px; color: var(--color-text-secondary); margin-top: 4px; text-align: right; }
-  .ord-rec-pendientes-card {
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    padding: 14px;
-    flex: 1;
-  }
-  .ord-rec-pendientes-card h3 { margin: 0 0 10px; font-size: 0.9rem; color: var(--color-text-secondary); }
-  .ord-rec-pendiente-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 6px 0;
-    border-bottom: 1px solid var(--color-border);
-    font-size: 13px;
-  }
-  .ord-rec-pendiente-item:last-child { border-bottom: none; }
-  .ord-rec-confirmar-wrap { margin-top: auto; }
-
-  /* Alert banner within recepcion */
-  .ord-scan-alert {
-    margin: 8px 16px;
-    padding: 10px 14px;
-    border-radius: var(--radius-md);
-    font-size: 13px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-  .ord-scan-alert-yellow { background: #FFF8E1; border: 1px solid #FFB300; }
-  .ord-scan-alert-red    { background: #FFEBEE; border: 1px solid #EF9A9A; }
-  .ord-scan-alert-actions { display: flex; gap: 6px; flex-shrink: 0; }
-
-  /* Discrepancia modal — larger */
-  #ord-disc-overlay .ord-modal { max-width: 520px; }
-  .ord-disc-options { display: grid; gap: 8px; margin-top: 12px; }
-  .ord-disc-option {
-    padding: 12px 14px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    font-size: 14px;
-    background: var(--color-background);
-    transition: border-color 0.15s, background 0.15s;
-    text-align: left;
-    width: 100%;
-  }
-  .ord-disc-option:hover { border-color: var(--color-primary); background: var(--color-surface); }
-  .ord-disc-option-icon { font-size: 18px; flex-shrink: 0; }
-  .ord-disc-option-label { font-weight: 600; }
-  .ord-disc-option-desc { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; }
-
-  /* Pago modal */
-  .ord-pago-total { font-size: 1.4rem; font-weight: 700; margin-bottom: 16px; }
-  .ord-pago-opts { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
-  .ord-pago-opt {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    font-size: 14px;
-  }
-  .ord-pago-opt.selected { border-color: var(--color-primary); background: var(--color-surface); }
-  .ord-pago-monto-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
-  .ord-pago-monto-row label { font-size: 13px; flex-shrink: 0; }
-  .ord-pago-monto-row input { flex: 1; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: 15px; }
-
-  /* Costos modal */
-  .ord-costos-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
-  .ord-costos-table th { padding: 6px 10px; font-size: 11px; font-weight: 600; color: var(--color-text-secondary); text-transform: uppercase; border-bottom: 1px solid var(--color-border); text-align: left; }
-  .ord-costos-table td { padding: 8px 10px; border-bottom: 1px solid var(--color-border); }
-  .ord-costos-diff-pos { color: #C62828; font-weight: 600; }
-  .ord-costos-diff-neg { color: #2E7D32; font-weight: 600; }
-  .ord-costos-check-row { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-top: 6px; }
-
-  /* Pagos pendientes view */
-  #ord-pagos-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 400;
-    background: var(--color-background);
-    display: flex;
-    flex-direction: column;
-  }
-  .ord-pagos-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--color-border);
-    flex-shrink: 0;
-  }
-  .ord-pagos-header h2 { margin: 0; font-size: 1.1rem; }
-  .ord-pagos-body { flex: 1; overflow-y: auto; padding: 20px; }
+  .ord-search-result:hover { background: #f5f7fa; }
 </style>
 
-<!-- ── MAIN LIST VIEW ──────────────────────────────────────────────────────── -->
-<div id="ord-main">
-  <div class="ord-toolbar">
-    <h2>📋 Órdenes de Compra</h2>
-    <div class="ord-toolbar-right">
-      <button class="btn btn-secondary" id="ord-btn-pagos">💰 Pagos pendientes (<span id="ord-pagos-count">0</span>)</button>
-      <button class="btn btn-primary" id="ord-btn-nueva">+ Nueva Orden</button>
+<div class="ord-root" id="ord-root">
+
+  <!-- HEADER -->
+  <div class="ord-header">
+    <div class="ord-header-left">
+      <button class="ord-btn-back" id="ord-btn-back" style="display:none">← Volver</button>
+      <span class="ord-header-title" id="ord-header-title">Órdenes de Compra</span>
+    </div>
+    <div>
+      <button class="ord-btn-primary" id="ord-btn-generar">+ Generar orden</button>
     </div>
   </div>
 
-  <div class="ord-tabs">
-    <button class="ord-tab active" data-tab="activas">Activas</button>
-    <button class="ord-tab" data-tab="cerradas">Cerradas</button>
-    <button class="ord-tab" data-tab="todas">Todas</button>
-  </div>
-
-  <div class="ord-table-wrap">
-    <table class="ord-table">
-      <thead>
-        <tr>
-          <th>Fecha</th>
-          <th>Proveedor</th>
-          <th>Items</th>
-          <th>Total estimado</th>
-          <th>Estado</th>
-          <th>Acciones</th>
-        </tr>
-      </thead>
-      <tbody id="ord-tbody"></tbody>
-    </table>
-    <div id="ord-empty" class="ord-empty" style="display:none">No hay órdenes para mostrar.</div>
-  </div>
-</div>
-
-<!-- ── NUEVA ORDEN MODAL ──────────────────────────────────────────────────── -->
-<div id="ord-nueva-overlay" class="ord-overlay" style="display:none">
-  <div class="ord-modal">
-    <div class="ord-modal-header">
-      <h3>Nueva Orden de Compra</h3>
-      <button class="btn btn-ghost" id="ord-nueva-close">✕</button>
+  <!-- VIEW: LISTA -->
+  <div id="ord-view-lista" class="ord-lista-wrap">
+    <div class="ord-filter-bar">
+      <button class="ord-filter-tab active" data-filter="activas">Activas</button>
+      <button class="ord-filter-tab" data-filter="enviadas">Enviadas</button>
+      <button class="ord-filter-tab" data-filter="historial">Historial</button>
     </div>
-    <div class="ord-steps" id="ord-nueva-steps"><!-- rendered by JS --></div>
-    <div class="ord-modal-body" id="ord-nueva-body"><!-- rendered by JS --></div>
-    <div class="ord-modal-footer" id="ord-nueva-footer"><!-- rendered by JS --></div>
-  </div>
-</div>
-
-<!-- ── RECEPCIÓN FULL-SCREEN ─────────────────────────────────────────────── -->
-<div id="ord-recepcion-overlay" style="display:none">
-  <div class="ord-rec-header">
-    <button class="btn btn-secondary" id="ord-rec-volver">← Volver</button>
-    <h2 id="ord-rec-titulo">📦 Recepción</h2>
-    <div style="width:100px"></div>
-  </div>
-  <div class="ord-rec-layout">
-    <!-- LEFT -->
-    <div class="ord-rec-left">
-      <div class="ord-rec-scanner-wrap">
-        <input id="ord-scanner-input" placeholder="Escanear código de barras..." autocomplete="off" spellcheck="false">
+    <div class="ord-table-wrap">
+      <table class="ord-table">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Proveedor</th>
+            <th style="text-align:center">Items</th>
+            <th>Estado</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ord-lista-tbody"></tbody>
+      </table>
+      <div id="ord-lista-empty" class="ord-empty" style="display:none">
+        No hay órdenes en este estado.
       </div>
-      <div id="ord-scan-alert-wrap"></div>
-      <div class="ord-rec-items-wrap">
-        <table class="ord-rec-table">
-          <thead>
-            <tr>
-              <th>Producto</th>
-              <th>Pedido</th>
-              <th>Recibido</th>
-              <th>Costo</th>
-              <th>Estado</th>
-              <th></th>
-            </tr>
+    </div>
+  </div>
+
+  <!-- VIEW: ORDEN -->
+  <div id="ord-view-orden" class="ord-orden-root" style="display:none">
+
+    <div class="ord-tab-bar" id="ord-tab-bar"></div>
+
+    <div class="ord-orden-body">
+
+      <div class="ord-orden-infobar">
+        <span class="ord-orden-infobar-proveedor" id="ord-infobar-proveedor"></span>
+        <span class="ord-badge" id="ord-infobar-badge"></span>
+        <span class="ord-orden-infobar-fecha" id="ord-infobar-fecha"></span>
+        <input class="ord-notas-input" id="ord-notas-input" placeholder="Notas de la orden…">
+      </div>
+
+      <div class="ord-items-wrap">
+        <table class="ord-items-table">
+          <thead id="ord-items-thead"></thead>
           </thead>
-          <tbody id="ord-rec-tbody"></tbody>
+          <tbody id="ord-items-tbody"></tbody>
         </table>
       </div>
-    </div>
-    <!-- RIGHT -->
-    <div class="ord-rec-right">
-      <div class="ord-rec-summary-card">
-        <h3>Resumen</h3>
-        <div id="ord-rec-stats"></div>
-        <div class="ord-rec-progress-bar">
-          <div class="ord-rec-progress-fill" id="ord-rec-progress-fill" style="width:0%"></div>
+
+      <div class="ord-action-bar">
+        <div class="ord-action-bar-left">
+          <button class="ord-btn-action ord-btn-add" id="ord-btn-add-item">+ Agregar producto</button>
         </div>
-        <div class="ord-rec-pct" id="ord-rec-pct">0%</div>
+        <div class="ord-action-bar-right" id="ord-action-btns"></div>
       </div>
-      <div class="ord-rec-pendientes-card">
-        <h3>Pendientes</h3>
-        <div id="ord-rec-pendientes"></div>
+
+    </div>
+  </div>
+
+</div><!-- ord-root -->
+
+<!-- MODAL: GENERAR ÓRDENES -->
+<div id="ord-generar-overlay" class="ord-overlay" style="display:none">
+  <div class="ord-overlay-box" style="width:520px;max-width:95vw;max-height:80vh">
+    <div class="ord-overlay-header">
+      <span>Generar órdenes de compra</span>
+      <button class="ord-overlay-close" id="ord-generar-close">×</button>
+    </div>
+    <div class="ord-overlay-body" id="ord-generar-body"></div>
+    <div class="ord-overlay-footer">
+      <button class="ord-btn-cancel" id="ord-generar-cancel">Cancelar</button>
+      <button class="ord-btn-action ord-btn-confirmar" id="ord-generar-ok">Generar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: AGREGAR PRODUCTO MANUAL -->
+<div id="ord-agregar-overlay" class="ord-overlay" style="display:none">
+  <div class="ord-overlay-box" style="width:440px;max-width:95vw;max-height:75vh">
+    <div class="ord-overlay-header">
+      <span>Agregar producto</span>
+      <button class="ord-overlay-close" id="ord-agregar-close">×</button>
+    </div>
+    <div class="ord-overlay-body">
+      <input class="ord-search-input" id="ord-agregar-search"
+             placeholder="Buscar por nombre o código de barras…" autocomplete="off">
+      <div id="ord-agregar-results"></div>
+    </div>
+  </div>
+</div>
+
+<!-- OVERLAY: EDITAR CANTIDAD A PEDIR -->
+<div id="ord-edit-cant-overlay" class="ord-overlay" style="display:none">
+  <div class="ord-editcant-box">
+    <div class="ord-overlay-header">
+      <span>Editar pedido</span>
+      <button class="ord-overlay-close" id="ord-editcant-close">×</button>
+    </div>
+    <div class="ord-editcant-body">
+      <div>
+        <div class="ord-editcant-label">Pedido sugerido</div>
+        <div class="ord-editcant-row">
+          <input type="number" id="ord-editcant-cant" class="ord-editcant-input"
+                 min="0" step="1" placeholder="0">
+          <select id="ord-editcant-unidad" class="ord-editcant-select">
+            <option value="unidad">Unidad</option>
+            <option value="kg">Kg</option>
+            <option value="bulto_cerrado">Bulto cerrado</option>
+            <option value="pack">Pack</option>
+            <option value="display">Display</option>
+            <option value="bolsa">Bolsa</option>
+          </select>
+        </div>
       </div>
-      <div class="ord-rec-confirmar-wrap">
-        <button class="btn btn-primary" id="ord-rec-confirmar" style="width:100%" disabled>
-          ✓ Confirmar Recepción
-        </button>
-      </div>
+    </div>
+    <div class="ord-overlay-footer">
+      <button class="ord-btn-cancel" id="ord-editcant-cancel">Cancelar</button>
+      <button class="ord-btn-action ord-btn-confirmar" id="ord-editcant-ok">Confirmar</button>
     </div>
   </div>
 </div>
 
-<!-- ── DISCREPANCIA MODAL ─────────────────────────────────────────────────── -->
-<div id="ord-disc-overlay" class="ord-overlay" style="display:none">
-  <div class="ord-modal" id="ord-disc-modal">
-    <div class="ord-modal-header">
-      <h3>⚠️ Código no encontrado</h3>
-      <button class="btn btn-ghost" id="ord-disc-close">✕</button>
-    </div>
-    <div class="ord-modal-body" id="ord-disc-body"><!-- rendered by JS --></div>
-  </div>
-</div>
-
-<!-- ── PAYMENT MODAL ──────────────────────────────────────────────────────── -->
-<div id="ord-pago-overlay" class="ord-overlay" style="display:none">
-  <div class="ord-modal">
-    <div class="ord-modal-header">
-      <h3 id="ord-pago-titulo">💳 Registrar pago</h3>
-      <button class="btn btn-ghost" id="ord-pago-close">✕</button>
-    </div>
-    <div class="ord-modal-body" id="ord-pago-body"><!-- rendered by JS --></div>
-    <div class="ord-modal-footer">
-      <button class="btn btn-secondary" id="ord-pago-cancelar">Cancelar</button>
-      <button class="btn btn-primary" id="ord-pago-confirmar">Confirmar</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── COST CHANGES MODAL ─────────────────────────────────────────────────── -->
-<div id="ord-costos-overlay" class="ord-overlay" style="display:none">
-  <div class="ord-modal" style="max-width:700px">
-    <div class="ord-modal-header">
-      <h3>📊 Cambios de costo detectados</h3>
-    </div>
-    <div class="ord-modal-body" id="ord-costos-body"><!-- rendered by JS --></div>
-    <div class="ord-modal-footer">
-      <button class="btn btn-primary" id="ord-costos-confirmar">Confirmar cambios de costo</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── PAGOS PENDIENTES VIEW ──────────────────────────────────────────────── -->
-<div id="ord-pagos-overlay" style="display:none">
-  <div class="ord-pagos-header">
-    <button class="btn btn-secondary" id="ord-pagos-volver">← Volver</button>
-    <h2>💰 Pagos Pendientes a Proveedores</h2>
-  </div>
-  <div class="ord-pagos-body">
-    <table class="ord-table">
-      <thead>
-        <tr>
-          <th>Proveedor</th>
-          <th>Fecha recepción</th>
-          <th>Total</th>
-          <th>Pagado</th>
-          <th>Pendiente</th>
-          <th>Acciones</th>
-        </tr>
-      </thead>
-      <tbody id="ord-pagos-tbody"></tbody>
-    </table>
-    <div id="ord-pagos-empty" class="ord-empty" style="display:none">No hay pagos pendientes.</div>
-  </div>
-</div>
+<script type="module" src="./js/modules/ordenes.js"></script>

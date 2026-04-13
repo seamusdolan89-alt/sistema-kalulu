@@ -1258,6 +1258,7 @@ const ComprasV2 = (() => {
             [item.productoId, user.sucursal_id, cantUds, ts, ts]
           );
         }
+        window.SGA_DB.registrarHistorialStock(item.productoId, user.sucursal_id);
 
         // Cost update (if changed)
         if (costoNvo > 0 && Math.abs(costoNvo - costoAnt) > 0.001) {
