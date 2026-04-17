@@ -221,7 +221,131 @@
     color: var(--color-text);
   }
   .prov-input:focus { outline: 2px solid var(--color-primary); border-color: transparent; }
+
+  /* ── ALIAS + IVA LABELS IN LIST ──────────────────────────────────────────── */
+  .prov-alias {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    background: #eef0ff;
+    border: 1px solid #c5caf5;
+    border-radius: 10px;
+    font-size: 11px;
+    color: #5060c8;
+    vertical-align: middle;
+  }
+  .prov-iva-label {
+    font-size: 11px;
+    color: var(--color-text-secondary);
+    margin-top: 2px;
+  }
+
+  /* ── MODAL SECTION SEPARATORS ────────────────────────────────────────────── */
+  .prov-section-sep {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--color-text-secondary);
+    margin-top: 4px;
+  }
+  .prov-section-sep::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--color-border);
+  }
+
+  /* ── CHECKBOX ROWS ───────────────────────────────────────────────────────── */
+  .prov-check-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .prov-check-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .prov-check-row:hover { background: var(--color-surface); }
+  .prov-check-row:focus {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 1px;
+    background: var(--color-surface);
+  }
+  /* Hide native checkbox visually, keep it in DOM for state */
+  .prov-check-row input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+  }
+  /* Custom checkbox box */
+  .prov-check-box {
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--color-border);
+    border-radius: 4px;
+    background: var(--color-background);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }
+  .prov-check-row input[type="checkbox"]:checked ~ .prov-check-box {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+  }
+  .prov-check-row input[type="checkbox"]:checked ~ .prov-check-box::after {
+    content: '';
+    display: block;
+    width: 5px;
+    height: 9px;
+    border: 2px solid white;
+    border-top: none;
+    border-left: none;
+    transform: rotate(45deg) translate(-1px, -1px);
+  }
+  .prov-check-text {
+    font-size: 13px;
+    color: var(--color-text);
+    font-weight: 500;
+  }
+
+  /* ── MODAL WIDTH ─────────────────────────────────────────────────────────── */
+  .prov-modal { max-width: 580px; }
+
+  /* ── FORM ERROR ──────────────────────────────────────────────────────────── */
+  .prov-form-error {
+    color: var(--color-danger);
+    font-size: 13px;
+    margin: 4px 0 0;
+    padding: 6px 10px;
+    background: #fff0f0;
+    border-radius: var(--radius-sm);
+    border: 1px solid #fcc;
+  }
+
+  /* ── KBD HINT IN FOOTER ──────────────────────────────────────────────────── */
+  .prov-kbd-hint {
+    font-size: 11px;
+    color: var(--color-text-secondary);
+    margin-right: auto;
+    opacity: 0.7;
+  }
 </style>
 
 <div id="prov-root"></div>
 <div id="prov-modal-overlay" class="prov-modal-overlay hidden"></div>
+<div id="prov-import-overlay" class="prov-modal-overlay hidden"></div>

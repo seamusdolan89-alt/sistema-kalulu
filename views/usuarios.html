@@ -22,6 +22,23 @@
   </table>
 </div>
 
+<!-- Herramientas de desarrollo -->
+<div class="card" style="margin-top: var(--spacing-lg); border: 2px solid #ffb300;">
+  <div style="padding: 16px 20px;">
+    <h3 style="margin: 0 0 6px; font-size: 1rem; color: #e65100;">⚠️ Herramientas de desarrollo</h3>
+    <p style="margin: 0 0 14px; font-size: 13px; color: var(--color-text-secondary);">
+      Estas acciones son destructivas e irreversibles. Usar solo en entorno de desarrollo antes de la migración final.
+    </p>
+    <button class="btn" id="btn-reset-db"
+      style="background:#e53935;color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:14px;cursor:pointer;font-weight:600;">
+      Borrar base de datos completa
+    </button>
+    <p style="margin: 10px 0 0; font-size: 12px; color: #999;">
+      Elimina todos los datos (productos, ventas, clientes, etc.). Los proveedores se pueden recuperar desde el Excel exportado. Después del borrado la app se recarga automáticamente.
+    </p>
+  </div>
+</div>
+
 <!-- Modal: Crear / Editar usuario -->
 <div id="modal-usuario" class="modal-overlay" style="display:none;">
   <div class="modal-container" style="max-width:440px;">

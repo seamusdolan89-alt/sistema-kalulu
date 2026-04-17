@@ -157,7 +157,11 @@ const EditorProducto = (() => {
       ? (p.precio_venta / p.costo).toFixed(2)
       : '0.00';
 
-    const esMadre   = p.es_madre === 1 || p.es_madre === '1';
+    const tieneHijos = window.SGA_DB.query(
+      'SELECT 1 FROM productos WHERE producto_madre_id = ? AND activo = 1 LIMIT 1',
+      [p.id]
+    ).length > 0;
+    const esMadre = p.es_madre === 1 || p.es_madre === '1' || tieneHijos;
     const tieneMadre = !!p.producto_madre_id;
 
     const unidades = ['unidad', 'kg', 'lt', 'mt', 'caja', 'par'];
@@ -908,6 +912,12 @@ const EditorProducto = (() => {
     const referenciaId   = refRow.length ? refRow[0].referencia_id : null;
     const referenciaInfo = refRow.length ? refRow[0] : null;
 
+    // Check if THIS product is itself a referencia for other products
+    const esReferencia = window.SGA_DB.query(
+      `SELECT COUNT(*) AS cnt FROM producto_sustitutos WHERE referencia_id = ? AND producto_id != ?`,
+      [state.productoId, state.productoId]
+    )[0]?.cnt > 0;
+
     let html = '';
 
     // Explanation
@@ -1010,6 +1020,44 @@ const EditorProducto = (() => {
           </div>
           <small class="ed-text-muted">Escribí el nombre o escaneá un código (Enter para seleccionar)</small>
         </div>`;
+    }
+
+    // If this product IS the referencia for other products, show those members
+    if (esReferencia) {
+      const miembros = window.SGA_DB.query(`
+        SELECT ps.producto_id, ps.activo, p.nombre,
+          cb.codigo AS codigo_barras,
+          COALESCE(st.cantidad, 0) AS stock
+        FROM producto_sustitutos ps
+        JOIN productos p ON p.id = ps.producto_id
+        LEFT JOIN codigos_barras cb ON cb.producto_id = ps.producto_id AND cb.es_principal = 1
+        LEFT JOIN stock st ON st.producto_id = ps.producto_id AND st.sucursal_id = ?
+        WHERE ps.referencia_id = ? AND ps.producto_id != ?
+        ORDER BY p.nombre
+      `, [sucursal_id, state.productoId, state.productoId]);
+
+      html += `
+        <div style="margin-top:${referenciaId ? '20px' : '0'}">
+          <div style="padding:8px 12px;background:#e8f5e9;border-radius:var(--radius-md);margin-bottom:12px;font-size:13px;color:#2e7d32;font-weight:600">
+            Este producto es la referencia de un grupo. Los siguientes productos apuntan a él para reposición:
+          </div>
+          <div style="border:1px solid var(--color-border);border-radius:var(--radius-md);overflow:hidden">
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead><tr style="background:var(--color-surface)">
+                <th style="padding:7px 10px;text-align:left;font-weight:600">Nombre</th>
+                <th style="padding:7px 10px;text-align:left;font-weight:600">Código</th>
+                <th style="padding:7px 10px;text-align:right;font-weight:600">Stock</th>
+              </tr></thead>
+              <tbody>
+      `;
+      miembros.forEach(m => {
+        html += `<tr style="border-top:1px solid var(--color-border)">
+          <td style="padding:7px 10px">${escapeHtml(m.nombre)}</td>
+          <td style="padding:7px 10px;color:var(--color-text-secondary)">${escapeHtml(m.codigo_barras || '—')}</td>
+          <td style="padding:7px 10px;text-align:right">${m.stock}</td>
+        </tr>`;
+      });
+      html += `</tbody></table></div></div>`;
     }
 
     list.innerHTML = html;
@@ -1325,7 +1373,11 @@ const EditorProducto = (() => {
   // ── FAMILIA SECTION ───────────────────────────────────────────────────────
 
   const renderFamilia = () => {
-    const esMadre = state.producto.es_madre === 1 || state.producto.es_madre === '1';
+    const tieneHijos = window.SGA_DB.query(
+      'SELECT 1 FROM productos WHERE producto_madre_id = ? AND activo = 1 LIMIT 1',
+      [state.producto.id]
+    ).length > 0;
+    const esMadre = state.producto.es_madre === 1 || state.producto.es_madre === '1' || tieneHijos;
     const madrePanel = ge('ed-familia-madre-panel');
     const hijoPanel  = ge('ed-familia-hijo-panel');
     if (madrePanel) madrePanel.style.display = esMadre ? '' : 'none';

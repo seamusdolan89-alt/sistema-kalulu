@@ -203,6 +203,32 @@ const UsuariosModule = (() => {
     document.getElementById('usuario-username').addEventListener('input', (e) => {
       e.target.value = e.target.value.toLowerCase().replace(/[^a-z0-9._]/g, '');
     });
+
+    document.getElementById('btn-reset-db').addEventListener('click', resetDB);
+  }
+
+  async function resetDB() {
+    const confirmMsg =
+      '⚠️ ATENCIÓN: Esta acción borrará TODA la base de datos (productos, ventas, clientes, stock, etc.).\n\n' +
+      'Los proveedores NO se recuperan automáticamente — asegurate de haber exportado el Excel antes.\n\n' +
+      '¿Confirmar borrado total?';
+    if (!confirm(confirmMsg)) return;
+    if (!confirm('Segunda confirmación: ¿Estás seguro? No hay vuelta atrás.')) return;
+
+    try {
+      // Borrar archivo OPFS
+      if (navigator.storage && navigator.storage.getDirectory) {
+        const root = await navigator.storage.getDirectory();
+        await root.removeEntry('sga.db').catch(() => {});
+      }
+      // Borrar fallback localStorage
+      localStorage.removeItem('sga_db');
+
+      alert('Base de datos borrada. La aplicación se va a recargar.');
+      location.reload();
+    } catch (e) {
+      alert('Error al borrar la base de datos: ' + e.message);
+    }
   }
 
   return { init };

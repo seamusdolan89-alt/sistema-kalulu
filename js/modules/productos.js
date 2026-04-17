@@ -686,7 +686,11 @@
       const sucursal_id = window.SGA_Auth.getCurrentUser()?.sucursal_id || '1';
       const exportRows = window.SGA_DB.query(`
         SELECT p.*,
-          cb.codigo                               AS codigo_barras,
+          cb.codigo                               AS codigo_barras_principal,
+          (SELECT GROUP_CONCAT(c2.codigo, ';')
+           FROM codigos_barras c2
+           WHERE c2.producto_id = p.id
+           ORDER BY c2.es_principal DESC, c2.codigo ASC) AS todos_codigos_barras,
           cat.nombre                              AS categoria_nombre,
           prov.razon_social                       AS proveedor_nombre,
           alt_prov.razon_social                   AS proveedor_alternativo_nombre,
@@ -708,7 +712,7 @@
       `, [sucursal_id]);
 
       dataRows = exportRows.map(p => [
-        p.codigo_barras || '',
+        p.todos_codigos_barras || p.codigo_barras_principal || '',
         p.nombre || '',
         p.costo || 0,
         p.precio_venta || 0,
@@ -1193,11 +1197,15 @@
         const pedidoUnidad = m('pedido_sugerido_unidad')
           ? (String(fila.pedido_sugerido_unidad || '').trim() || null) : undefined;
 
-        // Find existing product by barcode
+        // Split multiple barcodes (separator: ;)
+        const codigos = codigo.split(';').map(c => c.trim()).filter(Boolean);
+        const codigoPrincipal = codigos[0] || '';
+
+        // Find existing product by any of its barcodes
         let producto_id = null;
-        if (codigo) {
-          const cb = window.SGA_DB.query('SELECT producto_id FROM codigos_barras WHERE codigo = ?', [codigo]);
-          if (cb.length) producto_id = cb[0].producto_id;
+        for (const cod of codigos) {
+          const cb = window.SGA_DB.query('SELECT producto_id FROM codigos_barras WHERE codigo = ?', [cod]);
+          if (cb.length) { producto_id = cb[0].producto_id; break; }
         }
         // Fallback: find by exact name
         if (!producto_id && nombre) {
@@ -1264,16 +1272,16 @@
           results.importados++;
         }
 
-        // Upsert barcode
-        if (codigo) {
-          const existing = window.SGA_DB.query('SELECT id FROM codigos_barras WHERE codigo = ?', [codigo]);
+        // Upsert all barcodes (first = principal)
+        codigos.forEach((cod, i) => {
+          const existing = window.SGA_DB.query('SELECT id FROM codigos_barras WHERE codigo = ?', [cod]);
           if (!existing.length) {
             window.SGA_DB.run(
-              'INSERT INTO codigos_barras (id, producto_id, codigo, es_principal) VALUES (?, ?, ?, 1)',
-              [window.SGA_Utils.generateUUID(), producto_id, codigo]
+              'INSERT INTO codigos_barras (id, producto_id, codigo, es_principal) VALUES (?, ?, ?, ?)',
+              [window.SGA_Utils.generateUUID(), producto_id, cod, i === 0 ? 1 : 0]
             );
           }
-        }
+        });
 
         // Upsert stock — only if stock_actual was mapped
         if (stock_actual !== undefined) {
