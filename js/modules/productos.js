@@ -1128,7 +1128,10 @@
       if (!nombre) return null;
       const key = nombre.toLowerCase().trim();
       if (provCache[key] !== undefined) return provCache[key];
-      const rows = window.SGA_DB.query('SELECT id FROM proveedores WHERE LOWER(razon_social) = ?', [key]);
+      const rows = window.SGA_DB.query(
+        'SELECT id FROM proveedores WHERE LOWER(razon_social) = ? OR LOWER(COALESCE(alias,\'\')) = ? LIMIT 1',
+        [key, key]
+      );
       if (rows.length) { provCache[key] = rows[0].id; return rows[0].id; }
       if (!createProvs) { provCache[key] = null; return null; }
       const id = window.SGA_Utils.generateUUID();

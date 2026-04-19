@@ -31,15 +31,26 @@ const ComprasV2 = (() => {
     proveedorSaldo:     0,      // positive = nosotros le debemos | negative = nos deben
     aplicarSaldo:       false,
     condicionPago:      'pendiente',
+    condicionCompra:    '',     // Factura A / B / C / Remito / Ticket
     facturaPv:          '',
     numeroFactura:      '',
     fecha:              todayDate(),
     fechaVencimiento:   '',
     totalFactura:       0,
+    subtotalNeto:       0,      // solo Factura A
+    iva105:             0,
+    iva21:              0,
+    impInterno:         0,
+    percepcionIva:      0,
+    percepcionIibb:     0,
     items:              [],     // cart items
     pausadaId:          null,
     sesionActiva:       null,
     currentUser:        null,
+    // provider fiscal info (read-only, from DB)
+    proveedorCondicionIva:  null,
+    proveedorAgRetIva:      0,
+    proveedorAgRetIibb:     0,
     // transient UI
     searchResults:        [],
     searchHighlight:      -1,
@@ -47,6 +58,10 @@ const ComprasV2 = (() => {
     provResults:          [],
     provHighlight:        -1,
     herenciaSincronizados: [], // products synced via herencia modal during post-compra
+    // remito mode
+    modoRemito:          false,
+    vinculandoRemitoId:  null,
+    remitoNumero:        '',
   };
 
   // ── DB helpers ───────────────────────────────────────────────────────────────
@@ -57,6 +72,14 @@ const ComprasV2 = (() => {
       [proveedorId]
     );
     return parseFloat(r[0]?.saldo) || 0;
+  }
+
+  function getRemitosCount(proveedorId) {
+    const r = db().query(
+      `SELECT COUNT(*) AS n FROM remitos WHERE estado='pendiente'${proveedorId ? ' AND proveedor_id=?' : ''}`,
+      proveedorId ? [proveedorId] : []
+    );
+    return parseInt(r[0]?.n) || 0;
   }
 
   function getSesionActiva(sucursalId) {
@@ -102,6 +125,217 @@ const ComprasV2 = (() => {
     return Math.max(0, calcTotal() - calcSaldoAplicado());
   }
 
+  // ── Cabecera helpers ────────────────────────────────────────────────────────
+  function isFacturaA() { return state.condicionCompra === 'Factura A'; }
+
+  function renderFiscalBadges() {
+    const el = ge('cv2-fiscal-badges');
+    if (!el) return;
+    if (!state.proveedorId) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    const badges = [];
+    if (state.proveedorCondicionIva) {
+      badges.push(`<span class="cv2-fiscal-badge cv2-fiscal-badge-iva">${esc(state.proveedorCondicionIva)}</span>`);
+    }
+    if (state.proveedorAgRetIva)  badges.push(`<span class="cv2-fiscal-badge cv2-fiscal-badge-ret">Ag. Ret. IVA</span>`);
+    if (state.proveedorAgRetIibb) badges.push(`<span class="cv2-fiscal-badge cv2-fiscal-badge-ret">Ag. Ret. IIBB</span>`);
+    el.innerHTML = badges.join('');
+    el.style.display = badges.length ? 'flex' : 'none';
+  }
+
+  function toggleModoRemito() {
+    state.modoRemito = !state.modoRemito;
+    if (state.modoRemito) {
+      // reset factura fields
+      state.condicionCompra = '';
+      state.facturaPv = '';
+      state.numeroFactura = '';
+      state.totalFactura = 0;
+      const sel = ge('cv2-condicion-compra');
+      if (sel) sel.value = '';
+    }
+    const btn = ge('cv2-btn-sin-factura');
+    if (btn) {
+      btn.classList.toggle('active', state.modoRemito);
+      btn.setAttribute('aria-checked', state.modoRemito ? 'true' : 'false');
+    }
+    const pausarBtn = ge('cv2-btn-pausar');
+    if (pausarBtn) pausarBtn.style.display = state.modoRemito ? 'none' : '';
+    renderCabeceraFields();
+  }
+
+  function updateRemitoBadge() {
+    const badge = ge('cv2-remitos-badge');
+    if (!badge) return;
+    const n = getRemitosCount(null);
+    badge.textContent = n;
+    badge.style.display = n > 0 ? 'block' : 'none';
+  }
+
+  function renderCabeceraFields() {
+    const remito    = state.modoRemito;
+    const isA       = isFacturaA();
+    const hasCond   = !!state.condicionCompra;
+    const fiscalFld = ge('cv2-cab-fiscal-fields');
+    const totalWrap = ge('cv2-fiscal-total-wrap');
+    const hint      = ge('cv2-cab-hint-text');
+    const totalInp  = ge('cv2-total-factura');
+
+    // toggle between normal and remito field panels
+    const camposFactura = ge('cv2-campos-factura');
+    const camposRemito  = ge('cv2-campos-remito');
+    if (camposFactura) camposFactura.style.display = remito ? 'none' : '';
+    if (camposRemito)  camposRemito.style.display  = remito ? ''     : 'none';
+
+    if (!remito) {
+      if (hint)      hint.style.display      = hasCond ? 'none'  : 'block';
+      if (fiscalFld) fiscalFld.style.display = isA     ? 'flex'  : 'none';
+      if (totalWrap) totalWrap.style.display = hasCond ? 'flex'  : 'none';
+
+      if (totalInp) {
+        totalInp.readOnly         = isA;
+        totalInp.style.background = isA ? '#dce8f9' : '';
+        totalInp.style.cursor     = isA ? 'default' : '';
+      }
+    } else {
+      if (hint)      hint.style.display      = 'none';
+      if (fiscalFld) fiscalFld.style.display = 'none';
+      if (totalWrap) totalWrap.style.display = 'none';
+    }
+  }
+
+  function updateTotalFactura() {
+    if (!isFacturaA()) return;
+    const total = state.subtotalNeto + state.iva105 + state.iva21
+                + state.impInterno + state.percepcionIva + state.percepcionIibb;
+    state.totalFactura = total;
+    const inp = ge('cv2-total-factura');
+    if (inp) inp.value = total > 0 ? formatARS(total) : '';
+  }
+
+  function renderCollapsedBar() {
+    const el = ge('cv2-collapsed-bar');
+    if (!el) return;
+    const prov  = state.proveedorNombre || '—';
+    const fecha = (() => {
+      const src = state.modoRemito ? (state.fecha || '') : (state.fecha || '');
+      const [y, m, d] = src.split('-');
+      return d && m && y ? `${d}/${m}/${y}` : (src || '—');
+    })();
+
+    if (state.modoRemito) {
+      el.innerHTML = `
+        <div class="cv2-col-field">
+          <span class="cv2-col-label">Proveedor</span>
+          <span class="cv2-col-value">${esc(prov)}</span>
+        </div>
+        <div class="cv2-col-sep"></div>
+        <div class="cv2-col-field">
+          <span class="cv2-col-label">Modo</span>
+          <span class="cv2-col-value" style="color:#ffb74d">📦 Remito sin factura</span>
+        </div>
+        <div class="cv2-col-sep"></div>
+        <div class="cv2-col-field">
+          <span class="cv2-col-label">Nro. Remito</span>
+          <span class="cv2-col-value">${esc(state.remitoNumero || '—')}</span>
+        </div>
+        <div class="cv2-col-sep"></div>
+        <div class="cv2-col-field">
+          <span class="cv2-col-label">Fecha</span>
+          <span class="cv2-col-value">${esc(fecha)}</span>
+        </div>
+        <button class="cv2-col-edit" id="cv2-col-edit-btn">Editar Datos</button>
+      `;
+      el.style.display = 'flex';
+      ge('cv2-col-edit-btn')?.addEventListener('click', showCabecera);
+      return;
+    }
+
+    const cond  = state.condicionCompra || '—';
+    const fact  = state.facturaPv && state.numeroFactura
+      ? `${state.facturaPv}-${state.numeroFactura}`
+      : (state.numeroFactura || state.facturaPv || '—');
+    const total = state.totalFactura > 0 ? formatARS(state.totalFactura) : '—';
+    el.innerHTML = `
+      <div class="cv2-col-field">
+        <span class="cv2-col-label">Proveedor</span>
+        <span class="cv2-col-value">${esc(prov)}</span>
+      </div>
+      <div class="cv2-col-sep"></div>
+      <div class="cv2-col-field">
+        <span class="cv2-col-label">Condición</span>
+        <span class="cv2-col-value">${esc(cond)}</span>
+      </div>
+      <div class="cv2-col-sep"></div>
+      <div class="cv2-col-field">
+        <span class="cv2-col-label">Factura</span>
+        <span class="cv2-col-value">${esc(fact)}</span>
+      </div>
+      <div class="cv2-col-sep"></div>
+      <div class="cv2-col-field">
+        <span class="cv2-col-label">Fecha</span>
+        <span class="cv2-col-value">${esc(fecha)}</span>
+      </div>
+      <div class="cv2-col-sep"></div>
+      <div class="cv2-col-field">
+        <span class="cv2-col-label">Total Factura</span>
+        <span class="cv2-col-value">${esc(total)}</span>
+      </div>
+      <button class="cv2-col-edit" id="cv2-col-edit-btn">Editar Cabecera</button>
+    `;
+    el.style.display = 'flex';
+    ge('cv2-col-edit-btn')?.addEventListener('click', showCabecera);
+  }
+
+  function showCabecera() {
+    const cab  = ge('cv2-cabecera');
+    const cart = ge('cv2-carrito-wrap');
+    if (cab)  cab.style.display  = 'flex';
+    if (cart) cart.style.display = 'none';
+    setTimeout(() => ge('cv2-prov-search')?.focus(), 50);
+  }
+
+  function showCarrito() {
+    const cab  = ge('cv2-cabecera');
+    const cart = ge('cv2-carrito-wrap');
+    if (cab)  cab.style.display  = 'none';
+    if (cart) cart.style.display = 'flex';
+
+    // Banner vincular
+    const vincBanner = ge('cv2-vincular-banner');
+    if (vincBanner) {
+      vincBanner.style.display = state.vinculandoRemitoId ? 'flex' : 'none';
+      const numEl = ge('cv2-vincular-remito-num');
+      if (numEl) numEl.textContent = state.remitoNumero || state.vinculandoRemitoId?.slice(-6).toUpperCase();
+    }
+
+    // Table: toggle remito mode class
+    const tbl = ge('cv2-cart-table');
+    if (tbl) tbl.classList.toggle('cv2-cart-remito', state.modoRemito);
+
+    // Summary bar: hide monetary totals in remito mode
+    const summaryTotals = document.querySelector('.cv2-summary-totals');
+    if (summaryTotals) summaryTotals.style.display = state.modoRemito ? 'none' : '';
+    const controlLine = ge('cv2-control-line');
+    if (controlLine && state.modoRemito) controlLine.style.display = 'none';
+
+    // Confirm button label
+    const confirmBtn = ge('cv2-btn-confirmar');
+    if (confirmBtn) confirmBtn.textContent = state.modoRemito ? '✓ Confirmar Ingreso' : '→ Siguiente · F10';
+
+    // In vincular mode with pre-loaded items, hide search bar (quantities are locked to the remito)
+    const searchBarRow = document.querySelector('.cv2-search-bar-row');
+    if (searchBarRow) searchBarRow.style.display = (state.vinculandoRemitoId && state.items.length > 0) ? 'none' : '';
+
+    renderCollapsedBar();
+    renderProveedorPanel();
+    renderEfectivoInfo();
+    renderCart();
+    updateConfirmBtn();
+    if (!state.vinculandoRemitoId || state.items.length === 0) {
+      setTimeout(() => ge('cv2-search')?.focus(), 50);
+    }
+  }
+
   // ── Cart render ──────────────────────────────────────────────────────────────
   function renderCart() {
     const tbody = ge('cv2-cart-body');
@@ -133,16 +367,17 @@ const ComprasV2 = (() => {
           <td class="cv2-td-present">${parseFloat(it.udsPaquete) || 1} × ${esc(it.unidadCompra || 'Unidad')}</td>
           <td class="cv2-td-right">
             <input type="number" class="cv2-num-input" value="${it.cantidad}"
-                   min="0.001" step="any" style="width:62px"
-                   data-idx="${i}" data-field="cantidad">
+                   min="0.001" step="any" style="width:62px${state.vinculandoRemitoId ? ';background:#f0f4f8;color:#546e7a' : ''}"
+                   data-idx="${i}" data-field="cantidad"
+                   ${state.vinculandoRemitoId ? 'readonly tabindex="-1" title="Cantidad bloqueada (del remito)"' : ''}>
           </td>
-          <td class="cv2-td-costo-actual">${fmt$(it.costoActual)}</td>
-          <td class="cv2-td-right">
+          <td class="cv2-td-costo-actual cv2-td-costo-actual">${fmt$(it.costoActual)}</td>
+          <td class="cv2-td-right cv2-td-nuevo-costo">
             <input type="number" class="cv2-num-input nuevo-costo" value="${parseFloat(it.costoNuevo).toFixed(2)}"
                    min="0" step="any" style="width:80px"
                    data-idx="${i}" data-field="costoNuevo">
           </td>
-          <td class="cv2-td-right">
+          <td class="cv2-td-right cv2-td-descuento">
             <div style="display:flex;gap:3px;justify-content:flex-end">
               <input type="number" class="cv2-num-input" value="${parseFloat(it.descuento || 0).toFixed(1)}"
                      min="0" max="100" step="0.1" style="width:50px" placeholder="%"
@@ -152,9 +387,10 @@ const ComprasV2 = (() => {
                      data-idx="${i}" data-field="descuentoMonto" title="Descuento ($)">
             </div>
           </td>
-          <td class="cv2-subtotal cv2-td-right">${fmt$(sub)}</td>
+          <td class="cv2-subtotal cv2-td-right cv2-td-subtotal">${fmt$(sub)}</td>
           <td class="cv2-td-center">
-            <button class="cv2-remove-btn" data-idx="${i}" title="Quitar">×</button>
+            <button class="cv2-remove-btn" data-idx="${i}" title="Quitar"
+                    ${state.vinculandoRemitoId ? 'style="visibility:hidden"' : ''}>×</button>
           </td>
         </tr>
       `;
@@ -264,11 +500,32 @@ const ComprasV2 = (() => {
     const btn = ge('cv2-btn-confirmar');
     if (!btn) return;
     btn.disabled = !(state.proveedorId && state.items.length > 0);
-    // Red alert when control total doesn't match calculated total.
-    // Empty field (0) is treated as 0 — mismatches if neto > 0.
-    const neto = calcNeto();
-    const mismatch = Math.abs(state.totalFactura - neto) > 0.01 && neto > 0.001;
+
+    if (state.modoRemito) {
+      btn.classList.remove('cv2-btn-confirmar-alert');
+      return;
+    }
+
+    const neto    = calcNeto();
+    const control = isFacturaA() ? state.subtotalNeto : state.totalFactura;
+    const mismatch = control > 0.001 && Math.abs(control - neto) > 0.01 && neto > 0.001;
     btn.classList.toggle('cv2-btn-confirmar-alert', mismatch && !btn.disabled);
+
+    // Update control line in summary bar
+    const controlLine = ge('cv2-control-line');
+    if (controlLine) {
+      if (control > 0.001 && neto > 0.001) {
+        const label = isFacturaA() ? 'Subtotal Neto' : 'Total Factura';
+        controlLine.style.display = 'flex';
+        controlLine.innerHTML = `
+          <span class="cv2-control-label">${label}:</span>
+          <span class="cv2-control-value ${mismatch ? 'cv2-control-bad' : ''}">${formatARS(control)}</span>
+          <span class="cv2-control-badge ${mismatch ? 'cv2-control-badge-bad' : 'cv2-control-badge-ok'}">${mismatch ? '≠ carrito' : '= carrito'}</span>
+        `;
+      } else {
+        controlLine.style.display = 'none';
+      }
+    }
   }
 
   // ── Product search ───────────────────────────────────────────────────────────
@@ -812,8 +1069,9 @@ const ComprasV2 = (() => {
     if (!q || !q.trim()) return [];
     const like = `%${q.trim()}%`;
     return db().query(
-      `SELECT id, razon_social FROM proveedores WHERE activo=1 AND razon_social LIKE ? LIMIT 10`,
-      [like]
+      `SELECT id, razon_social, alias, condicion_iva, agente_retencion_iva, agente_retencion_iibb, condicion_compra
+       FROM proveedores WHERE activo=1 AND (razon_social LIKE ? OR alias LIKE ?) LIMIT 10`,
+      [like, like]
     );
   }
 
@@ -834,10 +1092,23 @@ const ComprasV2 = (() => {
     state.proveedorId     = prov.id;
     state.proveedorNombre = prov.razon_social;
     state.proveedorSaldo  = getProveedorSaldo(prov.id);
-    state.aplicarSaldo    = state.proveedorSaldo < -0.01; // auto-apply if they owe us
+    state.aplicarSaldo    = state.proveedorSaldo < -0.01;
 
-    state.provResults     = [];
-    state.provHighlight   = -1;
+    // Store fiscal info for badges
+    state.proveedorCondicionIva  = prov.condicion_iva  || null;
+    state.proveedorAgRetIva      = prov.agente_retencion_iva  ? 1 : 0;
+    state.proveedorAgRetIibb     = prov.agente_retencion_iibb ? 1 : 0;
+
+    // Pre-fill condicion_compra from provider default (user can change it)
+    if (prov.condicion_compra && !state.condicionCompra) {
+      state.condicionCompra = prov.condicion_compra;
+      const sel = ge('cv2-condicion-compra');
+      if (sel) sel.value = prov.condicion_compra;
+      renderCabeceraFields();
+    }
+
+    state.provResults   = [];
+    state.provHighlight = -1;
 
     const inp = ge('cv2-prov-search');
     if (inp) { inp.value = ''; inp.style.display = 'none'; }
@@ -850,16 +1121,24 @@ const ComprasV2 = (() => {
     if (card)   card.style.display = 'flex';
     if (nameEl) nameEl.textContent = prov.razon_social;
 
-    renderProveedorPanel();
-    renderTotals();
-    updateConfirmBtn();
+    renderFiscalBadges();
+
+    // Move focus to condicion_compra if not set, else to factura-pv
+    if (!state.condicionCompra) {
+      ge('cv2-condicion-compra')?.focus();
+    } else {
+      ge('cv2-factura-pv')?.focus();
+    }
   }
 
   function clearProveedor() {
-    state.proveedorId     = null;
-    state.proveedorNombre = null;
-    state.proveedorSaldo  = 0;
-    state.aplicarSaldo    = false;
+    state.proveedorId            = null;
+    state.proveedorNombre        = null;
+    state.proveedorSaldo         = 0;
+    state.aplicarSaldo           = false;
+    state.proveedorCondicionIva  = null;
+    state.proveedorAgRetIva      = 0;
+    state.proveedorAgRetIibb     = 0;
 
     const card = ge('cv2-prov-card');
     if (card) card.style.display = 'none';
@@ -867,9 +1146,7 @@ const ComprasV2 = (() => {
     const inp = ge('cv2-prov-search');
     if (inp) { inp.value = ''; inp.style.display = 'block'; inp.focus(); }
 
-    renderProveedorPanel();
-    renderTotals();
-    updateConfirmBtn();
+    renderFiscalBadges();
   }
 
   // ── Pause / Resume ───────────────────────────────────────────────────────────
@@ -880,14 +1157,25 @@ const ComprasV2 = (() => {
     }
 
     const snapshot = JSON.stringify({
-      proveedorId:      state.proveedorId,
-      proveedorNombre:  state.proveedorNombre,
-      condicionPago:    state.condicionPago,
-      facturaPv:        state.facturaPv,
-      numeroFactura:    state.numeroFactura,
-      fecha:            state.fecha,
-      fechaVencimiento: state.fechaVencimiento,
-      items:            state.items,
+      proveedorId:         state.proveedorId,
+      proveedorNombre:     state.proveedorNombre,
+      condicionPago:       state.condicionPago,
+      condicionCompra:     state.condicionCompra,
+      facturaPv:           state.facturaPv,
+      numeroFactura:       state.numeroFactura,
+      fecha:               state.fecha,
+      fechaVencimiento:    state.fechaVencimiento,
+      totalFactura:        state.totalFactura,
+      subtotalNeto:        state.subtotalNeto,
+      iva105:              state.iva105,
+      iva21:               state.iva21,
+      impInterno:          state.impInterno,
+      percepcionIva:       state.percepcionIva,
+      percepcionIibb:      state.percepcionIibb,
+      proveedorCondicionIva:  state.proveedorCondicionIva,
+      proveedorAgRetIva:      state.proveedorAgRetIva,
+      proveedorAgRetIibb:     state.proveedorAgRetIibb,
+      items:               state.items,
     });
 
     const ts   = nowISO();
@@ -923,32 +1211,37 @@ const ComprasV2 = (() => {
   }
 
   function resetToNew() {
-    state.proveedorId      = null;
-    state.proveedorNombre  = null;
-    state.proveedorSaldo   = 0;
-    state.aplicarSaldo     = false;
-    state.condicionPago    = 'efectivo';
-    state.facturaPv        = '';
-    state.numeroFactura    = '';
-    state.fecha            = todayDate();
-    state.fechaVencimiento = '';
-    state.totalFactura     = 0;
-    state.items            = [];
-    state.pausadaId        = null;
+    state.proveedorId           = null;
+    state.proveedorNombre       = null;
+    state.proveedorSaldo        = 0;
+    state.aplicarSaldo          = false;
+    state.condicionPago         = 'pendiente';
+    state.condicionCompra       = '';
+    state.facturaPv             = '';
+    state.numeroFactura         = '';
+    state.fecha                 = todayDate();
+    state.fechaVencimiento      = '';
+    state.totalFactura          = 0;
+    state.subtotalNeto          = 0;
+    state.iva105                = 0;
+    state.iva21                 = 0;
+    state.impInterno            = 0;
+    state.percepcionIva         = 0;
+    state.percepcionIibb        = 0;
+    state.proveedorCondicionIva = null;
+    state.proveedorAgRetIva     = 0;
+    state.proveedorAgRetIibb    = 0;
+    state.items                 = [];
+    state.pausadaId             = null;
 
-    // Reset UI
+    // Reset cabecera UI
     const card = ge('cv2-prov-card');
     if (card) card.style.display = 'none';
     const provInp = ge('cv2-prov-search');
     if (provInp) { provInp.value = ''; provInp.style.display = 'block'; }
 
-    const radioEf = ge('cv2-radio-efectivo');
-    if (radioEf) radioEf.checked = true;
-    const chipEf  = ge('cv2-chip-efectivo');
-    const chipPe  = ge('cv2-chip-pendiente');
-    if (chipEf) chipEf.classList.add('cv2-chip-active');
-    if (chipPe) chipPe.classList.remove('cv2-chip-active');
-
+    const condSel = ge('cv2-condicion-compra');
+    if (condSel) condSel.value = '';
     const pvInp = ge('cv2-factura-pv');
     if (pvInp) pvInp.value = '';
     const facturaInp = ge('cv2-factura');
@@ -959,13 +1252,17 @@ const ComprasV2 = (() => {
     if (vencInp) vencInp.value = '';
     const tfInp = ge('cv2-total-factura');
     if (tfInp) tfInp.value = '';
+    ['cv2-subtotal-neto','cv2-iva-105','cv2-iva-21','cv2-imp-interno',
+     'cv2-percepcion-iva','cv2-percepcion-iibb'].forEach(id => {
+      const inp = ge(id); if (inp) inp.value = '';
+    });
+    renderFiscalBadges();
+    renderCabeceraFields();
 
     renderCart();
-    renderProveedorPanel();
-    renderEfectivoInfo();
     updateConfirmBtn();
     updatePausadasBtn();
-    ge('cv2-search')?.focus();
+    showCabecera();
   }
 
   function loadPausadas() {
@@ -1016,10 +1313,21 @@ const ComprasV2 = (() => {
     state.proveedorId      = snap.proveedorId      || null;
     state.proveedorNombre  = snap.proveedorNombre  || null;
     state.condicionPago    = snap.condicionPago    || 'pendiente';
+    state.condicionCompra  = snap.condicionCompra  || '';
     state.facturaPv        = snap.facturaPv        || '';
     state.numeroFactura    = snap.numeroFactura    || '';
     state.fecha            = snap.fecha            || todayDate();
     state.fechaVencimiento = snap.fechaVencimiento || '';
+    state.totalFactura     = snap.totalFactura     || 0;
+    state.subtotalNeto     = snap.subtotalNeto     || 0;
+    state.iva105           = snap.iva105           || 0;
+    state.iva21            = snap.iva21            || 0;
+    state.impInterno       = snap.impInterno       || 0;
+    state.percepcionIva    = snap.percepcionIva    || 0;
+    state.percepcionIibb   = snap.percepcionIibb   || 0;
+    state.proveedorCondicionIva  = snap.proveedorCondicionIva  || null;
+    state.proveedorAgRetIva      = snap.proveedorAgRetIva      || 0;
+    state.proveedorAgRetIibb     = snap.proveedorAgRetIibb     || 0;
     state.items            = snap.items            || [];
     state.pausadaId        = pausadaId;
 
@@ -1033,29 +1341,12 @@ const ComprasV2 = (() => {
     const nameEl = ge('cv2-prov-nombre');
     const provInp = ge('cv2-prov-search');
     if (state.proveedorNombre) {
-      if (card)    { card.style.display = 'flex'; }
-      if (nameEl)  { nameEl.textContent = state.proveedorNombre; }
-      if (provInp) { provInp.style.display = 'none'; }
+      if (card)    card.style.display = 'flex';
+      if (nameEl)  nameEl.textContent = state.proveedorNombre;
+      if (provInp) provInp.style.display = 'none';
     }
 
-    // Restore payment chip
-    const radioEf = ge('cv2-radio-efectivo');
-    const radioPe = ge('cv2-radio-pendiente');
-    const chipEf  = ge('cv2-chip-efectivo');
-    const chipPe  = ge('cv2-chip-pendiente');
-    if (state.condicionPago === 'pendiente') {
-      if (radioEf) radioEf.checked = false;
-      if (radioPe) radioPe.checked = true;
-      if (chipEf)  chipEf.classList.remove('cv2-chip-active');
-      if (chipPe)  chipPe.classList.add('cv2-chip-active');
-    } else {
-      if (radioEf) radioEf.checked = true;
-      if (radioPe) radioPe.checked = false;
-      if (chipEf)  chipEf.classList.add('cv2-chip-active');
-      if (chipPe)  chipPe.classList.remove('cv2-chip-active');
-    }
-
-    // Restore form fields
+    // Restore cabecera form fields
     const pvInp = ge('cv2-factura-pv');
     if (pvInp) pvInp.value = state.facturaPv;
     const facturaInp = ge('cv2-factura');
@@ -1064,17 +1355,32 @@ const ComprasV2 = (() => {
     if (fechaInp) fechaInp.value = state.fecha;
     const vencInp = ge('cv2-fecha-vencimiento');
     if (vencInp) vencInp.value = state.fechaVencimiento;
+    const condSel = ge('cv2-condicion-compra');
+    if (condSel) condSel.value = state.condicionCompra;
+    const tfInp = ge('cv2-total-factura');
+    if (tfInp) tfInp.value = state.totalFactura > 0 ? formatARS(state.totalFactura) : '';
+    const fiscalMap = {
+      'cv2-subtotal-neto': state.subtotalNeto,
+      'cv2-iva-105':       state.iva105,
+      'cv2-iva-21':        state.iva21,
+      'cv2-imp-interno':   state.impInterno,
+      'cv2-percepcion-iva':  state.percepcionIva,
+      'cv2-percepcion-iibb': state.percepcionIibb,
+    };
+    for (const [id, val] of Object.entries(fiscalMap)) {
+      const inp = ge(id);
+      if (inp) inp.value = val > 0 ? formatARS(val) : '';
+    }
+    renderFiscalBadges();
+    renderCabeceraFields();
 
     ge('cv2-pausadas-overlay').style.display = 'none';
 
     renderCart();
-    renderProveedorPanel();
-    renderEfectivoInfo();
-    updateConfirmBtn();
     updatePausadasBtn();
 
     window.SGA_Utils.showNotification(`Compra de ${state.proveedorNombre || 'proveedor'} retomada`, 'success');
-    ge('cv2-search')?.focus();
+    showCarrito();
   }
 
   function deletePausada(id) {
@@ -1123,6 +1429,11 @@ const ComprasV2 = (() => {
     if (!state.proveedorId)  { alert('Seleccioná un proveedor'); ge('cv2-prov-search')?.focus(); return; }
     if (!state.items.length) { alert('Agregá al menos un producto'); ge('cv2-search')?.focus();   return; }
 
+    if (state.modoRemito) {
+      commitRemito();
+      return;
+    }
+
     const neto    = calcNeto();
     const total   = calcTotal();
     const factStr = state.facturaPv && state.numeroFactura
@@ -1133,7 +1444,8 @@ const ComprasV2 = (() => {
       const [y, m, d] = (state.fecha || '').split('-');
       return d && m && y ? `${d}/${m}/${y}` : (state.fecha || '—');
     })();
-    const mismatch = neto > 0.001 && Math.abs(state.totalFactura - neto) > 0.01;
+    const control  = isFacturaA() ? state.subtotalNeto : state.totalFactura;
+    const mismatch = neto > 0.001 && control > 0.001 && Math.abs(control - neto) > 0.01;
 
     // Form bar
     const formBar = ge('cv2-rev-form-bar');
@@ -1152,13 +1464,17 @@ const ComprasV2 = (() => {
           <div class="cv2-rev-fb-value">${esc(fechaFmt)}</div>
         </div>
         <div class="cv2-rev-fb-field">
+          <div class="cv2-rev-fb-label">Cond. Compra</div>
+          <div class="cv2-rev-fb-value">${esc(state.condicionCompra || '—')}</div>
+        </div>
+        <div class="cv2-rev-fb-field">
           <div class="cv2-rev-fb-label">Condición de Pago</div>
           <div class="cv2-rev-fb-value">${esc(condStr)}</div>
         </div>
         <div class="cv2-rev-total-block">
           <div class="cv2-rev-total-label">Total Compra</div>
           <div class="cv2-rev-total-value">${fmt$(neto)}</div>
-          ${mismatch ? `<div class="cv2-rev-mismatch">⚠ No coincide con Total Factura (${fmt$(state.totalFactura)})</div>` : ''}
+          ${mismatch ? `<div class="cv2-rev-mismatch">⚠ No coincide con ${isFacturaA() ? 'Subtotal Neto' : 'Total Factura'} (${fmt$(control)})</div>` : ''}
         </div>
       `;
     }
@@ -1214,13 +1530,19 @@ const ComprasV2 = (() => {
       db().run(`
         INSERT INTO compras
           (id, sucursal_id, proveedor_id, usuario_id, fecha, numero_factura,
-           total, condicion_pago, estado, sync_status, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmada', 'pending', ?)
+           total, condicion_pago, estado, sync_status, updated_at,
+           factura_pv, subtotal_neto, iva_105, iva_21, imp_interno,
+           percepcion_iva, percepcion_iibb, total_factura, condicion_compra)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmada', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [compraId, user.sucursal_id, state.proveedorId, user.id,
           state.fecha, state.numeroFactura || null,
-          neto, state.condicionPago, ts]);
+          neto, state.condicionPago, ts,
+          state.facturaPv || null,
+          state.subtotalNeto, state.iva105, state.iva21, state.impInterno,
+          state.percepcionIva, state.percepcionIibb, state.totalFactura,
+          state.condicionCompra || null]);
 
-      // 2. Items: compra_items + stock + cost update
+      // 2. Items: compra_items + (stock if not vinculando) + cost update
       for (const item of state.items) {
         const cant    = parseFloat(item.cantidad)   || 0;
         const udsPaq  = parseFloat(item.udsPaquete) || 1;
@@ -1239,26 +1561,28 @@ const ComprasV2 = (() => {
             Math.abs(costoNvo - costoAnt) > 0.001 ? 1 : 0,
             item.unidadCompra || 'Unidad', udsPaq]);
 
-        // Stock: increment by total units
-        const stockRow = db().query(
-          `SELECT cantidad FROM stock WHERE producto_id=? AND sucursal_id=?`,
-          [item.productoId, user.sucursal_id]
-        )[0];
+        // Stock: only increment if NOT vinculando (remito already updated stock)
+        if (!state.vinculandoRemitoId) {
+          const stockRow = db().query(
+            `SELECT cantidad FROM stock WHERE producto_id=? AND sucursal_id=?`,
+            [item.productoId, user.sucursal_id]
+          )[0];
 
-        if (stockRow) {
-          db().run(
-            `UPDATE stock SET cantidad=cantidad+?, fecha_modificacion=?, sync_status='pending', updated_at=?
-             WHERE producto_id=? AND sucursal_id=?`,
-            [cantUds, ts, ts, item.productoId, user.sucursal_id]
-          );
-        } else {
-          db().run(
-            `INSERT INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at)
-             VALUES (?, ?, ?, ?, 'pending', ?)`,
-            [item.productoId, user.sucursal_id, cantUds, ts, ts]
-          );
+          if (stockRow) {
+            db().run(
+              `UPDATE stock SET cantidad=cantidad+?, fecha_modificacion=?, sync_status='pending', updated_at=?
+               WHERE producto_id=? AND sucursal_id=?`,
+              [cantUds, ts, ts, item.productoId, user.sucursal_id]
+            );
+          } else {
+            db().run(
+              `INSERT INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at)
+               VALUES (?, ?, ?, ?, 'pending', ?)`,
+              [item.productoId, user.sucursal_id, cantUds, ts, ts]
+            );
+          }
+          window.SGA_DB.registrarHistorialStock(item.productoId, user.sucursal_id);
         }
-        window.SGA_DB.registrarHistorialStock(item.productoId, user.sucursal_id);
 
         // Cost update (if changed)
         if (costoNvo > 0 && Math.abs(costoNvo - costoAnt) > 0.001) {
@@ -1267,6 +1591,14 @@ const ComprasV2 = (() => {
             [costoNvo, costoNvo * udsPaq, ts, item.productoId]
           );
         }
+      }
+
+      // 2b. If vinculando: mark remito as facturado
+      if (state.vinculandoRemitoId) {
+        db().run(
+          `UPDATE remitos SET estado='facturado', compra_id=?, updated_at=? WHERE id=?`,
+          [compraId, ts, state.vinculandoRemitoId]
+        );
       }
 
       // 3. Payment
@@ -1321,6 +1653,288 @@ const ComprasV2 = (() => {
       console.error('Error confirming compra:', e);
       alert('Error al confirmar la compra: ' + e.message);
     }
+  }
+
+  // ── Remito: commit ───────────────────────────────────────────────────────────
+  function commitRemito() {
+    const user     = state.currentUser;
+    const ts       = nowISO();
+    const remitoId = uuid();
+
+    // Ensure remito_items table exists (defensive, in case DB was created before this migration)
+    try {
+      db().run(`CREATE TABLE IF NOT EXISTS remito_items (
+        id TEXT PRIMARY KEY,
+        remito_id TEXT NOT NULL,
+        producto_id TEXT,
+        cantidad REAL NOT NULL,
+        unidad_compra TEXT DEFAULT 'Unidad',
+        unidades_por_paquete REAL DEFAULT 1
+      )`);
+    } catch(e) { /* already exists */ }
+
+    console.log('[commitRemito] items a guardar:', state.items.length, state.items.map(i => i.productoId));
+
+    try {
+      db().beginBatch();
+
+      db().run(`
+        INSERT INTO remitos
+          (id, sucursal_id, proveedor_id, usuario_id, fecha, numero_remito, estado, sync_status, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'pendiente', 'pending', ?)
+      `, [remitoId, user.sucursal_id, state.proveedorId, user.id,
+          state.fecha, state.remitoNumero || null, ts]);
+
+      for (const item of state.items) {
+        const cant   = parseFloat(item.cantidad)   || 0;
+        const udsPaq = parseFloat(item.udsPaquete) || 1;
+        const cantUds = cant * udsPaq;
+
+        db().run(`
+          INSERT INTO remito_items (id, remito_id, producto_id, cantidad, unidad_compra, unidades_por_paquete)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `, [uuid(), remitoId, item.productoId, cant, item.unidadCompra || 'Unidad', udsPaq]);
+
+        const stockRow = db().query(
+          `SELECT cantidad FROM stock WHERE producto_id=? AND sucursal_id=?`,
+          [item.productoId, user.sucursal_id]
+        )[0];
+        if (stockRow) {
+          db().run(
+            `UPDATE stock SET cantidad=cantidad+?, fecha_modificacion=?, sync_status='pending', updated_at=? WHERE producto_id=? AND sucursal_id=?`,
+            [cantUds, ts, ts, item.productoId, user.sucursal_id]
+          );
+        } else {
+          db().run(
+            `INSERT INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at) VALUES (?, ?, ?, ?, 'pending', ?)`,
+            [item.productoId, user.sucursal_id, cantUds, ts, ts]
+          );
+        }
+        window.SGA_DB.registrarHistorialStock(item.productoId, user.sucursal_id);
+      }
+
+      db().commitBatch();
+
+      // Verify items were saved
+      const savedItems = db().query(`SELECT COUNT(*) as n FROM remito_items WHERE remito_id = ?`, [remitoId]);
+      console.log('[commitRemito] ítems guardados en DB:', savedItems[0]?.n, '| remitoId:', remitoId);
+
+      showRemitoSuccess(remitoId);
+    } catch(e) {
+      db().rollbackBatch();
+      console.error('Error al guardar remito:', e);
+      alert('Error al guardar el remito: ' + e.message);
+    }
+  }
+
+  function showRemitoSuccess(remitoId) {
+    const root = ge('cv2-root');
+    if (!root) return;
+    const totalUds = state.items.reduce((s, it) => s + (parseFloat(it.cantidad) || 0) * (parseFloat(it.udsPaquete) || 1), 0);
+    root.innerHTML = `
+      <div style="display:flex;flex-direction:column;flex:1;overflow:hidden;background:#f0f2f5">
+        <div style="background:linear-gradient(135deg,#1a2e4a,#1e3a5f);color:white;padding:14px 24px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+          <div>
+            <div style="font-size:16px;font-weight:800;text-transform:uppercase">Remito Ingresado</div>
+            <div style="font-size:12px;opacity:.7">Stock actualizado · Pendiente de factura</div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;gap:20px;padding:40px 24px;text-align:center">
+          <div style="font-size:3rem">📦</div>
+          <h2 style="margin:0;font-size:1.4rem;color:#2e7d32">¡Remito ingresado correctamente!</h2>
+          <div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:10px;padding:16px 24px;font-size:14px;min-width:320px">
+            <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #c8e6c9">
+              <span style="color:#546e7a">Proveedor</span>
+              <strong>${esc(state.proveedorNombre || '—')}</strong>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #c8e6c9">
+              <span style="color:#546e7a">Nro. Remito</span>
+              <strong>${esc(state.remitoNumero || '—')}</strong>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #c8e6c9">
+              <span style="color:#546e7a">Productos</span>
+              <strong>${state.items.length}</strong>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding:7px 0">
+              <span style="color:#546e7a">Unidades ingresadas</span>
+              <strong>${totalUds}</strong>
+            </div>
+          </div>
+          <div style="background:#fff3e0;border:1.5px solid #ffb300;border-radius:8px;padding:12px 20px;font-size:13px;color:#e65100;max-width:380px">
+            ⏳ <strong>Pendiente de factura.</strong> Cuando recibas la factura, buscá este remito desde Cuentas Corrientes o el botón "📋 Remitos" y vinculalo.
+          </div>
+          <button onclick="window.location.hash='#pos'" style="background:#1565c0;color:white;border:none;border-radius:8px;padding:12px 32px;font-size:14px;font-weight:700;cursor:pointer">
+            Volver al inicio
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  // ── Remitos: panel de pendientes ──────────────────────────────────────────────
+  function openRemitosPanel() {
+    const overlay = ge('cv2-remitos-overlay');
+    if (!overlay) return;
+    renderRemitosList();
+    overlay.style.display = 'flex';
+  }
+
+  function renderRemitosList(filtroProveedorId = null) {
+    const listEl = ge('cv2-remitos-list');
+    if (!listEl) return;
+
+    const sql = filtroProveedorId
+      ? `SELECT r.*, p.razon_social as proveedor_nombre,
+               (SELECT COUNT(*) FROM remito_items ri WHERE ri.remito_id = r.id) as n_items
+         FROM remitos r JOIN proveedores p ON p.id = r.proveedor_id
+         WHERE r.estado='pendiente' AND r.proveedor_id=?
+         ORDER BY r.fecha DESC, r.rowid DESC`
+      : `SELECT r.*, p.razon_social as proveedor_nombre,
+               (SELECT COUNT(*) FROM remito_items ri WHERE ri.remito_id = r.id) as n_items
+         FROM remitos r JOIN proveedores p ON p.id = r.proveedor_id
+         WHERE r.estado='pendiente'
+         ORDER BY r.fecha DESC, r.rowid DESC`;
+
+    const rows = db().query(sql, filtroProveedorId ? [filtroProveedorId] : []);
+
+    if (!rows.length) {
+      listEl.innerHTML = `<div class="cv2-remitos-empty">No hay remitos pendientes de factura.</div>`;
+      return;
+    }
+
+    listEl.innerHTML = rows.map(r => {
+      const [y, m, d] = (r.fecha || '').split('-');
+      const fechaFmt = d && m && y ? `${d}/${m}/${y}` : (r.fecha || '—');
+      return `
+        <div class="cv2-remito-item">
+          <div class="cv2-remito-info">
+            <strong>${esc(r.proveedor_nombre)}</strong>
+            <span>Remito: <strong>${esc(r.numero_remito || '—')}</strong> · ${r.n_items} producto${r.n_items !== 1 ? 's' : ''}</span>
+            <span class="cv2-remito-meta">Fecha: ${fechaFmt}</span>
+          </div>
+          <div class="cv2-remito-actions">
+            <button class="cv2-btn-vincular" data-id="${esc(r.id)}">Vincular Factura →</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    listEl.querySelectorAll('.cv2-btn-vincular').forEach(btn => {
+      btn.addEventListener('click', () => {
+        ge('cv2-remitos-overlay').style.display = 'none';
+        vincularFacturaDesdeRemito(btn.dataset.id);
+      });
+    });
+  }
+
+  // ── Vincular factura a remito existente ──────────────────────────────────────
+  function vincularFacturaDesdeRemito(remitoId) {
+    const remito = db().query(
+      `SELECT r.*, p.razon_social as proveedor_nombre, p.condicion_iva,
+              p.agente_retencion_iva, p.agente_retencion_iibb, p.condicion_compra as cond_compra_prov
+       FROM remitos r JOIN proveedores p ON p.id = r.proveedor_id
+       WHERE r.id = ?`,
+      [remitoId]
+    )[0];
+    if (!remito) { alert('Remito no encontrado'); return; }
+
+    const items = db().query(
+      `SELECT ri.*, pr.nombre, pr.costo,
+              cb.codigo AS barcode
+       FROM remito_items ri
+       JOIN productos pr ON pr.id = ri.producto_id
+       LEFT JOIN codigos_barras cb ON cb.producto_id = pr.id AND cb.es_principal = 1
+       WHERE ri.remito_id = ?`,
+      [remitoId]
+    );
+    console.log('[vincular] remitoId:', remitoId, '| items del JOIN:', items.length, items);
+
+    // Reset state
+    state.modoRemito         = false;
+    state.vinculandoRemitoId = remitoId;
+    state.remitoNumero       = remito.numero_remito || '';
+    state.proveedorId        = remito.proveedor_id;
+    state.proveedorNombre    = remito.proveedor_nombre;
+    state.proveedorSaldo     = getProveedorSaldo(remito.proveedor_id);
+    state.aplicarSaldo       = state.proveedorSaldo < -0.01;
+    state.proveedorCondicionIva  = remito.condicion_iva || null;
+    state.proveedorAgRetIva      = remito.agente_retencion_iva  ? 1 : 0;
+    state.proveedorAgRetIibb     = remito.agente_retencion_iibb ? 1 : 0;
+    state.condicionCompra    = remito.cond_compra_prov || '';
+    state.fecha              = todayDate();
+    state.condicionPago      = 'pendiente';
+    state.items              = items.map(ri => ({
+      productoId:    ri.producto_id,
+      nombre:        ri.nombre,
+      barcode:       ri.barcode || '',
+      cantidad:      parseFloat(ri.cantidad) || 1,
+      udsPaquete:    parseFloat(ri.unidades_por_paquete) || 1,
+      unidadCompra:  ri.unidad_compra || 'Unidad',
+      costoActual:   parseFloat(ri.costo) || 0,
+      costoNuevo:    parseFloat(ri.costo) || 0,
+      descuento:     0,
+      descuentoMonto: 0,
+    }));
+
+    if (state.items.length === 0) {
+      const cnt = db().query(`SELECT COUNT(*) as n FROM remito_items WHERE remito_id = ?`, [remitoId]);
+      const n   = parseInt(cnt[0]?.n) || 0;
+      if (n === 0) {
+        window.SGA_Utils.showNotification(
+          'Este remito no tiene ítems registrados — puede haber sido creado con una versión anterior. Ingresá los productos manualmente.',
+          'warning'
+        );
+      } else {
+        window.SGA_Utils.showNotification(
+          `No se pudieron cargar los ${n} ítems del remito (error en la consulta). Reintentá o contactá soporte.`,
+          'error'
+        );
+      }
+    }
+
+    // Restore UI to cabecera with proveedor pre-selected
+    const cab  = ge('cv2-cabecera');
+    const cart = ge('cv2-carrito-wrap');
+    if (cab)  cab.style.display  = 'flex';
+    if (cart) cart.style.display = 'none';
+
+    // Show proveedor card (locked, no clear button)
+    const provInp  = ge('cv2-prov-search');
+    const provCard = ge('cv2-prov-card');
+    const provNom  = ge('cv2-prov-nombre');
+    const provClr  = ge('cv2-prov-clear');
+    if (provInp)  { provInp.value = ''; provInp.style.display = 'none'; }
+    if (provCard) provCard.style.display = 'flex';
+    if (provNom)  provNom.textContent = remito.proveedor_nombre;
+    if (provClr)  provClr.style.display = 'none';
+
+    // Pre-fill condicion_compra y sincronizar state desde el select actual
+    const condSel = ge('cv2-condicion-compra');
+    if (condSel) {
+      if (state.condicionCompra) condSel.value = state.condicionCompra;
+      // Re-read from the DOM element to ensure state matches what's displayed
+      state.condicionCompra = condSel.value || '';
+    }
+
+    // Pre-fill fecha
+    const fechaInp = ge('cv2-fecha');
+    if (fechaInp) fechaInp.value = state.fecha;
+
+    renderFiscalBadges();
+    renderCabeceraFields();
+
+    // Show vincular banner in cabecera section
+    const root = ge('cv2-root');
+    const existingBanner = root?.querySelector('.cv2-remito-banner');
+    if (existingBanner) existingBanner.remove();
+    const banner = document.createElement('div');
+    banner.className = 'cv2-remito-banner cv2-vincular-banner';
+    banner.innerHTML = `📎 Vinculando factura al remito <strong>${esc(state.remitoNumero || remitoId.slice(-6).toUpperCase())}</strong> de <strong>${esc(remito.proveedor_nombre)}</strong>. Ingresá los datos de la factura y revisá los costos.`;
+    cab?.insertBefore(banner, cab.firstChild);
+
+    // Hide Sin Factura toggle in vincular mode
+    const sinFact = ge('cv2-btn-sin-factura');
+    if (sinFact) sinFact.closest('.cv2-sinf-toggle-wrap')?.style && (sinFact.closest('.cv2-sinf-toggle-wrap').style.display = 'none');
   }
 
   // ── Post-compra screen ───────────────────────────────────────────────────────
@@ -2372,8 +2986,11 @@ const ComprasV2 = (() => {
         return;
       }
 
-      // Don't steal focus from provider search, factura, fecha, total, or cart row inputs
-      if (['cv2-prov-search','cv2-factura-pv','cv2-factura','cv2-fecha','cv2-fecha-vencimiento','cv2-total-factura'].includes(active?.id)) return;
+      // Don't steal focus from cabecera inputs or cart row inputs
+      if (['cv2-prov-search','cv2-condicion-compra','cv2-factura-pv','cv2-factura',
+           'cv2-fecha','cv2-fecha-vencimiento','cv2-total-factura',
+           'cv2-subtotal-neto','cv2-iva-105','cv2-iva-21','cv2-imp-interno',
+           'cv2-percepcion-iva','cv2-percepcion-iibb'].includes(active?.id)) return;
       if (isInput && active?.closest?.('.cv2-cart-row')) return;
 
       // Redirect printable characters to scan input
@@ -2424,23 +3041,36 @@ const ComprasV2 = (() => {
 
     state.currentUser  = window.SGA_Auth.getCurrentUser();
     state.sesionActiva = getSesionActiva(state.currentUser.sucursal_id);
-    state.proveedorId      = null;
-    state.proveedorNombre  = null;
-    state.proveedorSaldo   = 0;
-    state.aplicarSaldo     = false;
-    state.condicionPago    = 'efectivo';
-    state.facturaPv        = '';
-    state.numeroFactura    = '';
-    state.fecha            = todayDate();
-    state.fechaVencimiento = '';
-    state.totalFactura     = 0;
-    state.items            = [];
-    state.pausadaId        = null;
-    state.searchResults    = [];
-    state.searchHighlight  = -1;
-    state.searchQuerySaved = '';
-    state.provResults      = [];
-    state.provHighlight    = -1;
+    state.proveedorId           = null;
+    state.proveedorNombre       = null;
+    state.proveedorSaldo        = 0;
+    state.aplicarSaldo          = false;
+    state.condicionPago         = 'pendiente';
+    state.condicionCompra       = '';
+    state.facturaPv             = '';
+    state.numeroFactura         = '';
+    state.fecha                 = todayDate();
+    state.fechaVencimiento      = '';
+    state.totalFactura          = 0;
+    state.subtotalNeto          = 0;
+    state.iva105                = 0;
+    state.iva21                 = 0;
+    state.impInterno            = 0;
+    state.percepcionIva         = 0;
+    state.percepcionIibb        = 0;
+    state.proveedorCondicionIva = null;
+    state.proveedorAgRetIva     = 0;
+    state.proveedorAgRetIibb    = 0;
+    state.items                 = [];
+    state.pausadaId             = null;
+    state.searchResults         = [];
+    state.searchHighlight       = -1;
+    state.searchQuerySaved      = '';
+    state.provResults           = [];
+    state.provHighlight         = -1;
+    state.modoRemito            = false;
+    state.vinculandoRemitoId    = null;
+    state.remitoNumero          = '';
 
     // Mostrar banner si hay ajuste de precios pendiente de una compra anterior
     const pendingBanner = ge('cv2-pending-resumen-banner');
@@ -2477,37 +3107,105 @@ const ComprasV2 = (() => {
     // Condición de pago fija: siempre cuenta corriente
     state.condicionPago = 'pendiente';
 
-    // Chip label clicks toggle the radio
-    ge('cv2-chip-efectivo') ?.addEventListener('click', () => {
-      const r = ge('cv2-radio-efectivo'); if (r) r.click();
+    // ── Sin Factura / Remito mode ──
+    ge('cv2-btn-sin-factura')?.addEventListener('click', toggleModoRemito);
+    ge('cv2-remito-numero')?.addEventListener('input', e => { state.remitoNumero = e.target.value; });
+    ge('cv2-remito-fecha')?.addEventListener('input', e => { state.fecha = e.target.value; });
+
+    // Init remito fecha
+    const remitoFechaInp = ge('cv2-remito-fecha');
+    if (remitoFechaInp) remitoFechaInp.value = todayDate();
+
+    // Badge de remitos pendientes
+    updateRemitoBadge();
+
+    // ── Remitos pendientes panel ──
+    ge('cv2-btn-remitos-pendientes')?.addEventListener('click', openRemitosPanel);
+    ge('cv2-remitos-close')?.addEventListener('click', () => {
+      ge('cv2-remitos-overlay').style.display = 'none';
     });
-    ge('cv2-chip-pendiente')?.addEventListener('click', () => {
-      const r = ge('cv2-radio-pendiente'); if (r) r.click();
+    ge('cv2-remitos-overlay')?.addEventListener('click', e => {
+      if (e.target === ge('cv2-remitos-overlay')) ge('cv2-remitos-overlay').style.display = 'none';
     });
 
-    // ── Factura / Fecha / Total ──
+    // ── Cabecera: condición de compra ──
+    ge('cv2-condicion-compra')?.addEventListener('change', e => {
+      state.condicionCompra = e.target.value;
+      renderCabeceraFields();
+      // If switching away from Factura A, clear auto-calc total
+      if (!isFacturaA()) {
+        state.totalFactura = 0;
+        const tfInp = ge('cv2-total-factura');
+        if (tfInp) tfInp.value = '';
+      } else {
+        updateTotalFactura();
+      }
+    });
+
+    // ── Cabecera: Continuar al carrito ──
+    ge('cv2-btn-continuar')?.addEventListener('click', () => {
+      if (!state.proveedorId) {
+        ge('cv2-prov-search')?.focus();
+        window.SGA_Utils.showNotification('Seleccioná un proveedor', 'warning');
+        return;
+      }
+      if (!state.modoRemito && !state.condicionCompra) {
+        ge('cv2-condicion-compra')?.focus();
+        window.SGA_Utils.showNotification('Seleccioná la condición de compra', 'warning');
+        return;
+      }
+      showCarrito();
+    });
+
+    // ── Cabecera: campos de importe fiscal ──
+    function setupFiscalInp(id, stateKey) {
+      const inp = ge(id);
+      if (!inp) return;
+      inp.addEventListener('focus', () => {
+        if (state[stateKey] > 0) inp.value = String(state[stateKey]).replace('.', ',');
+        else inp.value = '';
+        inp.select();
+      });
+      inp.addEventListener('blur', () => {
+        const raw = parseARS(inp.value);
+        state[stateKey] = raw;
+        inp.value = raw > 0 ? formatARS(raw) : '';
+        if (isFacturaA()) updateTotalFactura();
+        updateConfirmBtn();
+      });
+      inp.addEventListener('input', () => { inp.value = inp.value.replace(/[^\d,.]/g, ''); });
+    }
+    setupFiscalInp('cv2-subtotal-neto',   'subtotalNeto');
+    setupFiscalInp('cv2-iva-105',         'iva105');
+    setupFiscalInp('cv2-iva-21',          'iva21');
+    setupFiscalInp('cv2-imp-interno',     'impInterno');
+    setupFiscalInp('cv2-percepcion-iva',  'percepcionIva');
+    setupFiscalInp('cv2-percepcion-iibb', 'percepcionIibb');
+
+    // ── Factura / Fecha ──
     ge('cv2-factura-pv')        ?.addEventListener('input', e => { state.facturaPv = e.target.value; });
     ge('cv2-factura')           ?.addEventListener('input', e => { state.numeroFactura = e.target.value; });
     ge('cv2-fecha')             ?.addEventListener('input', e => { state.fecha = e.target.value; });
     ge('cv2-fecha-vencimiento') ?.addEventListener('input', e => { state.fechaVencimiento = e.target.value; });
 
-    // Total factura: format as ARS currency on blur, raw on focus
+    // Total factura (editable for non-Factura-A)
     const tfInp = ge('cv2-total-factura');
     if (tfInp) {
       tfInp.addEventListener('focus', () => {
+        if (tfInp.readOnly) return; // Factura A: readonly, auto-calculated
         if (state.totalFactura > 0) tfInp.value = String(state.totalFactura).replace('.', ',');
         else tfInp.value = '';
         tfInp.select();
       });
       tfInp.addEventListener('blur', () => {
+        if (tfInp.readOnly) return;
         const raw = parseARS(tfInp.value);
         state.totalFactura = raw;
         tfInp.value = raw > 0 ? formatARS(raw) : '';
         updateConfirmBtn();
       });
-      // Strip anything that's not a digit, comma or period while typing
       tfInp.addEventListener('input', () => {
-        tfInp.value = tfInp.value.replace(/[^\d,.]/g, '');
+        if (!tfInp.readOnly) tfInp.value = tfInp.value.replace(/[^\d,.]/g, '');
       });
     }
 
@@ -2672,7 +3370,15 @@ const ComprasV2 = (() => {
     ge('cv2-prov-clear')?.addEventListener('click', clearProveedor);
 
     // ── Action buttons ──
-    ge('cv2-btn-volver')          ?.addEventListener('click', showVolverModal);
+    ge('cv2-btn-volver')?.addEventListener('click', () => {
+      // From cabecera with no items: go back directly
+      const cab = ge('cv2-cabecera');
+      if (cab && cab.style.display !== 'none' && !state.items.length) {
+        window.location.hash = '#pos';
+        return;
+      }
+      showVolverModal();
+    });
     ge('cv2-btn-pausar')          ?.addEventListener('click', pausar);
     ge('cv2-btn-confirmar')       ?.addEventListener('click', siguiente);
     ge('cv2-rev-btn-volver')      ?.addEventListener('click', hideReviewOverlay);
@@ -2711,13 +3417,20 @@ const ComprasV2 = (() => {
 
     // ── Initial render ──
     setupKeyboard();
+    renderCabeceraFields();
     renderCart();
-    renderProveedorPanel();
-    renderEfectivoInfo();
     updateConfirmBtn();
     updatePausadasBtn();
 
-    ge('cv2-search')?.focus();
+    // Vincular factura a un remito (viene desde CxC proveedores)
+    // Se detecta AQUÍ para que todos los event listeners estén registrados primero
+    const vincularRemitoId = sessionStorage.getItem('compras_v2_vincular_remito');
+    if (vincularRemitoId) {
+      sessionStorage.removeItem('compras_v2_vincular_remito');
+      vincularFacturaDesdeRemito(vincularRemitoId);
+    } else {
+      showCabecera();
+    }
   }
 
   return { init };

@@ -98,7 +98,9 @@ const EditorProducto = (() => {
     // Header
     const h1 = qs('header h1');
     if (h1) {
-      h1.innerHTML = `<a href="#productos" class="ed-back-link">← Productos</a> / <span id="ed-header-nombre">${escapeHtml(p.nombre)}</span>`;
+      const codigoPrincipal = state.barcodes[0]?.codigo || '';
+      const codigoHtml = codigoPrincipal ? ` <span style="font-size:0.65em;font-weight:400;opacity:0.75;letter-spacing:0.02em">${escapeHtml(codigoPrincipal)}</span>` : '';
+      h1.innerHTML = `<a href="#productos" class="ed-back-link">← Productos</a> / <span id="ed-header-nombre">${escapeHtml(p.nombre)}</span>${codigoHtml}`;
     }
 
     // Replace aside
@@ -1542,25 +1544,29 @@ const EditorProducto = (() => {
         if (!q) { resultsDiv.style.display = 'none'; return; }
         const todosChk = ge('ed-buscar-madre-todos');
         const todos = todosChk?.checked;
-        const resultados = todos
-          ? window.SGA_DB.query(
-              "SELECT id, nombre, es_madre FROM productos WHERE activo = 1 AND id != ? AND LOWER(nombre) LIKE ? ORDER BY nombre LIMIT 10",
-              [state.productoId, '%' + q + '%']
-            )
-          : window.SGA_DB.query(
-              "SELECT id, nombre, es_madre FROM productos WHERE es_madre = 1 AND id != ? AND LOWER(nombre) LIKE ? ORDER BY nombre LIMIT 10",
-              [state.productoId, '%' + q + '%']
-            );
+        const baseQuery = todos
+          ? `SELECT p.id, p.nombre, p.es_madre,
+               (CASE WHEN p.es_madre = 1 OR EXISTS(SELECT 1 FROM productos h WHERE h.producto_madre_id = p.id) THEN 1 ELSE 0 END) AS es_madre_efectivo
+             FROM productos p
+             WHERE p.activo = 1 AND p.id != ? AND LOWER(p.nombre) LIKE ?
+             ORDER BY p.nombre LIMIT 10`
+          : `SELECT p.id, p.nombre, p.es_madre,
+               1 AS es_madre_efectivo
+             FROM productos p
+             WHERE p.activo = 1 AND p.id != ? AND LOWER(p.nombre) LIKE ?
+               AND (p.es_madre = 1 OR EXISTS(SELECT 1 FROM productos h WHERE h.producto_madre_id = p.id))
+             ORDER BY p.nombre LIMIT 10`;
+        const resultados = window.SGA_DB.query(baseQuery, [state.productoId, '%' + q + '%']);
         if (!resultados.length) {
           resultsDiv.innerHTML = '<div class="ed-search-result-item ed-text-muted">Sin resultados</div>';
           resultsDiv.style.display = '';
           return;
         }
         resultsDiv.innerHTML = resultados.map(m => {
-          const badge = !m.es_madre
+          const badge = !m.es_madre_efectivo
             ? `<span style="font-size:10px;color:#e65100;background:#fff3e0;padding:1px 5px;border-radius:4px;margin-left:6px">no es madre aún</span>`
             : '';
-          return `<div class="ed-search-result-item" data-id="${escapeHtml(m.id)}" data-nombre="${escapeHtml(m.nombre)}" data-es-madre="${m.es_madre ? '1' : '0'}">${escapeHtml(m.nombre)}${badge}</div>`;
+          return `<div class="ed-search-result-item" data-id="${escapeHtml(m.id)}" data-nombre="${escapeHtml(m.nombre)}" data-es-madre="${m.es_madre_efectivo ? '1' : '0'}">${escapeHtml(m.nombre)}${badge}</div>`;
         }).join('');
         resultsDiv.style.display = '';
         resultsDiv.querySelectorAll('.ed-search-result-item[data-id]').forEach(item => {

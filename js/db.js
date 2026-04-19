@@ -670,6 +670,20 @@
       "ALTER TABLE egresos_caja ADD COLUMN proveedor_id TEXT REFERENCES proveedores(id)",
       // Ordenes de compra — nuevo módulo
       "ALTER TABLE proveedores ADD COLUMN order_day INTEGER DEFAULT NULL",
+      "ALTER TABLE proveedores ADD COLUMN alias TEXT",
+      "ALTER TABLE proveedores ADD COLUMN condicion_iva TEXT",
+      "ALTER TABLE proveedores ADD COLUMN agente_retencion_iva INTEGER DEFAULT 0",
+      "ALTER TABLE proveedores ADD COLUMN agente_retencion_iibb INTEGER DEFAULT 0",
+      "ALTER TABLE proveedores ADD COLUMN condicion_compra TEXT",
+      // Compras v2 cabecera — campos de factura e IVA
+      "ALTER TABLE compras ADD COLUMN subtotal_neto REAL DEFAULT 0",
+      "ALTER TABLE compras ADD COLUMN iva_105 REAL DEFAULT 0",
+      "ALTER TABLE compras ADD COLUMN iva_21 REAL DEFAULT 0",
+      "ALTER TABLE compras ADD COLUMN imp_interno REAL DEFAULT 0",
+      "ALTER TABLE compras ADD COLUMN percepcion_iva REAL DEFAULT 0",
+      "ALTER TABLE compras ADD COLUMN percepcion_iibb REAL DEFAULT 0",
+      "ALTER TABLE compras ADD COLUMN total_factura REAL DEFAULT 0",
+      "ALTER TABLE compras ADD COLUMN condicion_compra TEXT",
       "ALTER TABLE ordenes_compra ADD COLUMN revisada_en TEXT",
       "ALTER TABLE ordenes_compra ADD COLUMN confirmada_en TEXT",
       // orden_compra_items — columnas para el nuevo flujo de sugerencia
@@ -749,6 +763,53 @@
       `);
     } catch(e) { console.warn('imputaciones_pagos:', e.message); }
 
+    // ── Remitos — albaranes de entrega sin factura ────────────────────────────
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS remitos (
+          id TEXT PRIMARY KEY,
+          sucursal_id TEXT REFERENCES sucursales(id),
+          proveedor_id TEXT REFERENCES proveedores(id),
+          usuario_id TEXT REFERENCES usuarios(id),
+          fecha TEXT NOT NULL,
+          numero_remito TEXT,
+          estado TEXT DEFAULT 'pendiente' CHECK(estado IN ('pendiente','facturado')),
+          compra_id TEXT REFERENCES compras(id),
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
+        )
+      `);
+    } catch(e) { console.warn('remitos:', e.message); }
+
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS remito_items (
+          id TEXT PRIMARY KEY,
+          remito_id TEXT NOT NULL REFERENCES remitos(id),
+          producto_id TEXT REFERENCES productos(id),
+          cantidad REAL NOT NULL,
+          unidad_compra TEXT DEFAULT 'Unidad',
+          unidades_por_paquete REAL DEFAULT 1
+        )
+      `);
+    } catch(e) { console.warn('remito_items:', e.message); }
+
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS compras_pausadas (
+          id TEXT PRIMARY KEY,
+          sucursal_id TEXT REFERENCES sucursales(id),
+          usuario_id TEXT REFERENCES usuarios(id),
+          snapshot TEXT NOT NULL,
+          proveedor_nombre TEXT,
+          num_items INTEGER DEFAULT 0,
+          total_estimado REAL DEFAULT 0,
+          created_at TEXT,
+          updated_at TEXT
+        )
+      `);
+    } catch(e) { console.warn('compras_pausadas:', e.message); }
+
     // ── Usuarios — autenticación local (username + password_hash) ─────────────
     const usuariosMigrations = [
       `ALTER TABLE usuarios ADD COLUMN username TEXT`,
@@ -825,6 +886,27 @@
         )
       `);
     } catch(e) { console.warn('consumo_interno:', e.message); }
+
+    // ── Gastos Generales — facturas de servicios, sueldos, etc. ──────────────
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS gastos (
+          id TEXT PRIMARY KEY,
+          sucursal_id TEXT REFERENCES sucursales(id),
+          usuario_id TEXT REFERENCES usuarios(id),
+          fecha TEXT NOT NULL,
+          categoria TEXT NOT NULL,
+          descripcion TEXT NOT NULL,
+          monto REAL NOT NULL,
+          metodo_pago TEXT DEFAULT 'efectivo',
+          comprobante TEXT,
+          proveedor_id TEXT REFERENCES proveedores(id),
+          observaciones TEXT,
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
+        )
+      `);
+    } catch(e) { console.warn('gastos:', e.message); }
 
     await saveDatabase();
     console.log('✅ All tables created');

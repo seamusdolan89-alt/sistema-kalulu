@@ -412,6 +412,77 @@ const CuentaCorrienteProveedores = (() => {
   // ── VISTA LISTA ──────────────────────────────────────────────────────────────
 
   // Renders only the table content — called on every filter change, preserves focus
+  function getRemitosCount(proveedorId) {
+    try {
+      const r = window.SGA_DB.query(
+        `SELECT COUNT(*) AS n FROM remitos WHERE estado='pendiente' AND proveedor_id=?`,
+        [proveedorId]
+      );
+      return parseInt(r[0]?.n) || 0;
+    } catch(e) { return 0; }
+  }
+
+  function openRemitosProvModal(proveedorId, proveedorNombre) {
+    // Create or reuse overlay
+    let overlay = document.getElementById('ccprov-remitos-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'ccprov-remitos-overlay';
+      overlay.className = 'ccprov-remitos-overlay';
+      document.body.appendChild(overlay);
+    }
+
+    const rows = window.SGA_DB.query(
+      `SELECT r.*,
+              (SELECT COUNT(*) FROM remito_items ri WHERE ri.remito_id = r.id) as n_items
+       FROM remitos r WHERE r.estado='pendiente' AND r.proveedor_id=?
+       ORDER BY r.fecha DESC, r.rowid DESC`,
+      [proveedorId]
+    );
+
+    const rowsHtml = rows.length ? rows.map(r => {
+      const [y, m, d] = (r.fecha || '').split('-');
+      const fechaFmt = d && m && y ? `${d}/${m}/${y}` : (r.fecha || '—');
+      return `
+        <div class="ccprov-remito-row">
+          <div class="ccprov-remito-info">
+            <strong>Remito: ${esc(r.numero_remito || '—')}</strong>
+            <span>${r.n_items} producto${r.n_items !== 1 ? 's' : ''} · Fecha: ${fechaFmt}</span>
+          </div>
+          <button class="ccprov-btn-vincular" data-id="${esc(r.id)}">Vincular Factura →</button>
+        </div>`;
+    }).join('') : `<div class="ccprov-remitos-empty">No hay remitos pendientes para este proveedor.</div>`;
+
+    overlay.innerHTML = `
+      <div class="ccprov-remitos-box">
+        <div class="ccprov-remitos-hdr">
+          <div>
+            <div class="ccprov-remitos-hdr-title">📋 Remitos Pendientes — ${esc(proveedorNombre)}</div>
+            <div class="ccprov-remitos-hdr-sub">Seleccioná el remito para vincularle la factura</div>
+          </div>
+          <button class="ccprov-remitos-close" id="ccprov-remitos-close-btn">✕</button>
+        </div>
+        <div class="ccprov-remitos-body">${rowsHtml}</div>
+      </div>
+    `;
+
+    overlay.style.display = 'flex';
+
+    overlay.querySelector('#ccprov-remitos-close-btn')?.addEventListener('click', () => {
+      overlay.style.display = 'none';
+    });
+    overlay.addEventListener('click', e => {
+      if (e.target === overlay) overlay.style.display = 'none';
+    });
+    overlay.querySelectorAll('.ccprov-btn-vincular').forEach(btn => {
+      btn.addEventListener('click', () => {
+        overlay.style.display = 'none';
+        sessionStorage.setItem('compras_v2_vincular_remito', btn.dataset.id);
+        window.location.hash = '#compras_v2';
+      });
+    });
+  }
+
   function renderTabla() {
     const wrap = ge('ccprov-table-wrap');
     if (!wrap) return;
@@ -463,7 +534,9 @@ const CuentaCorrienteProveedores = (() => {
           </tr>
         </thead>
         <tbody>
-          ${proveedores.map(p => `
+          ${proveedores.map(p => {
+            const remitosN = getRemitosCount(p.id);
+            return `
             <tr>
               <td><strong>${esc(p.razon_social)}</strong></td>
               <td>${esc(p.contacto_nombre || '—')}</td>
@@ -473,10 +546,13 @@ const CuentaCorrienteProveedores = (() => {
                 <div class="ccprov-actions">
                   <button class="ccprov-btn-icon btn-ver-detalle" data-id="${esc(p.id)}" data-nombre="${esc(p.razon_social)}" title="Ver cuenta corriente">📋</button>
                   <button class="ccprov-btn-icon btn-pagar" data-id="${esc(p.id)}" data-nombre="${esc(p.razon_social)}" title="Registrar pago">💳</button>
+                  <button class="ccprov-btn-icon btn-remitos-prov${remitosN > 0 ? ' btn-remitos-active' : ''}" data-id="${esc(p.id)}" data-nombre="${esc(p.razon_social)}" title="Remitos pendientes de factura" style="${remitosN === 0 ? 'opacity:0.4' : ''}">
+                    📄${remitosN > 0 ? `<span class="ccprov-remito-badge">${remitosN}</span>` : ''}
+                  </button>
                 </div>
               </td>
-            </tr>
-          `).join('')}
+            </tr>`;
+          }).join('')}
         </tbody>
       </table>
       `}
@@ -489,6 +565,9 @@ const CuentaCorrienteProveedores = (() => {
     });
     wrap.querySelectorAll('.btn-pagar').forEach(btn => {
       btn.addEventListener('click', () => openModalPago(btn.dataset.id, btn.dataset.nombre));
+    });
+    wrap.querySelectorAll('.btn-remitos-prov').forEach(btn => {
+      btn.addEventListener('click', () => openRemitosProvModal(btn.dataset.id, btn.dataset.nombre));
     });
   }
 

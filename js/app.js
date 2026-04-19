@@ -39,6 +39,7 @@
     'consumo_interno': () => import('./modules/consumo_interno.js').then(m => m.default),
     'vencimientos':    () => import('./modules/vencimientos.js').then(m => m.default),
     'roturas':         () => import('./modules/roturas.js').then(m => m.default),
+    'gastos':          () => import('./modules/gastos.js').then(m => m.default),
   };
 
   /**
@@ -144,6 +145,7 @@
       { name: 'promociones', label: '🏷️ Promociones' },
       { name: 'etiquetas', label: '🏷️ Etiquetas' },
       { name: 'informes', label: '📊 Informes' },
+      { name: 'gastos', label: '💸 Gastos Generales' },
       { name: 'usuarios', label: '👤 Usuarios', adminOnly: true },
     ];
 

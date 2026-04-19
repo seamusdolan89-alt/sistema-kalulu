@@ -475,6 +475,54 @@
 
   /* ── ACCIONES TABLE COLUMN ───────────────────────────────────────────────── */
   .ccprov-actions { display: flex; gap: 6px; align-items: center; }
+
+  /* Botón remitos pendientes */
+  .btn-remitos-prov { position: relative; }
+  .ccprov-remito-badge {
+    position: absolute; top: -4px; right: -4px;
+    background: #e65100; color: white; border-radius: 8px;
+    font-size: 9px; font-weight: 700; padding: 1px 4px; min-width: 14px; text-align: center;
+    line-height: 1.4;
+  }
+
+  /* Modal remitos */
+  .ccprov-remitos-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    z-index: 900; display: flex; align-items: center; justify-content: center;
+  }
+  .ccprov-remitos-box {
+    background: #fff; border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.22);
+    width: 92%; max-width: 620px; max-height: 75vh;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .ccprov-remitos-hdr {
+    padding: 14px 20px; background: #1a2744; color: white;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .ccprov-remitos-hdr-title { font-size: 15px; font-weight: 700; }
+  .ccprov-remitos-hdr-sub { font-size: 11px; color: rgba(255,255,255,0.65); margin-top: 2px; }
+  .ccprov-remitos-close {
+    background: none; border: none; color: rgba(255,255,255,0.8);
+    font-size: 20px; cursor: pointer; line-height: 1;
+  }
+  .ccprov-remitos-close:hover { color: white; }
+  .ccprov-remitos-body { overflow-y: auto; flex: 1; }
+  .ccprov-remito-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px; border-bottom: 1px solid #eef0f4;
+  }
+  .ccprov-remito-row:hover { background: #f5f9ff; }
+  .ccprov-remito-info { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+  .ccprov-remito-info strong { font-size: 14px; color: #1a2744; }
+  .ccprov-remito-info span { font-size: 12px; color: #8090a0; }
+  .ccprov-btn-vincular {
+    background: #1565c0; color: white; border: none; border-radius: 6px;
+    padding: 7px 14px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .ccprov-btn-vincular:hover { background: #1976d2; }
+  .ccprov-remitos-empty { padding: 28px 20px; text-align: center; color: #8090a0; font-size: 14px; }
 </style>
 
 <div id="ccprov-root"></div>
