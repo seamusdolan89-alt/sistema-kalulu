@@ -668,6 +668,16 @@
       "ALTER TABLE cuenta_proveedor ADD COLUMN compra_id TEXT REFERENCES compras(id)",
       // Fix: egresos_caja needs proveedor_id for pagos adelantados
       "ALTER TABLE egresos_caja ADD COLUMN proveedor_id TEXT REFERENCES proveedores(id)",
+      // Clasificación de proveedor: mercaderia (default) o servicios
+      "ALTER TABLE proveedores ADD COLUMN tipo_proveedor TEXT DEFAULT 'mercaderia'",
+      // Gastos: período contable (YYYY-MM) y subcategoría (ej. tipo de sueldo)
+      "ALTER TABLE gastos ADD COLUMN periodo TEXT",
+      "ALTER TABLE gastos ADD COLUMN subcategoria TEXT",
+      // Gastos: desglose factura A
+      "ALTER TABLE gastos ADD COLUMN subtotal_neto REAL",
+      "ALTER TABLE gastos ADD COLUMN iva_alicuota TEXT",
+      "ALTER TABLE gastos ADD COLUMN iva_monto REAL",
+      "ALTER TABLE gastos ADD COLUMN iibb_monto REAL",
       // Ordenes de compra — nuevo módulo
       "ALTER TABLE proveedores ADD COLUMN order_day INTEGER DEFAULT NULL",
       "ALTER TABLE proveedores ADD COLUMN alias TEXT",
@@ -697,6 +707,9 @@
       "ALTER TABLE orden_compra_items ADD COLUMN cantidad_sugerida REAL",
       "ALTER TABLE orden_compra_items ADD COLUMN cantidad_final REAL",
       "ALTER TABLE orden_compra_items ADD COLUMN unidad_pedida TEXT DEFAULT 'unidad'",
+      // etiquetas: auditoría de impresión y cambio de precio
+      "ALTER TABLE productos ADD COLUMN ultima_impresion_etiqueta TEXT",
+      "ALTER TABLE productos ADD COLUMN ultima_modificacion_precio TEXT",
     ];
     for (const sql of columnAlterations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }
@@ -886,6 +899,21 @@
         )
       `);
     } catch(e) { console.warn('consumo_interno:', e.message); }
+
+    // ── Pagos de Gastos — pagos parciales o múltiples por gasto ─────────────
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS gastos_pagos (
+          id TEXT PRIMARY KEY,
+          gasto_id TEXT NOT NULL REFERENCES gastos(id),
+          fecha TEXT NOT NULL,
+          metodo_pago TEXT NOT NULL,
+          monto REAL NOT NULL,
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
+        )
+      `);
+    } catch(e) { console.warn('gastos_pagos:', e.message); }
 
     // ── Gastos Generales — facturas de servicios, sueldos, etc. ──────────────
     try {

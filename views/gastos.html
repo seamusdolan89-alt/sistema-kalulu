@@ -9,26 +9,21 @@
   .gastos-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     padding: 14px 20px;
     border-bottom: 1px solid var(--color-border);
     flex-shrink: 0;
-    gap: 12px;
   }
-  .gastos-header h2 { margin: 0; font-size: 1.25rem; font-weight: 700; }
-  .gastos-header-right { display: flex; gap: 8px; }
+  .gastos-header h2 { margin: 0; font-size: 1.2rem; font-weight: 700; }
 
   /* ── TABS ─────────────────────────────────────────────────────────────────── */
   .gastos-tabs {
     display: flex;
-    gap: 0;
     border-bottom: 2px solid var(--color-border);
-    background: var(--color-background);
     padding: 0 20px;
     flex-shrink: 0;
   }
   .gastos-tab {
-    padding: 11px 16px;
+    padding: 10px 16px;
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
@@ -39,243 +34,508 @@
     color: var(--color-text-secondary);
     transition: color 0.15s;
   }
-  .gastos-tab.active {
-    color: var(--color-primary);
-    border-bottom-color: var(--color-primary);
-  }
+  .gastos-tab.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
   .gastos-tab:hover:not(.active) { color: var(--color-text); }
 
-  /* ── CONTENT AREA ─────────────────────────────────────────────────────────── */
   #gastos-content {
     flex: 1;
     overflow-y: auto;
-    padding: 20px;
+    display: flex;
+    flex-direction: column;
   }
 
-  /* ── FORM ─────────────────────────────────────────────────────────────────── */
-  .gastos-form-card {
+  /* ── CARGAR / SUELDOS WRAP ───────────────────────────────────────────────── */
+  .gc-wrap {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    padding: 16px 20px;
+    gap: 12px;
+    min-height: 0;
+  }
+
+  /* ── PROVIDER SEARCH BAR ─────────────────────────────────────────────────── */
+  .gc-search-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .gc-search-box {
+    position: relative;
+    flex: 1;
+    max-width: 480px;
+    display: flex;
+    align-items: center;
+    background: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    transition: border-color 0.15s;
+  }
+  .gc-search-box:focus-within { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(0,102,204,.1); }
+  .gc-search-icon { padding: 0 8px 0 12px; font-size: 15px; color: var(--color-text-secondary); pointer-events: none; }
+  .gc-prov-inp {
+    flex: 1;
+    border: none;
+    background: transparent;
+    padding: 9px 10px 9px 0;
+    font-size: 14px;
+    color: var(--color-text);
+    outline: none;
+  }
+  .gc-prov-inp::placeholder { color: var(--color-text-secondary); }
+
+  /* dropdown */
+  .gc-dd {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0; right: 0;
+    background: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 16px rgba(0,0,0,.12);
+    z-index: 200;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .gc-dd.hidden { display: none; }
+  .gc-dd-item {
+    padding: 9px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .gc-dd-item:hover { background: var(--color-surface); }
+  .gc-dd-alias { font-size: 11px; color: var(--color-text-secondary); }
+  .gc-dd-empty { padding: 10px 14px; font-size: 13px; color: var(--color-text-secondary); }
+
+  .gc-btn-cambiar {
+    background: none;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 7px 12px;
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s;
+  }
+  .gc-btn-cambiar:hover { border-color: var(--color-primary); color: var(--color-primary); }
+
+  /* ── PANEL HEADER ────────────────────────────────────────────────────────── */
+  .gc-panel-hdr {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-secondary);
+    padding: 0 0 8px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .gc-panel-hdr strong { color: var(--color-text); font-size: 13px; text-transform: none; letter-spacing: 0; }
+  .gc-hist-count {
+    margin-left: auto;
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--color-text-secondary);
+  }
+
+  /* ── HISTORIAL PANEL (top) ───────────────────────────────────────────────── */
+  .gc-historial {
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
-    padding: 24px;
-    max-width: 520px;
+    padding: 14px 16px;
+    flex-shrink: 0;
   }
-  .gastos-form-card h3 { margin: 0 0 18px; font-size: 1rem; font-weight: 700; }
-
-  .gastos-form-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px;
-  }
-  .gastos-form-grid .full { grid-column: 1 / -1; }
-
-  .gastos-field { display: flex; flex-direction: column; gap: 4px; }
-  .gastos-field label {
-    font-size: 12px;
-    font-weight: 600;
+  .gc-hist-empty {
+    padding: 16px 0 8px;
+    font-size: 13px;
     color: var(--color-text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
+    text-align: center;
   }
-  .gastos-field input,
-  .gastos-field select,
-  .gastos-field textarea {
-    padding: 8px 10px;
+  .gc-hist-table-wrap { overflow-x: auto; }
+  .gc-hist-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .gc-hist-table th {
+    text-align: left;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-secondary);
+    border-bottom: 1px solid var(--color-border);
+    white-space: nowrap;
+  }
+  .gc-th-r { text-align: right; }
+  .gc-hist-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--color-border);
+    vertical-align: middle;
+  }
+  .gc-hist-table tbody tr:last-child td { border-bottom: none; }
+  .gc-hist-table tbody tr:hover { background: rgba(0,0,0,.02); }
+  .gc-hist-table td small { font-size: 11px; color: var(--color-text-secondary); }
+  .gc-td-cat { white-space: nowrap; }
+  .gc-td-monto { text-align: right; font-weight: 700; white-space: nowrap; }
+
+  /* ── FORM PANEL (bottom) ─────────────────────────────────────────────────── */
+  .gc-form {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: 14px 16px;
+    flex-shrink: 0;
+  }
+  .gc-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 10px 14px;
+    margin-bottom: 12px;
+  }
+  .gc-field-full { grid-column: 1 / -1; }
+  .gc-field { display: flex; flex-direction: column; gap: 4px; }
+  .gc-field label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-secondary);
+  }
+  .gc-field label small { font-weight: 400; text-transform: none; letter-spacing: 0; font-size: 11px; }
+  .gc-input, .gc-select {
+    padding: 7px 10px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
-    font-size: 14px;
+    font-size: 13px;
     font-family: inherit;
     background: var(--color-background);
     color: var(--color-text);
     outline: none;
     transition: border-color 0.15s;
   }
-  .gastos-field input:focus,
-  .gastos-field select:focus,
-  .gastos-field textarea:focus {
+  .gc-input:focus, .gc-select:focus {
     border-color: var(--color-primary);
-    box-shadow: 0 0 0 3px rgba(0,102,204,0.1);
+    box-shadow: 0 0 0 3px rgba(0,102,204,.1);
   }
-  .gastos-field textarea { resize: vertical; min-height: 64px; }
-
-  .gastos-form-actions {
-    margin-top: 18px;
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
-  .gastos-error {
-    margin-top: 10px;
-    padding: 8px 12px;
+  .gc-error {
+    padding: 7px 12px;
     background: #fff0f0;
     border: 1px solid #fca5a5;
     border-radius: var(--radius-md);
     color: #dc2626;
     font-size: 13px;
-    display: none;
+    margin-bottom: 10px;
   }
+  .gc-error.hidden { display: none; }
+  .gc-form-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
-  /* ── FILTERS ──────────────────────────────────────────────────────────────── */
-  .gastos-filters {
+  /* ── EMPTY HINT ──────────────────────────────────────────────────────────── */
+  .gc-empty-hint {
+    flex: 1;
     display: flex;
-    gap: 10px;
-    margin-bottom: 16px;
-    flex-wrap: wrap;
-    align-items: flex-end;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: var(--color-text-secondary);
+    padding: 40px 20px;
+    text-align: center;
   }
-  .gastos-filters input,
-  .gastos-filters select {
-    padding: 7px 10px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    font-size: 13px;
-    background: var(--color-background);
-    color: var(--color-text);
-    outline: none;
-  }
-  .gastos-filters input:focus,
-  .gastos-filters select:focus { border-color: var(--color-primary); }
 
-  /* ── TABLE ────────────────────────────────────────────────────────────────── */
-  .gastos-table-wrap { overflow-x: auto; }
-  .gastos-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
+  /* ── SEGUIMIENTO ─────────────────────────────────────────────────────────── */
+  .gc-seg-wrap {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    padding: 16px 20px;
+    gap: 10px;
+    min-height: 0;
   }
-  .gastos-table th {
-    text-align: left;
-    padding: 10px 12px;
+  .gc-seg-legend {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-shrink: 0;
+  }
+  .gc-leg {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .gc-leg::before {
+    content: '';
+    display: inline-block;
+    width: 12px; height: 12px;
+    border-radius: 3px;
+  }
+  .gc-leg-ok::before    { background: #bbf7d0; border: 1px solid #86efac; }
+  .gc-leg-miss::before  { background: #fee2e2; border: 1px solid #fca5a5; }
+  .gc-leg-open::before  { background: var(--color-surface); border: 1px solid var(--color-border); }
+
+  .gc-seg-table-wrap {
+    overflow-x: auto;
+    overflow-y: auto;
+    flex: 1;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+  }
+  .gc-seg-table {
+    border-collapse: collapse;
+    font-size: 12px;
+    white-space: nowrap;
+    width: 100%;
+  }
+  .gc-seg-table thead { position: sticky; top: 0; z-index: 10; }
+  .gc-seg-th {
+    padding: 8px 10px;
     background: var(--color-surface);
     border-bottom: 2px solid var(--color-border);
-    font-weight: 600;
+    border-right: 1px solid var(--color-border);
+    font-weight: 700;
     color: var(--color-text-secondary);
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    white-space: nowrap;
+    text-align: center;
+    min-width: 90px;
   }
-  .gastos-table td {
-    padding: 9px 12px;
+  .gc-seg-th-cur {
+    background: var(--color-primary);
+    color: #fff;
+    border-bottom-color: var(--color-primary);
+  }
+  .gc-seg-prov-th {
+    padding: 8px 14px;
+    background: var(--color-surface);
+    border-bottom: 2px solid var(--color-border);
+    border-right: 2px solid var(--color-border);
+    font-weight: 700;
+    color: var(--color-text-secondary);
+    text-align: left;
+    position: sticky;
+    left: 0;
+    z-index: 11;
+    min-width: 180px;
+  }
+  .gc-seg-prov {
+    padding: 7px 14px;
     border-bottom: 1px solid var(--color-border);
-    vertical-align: middle;
+    border-right: 2px solid var(--color-border);
+    font-weight: 600;
+    font-size: 12px;
+    position: sticky;
+    left: 0;
+    background: var(--color-background);
+    z-index: 5;
   }
-  .gastos-table tbody tr:hover { background: var(--color-surface); }
-  .gastos-table .monto-cell { font-weight: 600; text-align: right; white-space: nowrap; }
-  .gastos-table .actions-cell { text-align: center; }
+  .gc-seg-table tbody tr:hover .gc-seg-prov { background: var(--color-surface); }
+
+  .gc-seg-cell {
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--color-border);
+    border-right: 1px solid var(--color-border);
+    text-align: center;
+    cursor: pointer;
+    transition: filter 0.1s;
+    min-width: 90px;
+  }
+  .gc-seg-cell:hover { filter: brightness(0.94); }
+  .gc-seg-ok   { background: #f0fdf4; color: #15803d; font-weight: 700; }
+  .gc-seg-miss { background: #fef2f2; color: #dc2626; }
+  .gc-seg-open { background: var(--color-surface); color: var(--color-text-secondary); }
+  .gc-seg-val  { font-size: 11px; }
+  .gc-seg-plus { font-size: 16px; font-weight: 300; opacity: 0.4; }
+  .gc-seg-miss .gc-seg-plus { opacity: 0.6; color: #dc2626; }
 
   .gastos-empty {
-    text-align: center;
     padding: 48px 20px;
+    text-align: center;
     color: var(--color-text-secondary);
     font-size: 14px;
   }
 
-  /* ── CATEGORY BADGE ───────────────────────────────────────────────────────── */
-  .cat-badge {
-    display: inline-block;
-    padding: 2px 8px;
+  /* ── FACTURA A ───────────────────────────────────────────────────────────── */
+  .gc-facta-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    user-select: none;
+    color: var(--color-text-secondary);
+  }
+  .gc-facta-toggle input[type="checkbox"] { cursor: pointer; width: 14px; height: 14px; }
+  .gc-facta-section {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 10px 14px;
+    padding: 12px 14px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: var(--radius-md);
+    margin-top: 2px;
+  }
+  .gc-facta-section.hidden { display: none; }
+  .gc-facta-total {
+    grid-column: 1 / -1;
+    text-align: right;
+    font-size: 13px;
+    color: var(--color-text-secondary);
+    padding-top: 4px;
+    border-top: 1px solid #bfdbfe;
+  }
+  .gc-facta-total strong { color: var(--color-primary); font-size: 15px; }
+  .gc-input[readonly] {
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    cursor: default;
+  }
+
+  /* ── PAGO ROWS (sueldos) ─────────────────────────────────────────────────── */
+  .gc-pago-section {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .gc-pago-section-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-secondary);
+    margin-bottom: 2px;
+  }
+  .gc-pago-row {
+    display: grid;
+    grid-template-columns: 140px 1fr 120px 28px;
+    gap: 8px;
+    align-items: center;
+  }
+  .gc-btn-del-pago {
+    background: none;
+    border: 1px solid #fca5a5;
+    border-radius: var(--radius-sm);
+    color: #dc2626;
+    width: 28px; height: 28px;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.1s;
+  }
+  .gc-btn-del-pago:hover { background: #fef2f2; }
+  .gc-btn-add-pago {
+    align-self: flex-start;
+    background: none;
+    border: 1px dashed var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 5px 12px;
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+    margin-top: 2px;
+  }
+  .gc-btn-add-pago:hover { border-color: var(--color-primary); color: var(--color-primary); }
+
+  /* ── PAYMENT BADGES (historial) ──────────────────────────────────────────── */
+  .gc-pago-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
     border-radius: 10px;
     font-size: 11px;
     font-weight: 600;
     white-space: nowrap;
   }
-  .cat-servicios    { background: #eff6ff; color: #1d4ed8; }
-  .cat-sueldos      { background: #f0fdf4; color: #15803d; }
-  .cat-impuestos    { background: #fef9c3; color: #a16207; }
-  .cat-alquiler     { background: #fdf4ff; color: #7e22ce; }
-  .cat-mantenimiento{ background: #fff7ed; color: #c2410c; }
-  .cat-honorarios   { background: #ecfdf5; color: #065f46; }
-  .cat-publicidad   { background: #fdf2f8; color: #9d174d; }
-  .cat-otros        { background: #f8fafc; color: #475569; }
+  .gc-pago-badge-ok      { background: #f0fdf4; color: #15803d; border: 1px solid #86efac; }
+  .gc-pago-badge-parcial { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+  .gc-pago-badge-none    { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }
 
-  /* ── FOOTER TOTAL ─────────────────────────────────────────────────────────── */
-  .gastos-total-bar {
-    margin-top: 16px;
-    padding: 12px 16px;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+  /* ── EDIT MODE ───────────────────────────────────────────────────────────── */
+  .gc-edit-banner {
     display: flex;
-    justify-content: flex-end;
     align-items: center;
-    gap: 8px;
-    font-size: 15px;
-  }
-  .gastos-total-bar span { color: var(--color-text-secondary); }
-  .gastos-total-bar strong { font-size: 17px; }
-
-  /* ── RESUMEN ──────────────────────────────────────────────────────────────── */
-  .gastos-resumen-filters {
-    display: flex;
     gap: 10px;
-    margin-bottom: 20px;
-    flex-wrap: wrap;
-    align-items: flex-end;
-  }
-  .gastos-resumen-filters input,
-  .gastos-resumen-filters select {
-    padding: 7px 10px;
-    border: 1px solid var(--color-border);
+    padding: 8px 12px;
+    background: #fffbeb;
+    border: 1px solid #fde68a;
     border-radius: var(--radius-md);
     font-size: 13px;
-    background: var(--color-background);
-    color: var(--color-text);
-    outline: none;
+    color: #92400e;
+    font-weight: 500;
+    margin-bottom: 10px;
   }
-  .gastos-resumen-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 12px;
-    margin-bottom: 20px;
-  }
-  .gastos-resumen-card {
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    padding: 16px;
-  }
-  .gastos-resumen-card .cat-label {
-    font-size: 12px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--color-text-secondary);
-    margin-bottom: 6px;
-  }
-  .gastos-resumen-card .cat-total {
-    font-size: 20px;
-    font-weight: 700;
-  }
-  .gastos-resumen-card .cat-count {
-    font-size: 11px;
-    color: var(--color-text-secondary);
-    margin-top: 2px;
-  }
-  .gastos-resumen-grand {
-    background: var(--color-primary);
-    color: #fff;
-    border-radius: var(--radius-lg);
-    padding: 16px 20px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  .gastos-resumen-grand .label { font-size: 14px; font-weight: 600; opacity: 0.9; }
-  .gastos-resumen-grand .total { font-size: 24px; font-weight: 800; }
-
-  /* ── DELETE BTN ───────────────────────────────────────────────────────────── */
-  .btn-del-gasto {
+  .gc-edit-banner.hidden { display: none; }
+  .gc-edit-cancel-btn {
+    margin-left: auto;
     background: none;
-    border: 1px solid #fca5a5;
+    border: 1px solid #fcd34d;
     border-radius: var(--radius-sm);
-    color: #dc2626;
-    padding: 3px 8px;
+    padding: 3px 10px;
+    font-size: 12px;
+    color: #92400e;
+    cursor: pointer;
+  }
+  .gc-edit-cancel-btn:hover { background: #fef3c7; }
+  .gc-row-editing td { background: #fefce8 !important; }
+  .gc-btn-edit-hist {
+    background: none;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: 3px 7px;
     font-size: 12px;
     cursor: pointer;
-    transition: all 0.15s;
+    transition: background 0.1s;
   }
-  .btn-del-gasto:hover { background: #fef2f2; }
+  .gc-btn-edit-hist:hover { background: var(--color-surface); }
+
+  /* ── INLINE PAGO FORM (in historial) ─────────────────────────────────────── */
+  .gc-inline-pago {
+    margin-top: 10px;
+    padding: 12px 14px;
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: var(--radius-md);
+  }
+  .gc-inline-pago.hidden { display: none; }
+  .gc-inline-pago-hdr {
+    font-size: 12px;
+    font-weight: 700;
+    color: #92400e;
+    margin-bottom: 8px;
+  }
+  .gc-inline-pago-row {
+    display: grid;
+    grid-template-columns: 140px 1fr 130px auto auto;
+    gap: 8px;
+    align-items: center;
+  }
+  .gc-inline-saldo {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    margin-top: 6px;
+  }
+
+  /* ── RESPONSIVE ──────────────────────────────────────────────────────────── */
+  @media (max-width: 700px) {
+    .gc-form-grid { grid-template-columns: 1fr 1fr; }
+    .gc-facta-section { grid-template-columns: 1fr 1fr; }
+    .gc-pago-row { grid-template-columns: 1fr 1fr 90px 28px; }
+    .gc-inline-pago-row { grid-template-columns: 1fr 1fr; }
+  }
 </style>
 
 <div id="gastos-root"></div>

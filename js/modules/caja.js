@@ -43,6 +43,18 @@ const Caja = (() => {
   const fmtPeso = (n) => window.SGA_Utils.formatCurrency(n);
   const fmtFecha = (str) => window.SGA_Utils.formatFecha(str);
 
+  const fmtHora = (str) => {
+    if (!str) return '—';
+    const d = new Date(str);
+    const hoy = new Date();
+    const esHoy = d.getFullYear() === hoy.getFullYear()
+      && d.getMonth() === hoy.getMonth()
+      && d.getDate() === hoy.getDate();
+    return esHoy
+      ? d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+      : fmtFecha(str);
+  };
+
   // ── DENOMINACIONES ────────────────────────────────────────────────────────────
 
   function getDenominaciones() {
@@ -126,6 +138,94 @@ const Caja = (() => {
        ORDER BY v.fecha DESC`,
       [sesionId]
     );
+  }
+
+  function getMovimientosDia(sesionId) {
+    const ventas = window.SGA_DB.query(
+      `SELECT v.id, v.fecha, v.total, v.estado, c.nombre AS cliente
+       FROM ventas v
+       LEFT JOIN clientes c ON c.id = v.cliente_id
+       WHERE v.sesion_caja_id = ?
+       ORDER BY v.fecha DESC`,
+      [sesionId]
+    );
+    const allPagos = window.SGA_DB.query(
+      `SELECT vp.venta_id, vp.medio FROM venta_pagos vp
+       JOIN ventas v ON v.id = vp.venta_id WHERE v.sesion_caja_id = ?`,
+      [sesionId]
+    );
+    const pagosByVenta = {};
+    for (const p of allPagos) {
+      if (!pagosByVenta[p.venta_id]) pagosByVenta[p.venta_id] = [];
+      if (!pagosByVenta[p.venta_id].includes(p.medio)) pagosByVenta[p.venta_id].push(p.medio);
+    }
+    const egresos = window.SGA_DB.query(
+      `SELECT e.id, e.fecha, e.monto, e.descripcion, e.tipo, u.nombre AS usuario
+       FROM egresos_caja e LEFT JOIN usuarios u ON u.id = e.usuario_id
+       WHERE e.sesion_caja_id = ? ORDER BY e.fecha DESC`,
+      [sesionId]
+    );
+    const ingresos = window.SGA_DB.query(
+      `SELECT i.id, i.fecha, i.monto, i.descripcion, u.nombre AS usuario
+       FROM ingresos_caja i LEFT JOIN usuarios u ON u.id = i.usuario_id
+       WHERE i.sesion_caja_id = ? ORDER BY i.fecha DESC`,
+      [sesionId]
+    );
+    const items = [
+      ...ventas.map(v => ({
+        tipo: 'venta', id: v.id, fecha: v.fecha,
+        monto: parseFloat(v.total) || 0,
+        descripcion: v.cliente || 'Consumidor final',
+        estado: v.estado,
+        medios: pagosByVenta[v.id] || [],
+      })),
+      ...egresos.map(e => ({
+        tipo: 'egreso', id: e.id, fecha: e.fecha,
+        monto: -(parseFloat(e.monto) || 0),
+        descripcion: e.descripcion || EGRESO_TIPO_LABEL[e.tipo] || 'Egreso',
+        subtipo: e.tipo, usuario: e.usuario,
+        medios: ['efectivo'],
+      })),
+      ...ingresos.map(i => ({
+        tipo: 'ingreso', id: i.id, fecha: i.fecha,
+        monto: parseFloat(i.monto) || 0,
+        descripcion: i.descripcion || 'Ingreso extra',
+        usuario: i.usuario,
+        medios: ['efectivo'],
+      })),
+    ];
+    items.sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+    return items;
+  }
+
+  const MEDIO_ICON = {
+    efectivo:         `<span class="mtag mtag-cash">💵 Efectivo</span>`,
+    mercadopago:      `<span class="mtag mtag-mp">📲 MP</span>`,
+    tarjeta:          `<span class="mtag mtag-card">💳 Tarjeta</span>`,
+    transferencia:    `<span class="mtag mtag-transf">🏦 Transf.</span>`,
+    cuenta_corriente: `<span class="mtag mtag-cc">Cta. Cte.</span>`,
+  };
+
+  function medioTags(medios) {
+    if (!medios || !medios.length) return '<span style="color:#ccc">—</span>';
+    return medios.map(m => MEDIO_ICON[m] || `<span class="mtag">${esc(m)}</span>`).join('');
+  }
+
+  function movTipoBadge(item) {
+    if (item.tipo === 'venta') {
+      const map = {
+        completada: ['mov-venta',    'Venta'],
+        anulada:    ['mov-anulada',  'Anulada'],
+        pendiente:  ['mov-pendiente','Sin cobrar'],
+      };
+      const [cls, lbl] = map[item.estado] || ['mov-venta', 'Venta'];
+      return `<span class="mov-badge ${cls}">${lbl}</span>`;
+    }
+    if (item.tipo === 'egreso') {
+      const lbl = { pago_proveedor: 'Pago Prov.', retiro: 'Retiro', gasto_operativo: 'Gasto', otro: 'Egreso' };
+      return `<span class="mov-badge mov-egreso">${lbl[item.subtipo] || 'Egreso'}</span>`;
+    }
+    return `<span class="mov-badge mov-ingreso">Ingreso</span>`;
   }
 
   function getEgresosIngresos(sesionId) {
@@ -364,16 +464,19 @@ const Caja = (() => {
       </div>
       <div class="caja-tabs">
         <button class="caja-tab ${state.currentTab === 'resumen' ? 'active' : ''}" data-tab="resumen">Resumen</button>
-        <button class="caja-tab ${state.currentTab === 'movimientos' ? 'active' : ''}" data-tab="movimientos">Movimientos</button>
-        <button class="caja-tab ${state.currentTab === 'egresos' ? 'active' : ''}" data-tab="egresos">Egresos e Ingresos</button>
+<button class="caja-tab ${state.currentTab === 'egresos' ? 'active' : ''}" data-tab="egresos">Egresos e Ingresos</button>
         <button class="caja-tab ${state.currentTab === 'historial' ? 'active' : ''}" data-tab="historial">Historial</button>
         <button class="caja-tab ${state.currentTab === 'recuento' ? 'active' : ''}" data-tab="recuento">Recuento de dinero</button>
+        <button class="caja-tab" data-action="medios">Cobranzas por medio de pago</button>
       </div>
       <div id="caja-tab-content" class="caja-tab-content"></div>
     `;
 
     root.querySelectorAll('.caja-tab').forEach(btn => {
-      btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+      btn.addEventListener('click', () => {
+        if (btn.dataset.action === 'medios') { openMediosPagoOverlay(); return; }
+        switchTab(btn.dataset.tab);
+      });
     });
 
     if (canManage()) {
@@ -393,11 +496,42 @@ const Caja = (() => {
     if (!content) return;
     switch (tab) {
       case 'resumen':     renderResumen(content);          break;
-      case 'movimientos': renderMovimientos(content);       break;
-      case 'egresos':     renderEgresosIngresos(content);   break;
+case 'egresos':     renderEgresosIngresos(content);   break;
       case 'historial':   renderHistorial(content);         break;
       case 'recuento':    renderRecuento(content);          break;
     }
+  }
+
+  // ── OVERLAY: COBRANZAS POR MEDIO DE PAGO ─────────────────────────────────────
+
+  function openMediosPagoOverlay() {
+    const tot = getTotalesSesion(state.sesion.id);
+    const mediosRows = MEDIOS
+      .filter(m => tot.totPagos[m] > 0)
+      .map(m => `
+        <div class="caja-stat-row">
+          <span>${MEDIOS_LABEL[m]}</span>
+          <span>${fmtPeso(tot.totPagos[m])}</span>
+        </div>
+      `).join('');
+
+    openModal(`
+      <button class="caja-modal-close" id="btn-close-medios">✕</button>
+      <h3>Cobranzas por medio de pago</h3>
+      ${mediosRows
+        ? mediosRows + `
+          <div class="caja-stat-row total-row" style="margin-top:8px">
+            <span>Total</span>
+            <span>${fmtPeso(tot.totalVentas)}</span>
+          </div>`
+        : '<p class="caja-empty">Sin ventas registradas en esta sesión.</p>'}
+      <div class="caja-modal-footer">
+        <button class="btn btn-outline" id="btn-close-medios2">Cerrar</button>
+      </div>
+    `);
+
+    ge('btn-close-medios').addEventListener('click', closeModal);
+    ge('btn-close-medios2').addEventListener('click', closeModal);
   }
 
   // ── TAB: RESUMEN ──────────────────────────────────────────────────────────────
@@ -408,14 +542,38 @@ const Caja = (() => {
     const tot = getTotalesSesion(state.sesion.id);
     state.totales = tot;
 
-    const mediosHtml = MEDIOS
-      .filter(m => tot.totPagos[m] > 0)
-      .map(m => `
-        <div class="caja-stat-row">
-          <span>${MEDIOS_LABEL[m]}</span>
-          <span>${fmtPeso(tot.totPagos[m])}</span>
-        </div>
-      `).join('');
+    const movimientos = getMovimientosDia(state.sesion.id);
+    const movsHtml = movimientos.length
+      ? `<div style="max-height:340px;overflow-y:auto">
+          <table class="caja-table mov-table">
+            <thead>
+              <tr>
+                <th style="width:70px">Hora</th>
+                <th style="width:110px">Tipo</th>
+                <th>Descripción</th>
+                <th style="width:150px">Medio</th>
+                <th style="text-align:right;width:110px">Monto</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${movimientos.map(m => {
+                const amtClass = m.monto < 0 ? 'text-danger' : '';
+                return `
+                  <tr class="mov-row" data-tipo="${esc(m.tipo)}" data-id="${esc(m.id)}">
+                    <td style="font-weight:600">${fmtHora(m.fecha)}</td>
+                    <td>${movTipoBadge(m)}</td>
+                    <td>${esc(m.descripcion)}</td>
+                    <td>${medioTags(m.medios)}</td>
+                    <td style="text-align:right;font-weight:600" class="${amtClass}">
+                      ${m.monto < 0 ? '−' : ''}${fmtPeso(Math.abs(m.monto))}
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`
+      : '<p class="caja-empty" style="padding:16px 0">Sin movimientos registrados en esta sesión.</p>';
 
     el.innerHTML = `
       <div class="caja-resumen-grid">
@@ -437,47 +595,17 @@ const Caja = (() => {
           <div class="caja-stat-value">${fmtPeso(tot.saldoEsperado)}</div>
         </div>
       </div>
-      ${mediosHtml ? `<div class="caja-medios-card"><h4>Ventas por medio de pago</h4>${mediosHtml}</div>` : ''}
-    `;
-  }
-
-  // ── TAB: MOVIMIENTOS ──────────────────────────────────────────────────────────
-
-  function renderMovimientos(container) {
-    const el = container || ge('caja-tab-content');
-    if (!el || !state.sesion) return;
-    const movs = getMovimientos(state.sesion.id);
-
-    if (!movs.length) {
-      el.innerHTML = '<div class="caja-empty">Sin ventas registradas en esta sesión.</div>';
-      return;
-    }
-
-    el.innerHTML = `
-      <table class="caja-table">
-        <thead>
-          <tr>
-            <th>Fecha</th><th>ID Venta</th><th>Cliente</th><th>Total</th><th>Estado</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${movs.map(v => `
-            <tr>
-              <td>${fmtFecha(v.fecha)}</td>
-              <td><a href="#" class="caja-link-venta" data-id="${esc(v.id)}">${v.id.slice(0, 8)}…</a></td>
-              <td>${esc(v.cliente || 'Consumidor final')}</td>
-              <td>${fmtPeso(v.total)}</td>
-              <td><span class="badge-estado ${esc(v.estado)}">${esc(v.estado)}</span></td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
+      <div class="caja-medios-card">
+        <h4>Movimientos del día</h4>
+        ${movsHtml}
+      </div>
     `;
 
-    el.querySelectorAll('.caja-link-venta').forEach(a => {
-      a.addEventListener('click', e => { e.preventDefault(); showVentaDetalle(a.dataset.id); });
+    el.querySelectorAll('.mov-row').forEach(row => {
+      row.addEventListener('click', () => openMovimientoSidebar(row.dataset.tipo, row.dataset.id));
     });
   }
+
 
   // ── TAB: EGRESOS E INGRESOS ───────────────────────────────────────────────────
 
@@ -599,6 +727,135 @@ const Caja = (() => {
     el.querySelectorAll('.btn-ver-sesion').forEach(btn => {
       btn.addEventListener('click', () => showSesionDetalle(btn.dataset.id));
     });
+  }
+
+  // ── SIDEBAR ───────────────────────────────────────────────────────────────────
+
+  function ensureSidebar() {
+    if (ge('caja-sidebar')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'caja-sidebar-overlay';
+    overlay.className = 'caja-sidebar-overlay';
+    overlay.addEventListener('click', closeSidebar);
+    document.body.appendChild(overlay);
+    const sidebar = document.createElement('div');
+    sidebar.id = 'caja-sidebar';
+    sidebar.className = 'caja-sidebar';
+    sidebar.innerHTML = `
+      <div class="caja-sidebar-header">
+        <h3 id="sidebar-title" style="margin:0;font-size:1rem"></h3>
+        <button class="btn-sidebar-close" id="btn-sidebar-close">✕</button>
+      </div>
+      <div class="caja-sidebar-body" id="sidebar-body"></div>
+    `;
+    document.body.appendChild(sidebar);
+    ge('btn-sidebar-close').addEventListener('click', closeSidebar);
+  }
+
+  function openSidebar(title, html) {
+    ensureSidebar();
+    ge('sidebar-title').textContent = title;
+    ge('sidebar-body').innerHTML = html;
+    ge('caja-sidebar').classList.add('open');
+    ge('caja-sidebar-overlay').classList.add('visible');
+  }
+
+  function closeSidebar() {
+    const s = ge('caja-sidebar');
+    const o = ge('caja-sidebar-overlay');
+    if (s) s.classList.remove('open');
+    if (o) o.classList.remove('visible');
+  }
+
+  function openMovimientoSidebar(tipo, id) {
+    if (tipo === 'venta') {
+      const rows = window.SGA_DB.query(
+        `SELECT v.*, c.nombre AS cliente, u.nombre AS usuario
+         FROM ventas v
+         LEFT JOIN clientes c ON c.id = v.cliente_id
+         LEFT JOIN usuarios u ON u.id = v.usuario_id
+         WHERE v.id = ?`, [id]
+      );
+      if (!rows.length) return;
+      const v = rows[0];
+      const items = window.SGA_DB.query(
+        `SELECT vi.*, p.nombre FROM venta_items vi
+         LEFT JOIN productos p ON p.id = vi.producto_id WHERE vi.venta_id = ?`, [id]
+      );
+      const pagos = window.SGA_DB.query(`SELECT * FROM venta_pagos WHERE venta_id = ?`, [id]);
+      const estadoCls = { completada: 'mov-venta', anulada: 'mov-anulada', pendiente: 'mov-pendiente' };
+      const itemsHtml = items.map(i => `
+        <tr>
+          <td>${esc(i.nombre || '')}</td>
+          <td style="text-align:center">${i.cantidad}</td>
+          <td style="text-align:right">${fmtPeso(i.precio_unitario)}</td>
+          <td style="text-align:right">${fmtPeso(i.subtotal)}</td>
+        </tr>`).join('') || '<tr><td colspan="4" style="color:#999;padding:8px">Sin detalle</td></tr>';
+      const pagosHtml = pagos.map(p => `
+        <div class="caja-stat-row">
+          <span>${MEDIOS_LABEL[p.medio] || esc(p.medio)}</span>
+          <span>${fmtPeso(p.monto)}</span>
+        </div>`).join('');
+      const html = `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <span class="mov-badge ${estadoCls[v.estado] || 'mov-venta'}" style="font-size:13px;padding:4px 10px">${esc(v.estado)}</span>
+          <span style="color:var(--color-text-secondary);font-size:13px">${fmtFecha(v.fecha)}</span>
+        </div>
+        <div class="caja-stat-row"><span style="color:#666">Cliente</span><span>${esc(v.cliente || 'Consumidor final')}</span></div>
+        <div class="caja-stat-row"><span style="color:#666">Vendedor</span><span>${esc(v.usuario || '—')}</span></div>
+        <h4 style="margin:16px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#999">Productos</h4>
+        <table class="caja-table">
+          <thead><tr><th>Producto</th><th style="text-align:center">Cant.</th><th style="text-align:right">Precio</th><th style="text-align:right">Subtotal</th></tr></thead>
+          <tbody>${itemsHtml}</tbody>
+        </table>
+        <h4 style="margin:16px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#999">Pagos</h4>
+        ${pagosHtml}
+        <div class="caja-stat-row total-row" style="margin-top:6px">
+          <span>Total</span><span>${fmtPeso(v.total)}</span>
+        </div>
+        <div style="margin-top:20px">
+          <button class="btn btn-outline btn-sm" id="btn-sidebar-ir-pos">Ver en POS</button>
+        </div>
+      `;
+      openSidebar('Detalle de venta', html);
+      const btnPos = ge('btn-sidebar-ir-pos');
+      if (btnPos) btnPos.addEventListener('click', () => {
+        closeSidebar();
+        sessionStorage.setItem('highlight_venta', id);
+        window.location.hash = '#pos';
+      });
+
+    } else if (tipo === 'egreso') {
+      const rows = window.SGA_DB.query(
+        `SELECT e.*, u.nombre AS usuario FROM egresos_caja e
+         LEFT JOIN usuarios u ON u.id = e.usuario_id WHERE e.id = ?`, [id]
+      );
+      if (!rows.length) return;
+      const e = rows[0];
+      openSidebar('Detalle de egreso', `
+        <div class="caja-stat-row"><span style="color:#666">Tipo</span>
+          <span class="mov-badge mov-egreso">${EGRESO_TIPO_LABEL[e.tipo] || esc(e.tipo)}</span>
+        </div>
+        <div class="caja-stat-row"><span style="color:#666">Descripción</span><span>${esc(e.descripcion || '—')}</span></div>
+        <div class="caja-stat-row"><span style="color:#666">Monto</span><span class="text-danger">−${fmtPeso(e.monto)}</span></div>
+        <div class="caja-stat-row"><span style="color:#666">Fecha</span><span>${fmtFecha(e.fecha)}</span></div>
+        <div class="caja-stat-row"><span style="color:#666">Usuario</span><span>${esc(e.usuario || '—')}</span></div>
+      `);
+
+    } else if (tipo === 'ingreso') {
+      const rows = window.SGA_DB.query(
+        `SELECT i.*, u.nombre AS usuario FROM ingresos_caja i
+         LEFT JOIN usuarios u ON u.id = i.usuario_id WHERE i.id = ?`, [id]
+      );
+      if (!rows.length) return;
+      const i = rows[0];
+      openSidebar('Detalle de ingreso', `
+        <div class="caja-stat-row"><span style="color:#666">Descripción</span><span>${esc(i.descripcion || '—')}</span></div>
+        <div class="caja-stat-row"><span style="color:#666">Monto</span><span class="text-success">${fmtPeso(i.monto)}</span></div>
+        <div class="caja-stat-row"><span style="color:#666">Fecha</span><span>${fmtFecha(i.fecha)}</span></div>
+        <div class="caja-stat-row"><span style="color:#666">Usuario</span><span>${esc(i.usuario || '—')}</span></div>
+      `);
+    }
   }
 
   // ── MODAL HELPERS ─────────────────────────────────────────────────────────────

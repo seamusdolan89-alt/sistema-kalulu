@@ -1070,7 +1070,7 @@ const ComprasV2 = (() => {
     const like = `%${q.trim()}%`;
     return db().query(
       `SELECT id, razon_social, alias, condicion_iva, agente_retencion_iva, agente_retencion_iibb, condicion_compra
-       FROM proveedores WHERE activo=1 AND (razon_social LIKE ? OR alias LIKE ?) LIMIT 10`,
+       FROM proveedores WHERE activo=1 AND COALESCE(tipo_proveedor,'mercaderia')='mercaderia' AND (razon_social LIKE ? OR alias LIKE ?) LIMIT 10`,
       [like, like]
     );
   }
@@ -2281,8 +2281,8 @@ const ComprasV2 = (() => {
       const nuevoPrecio = parseFloat(input?.value) || 0;
       if (nuevoPrecio <= 0) { alert('Precio inválido'); return; }
       const item = items[idx];
-      db().run(`UPDATE productos SET precio_venta=?, sync_status='pending', updated_at=? WHERE id=?`,
-               [nuevoPrecio, nowISO(), prodId]);
+      db().run(`UPDATE productos SET precio_venta=?, ultima_modificacion_precio=?, sync_status='pending', updated_at=? WHERE id=?`,
+               [nuevoPrecio, nowISO(), nowISO(), prodId]);
       items[idx].pvGuardado = nuevoPrecio;
       const hasFam = checkHasFamily(prodId);
       if (hasFam) {
@@ -2867,7 +2867,7 @@ const ComprasV2 = (() => {
       const ts  = nowISO();
       const fields = [], vals = [];
       if (hc) { fields.push('costo=?', 'costo_paquete=?'); vals.push(nuevoCosto, nuevoCosto); }
-      if (hp) { fields.push('precio_venta=?'); vals.push(nuevoPrecio); }
+      if (hp) { fields.push('precio_venta=?', 'ultima_modificacion_precio=?'); vals.push(nuevoPrecio, ts); }
       if (!fields.length) return;
       fields.push("sync_status='pending'", 'updated_at=?');
       vals.push(ts, m.id);

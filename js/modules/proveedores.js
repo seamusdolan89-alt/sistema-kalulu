@@ -48,8 +48,8 @@ const SGA_Proveedores = (() => {
           (id, razon_social, alias, cuit, condicion_iva,
            agente_retencion_iva, agente_retencion_iibb,
            telefono, email, contacto_nombre,
-           condicion_pago, condicion_compra, activo, sync_status, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'pending', ?)
+           condicion_pago, condicion_compra, tipo_proveedor, activo, sync_status, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'pending', ?)
       `, [
         id,
         (data.razon_social    || '').trim(),
@@ -63,6 +63,7 @@ const SGA_Proveedores = (() => {
         (data.contacto_nombre || '').trim() || null,
         data.condicion_pago   || null,
         data.condicion_compra || null,
+        data.tipo_proveedor   || 'mercaderia',
         now(),
       ]);
       return { success: true, id };
@@ -87,6 +88,7 @@ const SGA_Proveedores = (() => {
           contacto_nombre       = ?,
           condicion_pago        = ?,
           condicion_compra      = ?,
+          tipo_proveedor        = ?,
           sync_status           = 'pending',
           updated_at            = ?
         WHERE id = ?
@@ -102,6 +104,7 @@ const SGA_Proveedores = (() => {
         (data.contacto_nombre || '').trim() || null,
         data.condicion_pago   || null,
         data.condicion_compra || null,
+        data.tipo_proveedor   || 'mercaderia',
         now(),
         id,
       ]);
@@ -208,6 +211,9 @@ const Proveedores = (() => {
           ${p.activo
             ? `<span class="prov-badge active">Activo</span>`
             : `<span class="prov-badge inactive">Inactivo</span>`}
+          ${p.tipo_proveedor === 'servicios'
+            ? `<span class="prov-badge prov-badge-svc">Servicios</span>`
+            : `<span class="prov-badge prov-badge-merc">Mercadería</span>`}
         </td>
         <td>
           <div class="prov-actions">
@@ -262,6 +268,21 @@ const Proveedores = (() => {
           <button id="btn-prov-close" class="prov-modal-close" title="Cerrar (Esc)">✕</button>
         </div>
         <div class="prov-modal-body">
+
+          <!-- ── TIPO DE PROVEEDOR ── -->
+          <div class="prov-tipo-toggle-wrap">
+            <span class="prov-tipo-opt ${(!prov || prov.tipo_proveedor === 'mercaderia') ? 'prov-tipo-active' : ''}">
+              📦 Mercadería
+            </span>
+            <label class="prov-tipo-switch">
+              <input type="checkbox" id="pf-tipo-toggle"
+                ${prov && prov.tipo_proveedor === 'servicios' ? 'checked' : ''}>
+              <span class="prov-tipo-track"></span>
+            </label>
+            <span class="prov-tipo-opt ${prov && prov.tipo_proveedor === 'servicios' ? 'prov-tipo-active prov-tipo-active-svc' : ''}">
+              🧾 Gastos y Servicios
+            </span>
+          </div>
 
           <!-- ── IDENTIFICACIÓN ── -->
           <div class="prov-section-sep">Identificación</div>
@@ -380,6 +401,16 @@ const Proveedores = (() => {
     ge('btn-prov-cancel').addEventListener('click', close);
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
 
+    // Toggle tipo visual feedback
+    ge('pf-tipo-toggle').addEventListener('change', () => {
+      const esSvc = ge('pf-tipo-toggle').checked;
+      const opts = overlay.querySelectorAll('.prov-tipo-opt');
+      opts[0].classList.toggle('prov-tipo-active', !esSvc);
+      opts[0].classList.remove('prov-tipo-active-svc');
+      opts[1].classList.toggle('prov-tipo-active', esSvc);
+      opts[1].classList.toggle('prov-tipo-active-svc', esSvc);
+    });
+
     // ── SAVE ──
     const save = () => {
       const razon = (ge('pf-razon').value || '').trim();
@@ -404,6 +435,7 @@ const Proveedores = (() => {
         contacto_nombre:       ge('pf-contacto').value,
         condicion_pago:        ge('pf-condpago').value   || null,
         condicion_compra:      ge('pf-condcompra').value || null,
+        tipo_proveedor:        ge('pf-tipo-toggle').checked ? 'servicios' : 'mercaderia',
       };
 
       const res = prov
@@ -468,14 +500,15 @@ const Proveedores = (() => {
       'razon_social', 'alias', 'cuit', 'condicion_iva',
       'agente_retencion_iva', 'agente_retencion_iibb',
       'telefono', 'email', 'contacto_nombre',
-      'condicion_pago', 'condicion_compra', 'activo',
+      'condicion_pago', 'condicion_compra', 'tipo_proveedor', 'activo',
     ];
 
     const instrRow = [
       '* Obligatorio', '', '', '→ Ver opciones válidas abajo',
       '→ 1=sí, 0=no', '→ 1=sí, 0=no',
       '', '', '',
-      '→ Ver opciones válidas abajo', '→ Ver opciones válidas abajo', '→ 1=activo, 0=inactivo',
+      '→ Ver opciones válidas abajo', '→ Ver opciones válidas abajo',
+      '→ mercaderia | servicios', '→ 1=activo, 0=inactivo',
     ];
 
     let dataRows, filename;
@@ -492,12 +525,13 @@ const Proveedores = (() => {
         p.contacto_nombre || '',
         p.condicion_pago || '',
         p.condicion_compra || '',
+        p.tipo_proveedor || 'mercaderia',
         p.activo != null ? p.activo : 1,
       ]);
       filename = 'proveedores_exportados.xlsx';
     } else {
       dataRows = [
-        ['Distribuidora Ejemplo S.A.', 'DistrEjemplo', '30-12345678-9', 'Responsable Inscripto', 1, 0, '011 4444-5555', 'ventas@ejemplo.com', 'Juan García', 'Contado', 'Factura A', 1],
+        ['Distribuidora Ejemplo S.A.', 'DistrEjemplo', '30-12345678-9', 'Responsable Inscripto', 1, 0, '011 4444-5555', 'ventas@ejemplo.com', 'Juan García', 'Contado', 'Factura A', 'mercaderia', 1],
       ];
       filename = 'plantilla_proveedores.xlsx';
     }
@@ -507,7 +541,7 @@ const Proveedores = (() => {
       { wch: 28 }, { wch: 16 }, { wch: 16 }, { wch: 22 },
       { wch: 20 }, { wch: 22 },
       { wch: 16 }, { wch: 26 }, { wch: 20 },
-      { wch: 18 }, { wch: 18 }, { wch: 10 },
+      { wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 10 },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Proveedores');
@@ -602,25 +636,30 @@ const Proveedores = (() => {
           contacto_nombre:       idxOf('contacto_nombre'),
           condicion_pago:        idxOf('condicion_pago'),
           condicion_compra:      idxOf('condicion_compra'),
+          tipo_proveedor:        idxOf('tipo_proveedor'),
           activo:                idxOf('activo'),
         };
 
         importData.filas = jsonData.slice(1)
           .filter(row => row.some(c => c !== null && c !== undefined && String(c).trim() !== ''))
-          .map(row => ({
-            razon_social:          idx.razon_social >= 0          ? String(row[idx.razon_social] || '').trim() : '',
-            alias:                 idx.alias >= 0                 ? String(row[idx.alias] || '').trim() : '',
-            cuit:                  idx.cuit >= 0                  ? String(row[idx.cuit] || '').trim() : '',
-            condicion_iva:         idx.condicion_iva >= 0         ? String(row[idx.condicion_iva] || '').trim() : '',
-            agente_retencion_iva:  idx.agente_retencion_iva >= 0  ? (parseInt(row[idx.agente_retencion_iva]) === 1 ? 1 : 0) : 0,
-            agente_retencion_iibb: idx.agente_retencion_iibb >= 0 ? (parseInt(row[idx.agente_retencion_iibb]) === 1 ? 1 : 0) : 0,
-            telefono:              idx.telefono >= 0              ? String(row[idx.telefono] || '').trim() : '',
-            email:                 idx.email >= 0                 ? String(row[idx.email] || '').trim() : '',
-            contacto_nombre:       idx.contacto_nombre >= 0       ? String(row[idx.contacto_nombre] || '').trim() : '',
-            condicion_pago:        idx.condicion_pago >= 0        ? String(row[idx.condicion_pago] || '').trim() : '',
-            condicion_compra:      idx.condicion_compra >= 0      ? String(row[idx.condicion_compra] || '').trim() : '',
-            activo:                idx.activo >= 0                ? (parseInt(row[idx.activo]) === 0 ? 0 : 1) : 1,
-          }))
+          .map(row => {
+            const rawTipo = idx.tipo_proveedor >= 0 ? String(row[idx.tipo_proveedor] || '').trim().toLowerCase() : '';
+            return {
+              razon_social:          idx.razon_social >= 0          ? String(row[idx.razon_social] || '').trim() : '',
+              alias:                 idx.alias >= 0                 ? String(row[idx.alias] || '').trim() : '',
+              cuit:                  idx.cuit >= 0                  ? String(row[idx.cuit] || '').trim() : '',
+              condicion_iva:         idx.condicion_iva >= 0         ? String(row[idx.condicion_iva] || '').trim() : '',
+              agente_retencion_iva:  idx.agente_retencion_iva >= 0  ? (parseInt(row[idx.agente_retencion_iva]) === 1 ? 1 : 0) : 0,
+              agente_retencion_iibb: idx.agente_retencion_iibb >= 0 ? (parseInt(row[idx.agente_retencion_iibb]) === 1 ? 1 : 0) : 0,
+              telefono:              idx.telefono >= 0              ? String(row[idx.telefono] || '').trim() : '',
+              email:                 idx.email >= 0                 ? String(row[idx.email] || '').trim() : '',
+              contacto_nombre:       idx.contacto_nombre >= 0       ? String(row[idx.contacto_nombre] || '').trim() : '',
+              condicion_pago:        idx.condicion_pago >= 0        ? String(row[idx.condicion_pago] || '').trim() : '',
+              condicion_compra:      idx.condicion_compra >= 0      ? String(row[idx.condicion_compra] || '').trim() : '',
+              tipo_proveedor:        rawTipo === 'servicios' ? 'servicios' : 'mercaderia',
+              activo:                idx.activo >= 0                ? (parseInt(row[idx.activo]) === 0 ? 0 : 1) : 1,
+            };
+          })
           .filter(r => r.razon_social);
 
         if (!importData.filas.length) {
@@ -684,14 +723,15 @@ const Proveedores = (() => {
               alias = ?, cuit = ?, condicion_iva = ?,
               agente_retencion_iva = ?, agente_retencion_iibb = ?,
               telefono = ?, email = ?, contacto_nombre = ?,
-              condicion_pago = ?, condicion_compra = ?, activo = ?,
+              condicion_pago = ?, condicion_compra = ?, tipo_proveedor = ?, activo = ?,
               sync_status = 'pending', updated_at = ?
             WHERE id = ?
           `, [
             fila.alias || null, fila.cuit || null, fila.condicion_iva || null,
             fila.agente_retencion_iva, fila.agente_retencion_iibb,
             fila.telefono || null, fila.email || null, fila.contacto_nombre || null,
-            fila.condicion_pago || null, fila.condicion_compra || null, fila.activo,
+            fila.condicion_pago || null, fila.condicion_compra || null,
+            fila.tipo_proveedor || 'mercaderia', fila.activo,
             n, existing[0].id,
           ]);
           actualizados++;
@@ -701,14 +741,15 @@ const Proveedores = (() => {
               (id, razon_social, alias, cuit, condicion_iva,
                agente_retencion_iva, agente_retencion_iibb,
                telefono, email, contacto_nombre,
-               condicion_pago, condicion_compra, activo, sync_status, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?)
+               condicion_pago, condicion_compra, tipo_proveedor, activo, sync_status, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?)
           `, [
             uid(), fila.razon_social,
             fila.alias || null, fila.cuit || null, fila.condicion_iva || null,
             fila.agente_retencion_iva, fila.agente_retencion_iibb,
             fila.telefono || null, fila.email || null, fila.contacto_nombre || null,
-            fila.condicion_pago || null, fila.condicion_compra || null, fila.activo,
+            fila.condicion_pago || null, fila.condicion_compra || null,
+            fila.tipo_proveedor || 'mercaderia', fila.activo,
             n,
           ]);
           nuevos++;

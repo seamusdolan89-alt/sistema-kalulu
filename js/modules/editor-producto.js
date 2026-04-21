@@ -2489,7 +2489,8 @@ const EditorProducto = (() => {
     const unidadesPorPaquete = uppRaw !== '' ? (parseFloat(uppRaw) || null) : null;
 
     const uppCompraRaw = (ge('ed-unidades-paquete-compra') || {}).value;
-
+    const newPrecioVenta = parseFloat((ge('ed-precio-venta') || {}).value) || 0;
+    const precioChanged = newPrecioVenta !== (state.producto.precio_venta || 0);
 
     window.SGA_DB.run(`
       UPDATE productos SET
@@ -2504,6 +2505,7 @@ const EditorProducto = (() => {
         precio_lista_por = ?, precio_lista_divisor = ?,
         es_oferta = ?, oferta_desde = ?, oferta_hasta = ?,
         imagen = ?,
+        ultima_modificacion_precio = CASE WHEN ? THEN ? ELSE ultima_modificacion_precio END,
         fecha_modificacion = ?, sync_status = 'pending', updated_at = ?
       WHERE id = ?
     `, [
@@ -2534,6 +2536,7 @@ const EditorProducto = (() => {
       (ge('ed-oferta-desde') || {}).value || null,
       (ge('ed-oferta-hasta') || {}).value || null,
       imagen,
+      precioChanged ? 1 : 0, now,
       now, now,
       state.productoId,
     ]);

@@ -704,6 +704,7 @@ export const POS = (() => {
           }
         });
         inp.addEventListener('change', e => {
+          if (!document.contains(e.target)) return;
           const item = state.cart[idx];
           if (!item) return;
           const v = parseFloat(e.target.value);

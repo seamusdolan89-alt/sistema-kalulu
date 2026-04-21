@@ -359,6 +359,113 @@
     border-radius: var(--radius-sm);
     font-size: 14px;
   }
+
+  /* ── MOVEMENT TYPE BADGES ─────────────────────────────────────────────────── */
+  .mov-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .mov-venta     { background: #e8f5e9; color: #2E7D32; }
+  .mov-anulada   { background: #ffebee; color: #C62828; }
+  .mov-pendiente { background: #fff8e1; color: #E65100; }
+  .mov-egreso    { background: #ffebee; color: #C62828; }
+  .mov-ingreso   { background: #e3f2fd; color: #1565C0; }
+
+  /* ── MEDIO TAGS ───────────────────────────────────────────────────────────── */
+  .mtag {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    margin-right: 2px;
+  }
+  .mtag-cash  { background: #e8f5e9; color: #1b5e20; }
+  .mtag-mp    { background: #e3f2fd; color: #0d47a1; }
+  .mtag-card  { background: #e1f5fe; color: #01579b; }
+  .mtag-transf{ background: #f3e5f5; color: #6a1b9a; }
+  .mtag-cc    { background: #fff3e0; color: #e65100; }
+
+  /* ── MOVIMIENTOS TABLE ────────────────────────────────────────────────────── */
+  .mov-table {
+    border-collapse: separate;
+    border-spacing: 0 3px;
+  }
+  .mov-table thead th {
+    border-bottom: none;
+    padding-bottom: 6px;
+  }
+  .mov-table tbody tr td {
+    border-bottom: none;
+    background: var(--color-surface);
+    padding: 9px 12px;
+  }
+  .mov-table tbody tr td:first-child {
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  }
+  .mov-table tbody tr td:last-child {
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  }
+  .mov-row { cursor: pointer; }
+  .mov-row:hover td { background: var(--color-primary-light, #e8f0fe); }
+
+  /* ── SIDEBAR ──────────────────────────────────────────────────────────────── */
+  .caja-sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.3);
+    z-index: 1000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s;
+  }
+  .caja-sidebar-overlay.visible { opacity: 1; pointer-events: all; }
+  .caja-sidebar {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 420px;
+    max-width: 95vw;
+    height: 100%;
+    background: white;
+    box-shadow: -4px 0 24px rgba(0,0,0,.18);
+    z-index: 1001;
+    transform: translateX(100%);
+    transition: transform 0.28s cubic-bezier(.4,0,.2,1);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .caja-sidebar.open { transform: translateX(0); }
+  .caja-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--color-border);
+    position: sticky;
+    top: 0;
+    background: white;
+    z-index: 1;
+  }
+  .caja-sidebar-body { flex: 1; padding: 20px; }
+  .btn-sidebar-close {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    color: var(--color-text-secondary);
+    padding: 4px 8px;
+    line-height: 1;
+  }
+  .btn-sidebar-close:hover { color: var(--color-text); }
 </style>
 
 <div id="caja-root"></div>

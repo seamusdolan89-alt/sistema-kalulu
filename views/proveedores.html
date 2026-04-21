@@ -323,6 +323,54 @@
     font-weight: 500;
   }
 
+  /* ── TIPO PROVEEDOR TOGGLE ───────────────────────────────────────────────── */
+  .prov-tipo-toggle-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    margin-bottom: 14px;
+  }
+  .prov-tipo-opt {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    transition: color 0.15s;
+    white-space: nowrap;
+  }
+  .prov-tipo-active { color: var(--color-text); font-weight: 700; }
+  .prov-tipo-active-svc { color: #7c3aed; }
+  .prov-tipo-switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+  .prov-tipo-switch input { opacity: 0; width: 0; height: 0; }
+  .prov-tipo-track {
+    position: absolute;
+    inset: 0;
+    background: var(--color-primary);
+    border-radius: 22px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .prov-tipo-switch input:checked ~ .prov-tipo-track { background: #7c3aed; }
+  .prov-tipo-track::before {
+    content: '';
+    position: absolute;
+    left: 3px;
+    top: 3px;
+    width: 16px;
+    height: 16px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+  }
+  .prov-tipo-switch input:checked ~ .prov-tipo-track::before { transform: translateX(18px); }
+
+  /* ── TIPO BADGES EN LISTA ────────────────────────────────────────────────── */
+  .prov-badge-merc { background: #eff6ff; color: #1d4ed8; margin-left: 4px; }
+  .prov-badge-svc  { background: #f5f3ff; color: #7c3aed; margin-left: 4px; }
+
   /* ── MODAL WIDTH ─────────────────────────────────────────────────────────── */
   .prov-modal { max-width: 580px; }
 
