@@ -22,6 +22,16 @@
     <h1>🏪 Sistema Kalulu</h1>
     <div class="header-user">
       <span id="user-name">Usuario</span>
+      <div class="backup-menu" id="backup-menu">
+        <button class="btn btn-outline btn-sm" id="backup-btn" title="Backup de base de datos">💾</button>
+        <div class="backup-dropdown" id="backup-dropdown">
+          <button id="backup-export-btn">Exportar backup</button>
+          <label id="backup-import-label">
+            Restaurar backup
+            <input type="file" id="backup-import-input" accept=".sqlite" style="display:none">
+          </label>
+        </div>
+      </div>
       <button id="logout-btn" class="btn btn-outline btn-sm">Salir</button>
     </div>
   </header>

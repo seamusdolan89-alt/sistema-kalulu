@@ -1087,6 +1087,37 @@
     batchMode = false;
   }
 
+  async function exportarBackup() {
+    if (!database) throw new Error('Base de datos no inicializada');
+    const data = database.export();
+    const blob = new Blob([data], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const fecha = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `kalulu-backup-${fecha}.sqlite`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function importarBackup(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const bytes = new Uint8Array(e.target.result);
+          database = new SQL.Database(bytes);
+          await saveDatabase();
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
   // Export functions
   window.SGA_DB = {
     initialize,
@@ -1100,5 +1131,7 @@
     useFeature: () => db.useFeature,
     registrarHistorialStock,
     calcularDiasSinStock6m,
+    exportarBackup,
+    importarBackup,
   };
 })();

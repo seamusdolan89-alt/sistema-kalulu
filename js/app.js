@@ -242,10 +242,53 @@
 
     if (app.user) {
       userNameElem.textContent = `${app.user.nombre} (${app.user.rol})`;
-      
+
       logoutBtn.addEventListener('click', async () => {
         await window.SGA_Auth.logout();
         window.location.href = './views/login.html';
+      });
+    }
+
+    const backupBtn = document.getElementById('backup-btn');
+    const backupDropdown = document.getElementById('backup-dropdown');
+    const backupExportBtn = document.getElementById('backup-export-btn');
+    const backupImportInput = document.getElementById('backup-import-input');
+
+    if (backupBtn) {
+      backupBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        backupDropdown.classList.toggle('open');
+      });
+
+      document.addEventListener('click', () => {
+        backupDropdown.classList.remove('open');
+      });
+
+      backupExportBtn.addEventListener('click', async () => {
+        backupDropdown.classList.remove('open');
+        try {
+          await window.SGA_DB.exportarBackup();
+        } catch (err) {
+          alert('Error al exportar backup: ' + err.message);
+        }
+      });
+
+      backupImportInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        backupDropdown.classList.remove('open');
+        if (!confirm(`¿Restaurar la base de datos desde "${file.name}"?\n\nSe reemplazarán todos los datos actuales. Esta acción no se puede deshacer.`)) {
+          backupImportInput.value = '';
+          return;
+        }
+        try {
+          await window.SGA_DB.importarBackup(file);
+          alert('Base de datos restaurada correctamente. La página se va a recargar.');
+          location.reload();
+        } catch (err) {
+          alert('Error al restaurar backup: ' + err.message);
+        }
+        backupImportInput.value = '';
       });
     }
   }

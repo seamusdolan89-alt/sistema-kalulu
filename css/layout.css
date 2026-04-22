@@ -30,6 +30,47 @@ header h1 {
   align-items: center;
 }
 
+.backup-menu {
+  position: relative;
+}
+
+.backup-dropdown {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  z-index: 1000;
+  min-width: 170px;
+  overflow: hidden;
+}
+
+.backup-dropdown.open {
+  display: block;
+}
+
+.backup-dropdown button,
+.backup-dropdown label {
+  display: block;
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  color: var(--color-text);
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-normal);
+}
+
+.backup-dropdown button:hover,
+.backup-dropdown label:hover {
+  background: var(--color-background-secondary);
+}
+
 aside.sidebar {
   background-color: var(--color-background);
   border-right: 1px solid var(--color-border);
