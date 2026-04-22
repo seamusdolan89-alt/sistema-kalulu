@@ -1,11 +1,279 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SGA - Informes</title>
-</head>
-<body>
-  <div id="app-content"></div>
-</body>
-</html>
+<style>
+  /* ── INFORMES MODULE ─────────────────────────────────────────────────────── */
+  .inf-toolbar {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-background);
+    flex-wrap: wrap;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .inf-title {
+    margin: 0;
+    font-size: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .inf-toolbar-controls {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .inf-control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .inf-control-group label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--color-text-secondary);
+  }
+  .inf-select, .inf-date {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 7px 10px;
+    font-size: 13px;
+    background: var(--color-background);
+    color: var(--color-text);
+    height: 34px;
+    box-sizing: border-box;
+  }
+  .inf-select { min-width: 200px; }
+  .inf-date   { width: 140px; }
+  .inf-select:focus, .inf-date:focus {
+    outline: 2px solid var(--color-primary);
+    border-color: transparent;
+  }
+  .inf-quick-btns {
+    display: flex;
+    gap: 4px;
+    align-self: flex-end;
+  }
+
+  /* ── RESULTS AREA ────────────────────────────────────────────────────────── */
+  .inf-results-area { padding: 0 0 40px; }
+
+  .inf-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 50vh;
+    color: var(--color-text-secondary);
+    text-align: center;
+    gap: 12px;
+  }
+  .inf-empty-state .inf-empty-icon { font-size: 3rem; }
+  .inf-empty-state p { font-size: 14px; margin: 0; }
+
+  .inf-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 30vh;
+    color: var(--color-text-secondary);
+    font-size: 14px;
+  }
+  .inf-error {
+    margin: 24px 20px;
+    padding: 12px 16px;
+    background: #fff3f3;
+    border: 1px solid #fcc;
+    border-radius: var(--radius-md);
+    color: var(--color-danger);
+    font-size: 13px;
+  }
+  .inf-empty {
+    text-align: center;
+    color: var(--color-text-secondary);
+    font-size: 14px;
+    padding: 32px 0;
+  }
+
+  /* ── REPORT HEADER ───────────────────────────────────────────────────────── */
+  .inf-report-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--color-border);
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .inf-report-title h3 {
+    margin: 0 0 2px;
+    font-size: 1.1rem;
+  }
+  .inf-periodo {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+  }
+  .inf-export-btns {
+    display: flex;
+    gap: 8px;
+  }
+  .inf-btn-excel {
+    background: #1b7f3c;
+    color: white;
+    border-color: #1b7f3c;
+  }
+  .inf-btn-excel:hover { background: #145c2c; }
+
+  /* ── KPI ROW ─────────────────────────────────────────────────────────────── */
+  .inf-kpi-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface);
+  }
+  .inf-kpi {
+    background: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 12px 18px;
+    min-width: 130px;
+    flex: 1;
+  }
+  .inf-kpi.highlight {
+    background: var(--color-primary-light);
+    border-color: var(--color-primary);
+  }
+  .inf-kpi.danger {
+    background: #fff3f3;
+    border-color: #fcc;
+  }
+  .inf-kpi-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--color-text-secondary);
+    margin-bottom: 4px;
+  }
+  .inf-kpi-value {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--color-text);
+  }
+
+  /* ── TABLE ───────────────────────────────────────────────────────────────── */
+  .inf-table-wrap {
+    overflow-x: auto;
+    padding: 0 20px 20px;
+  }
+  .inf-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    min-width: 700px;
+  }
+  .inf-table th {
+    text-align: left;
+    padding: 9px 12px;
+    background: var(--color-surface);
+    border-bottom: 2px solid var(--color-border);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+  }
+  .inf-table th.num,
+  .inf-table td.num { text-align: right; }
+  .inf-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--color-border);
+    color: var(--color-text);
+  }
+  .inf-table tbody tr:hover { background: var(--color-surface); }
+  .inf-table tfoot td {
+    padding: 10px 12px;
+    border-top: 2px solid var(--color-border);
+    border-bottom: none;
+    font-weight: 700;
+    background: var(--color-surface);
+  }
+  .inf-table td.mono { font-family: var(--font-family-mono); font-size: 12px; }
+  .inf-table td.bold { font-weight: 600; }
+  .inf-table tr.row-danger td { background: #fff5f5; }
+
+  /* Compact table for analytics */
+  .inf-table-compact { font-size: 12px; }
+  .inf-table-compact th { padding: 6px 8px; }
+  .inf-table-compact td { padding: 6px 8px; }
+
+  /* ── TEXT HELPERS ─────────────────────────────────────────────────────────── */
+  .text-success { color: var(--color-success); }
+  .text-danger  { color: var(--color-danger); }
+  .text-warning { color: #c98000; }
+  .text-muted   { color: var(--color-text-secondary); }
+
+  /* ── ANALYTICS GRID ──────────────────────────────────────────────────────── */
+  .inf-analytics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+    gap: 0;
+  }
+  .inf-analytics-panel {
+    padding: 20px 20px 24px;
+    border-right: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border);
+  }
+  .inf-analytics-panel:nth-child(even) { border-right: none; }
+  .inf-analytics-panel h4 {
+    margin: 0 0 12px;
+    font-size: 13px;
+    color: var(--color-text);
+  }
+
+  /* ── SECTION LABELS ──────────────────────────────────────────────────────── */
+  .inf-section-label {
+    padding: 8px 20px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--color-text-secondary);
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+    margin-top: 12px;
+  }
+  .inf-section-label.danger { color: var(--color-danger); background: #fff5f5; }
+
+  /* ── PAYMENT TAGS ────────────────────────────────────────────────────────── */
+  .inf-medio-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+    margin-right: 2px;
+  }
+  .mtag-efectivo          { background: #e8f5e9; color: #1b5e20; }
+  .mtag-mercadopago       { background: #e3f2fd; color: #0d47a1; }
+  .mtag-tarjeta           { background: #e1f5fe; color: #01579b; }
+  .mtag-transferencia     { background: #f3e5f5; color: #6a1b9a; }
+  .mtag-cuenta-corriente  { background: #fff3e0; color: #e65100; }
+  .mtag-saldo-favor       { background: #f1f8e9; color: #33691e; }
+
+  /* ── SUBSTITUTO BADGES ───────────────────────────────────────────────────── */
+  .badge-si  { background: #e8f5e9; color: #2e7d32; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge-no  { background: #ffebee; color: #c62828; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+</style>
+
+<div id="inf-root"></div>
