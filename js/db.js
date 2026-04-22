@@ -959,6 +959,30 @@
       `);
     } catch(e) { console.warn('gastos:', e.message); }
 
+    // Primera vez: si no hay usuarios, crear sucursal y admin por defecto
+    try {
+      const stmt = database.prepare('SELECT COUNT(*) as count FROM usuarios');
+      let count = 0;
+      if (stmt.step()) count = stmt.getAsObject().count;
+      stmt.free();
+
+      if (count === 0) {
+        database.run(
+          `INSERT OR IGNORE INTO sucursales (id, nombre, activa, sync_status, updated_at)
+           VALUES ('1', 'Kalulu', 1, 'pending', datetime('now'))`
+        );
+        const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('kalulu123'));
+        const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+        const uid = crypto.randomUUID();
+        database.run(
+          `INSERT INTO usuarios (id, firebase_uid, nombre, username, password_hash, rol, sucursal_id, activo, sync_status, updated_at)
+           VALUES (?, 'dev-admin', 'Admin', 'admin', ?, 'admin', '1', 1, 'pending', datetime('now'))`,
+          [uid, hash]
+        );
+        console.log('✅ Primera instalación: usuario admin / kalulu123 creado');
+      }
+    } catch(e) { console.warn('init admin:', e.message); }
+
     await saveDatabase();
     console.log('✅ All tables created');
   }
