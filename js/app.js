@@ -20,6 +20,9 @@
     isOnline: navigator.onLine,
   };
 
+  // Persists the user's explicit open/close choice for the Cajas nav group
+  let cajasGroupOpen = null;
+
   // Module registry
   const modules = {
     'productos': () => import('./modules/productos.js').then(m => m.default),
@@ -81,13 +84,23 @@
     }
 
     // Update active nav link
+    const activeMedio = params[0] || null;
     document.querySelectorAll('aside nav a').forEach(link => {
       link.classList.remove('active');
       if (link.dataset.module === route) {
-        link.classList.add('active');
+        if (route === 'caja') {
+          if (!activeMedio && !link.dataset.medio) {
+            // #caja (overview) — highlight the group label
+            link.classList.add('active');
+          } else if (activeMedio && link.dataset.medio === activeMedio) {
+            // #caja/efectivo etc — highlight the sub-item
+            link.classList.add('active');
+          }
+        } else {
+          link.classList.add('active');
+        }
       }
     });
-
     // Load view
     await loadView(route, params);
   }
@@ -136,8 +149,15 @@
       { name: 'pos', label: '💳 Punto de Venta' },
       { name: 'productos', label: '📦 Productos' },
       { name: 'clientes', label: '👥 Clientes' },
-      { name: 'caja', label: '💰 Caja' },
-      { name: 'compras_v2', label: '📥 Compras' },
+      {
+        type: 'group', group: 'cajas', label: '💰 Cajas',
+        items: [
+          { name: 'caja', medio: 'efectivo',       label: '💵 Efectivo' },
+          { name: 'caja', medio: 'mercadopago',    label: '📲 Mercado Pago' },
+          { name: 'caja', medio: 'tarjeta',        label: '💳 Tarjeta' },
+          { name: 'caja', medio: 'transferencia',  label: '🏦 Transferencia' },
+        ],
+      },
       { name: 'operaciones_stock', label: '📦 Operaciones de Stock' },
       { name: 'ordenes', label: '📋 Órdenes' },
       { name: 'proveedores', label: '🏢 Proveedores' },
@@ -151,15 +171,66 @@
 
     const hasPendingResumen = !!localStorage.getItem('compras_resumen_pending');
     const currentUserRole = app.user?.rol || window.SGA_Auth.getCurrentUser()?.rol;
+    const currentHash = window.location.hash.slice(1) || '';
+    const [currentRoute, currentMedio] = currentHash.split('/');
 
     navContainer.innerHTML = moduleList
       .filter(({ adminOnly }) => !adminOnly || currentUserRole === 'admin')
-      .map(({ name, label }) => {
+      .map((item) => {
+        if (item.type === 'group') {
+          const isActive = currentRoute === 'caja';
+          const isOpen = cajasGroupOpen === true;
+          // Sub-item active only when we have a specific medio
+          const subItems = item.items.map(sub => {
+            const subActive = isActive && currentMedio === sub.medio ? ' active' : '';
+            return `<li><a href="#${sub.name}/${sub.medio}" data-module="${sub.name}" data-medio="${sub.medio}" class="nav-link${subActive}">${sub.label}</a></li>`;
+          }).join('');
+          // Group label active when on #caja with no medio (overview)
+          const groupActive = isActive && !currentMedio ? ' active' : '';
+          const toggleClasses = [isOpen ? 'open' : '', isActive ? 'has-active' : ''].filter(Boolean).join(' ');
+          return `
+            <li>
+              <div class="nav-group-toggle${toggleClasses ? ' ' + toggleClasses : ''}" data-group="${item.group}" data-href="#${item.items[0]?.name || 'caja'}">
+                <a href="#caja" class="nav-group-label${groupActive}" data-module="caja">${item.label}</a>
+                <span class="nav-group-arrow">▶</span>
+              </div>
+              <ul class="nav-subitems${isOpen ? ' open' : ''}" id="nav-subitems-${item.group}">
+                ${subItems}
+              </ul>
+            </li>`;
+        }
+        const { name, label } = item;
         const badge = (name === 'operaciones_stock' && hasPendingResumen)
           ? ' <span style="display:inline-block;background:#ff8f00;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;vertical-align:middle;margin-left:4px;white-space:nowrap;">● Ajuste pendiente</span>'
           : '';
         return `<li><a href="#${name}" data-module="${name}" class="nav-link">${label}${badge}</a></li>`;
       }).join('');
+
+    // Arrow-only click: toggle expand/collapse without navigating
+    navContainer.querySelectorAll('.nav-group-arrow').forEach(arrow => {
+      arrow.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const toggle = arrow.closest('.nav-group-toggle');
+        const group = toggle.dataset.group;
+        const subList = document.getElementById(`nav-subitems-${group}`);
+        const isOpen = toggle.classList.contains('open');
+        cajasGroupOpen = !isOpen;
+        toggle.classList.toggle('open', !isOpen);
+        if (subList) subList.classList.toggle('open', !isOpen);
+      });
+    });
+    // Label click also expands (navigation handled by href on <a>)
+    navContainer.querySelectorAll('.nav-group-label').forEach(label => {
+      label.addEventListener('click', () => {
+        const toggle = label.closest('.nav-group-toggle');
+        const group = toggle.dataset.group;
+        const subList = document.getElementById(`nav-subitems-${group}`);
+        cajasGroupOpen = true;
+        toggle.classList.add('open', 'has-active');
+        if (subList) subList.classList.add('open');
+      });
+    });
   }
 
   /**
