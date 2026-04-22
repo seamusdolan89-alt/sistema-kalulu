@@ -610,6 +610,8 @@ export const POS = (() => {
 
     let lastSearchResults = [];
     let searchHlIdx = -1;
+    let lastClientResults = [];
+    let clientHlIdx = -1;
 
     // Restore cart from sessionStorage
     try {
@@ -1360,6 +1362,27 @@ export const POS = (() => {
       sessionStorage.removeItem('sga_cart');
       sessionStorage.removeItem('sga_sale_mode');
       loadDashboard();
+    };
+
+    const finalizeAndNewSale = () => {
+      hideModal('modal-ticket');
+      closeDetailPanel();
+      sessionStorage.removeItem('pos_cart');
+      sessionStorage.removeItem('sga_cart');
+      sessionStorage.removeItem('sga_sale_mode');
+      state.cart = [];
+      state.descuentoTotal = 0;
+      state.pagosAmounts = { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0, cuenta_corriente: 0 };
+      state.activeMedios = new Set(['efectivo']);
+      state.recibeEfectivo = null;
+      state.ccCobrarDeuda = false;
+      state.ccAplicarFavor = false;
+      clearCliente();
+      saveCart();
+      window.SGA_POS_ACTIVE_SALE = false;
+      updateHeaderStatus();
+      showToast('Venta registrada ✓');
+      enterSaleMode();
     };
 
     const finalizeSaleAndGoDashboard = () => {
@@ -2299,7 +2322,7 @@ export const POS = (() => {
     // Ticket
     safeOn('btn-ticket-imprimir', 'click', () => window.print());
     safeOn('btn-ticket-close',   'click', finalizeSaleAndGoDashboard);
-    safeOn('btn-ticket-volver',  'click', finalizeSaleAndGoDashboard);
+    safeOn('btn-ticket-volver',  'click', finalizeAndNewSale);
     safeOn('btn-ticket-confirmar','click', finalizeSaleAndGoDashboard);
 
     // Cierre
@@ -2446,9 +2469,11 @@ export const POS = (() => {
         clearTimeout(clientTimeout);
         const q = clientInput.value.trim();
         const dd = ge('client-dropdown');
-        if (q.length < 2) { if (dd) dd.style.display = 'none'; return; }
+        clientHlIdx = -1;
+        if (q.length < 2) { if (dd) dd.style.display = 'none'; lastClientResults = []; return; }
         clientTimeout = setTimeout(() => {
           const results = searchClientes(q);
+          lastClientResults = results;
           if (!dd) return;
           if (!results.length) { dd.style.display = 'none'; return; }
           dd.innerHTML = results.map(c => {
@@ -2473,6 +2498,43 @@ export const POS = (() => {
             });
           });
         }, 180);
+      });
+
+      clientInput.addEventListener('keydown', e => {
+        const dd = ge('client-dropdown');
+        const criItems = dd ? dd.querySelectorAll('.cri') : [];
+
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (!criItems.length) return;
+          clientHlIdx = Math.min(clientHlIdx + 1, criItems.length - 1);
+          criItems.forEach((el, i) => el.classList.toggle('highlighted', i === clientHlIdx));
+          if (criItems[clientHlIdx]) criItems[clientHlIdx].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          clientHlIdx = Math.max(clientHlIdx - 1, -1);
+          criItems.forEach((el, i) => el.classList.toggle('highlighted', i === clientHlIdx));
+          if (criItems[clientHlIdx]) criItems[clientHlIdx].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (clientHlIdx >= 0 && lastClientResults[clientHlIdx]) {
+            selectCliente(lastClientResults[clientHlIdx]);
+            clientHlIdx = -1;
+          }
+          return;
+        }
+        if (e.key === 'Escape') {
+          if (dd && dd.style.display !== 'none') {
+            dd.style.display = 'none';
+            clientHlIdx = -1;
+            lastClientResults = [];
+            e.stopPropagation();
+          }
+        }
       });
     }
 
@@ -2737,6 +2799,9 @@ export const POS = (() => {
       }
       saveCart(); renderCart(); renderSaleTotals(); autoFillPayment();
       hideModal('modal-desc-total');
+    });
+    ge('desc-total-input')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); ge('btn-desc-total-confirm')?.click(); }
     });
     safeOn('btn-abrir-desc-total', 'click', () => showDescTotalModal());
 

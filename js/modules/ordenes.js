@@ -301,13 +301,16 @@ const Ordenes = (() => {
   // ── UI STATE ─────────────────────────────────────────────────────────────────
 
   const ui = {
-    view:         'lista',   // 'lista' | 'orden'
-    filtroLista:  'activas',
-    tabOrdenIds:  [],        // IDs de órdenes activas mostradas como tabs
-    ordenActiva:  null,      // ID de la orden en el tab activo
-    user:         null,
-    kbHandler:    null,
+    view:          'lista',   // 'lista' | 'orden'
+    filtroLista:   'activas',
+    tabOrdenIds:   [],        // IDs de órdenes activas mostradas como tabs
+    ordenActiva:   null,      // ID de la orden en el tab activo
+    user:          null,
+    kbHandler:     null,
+    focusedItemId: null,      // ID del item con foco de teclado en la tabla
   };
+
+  let agHlIdx = -1; // highlight index para el dropdown de agregar producto
 
   const ge  = id => document.getElementById(id);
   const esc = s  => String(s == null ? '' : s)
@@ -498,6 +501,16 @@ const Ordenes = (() => {
     ge('ord-btn-add-item').style.display = editable ? '' : 'none';
   }
 
+  function setRowFocus(itemId) {
+    const tbody = ge('ord-items-tbody');
+    if (!tbody) return;
+    tbody.querySelectorAll('tr[data-item-id]').forEach(r =>
+      r.classList.toggle('ord-row-focus', r.dataset.itemId === itemId)
+    );
+    ui.focusedItemId = itemId;
+    tbody.querySelector(`tr[data-item-id="${itemId}"]`)?.scrollIntoView({ block: 'nearest' });
+  }
+
   function renderItems(orden, editable) {
     const tbody = ge('ord-items-tbody');
     const thead = ge('ord-items-thead');
@@ -571,6 +584,18 @@ const Ordenes = (() => {
     }).join('');
 
     if (!editable) return;
+
+    // Restaurar foco de teclado si el item sigue existiendo
+    if (ui.focusedItemId) {
+      const focusedRow = tbody.querySelector(`tr[data-item-id="${ui.focusedItemId}"]`);
+      if (focusedRow) focusedRow.classList.add('ord-row-focus');
+      else ui.focusedItemId = null;
+    }
+
+    // Click en fila → seleccionar con teclado
+    tbody.querySelectorAll('tr[data-item-id]').forEach(r =>
+      r.addEventListener('mousedown', () => setRowFocus(r.dataset.itemId))
+    );
 
     // Auto-save notas y código proveedor on blur
     tbody.querySelectorAll('tr[data-item-id]').forEach(row => {
@@ -648,10 +673,10 @@ const Ordenes = (() => {
       btns.push(`<button class="ord-btn-action ord-btn-save" id="ord-btn-guardar">✓ Guardar borrador</button>`);
     }
     if (orden.estado === 'borrador') {
-      btns.push(`<button class="ord-btn-action ord-btn-revisar" id="ord-btn-revisar">Marcar revisada</button>`);
+      btns.push(`<button class="ord-btn-action ord-btn-revisar" id="ord-btn-revisar">Marcar revisada - F2</button>`);
     }
     if (orden.estado === 'revisada') {
-      btns.push(`<button class="ord-btn-action ord-btn-confirmar" id="ord-btn-confirmar">Confirmar</button>`);
+      btns.push(`<button class="ord-btn-action ord-btn-confirmar" id="ord-btn-confirmar">Confirmar - F2</button>`);
     }
     if (orden.estado === 'confirmada') {
       btns.push(`<button class="ord-btn-action ord-btn-enviar" id="ord-btn-enviar">Enviar</button>`);
@@ -806,9 +831,85 @@ const Ordenes = (() => {
   function setupKeyboard() {
     teardownKeyboard();
     ui.kbHandler = (e) => {
-      if (!e.ctrlKey) return;
-      if (e.key === 'PageDown') { e.preventDefault(); moveTab(1); }
-      if (e.key === 'PageUp')   { e.preventDefault(); moveTab(-1); }
+      // Navegación de tabs (siempre activa)
+      if (e.ctrlKey) {
+        if (e.key === 'PageDown') { e.preventDefault(); moveTab(1); }
+        if (e.key === 'PageUp')   { e.preventDefault(); moveTab(-1); }
+        return;
+      }
+
+      if (ui.view !== 'orden') return;
+
+      // F2 → Marcar revisada (funciona desde cualquier lugar en la vista de orden)
+      if (e.key === 'F2') {
+        e.preventDefault();
+        ge('ord-btn-revisar')?.click();
+        ge('ord-btn-confirmar')?.click();
+        return;
+      }
+
+      // Si hay overlays abiertos, no interceptar más teclas (cada overlay maneja las suyas)
+      const editOpen    = ge('ord-edit-cant-overlay')?.style.display === 'flex';
+      const agregarOpen = ge('ord-agregar-overlay')?.style.display === 'flex';
+      if (editOpen || agregarOpen) return;
+
+      const tag     = document.activeElement?.tagName?.toLowerCase();
+      const inInput = tag === 'input' || tag === 'select' || tag === 'textarea';
+
+      const getItemIds = () =>
+        Array.from(ge('ord-items-tbody')?.querySelectorAll('tr[data-item-id]') || [])
+          .map(r => r.dataset.itemId);
+
+      // ArrowDown / ArrowUp — navegar filas (solo si no estamos dentro de un input)
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !inInput) {
+        e.preventDefault();
+        const ids = getItemIds();
+        if (!ids.length) return;
+        const idx  = ids.indexOf(ui.focusedItemId);
+        const next = e.key === 'ArrowDown'
+          ? Math.min(ids.length - 1, idx === -1 ? 0 : idx + 1)
+          : Math.max(0, idx === -1 ? 0 : idx - 1);
+        setRowFocus(ids[next]);
+        return;
+      }
+
+      // Enter — abrir overlay de editar cantidad para la fila seleccionada
+      if (e.key === 'Enter' && !inInput && ui.focusedItemId) {
+        e.preventDefault();
+        const row = ge('ord-items-tbody')?.querySelector(`tr[data-item-id="${ui.focusedItemId}"]`);
+        row?.querySelector('[data-edit-cant]')?.click();
+        return;
+      }
+
+      // Supr — eliminar fila seleccionada
+      if (e.key === 'Delete' && !inInput && ui.focusedItemId) {
+        e.preventDefault();
+        if (!confirm('¿Eliminar este producto de la orden?')) return;
+        const nextIds  = getItemIds();
+        const delIdx   = nextIds.indexOf(ui.focusedItemId);
+        eliminarItem(ui.focusedItemId);
+        ui.focusedItemId = null;
+        renderOrden();
+        renderTabs();
+        // Mover foco al item siguiente (o anterior si era el último)
+        const afterIds = Array.from(ge('ord-items-tbody')?.querySelectorAll('tr[data-item-id]') || [])
+          .map(r => r.dataset.itemId);
+        if (afterIds.length) setRowFocus(afterIds[Math.min(delIdx, afterIds.length - 1)]);
+        return;
+      }
+
+      // Carácter imprimible → focus al campo Notas de la fila seleccionada
+      if (!inInput && ui.focusedItemId && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        const row = ge('ord-items-tbody')?.querySelector(`tr[data-item-id="${ui.focusedItemId}"]`);
+        const notasInput = row?.querySelector('.ord-cell-input-text');
+        if (notasInput) {
+          e.preventDefault();
+          notasInput.focus();
+          notasInput.value += e.key;
+          notasInput.setSelectionRange(notasInput.value.length, notasInput.value.length);
+        }
+        return;
+      }
     };
     document.addEventListener('keydown', ui.kbHandler);
   }
@@ -902,6 +1003,7 @@ const Ordenes = (() => {
   // ── MODAL: AGREGAR PRODUCTO ───────────────────────────────────────────────────
 
   function openAgregarModal() {
+    agHlIdx = -1;
     ge('ord-agregar-search').value = '';
     ge('ord-agregar-results').innerHTML = '';
     ge('ord-agregar-overlay').style.display = 'flex';
@@ -909,6 +1011,7 @@ const Ordenes = (() => {
   }
 
   function buscarProductosAgregar(q) {
+    agHlIdx = -1;
     if (!q.trim()) { ge('ord-agregar-results').innerHTML = ''; return; }
     const res = db().query(`
       SELECT p.id, p.nombre, COALESCE(st.cantidad, 0) AS stock
@@ -976,6 +1079,34 @@ const Ordenes = (() => {
     ge('ord-agregar-search')?.addEventListener('input', e =>
       buscarProductosAgregar(e.target.value)
     );
+    ge('ord-agregar-search')?.addEventListener('keydown', e => {
+      const items = ge('ord-agregar-results')?.querySelectorAll('[data-add-prod]') || [];
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!items.length) return;
+        agHlIdx = Math.min(agHlIdx + 1, items.length - 1);
+        items.forEach((el, i) => el.classList.toggle('highlighted', i === agHlIdx));
+        items[agHlIdx]?.scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        agHlIdx = Math.max(agHlIdx - 1, -1);
+        items.forEach((el, i) => el.classList.toggle('highlighted', i === agHlIdx));
+        items[agHlIdx]?.scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (agHlIdx >= 0 && items[agHlIdx]) { items[agHlIdx].click(); agHlIdx = -1; }
+        return;
+      }
+      if (e.key === 'Escape') {
+        ge('ord-agregar-overlay').style.display = 'none';
+        agHlIdx = -1;
+        e.stopPropagation();
+      }
+    });
     ge('ord-btn-add-item')?.addEventListener('click', openAgregarModal);
 
     // ── Overlay editar cantidad
