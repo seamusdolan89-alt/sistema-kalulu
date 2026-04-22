@@ -251,7 +251,7 @@ export const POS = (() => {
             'venta_fiada',
             pago.monto, // positive = owes
             ventaId,
-            `Venta ${ventaId}`,
+            `Deuda por venta #${ventaId.slice(-6)}`,
             now,
             usuarioId,
             'pending',
@@ -539,6 +539,10 @@ export const POS = (() => {
       descTipo: 'monto',
       descuentoTotal: 0,
       descTipoTotal: 'monto',
+      promoDescuentos: 0,
+      promoAplicadas: [],
+      promoHints: [],
+      promoProductIds: new Set(),
       ccCobrarDeuda: false,
       ccAplicarFavor: false,
       ccRegistrarDeuda: false,
@@ -589,12 +593,15 @@ export const POS = (() => {
     const saveCart = () => sessionStorage.setItem('pos_cart', JSON.stringify(state.cart));
 
     const getCartSubtotal = () => state.cart.reduce((s, i) => s + i.cantidad * i.precioUnitario, 0);
-    const getCartDescuento = () => state.cart.reduce((s, i) => s + (i.descuentoItem || 0), 0) + state.descuentoGlobal + state.descuentoTotal;
+    const getCartDescuento = () => state.cart.reduce((s, i) => s + (i.descuentoItem || 0), 0) + state.descuentoGlobal + state.descuentoTotal + (state.promoDescuentos || 0);
     const getCartTotal = () => Math.max(0, getCartSubtotal() - getCartDescuento());
     const getTotalAsignado = () => [...state.activeMedios].reduce((s, m) => s + (state.pagosAmounts[m] || 0), 0);
 
     const getEffectiveTotal = () => {
       const base = getCartTotal();
+      if (state.ccCobrarDeuda && state.clienteSaldo > 0) {
+        return base + state.clienteSaldo; // add outstanding debt to charge
+      }
       if (state.ccAplicarFavor && state.clienteSaldo < 0) {
         return Math.max(0, base + state.clienteSaldo); // clienteSaldo is negative
       }
@@ -668,22 +675,167 @@ export const POS = (() => {
       searchHlIdx = -1;
     };
 
+    // ── PROMO DETECTION ────────────────────────────────────────────
+    const applyPromos = () => {
+      if (!state.cart.length) {
+        state.promoDescuentos = 0;
+        state.promoAplicadas  = [];
+        state.promoHints      = [];
+        state.promoProductIds = new Set();
+        return;
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      let promos;
+      try {
+        promos = window.SGA_DB.query(`
+          SELECT * FROM promociones
+          WHERE activa = 1
+            AND (fecha_desde IS NULL OR fecha_desde = '' OR fecha_desde <= ?)
+            AND (fecha_hasta IS NULL OR fecha_hasta = '' OR fecha_hasta >= ?)
+            AND (stock_maximo = 0 OR COALESCE(stock_vendido,0) < stock_maximo)
+        `, [today, today]);
+      } catch(e) { return; }
+
+      let totalDiscount = 0;
+      const applied = [];
+      const hints   = [];
+      const promoPids = new Set();
+
+      for (const promo of promos) {
+        if (promo.solo_clientes_registrados && !state.clienteId) continue;
+
+        let items;
+        try {
+          items = window.SGA_DB.query(
+            `SELECT * FROM promocion_items WHERE promocion_id = ?`, [promo.id]
+          );
+        } catch(e) { continue; }
+        if (!items.length) continue;
+
+        const pidSet = new Set(items.map(i => i.producto_id));
+
+        if (promo.flexible) {
+          const required = promo.cantidad_total_requerida || 1;
+          let totalUnits = 0;
+          const matched = [];
+          for (const ci of state.cart) {
+            if (pidSet.has(ci.productoId)) {
+              totalUnits += ci.cantidad;
+              matched.push(ci);
+            }
+          }
+          const combos = Math.floor(totalUnits / required);
+          if (combos > 0) {
+            let discPerCombo = 0;
+            if (promo.aplica_a === 'item_mas_barato' && promo.tipo_descuento === 'porcentaje') {
+              const sorted = [...matched].sort((a, b) => a.precioUnitario - b.precioUnitario);
+              discPerCombo = sorted[0].precioUnitario * ((promo.valor_descuento || 0) / 100);
+            } else if (promo.tipo_descuento === 'porcentaje') {
+              const sub = matched.reduce((s, ci) => s + ci.precioUnitario * Math.min(ci.cantidad, required), 0);
+              discPerCombo = sub * ((promo.valor_descuento || 0) / 100);
+            } else {
+              discPerCombo = promo.valor_descuento || 0;
+            }
+            const disc = discPerCombo * combos;
+            totalDiscount += disc;
+            applied.push({ promo, discount: disc, times: combos });
+            for (const pid of pidSet) promoPids.add(pid);
+          } else if (totalUnits > 0) {
+            hints.push({ promo, needed: required - totalUnits, flexible: true });
+            for (const ci of matched) promoPids.add(ci.productoId);
+          }
+        } else {
+          let allMet = true;
+          let anyPresent = false;
+          for (const item of items) {
+            const ci = state.cart.find(c => c.productoId === item.producto_id);
+            if (ci && ci.cantidad >= item.cantidad_requerida) {
+              anyPresent = true;
+            } else {
+              allMet = false;
+              if (ci) anyPresent = true;
+            }
+          }
+          if (allMet) {
+            let combos = Infinity;
+            for (const item of items) {
+              const ci = state.cart.find(c => c.productoId === item.producto_id);
+              combos = Math.min(combos, Math.floor(ci.cantidad / item.cantidad_requerida));
+            }
+            if (!isFinite(combos) || combos < 1) combos = 1;
+
+            const comboSub = items.reduce((s, item) => {
+              const ci = state.cart.find(c => c.productoId === item.producto_id);
+              return s + (ci?.precioUnitario || 0) * item.cantidad_requerida;
+            }, 0);
+
+            let discPerCombo = 0;
+            if ((promo.precio_combo || 0) > 0) {
+              discPerCombo = Math.max(0, comboSub - promo.precio_combo);
+            } else if (promo.tipo_descuento === 'porcentaje') {
+              discPerCombo = comboSub * ((promo.valor_descuento || 0) / 100);
+            } else {
+              discPerCombo = promo.valor_descuento || 0;
+            }
+            const disc = discPerCombo * combos;
+            totalDiscount += disc;
+            applied.push({ promo, discount: disc, times: combos });
+            for (const item of items) promoPids.add(item.producto_id);
+          } else if (anyPresent) {
+            hints.push({ promo, items, flexible: false });
+            for (const item of items) {
+              if (state.cart.find(c => c.productoId === item.producto_id)) promoPids.add(item.producto_id);
+            }
+          }
+        }
+      }
+
+      state.promoDescuentos = totalDiscount;
+      state.promoAplicadas  = applied;
+      state.promoHints      = hints;
+      state.promoProductIds = promoPids;
+    };
+
+    const renderPromoArea = () => {
+      const el = ge('promo-area');
+      if (!el) return;
+      const parts = [];
+
+      for (const a of state.promoAplicadas) {
+        const t = a.times > 1 ? ` ×${a.times}` : '';
+        parts.push(`<div class="promo-applied"><span class="promo-tag">🎁</span><span><strong>${a.promo.nombre}</strong>${t} — Descuento: ${formatCurrency(a.discount)}</span></div>`);
+      }
+      for (const h of state.promoHints) {
+        const msg = h.flexible
+          ? `Sumá ${h.needed} unidad${h.needed > 1 ? 'es' : ''} más para activar <strong>${h.promo.nombre}</strong>`
+          : `Completá el combo <strong>${h.promo.nombre}</strong>`;
+        parts.push(`<div class="promo-hint"><span class="promo-tag">💡</span><span>${msg}</span></div>`);
+      }
+
+      el.innerHTML = parts.join('');
+      el.style.display = parts.length ? 'flex' : 'none';
+    };
+
     // ── RENDER CART ────────────────────────────────────────────────
     const renderCart = () => {
       const tbody = ge('cart-tbody');
       if (!tbody) return;
 
+      applyPromos();
+
       if (!state.cart.length) {
         tbody.innerHTML = `<tr><td colspan="7"><div class="cart-empty"><div class="cart-empty-icon">🛍️</div><div>Escaneá o buscá un producto para comenzar</div></div></td></tr>`;
+        renderPromoArea();
         return;
       }
 
       tbody.innerHTML = state.cart.map((item, idx) => {
         const sub = item.cantidad * item.precioUnitario - (item.descuentoItem || 0);
         const hasDisc = (item.descuentoItem || 0) > 0;
-        return `<tr>
+        const promoHl = state.promoProductIds.has(item.productoId);
+        return `<tr${promoHl ? ' class="promo-row"' : ''}>
           <td class="c-idx">${idx + 1}</td>
-          <td>${item.nombre}</td>
+          <td>${item.nombre}${promoHl ? '<span class="promo-dot" title="Pertenece a una promoción">🏷</span>' : ''}</td>
           <td class="c-qty"><input type="number" class="qty-input" value="${item.cantidad}" min="0.01" step="0.01" data-idx="${idx}"></td>
           <td class="c-price">${formatCurrency(item.precioUnitario)}</td>
           <td class="c-disc"><button class="disc-btn ${hasDisc ? 'active' : ''}" data-idx="${idx}">${hasDisc ? formatCurrency(item.descuentoItem) : '—'}</button></td>
@@ -737,6 +889,8 @@ export const POS = (() => {
           saveCart(); renderCart(); renderSaleTotals(); autoFillPayment();
         });
       });
+
+      renderPromoArea();
     };
 
     // ── SALE TOTALS ────────────────────────────────────────────────
@@ -832,7 +986,8 @@ export const POS = (() => {
           // Smart breakdown based on client debt
           const saldo = state.clienteSaldo; // positive = owes store, negative = store owes client
           let breakdownHtml = '';
-          if (saldo > 0) {
+          if (saldo > 0 && !state.ccCobrarDeuda) {
+            // Debt not being collected in this sale — vuelto goes toward debt
             if (vuelto >= saldo) {
               const sobrante = vuelto - saldo;
               breakdownHtml = `Cancela deuda ${formatCurrency(saldo)}` +
@@ -841,6 +996,7 @@ export const POS = (() => {
               breakdownHtml = `Cancela deuda parcial: ${formatCurrency(vuelto)} (resta debe: ${formatCurrency(saldo - vuelto)})`;
             }
           } else {
+            // Either no debt, or debt is already being fully collected via ccCobrarDeuda
             breakdownHtml = `Saldo a favor: ${formatCurrency(vuelto)}`;
           }
           html += `<div class="saldo-favor-row" style="margin-top:6px">
@@ -1029,8 +1185,12 @@ export const POS = (() => {
         const deudaAmt = ge('client-deuda-amount');
         if (deudaAmt) deudaAmt.textContent = formatCurrency(state.clienteSaldo);
         deudaRow.style.display = 'flex';
+        state.ccCobrarDeuda = true;
+        const chkAplicarDeuda = ge('chk-aplicar-deuda');
+        if (chkAplicarDeuda) chkAplicarDeuda.checked = true;
       } else if (deudaRow) {
         deudaRow.style.display = 'none';
+        state.ccCobrarDeuda = false;
       }
       // Tope check — warn and block debt toggle if tope exceeded
       const topeWarn = ge('client-tope-warn');
@@ -1069,6 +1229,7 @@ export const POS = (() => {
       renderDebtToggle();
       renderFavorSection();
       autoFillPayment(); // recalculates effTotal with new ccAplicarFavor
+      applyPromos(); renderPromoArea(); renderSaleTotals();
     };
 
     const clearCliente = () => {
@@ -1077,6 +1238,7 @@ export const POS = (() => {
       state.clienteSaldo = 0;
       state.ccCobrarDeuda = false;
       state.ccAplicarFavor = false;
+      applyPromos(); renderPromoArea(); renderSaleTotals();
       state.ccRegistrarDeuda = false;
       const card = ge('client-card');
       if (card) card.style.display = 'none';
@@ -1388,7 +1550,7 @@ export const POS = (() => {
 
         <div>
           <div class="dp-total-row"><span>Subtotal</span><span>${formatCurrency(venta.subtotal)}</span></div>
-          <div class="dp-total-row"><span>Descuento</span><span>-${formatCurrency(venta.descuento)}</span></div>
+          ${(venta.descuento || 0) > 0 ? `<div class="dp-total-row" style="color:#e65100"><span>Descuento</span><span>-${formatCurrency(venta.descuento)}</span></div>` : ''}
           <div class="dp-total-row grand"><span>TOTAL</span><span>${formatCurrency(venta.total)}</span></div>
         </div>
       `;
@@ -2322,6 +2484,12 @@ export const POS = (() => {
       autoFillPayment(); // re-renders payment inputs with updated effTotal
     });
 
+    safeOn('chk-aplicar-deuda', 'change', e => {
+      state.ccCobrarDeuda = e.target.checked;
+      autoFillPayment();
+      renderSaleTotals();
+    });
+
     safeOn('chk-registrar-deuda', 'change', e => {
       state.ccRegistrarDeuda = e.target.checked;
       renderDebtToggle();
@@ -2394,13 +2562,36 @@ export const POS = (() => {
         ? Math.min(Math.abs(state.clienteSaldo), getCartTotal())
         : 0;
 
+      // For efectivo + ccRegistrarDeuda: pagosAmounts.efectivo is auto-filled to the full total
+      // but the actual cash received is recibeEfectivo. Use recibeEfectivo as the real cash amount.
       const pagos = [...state.activeMedios]
-        .filter(m => (state.pagosAmounts[m] || 0) > 0.001)
-        .map(m => ({ medio: m, monto: state.pagosAmounts[m], referencia: null }));
+        .filter(m => {
+          if (m === 'efectivo' && state.ccRegistrarDeuda && state.recibeEfectivo !== null) {
+            return state.recibeEfectivo > 0.001;
+          }
+          return (state.pagosAmounts[m] || 0) > 0.001;
+        })
+        .map(m => {
+          if (m === 'efectivo' && state.ccRegistrarDeuda && state.recibeEfectivo !== null) {
+            return { medio: 'efectivo', monto: Math.min(state.recibeEfectivo, effTotal), referencia: null };
+          }
+          return { medio: m, monto: state.pagosAmounts[m], referencia: null };
+        });
 
       // Add saldo_favor as its own payment entry (not efectivo)
       if (saldoFavorApplied > 0.001) {
         pagos.push({ medio: 'saldo_favor', monto: saldoFavorApplied, referencia: null });
+      }
+
+      // Debt via ccRegistrarDeuda: the difference between effTotal and what was actually collected.
+      // Flows through registrarVenta so it updates venta_pagos, sesiones_caja.total_cuenta_corriente,
+      // and cuenta_corriente (client balance) all in one consistent path.
+      if (state.ccRegistrarDeuda) {
+        const collected = pagos.filter(p => p.medio !== 'saldo_favor').reduce((s, p) => s + p.monto, 0);
+        const debtAmount = Math.max(0, effTotal - collected);
+        if (debtAmount > 0.001) {
+          pagos.push({ medio: 'cuenta_corriente', monto: debtAmount, referencia: null });
+        }
       }
 
       const ventaData = {
@@ -2411,7 +2602,7 @@ export const POS = (() => {
         usuarioId: state.currentUser.id,
         items: state.cart,
         pagos,
-        descuentoGlobal: state.descuentoGlobal,
+        descuentoGlobal: state.descuentoGlobal + (state.descuentoTotal || 0) + (state.promoDescuentos || 0),
         saldoFavorMonto: saldoFavorApplied,
       };
 
@@ -2419,6 +2610,23 @@ export const POS = (() => {
       if (!result.success) {
         alert('Error al registrar venta: ' + result.error);
         return;
+      }
+
+      // Track promo usage: increment stock_vendido and store sale history
+      if (state.promoAplicadas.length) {
+        const promoNow = window.SGA_Utils.formatISODate(new Date());
+        for (const a of state.promoAplicadas) {
+          try {
+            window.SGA_DB.run(
+              `INSERT INTO venta_promociones (id, venta_id, promocion_id, veces, descuento_aplicado, fecha, sync_status, updated_at) VALUES (?,?,?,?,?,?,?,?)`,
+              [window.SGA_Utils.generateUUID(), result.ventaId, a.promo.id, a.times, a.discount, promoNow, 'pending', promoNow]
+            );
+            window.SGA_DB.run(
+              `UPDATE promociones SET stock_vendido = COALESCE(stock_vendido, 0) + ?, updated_at = ? WHERE id = ?`,
+              [a.times, promoNow, a.promo.id]
+            );
+          } catch(e) { console.warn('promo tracking:', e); }
+        }
       }
 
       // Post-sale CC operations
@@ -2432,36 +2640,33 @@ export const POS = (() => {
         };
 
         // Saldo a favor applied: reduce client's credit (saldo < 0 means store owes client)
-        // Adding +applied to balance reduces how much the store owes
         if (saldoFavorApplied > 0.001) {
           ccInsert('pago', saldoFavorApplied,
             `Aplicado saldo a favor en venta #${result.ventaId.slice(-6)}`);
-          // Update ultima_visita
           window.SGA_DB.run(
             `UPDATE clientes SET ultima_visita = ?, updated_at = ?, sync_status = 'pending' WHERE id = ?`,
             [now, now, state.clienteId]
           );
         }
 
-        // Register remaining as debt if toggle was on
-        if (state.ccRegistrarDeuda) {
-          const totalPaid = getTotalAsignado() + saldoFavorApplied;
-          const realFaltante = Math.max(0, getCartTotal() - totalPaid);
-          if (realFaltante > 0.001) {
-            ccInsert('venta_fiada', realFaltante, 'Diferencia registrada como deuda');
-          }
+        // Cobrar deuda existente: the full debt was included in effTotal, so cancel it now.
+        // The cash already entered the register via pagos; this just clears the ledger.
+        if (state.ccCobrarDeuda && state.clienteSaldo > 0.001) {
+          ccInsert('pago', -state.clienteSaldo,
+            `Cancelación de deuda en venta #${result.ventaId.slice(-6)}`);
         }
 
-        // Vuelto como saldo a favor (with smart debt cancellation)
+        // Vuelto como saldo a favor
+        // If ccCobrarDeuda was used, the debt is already fully paid above → treat residual balance as 0.
         if (ge('chk-saldo-favor')?.checked) {
           const recibe = state.recibeEfectivo || 0;
           const vuelto = Math.max(0, recibe - effTotal);
           if (vuelto > 0.001) {
-            const saldo = state.clienteSaldo; // positive = client owes store
-            if (saldo > 0) {
-              if (vuelto >= saldo) {
-                ccInsert('pago', -saldo, 'Cancelación de deuda con vuelto');
-                const sobrante = vuelto - saldo;
+            const saldoResidual = state.ccCobrarDeuda ? 0 : state.clienteSaldo;
+            if (saldoResidual > 0.001) {
+              if (vuelto >= saldoResidual) {
+                ccInsert('pago', -saldoResidual, 'Cancelación de deuda con vuelto');
+                const sobrante = vuelto - saldoResidual;
                 if (sobrante > 0.001) ccInsert('saldo_favor', -sobrante, 'Saldo a favor del vuelto');
               } else {
                 ccInsert('pago', -vuelto, 'Cancelación parcial de deuda con vuelto');

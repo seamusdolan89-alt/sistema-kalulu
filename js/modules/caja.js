@@ -28,6 +28,7 @@ const Caja = (() => {
     sesion: null,
     totales: null,
     currentTab: 'resumen',
+    activeMedio: 'efectivo',
     cierre: { mediosInformados: {}, explicaciones: {} },
     recuento: { billetes: {} },
     refreshTimer: null,
@@ -140,15 +141,20 @@ const Caja = (() => {
     );
   }
 
-  function getMovimientosDia(sesionId) {
+  function getMovimientosDia(sesionId, medio = 'efectivo') {
+    // Get ventas that have payments in this medio, with the amount for that medio only
     const ventas = window.SGA_DB.query(
-      `SELECT v.id, v.fecha, v.total, v.estado, c.nombre AS cliente
+      `SELECT v.id, v.fecha, v.total, v.estado, c.nombre AS cliente,
+         COALESCE((SELECT SUM(vp2.monto) FROM venta_pagos vp2
+                   WHERE vp2.venta_id = v.id AND vp2.medio = ?), 0) AS monto_medio
        FROM ventas v
        LEFT JOIN clientes c ON c.id = v.cliente_id
        WHERE v.sesion_caja_id = ?
        ORDER BY v.fecha DESC`,
-      [sesionId]
-    );
+      [medio, sesionId]
+    ).filter(v => parseFloat(v.monto_medio) > 0);
+
+    // All medios per venta (for the tag column)
     const allPagos = window.SGA_DB.query(
       `SELECT vp.venta_id, vp.medio FROM venta_pagos vp
        JOIN ventas v ON v.id = vp.venta_id WHERE v.sesion_caja_id = ?`,
@@ -159,22 +165,25 @@ const Caja = (() => {
       if (!pagosByVenta[p.venta_id]) pagosByVenta[p.venta_id] = [];
       if (!pagosByVenta[p.venta_id].includes(p.medio)) pagosByVenta[p.venta_id].push(p.medio);
     }
-    const egresos = window.SGA_DB.query(
+
+    // Egresos e ingresos only apply to the efectivo caja
+    const egresos = medio === 'efectivo' ? window.SGA_DB.query(
       `SELECT e.id, e.fecha, e.monto, e.descripcion, e.tipo, u.nombre AS usuario
        FROM egresos_caja e LEFT JOIN usuarios u ON u.id = e.usuario_id
        WHERE e.sesion_caja_id = ? ORDER BY e.fecha DESC`,
       [sesionId]
-    );
-    const ingresos = window.SGA_DB.query(
+    ) : [];
+    const ingresos = medio === 'efectivo' ? window.SGA_DB.query(
       `SELECT i.id, i.fecha, i.monto, i.descripcion, u.nombre AS usuario
        FROM ingresos_caja i LEFT JOIN usuarios u ON u.id = i.usuario_id
        WHERE i.sesion_caja_id = ? ORDER BY i.fecha DESC`,
       [sesionId]
-    );
+    ) : [];
+
     const items = [
       ...ventas.map(v => ({
         tipo: 'venta', id: v.id, fecha: v.fecha,
-        monto: parseFloat(v.total) || 0,
+        monto: parseFloat(v.monto_medio) || 0,
         descripcion: v.cliente || 'Consumidor final',
         estado: v.estado,
         medios: pagosByVenta[v.id] || [],
@@ -448,27 +457,33 @@ const Caja = (() => {
   function renderCajaActiva() {
     const root = ge('caja-root');
     if (!root) return;
+    const medio = state.activeMedio || 'efectivo';
+    const medioLabel = MEDIOS_LABEL[medio] || medio;
+    const isEfectivo = medio === 'efectivo';
+
+    // Tabs: egresos/recuento only relevant for efectivo
+    const tabsHtml = `
+      <button class="caja-tab ${state.currentTab === 'resumen' ? 'active' : ''}" data-tab="resumen">Resumen</button>
+      ${isEfectivo ? `<button class="caja-tab ${state.currentTab === 'egresos' ? 'active' : ''}" data-tab="egresos">Egresos e Ingresos</button>` : ''}
+      <button class="caja-tab ${state.currentTab === 'historial' ? 'active' : ''}" data-tab="historial">Historial</button>
+      ${isEfectivo ? `<button class="caja-tab ${state.currentTab === 'recuento' ? 'active' : ''}" data-tab="recuento">Recuento de dinero</button>` : ''}
+      <button class="caja-tab" data-action="medios">Cobranzas por medio de pago</button>
+    `;
 
     root.innerHTML = `
       <div class="caja-toolbar">
         <div>
-          <h2>💰 Caja <span class="badge-abierta">Abierta</span></h2>
+          <h2>💰 Caja · ${esc(medioLabel)} <span class="badge-abierta">Abierta</span></h2>
           <small class="caja-apertura-info">
             Apertura: ${fmtFecha(state.sesion.fecha_apertura)}
             · ${esc(state.sesion.nombre_apertura || '')}
           </small>
         </div>
         <div class="caja-toolbar-right">
-          ${canManage() ? `<button id="btn-cierre-caja" class="btn btn-danger">Cerrar Caja</button>` : ''}
+          ${isEfectivo && canManage() ? `<button id="btn-cierre-caja" class="btn btn-danger">Cerrar Caja</button>` : ''}
         </div>
       </div>
-      <div class="caja-tabs">
-        <button class="caja-tab ${state.currentTab === 'resumen' ? 'active' : ''}" data-tab="resumen">Resumen</button>
-<button class="caja-tab ${state.currentTab === 'egresos' ? 'active' : ''}" data-tab="egresos">Egresos e Ingresos</button>
-        <button class="caja-tab ${state.currentTab === 'historial' ? 'active' : ''}" data-tab="historial">Historial</button>
-        <button class="caja-tab ${state.currentTab === 'recuento' ? 'active' : ''}" data-tab="recuento">Recuento de dinero</button>
-        <button class="caja-tab" data-action="medios">Cobranzas por medio de pago</button>
-      </div>
+      <div class="caja-tabs">${tabsHtml}</div>
       <div id="caja-tab-content" class="caja-tab-content"></div>
     `;
 
@@ -541,8 +556,9 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     if (!el || !state.sesion) return;
     const tot = getTotalesSesion(state.sesion.id);
     state.totales = tot;
+    const medio = state.activeMedio || 'efectivo';
 
-    const movimientos = getMovimientosDia(state.sesion.id);
+    const movimientos = getMovimientosDia(state.sesion.id, medio);
     const movsHtml = movimientos.length
       ? `<div style="max-height:340px;overflow-y:auto">
           <table class="caja-table mov-table">
@@ -573,14 +589,15 @@ case 'egresos':     renderEgresosIngresos(content);   break;
             </tbody>
           </table>
         </div>`
-      : '<p class="caja-empty" style="padding:16px 0">Sin movimientos registrados en esta sesión.</p>';
+      : '<p class="caja-empty" style="padding:16px 0">Sin movimientos para este medio en esta sesión.</p>';
 
-    el.innerHTML = `
-      <div class="caja-resumen-grid">
+    let kpisHtml;
+    if (medio === 'efectivo') {
+      kpisHtml = `
         <div class="caja-stat-card">
-          <div class="caja-stat-label">Ventas del día</div>
-          <div class="caja-stat-value">${fmtPeso(tot.totalVentas)}</div>
-          <div class="caja-stat-sub">${tot.nVentas} venta${tot.nVentas !== 1 ? 's' : ''}</div>
+          <div class="caja-stat-label">Cobrado en Efectivo</div>
+          <div class="caja-stat-value">${fmtPeso(tot.totPagos['efectivo'] || 0)}</div>
+          <div class="caja-stat-sub">${movimientos.filter(m => m.tipo === 'venta').length} venta${movimientos.filter(m => m.tipo === 'venta').length !== 1 ? 's' : ''}</div>
         </div>
         <div class="caja-stat-card">
           <div class="caja-stat-label">Saldo inicial</div>
@@ -593,10 +610,25 @@ case 'egresos':     renderEgresosIngresos(content);   break;
         <div class="caja-stat-card highlight">
           <div class="caja-stat-label">Saldo esperado (efectivo)</div>
           <div class="caja-stat-value">${fmtPeso(tot.saldoEsperado)}</div>
-        </div>
+        </div>`;
+    } else {
+      const medioTotal = tot.totPagos[medio] || 0;
+      const label = MEDIOS_LABEL[medio] || medio;
+      const nVentas = movimientos.filter(m => m.tipo === 'venta').length;
+      kpisHtml = `
+        <div class="caja-stat-card highlight">
+          <div class="caja-stat-label">Cobrado por ${label}</div>
+          <div class="caja-stat-value">${fmtPeso(medioTotal)}</div>
+          <div class="caja-stat-sub">${nVentas} transacción${nVentas !== 1 ? 'es' : ''}</div>
+        </div>`;
+    }
+
+    el.innerHTML = `
+      <div class="caja-resumen-grid">
+        ${kpisHtml}
       </div>
       <div class="caja-medios-card">
-        <h4>Movimientos del día</h4>
+        <h4>Movimientos del día · ${MEDIOS_LABEL[medio] || medio}</h4>
         ${movsHtml}
       </div>
     `;
@@ -733,6 +765,39 @@ case 'egresos':     renderEgresosIngresos(content);   break;
 
   function ensureSidebar() {
     if (ge('caja-sidebar')) return;
+
+    if (!ge('caja-sidebar-styles')) {
+      const s = document.createElement('style');
+      s.id = 'caja-sidebar-styles';
+      s.textContent = `
+        .caja-sidebar-overlay{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:1000;opacity:0;pointer-events:none;transition:opacity .25s}
+        .caja-sidebar-overlay.visible{opacity:1;pointer-events:all}
+        .caja-sidebar{position:fixed;top:0;right:0;width:440px;max-width:95vw;height:100%;background:#fff;box-shadow:-4px 0 24px rgba(0,0,0,.18);z-index:1001;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);overflow-y:auto;display:flex;flex-direction:column}
+        .caja-sidebar.open{transform:translateX(0)}
+        .caja-sidebar-header{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--color-border,#e5e7eb);position:sticky;top:0;background:#fff;z-index:1}
+        .caja-sidebar-body{flex:1;padding:20px}
+        .btn-sidebar-close{background:none;border:none;font-size:20px;cursor:pointer;color:#888;padding:4px 8px;line-height:1}
+        .btn-sidebar-close:hover{color:#333}
+        .btn-sidebar-back{background:none;border:none;font-size:13px;cursor:pointer;color:var(--color-primary,#667eea);padding:0 0 14px;display:flex;align-items:center;gap:4px}
+        .btn-sidebar-back:hover{text-decoration:underline}
+        .mov-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap}
+        .mov-venta{background:#e8f5e9;color:#2E7D32}.mov-anulada{background:#ffebee;color:#C62828}
+        .mov-pendiente{background:#fff8e1;color:#E65100}.mov-egreso{background:#ffebee;color:#C62828}
+        .mov-ingreso{background:#e3f2fd;color:#1565C0}
+        .mtag{display:inline-flex;align-items:center;gap:2px;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;margin-right:2px}
+        .mtag-cash{background:#e8f5e9;color:#1b5e20}.mtag-mp{background:#e3f2fd;color:#0d47a1}
+        .mtag-card{background:#e1f5fe;color:#01579b}.mtag-transf{background:#f3e5f5;color:#6a1b9a}
+        .mtag-cc{background:#fff3e0;color:#e65100}
+        .sb-mov-table{border-collapse:separate;border-spacing:0 3px;width:100%;font-size:13px}
+        .sb-mov-table thead th{text-align:left;padding:4px 10px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:#888;border-bottom:none}
+        .sb-mov-table tbody tr td{padding:8px 10px;background:#f9fafb;border-bottom:none}
+        .sb-mov-table tbody tr td:first-child{border-radius:6px 0 0 6px}
+        .sb-mov-table tbody tr td:last-child{border-radius:0 6px 6px 0}
+        .sb-mov-row{cursor:pointer}.sb-mov-row:hover td{background:#eef2ff}
+      `;
+      document.head.appendChild(s);
+    }
+
     const overlay = document.createElement('div');
     overlay.id = 'caja-sidebar-overlay';
     overlay.className = 'caja-sidebar-overlay';
@@ -767,7 +832,15 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     if (o) o.classList.remove('visible');
   }
 
-  function openMovimientoSidebar(tipo, id) {
+  function openMovimientoSidebar(tipo, id, onBack) {
+    const backBtn = onBack
+      ? `<button class="btn-sidebar-back" id="btn-sidebar-back">← Volver al turno</button>`
+      : '';
+    const wireBack = () => {
+      const b = ge('btn-sidebar-back');
+      if (b) b.addEventListener('click', onBack);
+    };
+
     if (tipo === 'venta') {
       const rows = window.SGA_DB.query(
         `SELECT v.*, c.nombre AS cliente, u.nombre AS usuario
@@ -797,9 +870,10 @@ case 'egresos':     renderEgresosIngresos(content);   break;
           <span>${fmtPeso(p.monto)}</span>
         </div>`).join('');
       const html = `
+        ${backBtn}
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
           <span class="mov-badge ${estadoCls[v.estado] || 'mov-venta'}" style="font-size:13px;padding:4px 10px">${esc(v.estado)}</span>
-          <span style="color:var(--color-text-secondary);font-size:13px">${fmtFecha(v.fecha)}</span>
+          <span style="color:var(--color-text-secondary,#666);font-size:13px">${fmtFecha(v.fecha)}</span>
         </div>
         <div class="caja-stat-row"><span style="color:#666">Cliente</span><span>${esc(v.cliente || 'Consumidor final')}</span></div>
         <div class="caja-stat-row"><span style="color:#666">Vendedor</span><span>${esc(v.usuario || '—')}</span></div>
@@ -810,14 +884,20 @@ case 'egresos':     renderEgresosIngresos(content);   break;
         </table>
         <h4 style="margin:16px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#999">Pagos</h4>
         ${pagosHtml}
+        ${(v.descuento || 0) > 0 ? `
+        <div class="caja-stat-row" style="color:#e65100;margin-top:6px">
+          <span>Subtotal</span><span>${fmtPeso(v.subtotal)}</span>
+        </div>
+        <div class="caja-stat-row" style="color:#e65100">
+          <span>Descuento</span><span>-${fmtPeso(v.descuento)}</span>
+        </div>` : ''}
         <div class="caja-stat-row total-row" style="margin-top:6px">
           <span>Total</span><span>${fmtPeso(v.total)}</span>
         </div>
-        <div style="margin-top:20px">
-          <button class="btn btn-outline btn-sm" id="btn-sidebar-ir-pos">Ver en POS</button>
-        </div>
+        ${!onBack ? `<div style="margin-top:20px"><button class="btn btn-outline btn-sm" id="btn-sidebar-ir-pos">Ver en POS</button></div>` : ''}
       `;
       openSidebar('Detalle de venta', html);
+      wireBack();
       const btnPos = ge('btn-sidebar-ir-pos');
       if (btnPos) btnPos.addEventListener('click', () => {
         closeSidebar();
@@ -833,14 +913,16 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       if (!rows.length) return;
       const e = rows[0];
       openSidebar('Detalle de egreso', `
+        ${backBtn}
         <div class="caja-stat-row"><span style="color:#666">Tipo</span>
           <span class="mov-badge mov-egreso">${EGRESO_TIPO_LABEL[e.tipo] || esc(e.tipo)}</span>
         </div>
         <div class="caja-stat-row"><span style="color:#666">Descripción</span><span>${esc(e.descripcion || '—')}</span></div>
-        <div class="caja-stat-row"><span style="color:#666">Monto</span><span class="text-danger">−${fmtPeso(e.monto)}</span></div>
+        <div class="caja-stat-row"><span style="color:#666">Monto</span><span style="color:#C62828">−${fmtPeso(e.monto)}</span></div>
         <div class="caja-stat-row"><span style="color:#666">Fecha</span><span>${fmtFecha(e.fecha)}</span></div>
         <div class="caja-stat-row"><span style="color:#666">Usuario</span><span>${esc(e.usuario || '—')}</span></div>
       `);
+      wireBack();
 
     } else if (tipo === 'ingreso') {
       const rows = window.SGA_DB.query(
@@ -850,11 +932,13 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       if (!rows.length) return;
       const i = rows[0];
       openSidebar('Detalle de ingreso', `
+        ${backBtn}
         <div class="caja-stat-row"><span style="color:#666">Descripción</span><span>${esc(i.descripcion || '—')}</span></div>
-        <div class="caja-stat-row"><span style="color:#666">Monto</span><span class="text-success">${fmtPeso(i.monto)}</span></div>
+        <div class="caja-stat-row"><span style="color:#666">Monto</span><span style="color:#2E7D32">${fmtPeso(i.monto)}</span></div>
         <div class="caja-stat-row"><span style="color:#666">Fecha</span><span>${fmtFecha(i.fecha)}</span></div>
         <div class="caja-stat-row"><span style="color:#666">Usuario</span><span>${esc(i.usuario || '—')}</span></div>
       `);
+      wireBack();
     }
   }
 
@@ -1865,16 +1949,111 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     });
   }
 
+  // ── OVERVIEW ─────────────────────────────────────────────────────────────────
+
+  function renderOverview() {
+    const root = ge('caja-root');
+    if (!root) return;
+
+    if (!ge('caja-overview-styles')) {
+      const s = document.createElement('style');
+      s.id = 'caja-overview-styles';
+      s.textContent = `
+        .caja-overview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px;padding:28px 24px}
+        .caja-overview-card{
+          background:#fff;border-radius:14px;padding:32px 24px;
+          box-shadow:0 2px 10px rgba(0,0,0,.08);cursor:pointer;text-align:center;
+          border:2px solid transparent;transition:all .2s;user-select:none;
+        }
+        .caja-overview-card:hover{transform:translateY(-3px);box-shadow:0 8px 24px rgba(0,0,0,.13);border-color:var(--color-primary)}
+        .caja-overview-card.co-efectivo{background:linear-gradient(135deg,#f0f4ff,#e8ecff)}
+        .caja-overview-card.co-mercadopago{background:linear-gradient(135deg,#e3f2fd,#d0eafc)}
+        .caja-overview-card.co-tarjeta{background:linear-gradient(135deg,#e1f5fe,#ccedfb)}
+        .caja-overview-card.co-transferencia{background:linear-gradient(135deg,#f3e5f5,#ead5f7)}
+        .caja-overview-icon{font-size:2.2em;margin-bottom:10px}
+        .caja-overview-label{font-size:.88em;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#666;margin-bottom:10px}
+        .caja-overview-value{font-size:1.7em;font-weight:700;color:#333;margin-bottom:6px}
+        .caja-overview-sub{font-size:.82em;color:#888}
+        .caja-overview-hint{text-align:center;color:#bbb;font-size:.82em;margin-top:4px;padding-bottom:12px}
+      `;
+      document.head.appendChild(s);
+    }
+
+    const tot = state.sesion ? getTotalesSesion(state.sesion.id) : null;
+
+    const cajas = [
+      {
+        medio: 'efectivo', icon: '💵', label: 'Efectivo',
+        value: tot ? tot.saldoEsperado : 0,
+        sub: tot ? `Cobrado: ${fmtPeso(tot.totPagos['efectivo'] || 0)} · Inicial: ${fmtPeso(tot.saldoInicial)}` : 'Sin sesión activa',
+      },
+      {
+        medio: 'mercadopago', icon: '📲', label: 'Mercado Pago',
+        value: tot ? (tot.totPagos['mercadopago'] || 0) : 0,
+        sub: `${tot ? (tot.totPagos['mercadopago'] > 0 ? 'Cobrado hoy' : 'Sin movimientos') : 'Sin sesión activa'}`,
+      },
+      {
+        medio: 'tarjeta', icon: '💳', label: 'Tarjeta',
+        value: tot ? (tot.totPagos['tarjeta'] || 0) : 0,
+        sub: `${tot ? (tot.totPagos['tarjeta'] > 0 ? 'Cobrado hoy' : 'Sin movimientos') : 'Sin sesión activa'}`,
+      },
+      {
+        medio: 'transferencia', icon: '🏦', label: 'Transferencia',
+        value: tot ? (tot.totPagos['transferencia'] || 0) : 0,
+        sub: `${tot ? (tot.totPagos['transferencia'] > 0 ? 'Cobrado hoy' : 'Sin movimientos') : 'Sin sesión activa'}`,
+      },
+    ];
+
+    root.innerHTML = `
+      <div class="caja-toolbar">
+        <div>
+          <h2>💰 Cajas</h2>
+          <small class="caja-apertura-info">
+            ${state.sesion
+              ? `Sesión abierta desde ${fmtFecha(state.sesion.fecha_apertura)} · ${esc(state.sesion.nombre_apertura || '')}`
+              : 'No hay caja abierta — ir a 💵 Efectivo para abrir una sesión'}
+          </small>
+        </div>
+      </div>
+      <div class="caja-overview-grid">
+        ${cajas.map(c => `
+          <div class="caja-overview-card co-${c.medio}" data-medio="${c.medio}">
+            <div class="caja-overview-icon">${c.icon}</div>
+            <div class="caja-overview-label">${c.label}</div>
+            <div class="caja-overview-value">${fmtPeso(c.value)}</div>
+            <div class="caja-overview-sub">${c.sub}</div>
+          </div>
+        `).join('')}
+      </div>
+      <p class="caja-overview-hint">Doble clic en una caja para ver el detalle</p>
+    `;
+
+    root.querySelectorAll('.caja-overview-card').forEach(card => {
+      card.addEventListener('dblclick', () => {
+        window.location.hash = `#caja/${card.dataset.medio}`;
+      });
+    });
+  }
+
   // ── INIT ──────────────────────────────────────────────────────────────────────
 
-  const init = () => {
+  const init = (params = []) => {
     state.user = window.SGA_Auth.getCurrentUser();
     if (!state.user) { window.location.hash = '#pos'; return; }
 
+    const VALID_MEDIOS = ['efectivo', 'mercadopago', 'tarjeta', 'transferencia'];
+    const medio = params[0];
     state.sesion = getSesionActiva(state.user.sucursal_id);
+
+    if (!medio || !VALID_MEDIOS.includes(medio)) {
+      state.activeMedio = null;
+      renderOverview();
+      return;
+    }
+
+    state.activeMedio = medio;
     state.currentTab = 'resumen';
     render();
-
     if (state.sesion) startAutoRefresh();
   };
 

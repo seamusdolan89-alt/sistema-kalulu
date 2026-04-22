@@ -710,6 +710,13 @@
       // etiquetas: auditoría de impresión y cambio de precio
       "ALTER TABLE productos ADD COLUMN ultima_impresion_etiqueta TEXT",
       "ALTER TABLE productos ADD COLUMN ultima_modificacion_precio TEXT",
+      // Promociones — campos para combos y flexibles
+      "ALTER TABLE promociones ADD COLUMN precio_combo REAL DEFAULT 0",
+      "ALTER TABLE promociones ADD COLUMN stock_maximo INTEGER DEFAULT 0",
+      "ALTER TABLE promociones ADD COLUMN stock_vendido INTEGER DEFAULT 0",
+      "ALTER TABLE promociones ADD COLUMN flexible INTEGER DEFAULT 0",
+      "ALTER TABLE promociones ADD COLUMN solo_clientes_registrados INTEGER DEFAULT 0",
+      "ALTER TABLE promociones ADD COLUMN cantidad_total_requerida INTEGER DEFAULT 1",
     ];
     for (const sql of columnAlterations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }
@@ -731,6 +738,22 @@
           ON historial_stock(producto_id, sucursal_id, registrado_en)
       `);
     } catch(e) { console.warn('historial_stock:', e.message); }
+
+    // ── venta_promociones — historial de uso de cada promoción ────────────────
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS venta_promociones (
+          id TEXT PRIMARY KEY,
+          venta_id TEXT REFERENCES ventas(id),
+          promocion_id TEXT REFERENCES promociones(id),
+          veces INTEGER DEFAULT 1,
+          descuento_aplicado REAL DEFAULT 0,
+          fecha TEXT,
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
+        )
+      `);
+    } catch(e) { console.warn('venta_promociones:', e.message); }
 
     // ── Cuenta Corriente Proveedores ──────────────────────────────────────────
     // pagos_proveedores: payment header (who, when, notes)

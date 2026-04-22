@@ -6,6 +6,343 @@
   <title>SGA - Promociones</title>
 </head>
 <body>
-  <div id="app-content"></div>
+<style>
+/* ── Layout ────────────────────────────────────────────────────────── */
+.promo-page { display: flex; flex-direction: column; height: 100%; background: #f8f9fa; }
+
+.promo-header {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 24px; background: white;
+  border-bottom: 1px solid #e8e8e8; flex-shrink: 0;
+}
+.promo-header h2 { margin: 0; font-size: 1.15em; font-weight: 700; color: #333; flex: 1; }
+.btn-nueva-promo {
+  padding: 8px 18px; background: #667eea; color: white;
+  border: none; border-radius: 8px; font-size: 0.9em;
+  font-weight: 600; cursor: pointer; transition: background 0.15s;
+}
+.btn-nueva-promo:hover { background: #5a6fd6; }
+
+.promo-body { flex: 1; overflow-y: auto; padding: 24px; }
+
+/* ── Empty state ───────────────────────────────────────────────────── */
+.promo-empty {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; min-height: 340px; color: #bbb; gap: 10px;
+}
+.promo-empty-icon { font-size: 3em; }
+.promo-empty-title { font-size: 1.05em; font-weight: 600; color: #aaa; }
+.promo-empty-sub { font-size: 0.88em; color: #ccc; }
+
+/* ── Promo cards grid ──────────────────────────────────────────────── */
+.promo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+
+.promo-card {
+  background: white; border-radius: 12px;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.07); padding: 18px 20px;
+  display: flex; flex-direction: column; gap: 10px;
+  border-left: 4px solid #667eea;
+}
+.promo-card.inactiva { border-left-color: #ddd; opacity: 0.7; }
+.promo-card.flexible { border-left-color: #f59e0b; }
+
+.promo-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.promo-card-nombre { font-weight: 700; font-size: 1em; color: #222; }
+.promo-card-badges { display: flex; gap: 5px; flex-wrap: wrap; }
+.badge {
+  font-size: 0.72em; font-weight: 700; padding: 2px 8px;
+  border-radius: 10px; white-space: nowrap;
+}
+.badge-combo    { background: #e8eaf6; color: #3949ab; }
+.badge-flexible { background: #fef3c7; color: #92400e; }
+.badge-inactiva { background: #f5f5f5; color: #9e9e9e; }
+.badge-solo-reg { background: #e8f5e9; color: #2e7d32; }
+
+.promo-card-desc { font-size: 0.83em; color: #888; }
+
+.promo-card-items { display: flex; flex-wrap: wrap; gap: 5px; }
+.promo-item-pill {
+  background: #f0f4ff; color: #667eea; font-size: 0.78em;
+  padding: 2px 9px; border-radius: 10px; font-weight: 600;
+}
+
+.promo-card-discount {
+  background: #f0fdf4; border-radius: 8px;
+  padding: 7px 12px; font-size: 0.85em; color: #166534; font-weight: 600;
+}
+
+.promo-card-dates { font-size: 0.78em; color: #bbb; }
+
+.promo-card-footer { display: flex; gap: 8px; margin-top: 4px; }
+.btn-promo-action {
+  flex: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid #e0e0e0;
+  background: none; cursor: pointer; font-size: 0.82em;
+  font-weight: 600; color: #666; transition: all 0.15s;
+}
+.btn-promo-action:hover { background: #f5f5f5; border-color: #bbb; }
+.btn-promo-delete:hover { background: #fff0f0; border-color: #f44336; color: #f44336; }
+
+/* ── Modal backdrop ────────────────────────────────────────────────── */
+.promo-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000; padding: 16px;
+}
+.promo-backdrop.hidden { display: none; }
+
+.promo-modal {
+  background: white; border-radius: 14px; width: 100%;
+  max-width: 700px; max-height: 90vh; display: flex;
+  flex-direction: column; box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+}
+.promo-modal-header {
+  padding: 18px 22px 14px; border-bottom: 1px solid #f0f0f0;
+  display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+}
+.promo-modal-header h3 { margin: 0; font-size: 1.05em; font-weight: 700; color: #333; flex: 1; }
+.btn-modal-close {
+  background: none; border: none; font-size: 1.3em; color: #bbb;
+  cursor: pointer; padding: 2px 6px; border-radius: 4px;
+}
+.btn-modal-close:hover { color: #666; background: #f5f5f5; }
+
+.promo-modal-body { flex: 1; overflow-y: auto; padding: 18px 22px; display: flex; flex-direction: column; gap: 16px; }
+
+/* ── Form fields ───────────────────────────────────────────────────── */
+.form-row { display: flex; gap: 12px; }
+.form-group { display: flex; flex-direction: column; gap: 5px; flex: 1; }
+.form-label { font-size: 0.78em; font-weight: 700; color: #666; text-transform: uppercase; letter-spacing: 0.05em; }
+.form-input {
+  padding: 8px 11px; border: 1px solid #e0e0e0; border-radius: 7px;
+  font-size: 0.92em; outline: none; transition: border-color 0.15s;
+  background: white;
+}
+.form-input:focus { border-color: #667eea; }
+.form-select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23999' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px; }
+
+.form-check { display: flex; align-items: center; gap: 7px; cursor: pointer; font-size: 0.88em; color: #555; }
+.form-check input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; }
+
+/* ── Tipo toggle ───────────────────────────────────────────────────── */
+.tipo-toggle { display: flex; gap: 8px; }
+.tipo-btn {
+  flex: 1; padding: 9px 12px; border: 2px solid #e0e0e0;
+  border-radius: 8px; background: none; cursor: pointer;
+  font-size: 0.87em; font-weight: 600; color: #888;
+  transition: all 0.15s; text-align: center;
+}
+.tipo-btn.active { border-color: #667eea; color: #667eea; background: #f0f4ff; }
+.tipo-btn.active.flexible { border-color: #f59e0b; color: #92400e; background: #fef3c7; }
+
+/* ── Descuento options ─────────────────────────────────────────────── */
+.desc-options { display: flex; gap: 8px; flex-wrap: wrap; }
+.desc-opt-btn {
+  padding: 7px 14px; border: 1px solid #e0e0e0; border-radius: 7px;
+  background: none; cursor: pointer; font-size: 0.85em; color: #666;
+  font-weight: 600; transition: all 0.15s;
+}
+.desc-opt-btn.active { border-color: #667eea; color: #667eea; background: #f0f4ff; }
+
+.desc-section { display: flex; flex-direction: column; gap: 8px; }
+#desc-aplica-row { display: none; }
+
+/* ── Product search in modal ───────────────────────────────────────── */
+.search-section {
+  background: #f8f9fa; border-radius: 10px; padding: 14px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.search-section-title { font-size: 0.78em; font-weight: 700; color: #666; text-transform: uppercase; letter-spacing: 0.05em; }
+.modal-search-wrap { position: relative; }
+.modal-search-input {
+  width: 100%; padding: 9px 12px; border: 2px solid #667eea;
+  border-radius: 8px; font-size: 0.92em; outline: none; box-sizing: border-box;
+  background: white;
+}
+.modal-search-input:focus { border-color: #764ba2; }
+.modal-search-dropdown {
+  position: absolute; top: calc(100% + 2px); left: 0; right: 0;
+  background: white; border: 1px solid #ddd; border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 200;
+  max-height: 220px; overflow-y: auto; display: none;
+}
+.msri {
+  padding: 9px 13px; cursor: pointer; display: flex;
+  justify-content: space-between; align-items: center;
+  border-bottom: 1px solid #f5f5f5; font-size: 0.88em;
+}
+.msri:last-child { border-bottom: none; }
+.msri:hover, .msri.highlighted { background: #f0f4ff; }
+.msri.highlighted { outline: 2px solid #667eea; outline-offset: -2px; }
+.msri-left { display: flex; flex-direction: column; gap: 1px; }
+.msri-nombre { font-weight: 600; color: #333; }
+.msri-codigo { color: #aaa; font-size: 0.82em; }
+.msri-precio { font-weight: 700; color: #667eea; }
+
+/* ── Selected combo items ──────────────────────────────────────────── */
+.combo-items-list { display: flex; flex-direction: column; gap: 6px; }
+.combo-item-row {
+  display: flex; align-items: center; gap: 10px;
+  background: white; border-radius: 8px; padding: 8px 12px;
+  border: 1px solid #e8e8e8;
+}
+.combo-item-nombre { flex: 1; font-size: 0.88em; font-weight: 600; color: #333; }
+.combo-item-precio { font-size: 0.82em; color: #888; white-space: nowrap; }
+.combo-item-qty-wrap { display: flex; align-items: center; gap: 5px; }
+.combo-item-qty-label { font-size: 0.78em; color: #999; }
+.combo-item-qty {
+  width: 54px; padding: 4px 6px; border: 1px solid #ddd;
+  border-radius: 5px; text-align: center; font-size: 0.88em; outline: none;
+}
+.combo-item-qty:focus { border-color: #667eea; }
+.btn-combo-remove {
+  background: none; border: none; color: #ddd; cursor: pointer;
+  font-size: 1.1em; padding: 2px 4px; transition: color 0.15s;
+}
+.btn-combo-remove:hover { color: #f44336; }
+.combo-empty-msg { font-size: 0.83em; color: #bbb; text-align: center; padding: 10px 0; }
+
+/* ── Modal footer ──────────────────────────────────────────────────── */
+.promo-modal-footer {
+  padding: 14px 22px; border-top: 1px solid #f0f0f0;
+  display: flex; gap: 10px; justify-content: flex-end; flex-shrink: 0;
+}
+.btn-cancel-modal {
+  padding: 9px 20px; background: none; border: 1px solid #e0e0e0;
+  border-radius: 8px; font-size: 0.9em; font-weight: 600;
+  color: #888; cursor: pointer;
+}
+.btn-cancel-modal:hover { background: #f5f5f5; }
+.btn-save-promo {
+  padding: 9px 22px; background: #667eea; color: white;
+  border: none; border-radius: 8px; font-size: 0.9em;
+  font-weight: 600; cursor: pointer; transition: background 0.15s;
+}
+.btn-save-promo:hover { background: #5a6fd6; }
+.btn-save-promo:disabled { background: #c5c9f9; cursor: not-allowed; }
+</style>
+
+<div class="promo-page" id="promo-page">
+  <!-- Header -->
+  <div class="promo-header">
+    <h2>🎁 Promociones y Combos</h2>
+    <button class="btn-nueva-promo" id="btn-nueva-promo">+ Nueva promoción</button>
+  </div>
+
+  <!-- Body -->
+  <div class="promo-body" id="promo-body">
+    <div class="promo-empty" id="promo-empty">
+      <div class="promo-empty-icon">🎁</div>
+      <div class="promo-empty-title">No hay promociones creadas</div>
+      <div class="promo-empty-sub">Creá tu primer combo con el botón de arriba</div>
+    </div>
+    <div class="promo-grid" id="promo-grid" style="display:none"></div>
+  </div>
+</div>
+
+<!-- ══ Modal Nueva Promoción ══ -->
+<div class="promo-backdrop hidden" id="promo-modal-backdrop">
+  <div class="promo-modal">
+    <div class="promo-modal-header">
+      <h3 id="promo-modal-title">Nueva Promoción</h3>
+      <button class="btn-modal-close" id="btn-promo-modal-close">✕</button>
+    </div>
+
+    <div class="promo-modal-body">
+      <!-- Nombre -->
+      <div class="form-group">
+        <label class="form-label">Nombre de la promoción</label>
+        <input type="text" class="form-input" id="promo-nombre" placeholder="Ej: Combo 2 Coca 600ml" autocomplete="off">
+      </div>
+
+      <!-- Tipo -->
+      <div class="form-group">
+        <label class="form-label">Tipo de combo</label>
+        <div class="tipo-toggle">
+          <button class="tipo-btn active" id="btn-tipo-fijo" data-tipo="fijo">
+            📦 Combo fijo<br><small style="font-weight:400;font-size:0.85em">Productos específicos</small>
+          </button>
+          <button class="tipo-btn flexible" id="btn-tipo-flexible" data-tipo="flexible">
+            🔀 Flexible<br><small style="font-weight:400;font-size:0.85em">Cualquier combinación del pool</small>
+          </button>
+        </div>
+      </div>
+
+      <!-- Flexible: unidades totales -->
+      <div class="form-row" id="flexible-opts" style="display:none">
+        <div class="form-group">
+          <label class="form-label">Unidades totales requeridas</label>
+          <input type="number" class="form-input" id="promo-cantidad-total" value="2" min="1" step="1">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Descuento aplica sobre</label>
+          <select class="form-input form-select" id="promo-aplica-a">
+            <option value="item_mas_barato">El producto más barato</option>
+            <option value="todos">Todos los productos del combo</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Descuento -->
+      <div class="desc-section">
+        <label class="form-label">Tipo de descuento / precio especial</label>
+        <div class="desc-options">
+          <button class="desc-opt-btn active" id="btn-desc-pct" data-desc="porcentaje">% Porcentaje</button>
+          <button class="desc-opt-btn" id="btn-desc-fijo" data-desc="monto_fijo">$ Monto fijo</button>
+          <button class="desc-opt-btn" id="btn-desc-precio" data-desc="precio_combo">💰 Precio combo total</button>
+        </div>
+        <div class="form-row" style="margin-top:6px">
+          <div class="form-group" id="desc-valor-group">
+            <label class="form-label" id="desc-valor-label">Porcentaje de descuento</label>
+            <input type="number" class="form-input" id="promo-valor-descuento" min="0" step="0.01" placeholder="0">
+          </div>
+        </div>
+      </div>
+
+      <!-- Fechas y stock -->
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Fecha desde</label>
+          <input type="date" class="form-input" id="promo-fecha-desde">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Fecha hasta</label>
+          <input type="date" class="form-input" id="promo-fecha-hasta">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Stock máx. de combos</label>
+          <input type="number" class="form-input" id="promo-stock-max" value="0" min="0" step="1" placeholder="0 = ilimitado">
+        </div>
+      </div>
+
+      <!-- Checkboxes -->
+      <div style="display:flex;flex-wrap:wrap;gap:14px">
+        <label class="form-check">
+          <input type="checkbox" id="promo-solo-registrados">
+          Solo para clientes registrados
+        </label>
+      </div>
+
+      <!-- Buscador de productos -->
+      <div class="search-section">
+        <div class="search-section-title">Productos que forman el combo / pool</div>
+        <div class="modal-search-wrap">
+          <input type="text" class="modal-search-input" id="modal-product-search"
+            placeholder="Buscar por nombre o código de barras..." autocomplete="off" spellcheck="false">
+          <div class="modal-search-dropdown" id="modal-search-dropdown"></div>
+        </div>
+        <div class="combo-items-list" id="combo-items-list">
+          <div class="combo-empty-msg" id="combo-empty-msg">Buscá y seleccioná los productos del combo</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="promo-modal-footer">
+      <button class="btn-cancel-modal" id="btn-promo-cancel">Cancelar</button>
+      <button class="btn-save-promo" id="btn-promo-save">Guardar promoción</button>
+    </div>
+  </div>
+</div>
+
+<div id="app-content"></div>
 </body>
 </html>
