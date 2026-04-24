@@ -2671,63 +2671,103 @@ export const POS = (() => {
 
     const openBuscarClienteModal = () => {
       showModal('modal-buscar-cliente');
-      const q = ge('buscar-cliente-query');
-      if (q) { q.value = ''; q.focus(); renderBuscarResultados(''); }
+      const qn = ge('buscar-nombre-query');
+      const ql = ge('buscar-lote-query');
+      if (qn) { qn.value = ''; }
+      if (ql) { ql.value = ''; }
+      ge('buscar-nombre-results') && (ge('buscar-nombre-results').innerHTML = '');
+      ge('buscar-lote-results')   && (ge('buscar-lote-results').innerHTML = '');
+      if (qn) qn.focus();
     };
 
-    const renderBuscarResultados = (query) => {
-      const container = ge('buscar-cliente-results');
+    const buildResultItem = (c) => {
+      const nombre = `${c.nombre} ${c.apellido || ''}`.trim();
+      const lote   = c.lote ? `Lote ${c.lote}` : '';
+      const tel    = c.telefono || '';
+      const saldo  = c.saldo || 0;
+      let badgeHtml = '';
+      if (saldo > 0.01)       badgeHtml = `<span class="saldo-badge deuda">Debe ${formatCurrency(saldo)}</span>`;
+      else if (saldo < -0.01) badgeHtml = `<span class="saldo-badge favor">Saldo ${formatCurrency(Math.abs(saldo))}</span>`;
+      const meta = [lote, tel].filter(Boolean).join(' · ');
+      return `<div class="buscar-result-item"
+          data-id="${c.id}" data-nombre="${c.nombre}" data-apellido="${c.apellido || ''}"
+          data-lote="${c.lote || ''}" data-telefono="${c.telefono || ''}" data-saldo="${saldo}">
+        <div class="buscar-result-name">${nombre} ${badgeHtml}</div>
+        ${meta ? `<div class="buscar-result-meta">${meta}</div>` : ''}
+      </div>`;
+    };
+
+    const handleBuscarSelect = (item) => {
+      const nombreQ = ge('buscar-nombre-query');
+      const loteQ   = ge('buscar-lote-query');
+      const fullName = `${item.dataset.nombre} ${item.dataset.apellido || ''}`.trim();
+      if (nombreQ) nombreQ.value = fullName;
+      if (loteQ)   loteQ.value   = item.dataset.lote || '';
+      selectCliente({
+        id: item.dataset.id,
+        nombre: item.dataset.nombre,
+        apellido: item.dataset.apellido,
+        telefono: item.dataset.telefono,
+        saldo_actual: parseFloat(item.dataset.saldo) || 0,
+      });
+      hideModal('modal-buscar-cliente');
+    };
+
+    const bindBuscarItems = (container) => {
+      container.querySelectorAll('.buscar-result-item').forEach(item => {
+        item.addEventListener('click', () => handleBuscarSelect(item));
+      });
+    };
+
+    const renderBuscarNombre = (query) => {
+      const container = ge('buscar-nombre-results');
       if (!container) return;
       const trimmed = query.trim();
-      if (!trimmed) { container.innerHTML = '<div style="color:#aaa;font-size:0.85em;padding:8px 4px;">Escribí un nombre, apellido o número de lote para buscar.</div>'; return; }
+      if (!trimmed) { container.innerHTML = ''; return; }
       const like = `%${trimmed}%`;
       const rows = window.SGA_DB.query(
         `SELECT c.id, c.nombre, c.apellido, c.lote, c.telefono,
            COALESCE((SELECT SUM(monto) FROM cuenta_corriente WHERE cliente_id = c.id), 0) AS saldo
-         FROM clientes c WHERE c.activo = 1
-           AND (c.nombre LIKE ? OR c.apellido LIKE ? OR c.lote LIKE ?)
-         ORDER BY c.nombre, c.apellido LIMIT 20`,
-        [like, like, like]
+         FROM clientes c WHERE c.activo = 1 AND (c.nombre LIKE ? OR c.apellido LIKE ?)
+         ORDER BY c.nombre, c.apellido LIMIT 15`,
+        [like, like]
       );
-      if (!rows.length) {
-        container.innerHTML = '<div style="color:#aaa;font-size:0.85em;padding:8px 4px;">Sin resultados.</div>';
-        return;
-      }
-      container.innerHTML = rows.map(c => {
-        const nombre = `${c.nombre} ${c.apellido || ''}`.trim();
-        const lote = c.lote ? `Lote ${c.lote}` : '';
-        const tel  = c.telefono || '';
-        const saldo = c.saldo || 0;
-        let badgeHtml = '';
-        if (saldo > 0.01)       badgeHtml = `<span class="saldo-badge deuda">Debe ${formatCurrency(saldo)}</span>`;
-        else if (saldo < -0.01) badgeHtml = `<span class="saldo-badge favor">Saldo ${formatCurrency(Math.abs(saldo))}</span>`;
-        const meta = [lote, tel].filter(Boolean).join(' · ');
-        return `<div class="buscar-result-item" data-id="${c.id}" data-nombre="${c.nombre}" data-apellido="${c.apellido || ''}" data-telefono="${c.telefono || ''}" data-saldo="${saldo}">
-          <div class="buscar-result-name">${nombre} ${badgeHtml}</div>
-          ${meta ? `<div class="buscar-result-meta">${meta}</div>` : ''}
-        </div>`;
-      }).join('');
+      container.innerHTML = rows.length
+        ? rows.map(buildResultItem).join('')
+        : '<div style="color:#aaa;font-size:0.85em;padding:6px 4px;">Sin resultados.</div>';
+      bindBuscarItems(container);
+    };
 
-      container.querySelectorAll('.buscar-result-item').forEach(item => {
-        item.addEventListener('click', () => {
-          selectCliente({
-            id: item.dataset.id,
-            nombre: item.dataset.nombre,
-            apellido: item.dataset.apellido,
-            telefono: item.dataset.telefono,
-            saldo_actual: parseFloat(item.dataset.saldo) || 0,
-          });
-          hideModal('modal-buscar-cliente');
-        });
-      });
+    const renderBuscarLote = (query) => {
+      const container = ge('buscar-lote-results');
+      if (!container) return;
+      const trimmed = query.trim();
+      if (!trimmed) { container.innerHTML = ''; return; }
+      const like = `%${trimmed}%`;
+      const rows = window.SGA_DB.query(
+        `SELECT c.id, c.nombre, c.apellido, c.lote, c.telefono,
+           COALESCE((SELECT SUM(monto) FROM cuenta_corriente WHERE cliente_id = c.id), 0) AS saldo
+         FROM clientes c WHERE c.activo = 1 AND c.lote LIKE ?
+         ORDER BY c.lote LIMIT 15`,
+        [like]
+      );
+      container.innerHTML = rows.length
+        ? rows.map(buildResultItem).join('')
+        : '<div style="color:#aaa;font-size:0.85em;padding:6px 4px;">Sin resultados.</div>';
+      bindBuscarItems(container);
     };
 
     safeOn('btn-buscar-cliente',       'click', openBuscarClienteModal);
     safeOn('btn-buscar-cliente-close', 'click', () => hideModal('modal-buscar-cliente'));
-    const buscarQuery = ge('buscar-cliente-query');
-    if (buscarQuery) {
-      buscarQuery.addEventListener('input', e => renderBuscarResultados(e.target.value));
-      buscarQuery.addEventListener('keydown', e => { if (e.key === 'Escape') hideModal('modal-buscar-cliente'); });
+    const buscarNombreQ = ge('buscar-nombre-query');
+    const buscarLoteQ   = ge('buscar-lote-query');
+    if (buscarNombreQ) {
+      buscarNombreQ.addEventListener('input',   e => renderBuscarNombre(e.target.value));
+      buscarNombreQ.addEventListener('keydown', e => { if (e.key === 'Escape') hideModal('modal-buscar-cliente'); });
+    }
+    if (buscarLoteQ) {
+      buscarLoteQ.addEventListener('input',   e => renderBuscarLote(e.target.value));
+      buscarLoteQ.addEventListener('keydown', e => { if (e.key === 'Escape') hideModal('modal-buscar-cliente'); });
     }
     safeOn('btn-crapido-close',  'click', () => hideModal('modal-cliente-rapido'));
     safeOn('btn-crapido-cancel', 'click', () => hideModal('modal-cliente-rapido'));

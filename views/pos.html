@@ -920,10 +920,19 @@ main#app { overflow: hidden; }
       <span class="pmodal-title">🔍 Buscar cliente</span>
       <button class="pmodal-close" id="btn-buscar-cliente-close">✕</button>
     </div>
-    <div class="pmodal-body">
-      <input type="text" id="buscar-cliente-query" class="fi"
-        placeholder="Nombre, apellido o N° de lote..." autocomplete="off" style="width:100%;box-sizing:border-box;">
-      <div id="buscar-cliente-results" class="buscar-results-list"></div>
+    <div class="pmodal-body" style="display:flex;flex-direction:column;gap:14px;">
+      <div>
+        <label style="font-size:0.8em;font-weight:600;color:#666;display:block;margin-bottom:4px;">Nombre / Apellido</label>
+        <input type="text" id="buscar-nombre-query" class="fi"
+          placeholder="Buscar por nombre o apellido..." autocomplete="off" style="width:100%;box-sizing:border-box;">
+        <div id="buscar-nombre-results" class="buscar-results-list"></div>
+      </div>
+      <div>
+        <label style="font-size:0.8em;font-weight:600;color:#666;display:block;margin-bottom:4px;">Lote / UF</label>
+        <input type="text" id="buscar-lote-query" class="fi"
+          placeholder="Buscar por N° de lote o UF..." autocomplete="off" style="width:100%;box-sizing:border-box;">
+        <div id="buscar-lote-results" class="buscar-results-list"></div>
+      </div>
     </div>
   </div>
 </div>
