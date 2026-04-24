@@ -290,8 +290,8 @@ main#app { overflow: hidden; }
 .btn-cliente-accion { flex: 1; font-size: 0.82em; color: #667eea; background: none; border: 1px dashed #c5cdf9; border-radius: 6px; padding: 5px 8px; cursor: pointer; text-align: center; }
 .btn-cliente-accion:hover { background: #f5f7ff; }
 .buscar-results-list { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; margin-top: 8px; }
-.buscar-result-item { padding: 10px 12px; border: 1px solid #e0e0e0; border-radius: 6px; cursor: pointer; transition: background 0.15s; }
-.buscar-result-item:hover { background: #f0f4ff; border-color: #667eea; }
+.buscar-result-item { padding: 10px 12px; border: 1px solid #e0e0e0; border-radius: 6px; cursor: pointer; transition: background 0.15s; outline: none; }
+.buscar-result-item:hover, .buscar-result-item:focus { background: #f0f4ff; border-color: #667eea; box-shadow: 0 0 0 2px #c5cdf9; }
 .buscar-result-name { font-weight: 700; font-size: 0.92em; color: #333; }
 .buscar-result-meta { font-size: 0.78em; color: #888; margin-top: 2px; display: flex; align-items: center; gap: 6px; }
 .buscar-kpi-row { display: flex; gap: 8px; margin-top: 4px; }

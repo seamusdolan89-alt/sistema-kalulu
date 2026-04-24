@@ -2776,9 +2776,27 @@ export const POS = (() => {
       </div>`;
     };
 
-    const bindBuscarItems = (container) => {
-      container.querySelectorAll('.buscar-result-item').forEach(item => {
+    const bindBuscarItems = (container, sourceInput) => {
+      const items = Array.from(container.querySelectorAll('.buscar-result-item'));
+      items.forEach((item, idx) => {
+        item.setAttribute('tabindex', '0');
         item.addEventListener('click', () => handleBuscarSelect(item));
+        item.addEventListener('keydown', e => {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            const next = items[idx + 1];
+            if (next) { next.focus(); next.scrollIntoView({ block: 'nearest' }); }
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (idx === 0) { sourceInput?.focus(); }
+            else { const prev = items[idx - 1]; prev.focus(); prev.scrollIntoView({ block: 'nearest' }); }
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            handleBuscarSelect(item);
+          } else if (e.key === 'Escape') {
+            cancelarClienteBuscar();
+          }
+        });
       });
     };
 
@@ -2798,7 +2816,7 @@ export const POS = (() => {
       container.innerHTML = rows.length
         ? rows.map(buildResultItem).join('')
         : '<div style="color:#aaa;font-size:0.85em;padding:6px 4px;">Sin resultados.</div>';
-      bindBuscarItems(container);
+      bindBuscarItems(container, ge('buscar-nombre-query'));
     };
 
     const renderBuscarLote = (query) => {
@@ -2817,7 +2835,7 @@ export const POS = (() => {
       container.innerHTML = rows.length
         ? rows.map(buildResultItem).join('')
         : '<div style="color:#aaa;font-size:0.85em;padding:6px 4px;">Sin resultados.</div>';
-      bindBuscarItems(container);
+      bindBuscarItems(container, ge('buscar-lote-query'));
     };
 
     safeOn('btn-buscar-cliente',       'click', openBuscarClienteModal);
@@ -2828,11 +2846,25 @@ export const POS = (() => {
     const buscarLoteQ   = ge('buscar-lote-query');
     if (buscarNombreQ) {
       buscarNombreQ.addEventListener('input',   e => renderBuscarNombre(e.target.value));
-      buscarNombreQ.addEventListener('keydown', e => { if (e.key === 'Escape') cancelarClienteBuscar(); });
+      buscarNombreQ.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { cancelarClienteBuscar(); return; }
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          const first = ge('buscar-nombre-results')?.querySelector('.buscar-result-item');
+          if (first) { first.focus(); first.scrollIntoView({ block: 'nearest' }); }
+        }
+      });
     }
     if (buscarLoteQ) {
       buscarLoteQ.addEventListener('input',   e => renderBuscarLote(e.target.value));
-      buscarLoteQ.addEventListener('keydown', e => { if (e.key === 'Escape') cancelarClienteBuscar(); });
+      buscarLoteQ.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { cancelarClienteBuscar(); return; }
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          const first = ge('buscar-lote-results')?.querySelector('.buscar-result-item');
+          if (first) { first.focus(); first.scrollIntoView({ block: 'nearest' }); }
+        }
+      });
     }
     safeOn('btn-crapido-close',  'click', () => hideModal('modal-cliente-rapido'));
     safeOn('btn-crapido-cancel', 'click', () => hideModal('modal-cliente-rapido'));
