@@ -1081,16 +1081,25 @@ export const POS = (() => {
         const asig  = MPAY.reduce((s, m) => s + (state.pagosAmounts[m.id] || 0), 0);
         const falta = Math.max(0, effTotal - asig);
         const el = ge('mpay-status');
+        const debtRow = ge('debt-toggle-row');
         if (!el) return;
-        if (asig < 0.01) { el.className = ''; el.innerHTML = ''; return; }
+        if (asig < 0.01) {
+          el.className = ''; el.innerHTML = '';
+          if (debtRow) debtRow.style.display = 'none';
+          return;
+        }
         if (falta > 0.01) {
           el.className = 'pinput-vuelto falta';
           el.innerHTML = `Falta: ${formatCurrency(falta)}`;
+          if (debtRow) debtRow.style.display = 'block';
+          renderDebtToggle();
         } else {
           const sobrante = asig - effTotal;
           el.className = 'pinput-vuelto ok';
           el.innerHTML = `✓ Cubierto${sobrante > 0.01 ? ` · Vuelto: ${formatCurrency(sobrante)}` : ''}`;
+          if (debtRow) debtRow.style.display = 'none';
         }
+        updateConfirmBtn();
       };
 
       container.querySelectorAll('.mpay-field').forEach(inp => {
@@ -1520,13 +1529,14 @@ export const POS = (() => {
       const sale = ge('pos-sale');
       if (dash) dash.style.display = 'none';
       if (sale) sale.classList.remove('hidden');
+      state.cobroMultiple = false;
       renderPaymentChips();
       updateCobroToggleLabels();
       const toggleEl = ge('cobro-multiple-toggle');
       if (toggleEl) {
         const fresh = toggleEl.cloneNode(true);
         toggleEl.parentNode.replaceChild(fresh, toggleEl);
-        fresh.checked = state.cobroMultiple;
+        fresh.checked = false;
         fresh.addEventListener('change', () => {
           state.cobroMultiple = fresh.checked;
           Object.keys(state.pagosAmounts).forEach(k => { state.pagosAmounts[k] = 0; });
