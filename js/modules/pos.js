@@ -2669,15 +2669,94 @@ export const POS = (() => {
     // Cliente rápido
     safeOn('btn-cliente-rapido', 'click', () => showModal('modal-cliente-rapido'));
 
+    let pendingClienteBuscar = null;
+
     const openBuscarClienteModal = () => {
+      pendingClienteBuscar = null;
       showModal('modal-buscar-cliente');
-      const qn = ge('buscar-nombre-query');
-      const ql = ge('buscar-lote-query');
-      if (qn) { qn.value = ''; }
-      if (ql) { ql.value = ''; }
+      ['buscar-nombre-query','buscar-lote-query'].forEach(id => { const el = ge(id); if (el) el.value = ''; });
+      ['buscar-nombre-results','buscar-lote-results'].forEach(id => { const el = ge(id); if (el) el.innerHTML = ''; });
+      const preview = ge('buscar-cliente-preview');
+      if (preview) preview.style.display = 'none';
+      const confirmBtn = ge('btn-buscar-confirmar');
+      if (confirmBtn) confirmBtn.disabled = true;
+      ge('buscar-nombre-query')?.focus();
+    };
+
+    const cancelarClienteBuscar = () => {
+      pendingClienteBuscar = null;
+      hideModal('modal-buscar-cliente');
+    };
+
+    const confirmarClienteBuscar = () => {
+      if (!pendingClienteBuscar) return;
+      selectCliente(pendingClienteBuscar);
+      hideModal('modal-buscar-cliente');
+      pendingClienteBuscar = null;
+    };
+
+    const renderBuscarPreview = (c) => {
+      const fullName = `${c.nombre} ${c.apellido || ''}`.trim();
+      const nameEl = ge('buscar-selected-name');
+      if (nameEl) nameEl.textContent = `✓ ${fullName}${c.lote ? ' · Lote ' + c.lote : ''}`;
+
+      // Saldo CC
+      const saldo = parseFloat(c.saldo) || 0;
+      const saldoCard = ge('buscar-kpi-saldo');
+      const saldoVal  = ge('buscar-kpi-saldo-val');
+      if (saldoVal) {
+        if (Math.abs(saldo) < 0.01) {
+          saldoVal.textContent = 'Sin deuda';
+          saldoCard?.classList.remove('kpi-deuda','kpi-favor');
+        } else if (saldo > 0) {
+          saldoVal.textContent = `Debe ${formatCurrency(saldo)}`;
+          saldoCard?.classList.add('kpi-deuda'); saldoCard?.classList.remove('kpi-favor');
+        } else {
+          saldoVal.textContent = `A favor ${formatCurrency(Math.abs(saldo))}`;
+          saldoCard?.classList.add('kpi-favor'); saldoCard?.classList.remove('kpi-deuda');
+        }
+      }
+
+      // Top productos
+      const topProd = window.SGA_DB.query(
+        `SELECT p.nombre, COUNT(*) AS veces
+         FROM venta_items vi
+         JOIN ventas v ON vi.venta_id = v.id
+         JOIN productos p ON vi.producto_id = p.id
+         WHERE v.cliente_id = ?
+         GROUP BY vi.producto_id ORDER BY veces DESC LIMIT 3`,
+        [c.id]
+      );
+      const prodVal = ge('buscar-kpi-productos-val');
+      if (prodVal) {
+        prodVal.style.fontStyle = '';
+        prodVal.style.color = '';
+        prodVal.innerHTML = topProd.length
+          ? topProd.map(r => `<div>${r.nombre} <span style="color:#aaa;font-size:0.85em">(${r.veces}x)</span></div>`).join('')
+          : '<span style="color:#aaa;font-style:italic">Sin historial</span>';
+      }
+
+      const preview = ge('buscar-cliente-preview');
+      if (preview) preview.style.display = 'block';
+      const confirmBtn = ge('btn-buscar-confirmar');
+      if (confirmBtn) confirmBtn.disabled = false;
+    };
+
+    const handleBuscarSelect = (item) => {
+      const fullName = `${item.dataset.nombre} ${item.dataset.apellido || ''}`.trim();
+      const lote = item.dataset.lote || '';
+      const nombreQ = ge('buscar-nombre-query');
+      const loteQ   = ge('buscar-lote-query');
+      if (nombreQ) nombreQ.value = fullName;
+      if (loteQ)   loteQ.value   = lote;
       ge('buscar-nombre-results') && (ge('buscar-nombre-results').innerHTML = '');
       ge('buscar-lote-results')   && (ge('buscar-lote-results').innerHTML = '');
-      if (qn) qn.focus();
+      pendingClienteBuscar = {
+        id: item.dataset.id, nombre: item.dataset.nombre,
+        apellido: item.dataset.apellido, telefono: item.dataset.telefono,
+        lote, saldo_actual: parseFloat(item.dataset.saldo) || 0,
+      };
+      renderBuscarPreview({ ...pendingClienteBuscar, saldo: item.dataset.saldo });
     };
 
     const buildResultItem = (c) => {
@@ -2695,22 +2774,6 @@ export const POS = (() => {
         <div class="buscar-result-name">${nombre} ${badgeHtml}</div>
         ${meta ? `<div class="buscar-result-meta">${meta}</div>` : ''}
       </div>`;
-    };
-
-    const handleBuscarSelect = (item) => {
-      const nombreQ = ge('buscar-nombre-query');
-      const loteQ   = ge('buscar-lote-query');
-      const fullName = `${item.dataset.nombre} ${item.dataset.apellido || ''}`.trim();
-      if (nombreQ) nombreQ.value = fullName;
-      if (loteQ)   loteQ.value   = item.dataset.lote || '';
-      selectCliente({
-        id: item.dataset.id,
-        nombre: item.dataset.nombre,
-        apellido: item.dataset.apellido,
-        telefono: item.dataset.telefono,
-        saldo_actual: parseFloat(item.dataset.saldo) || 0,
-      });
-      hideModal('modal-buscar-cliente');
     };
 
     const bindBuscarItems = (container) => {
@@ -2758,16 +2821,18 @@ export const POS = (() => {
     };
 
     safeOn('btn-buscar-cliente',       'click', openBuscarClienteModal);
-    safeOn('btn-buscar-cliente-close', 'click', () => hideModal('modal-buscar-cliente'));
+    safeOn('btn-buscar-cliente-close', 'click', cancelarClienteBuscar);
+    safeOn('btn-buscar-cancelar',      'click', cancelarClienteBuscar);
+    safeOn('btn-buscar-confirmar',     'click', confirmarClienteBuscar);
     const buscarNombreQ = ge('buscar-nombre-query');
     const buscarLoteQ   = ge('buscar-lote-query');
     if (buscarNombreQ) {
       buscarNombreQ.addEventListener('input',   e => renderBuscarNombre(e.target.value));
-      buscarNombreQ.addEventListener('keydown', e => { if (e.key === 'Escape') hideModal('modal-buscar-cliente'); });
+      buscarNombreQ.addEventListener('keydown', e => { if (e.key === 'Escape') cancelarClienteBuscar(); });
     }
     if (buscarLoteQ) {
       buscarLoteQ.addEventListener('input',   e => renderBuscarLote(e.target.value));
-      buscarLoteQ.addEventListener('keydown', e => { if (e.key === 'Escape') hideModal('modal-buscar-cliente'); });
+      buscarLoteQ.addEventListener('keydown', e => { if (e.key === 'Escape') cancelarClienteBuscar(); });
     }
     safeOn('btn-crapido-close',  'click', () => hideModal('modal-cliente-rapido'));
     safeOn('btn-crapido-cancel', 'click', () => hideModal('modal-cliente-rapido'));
@@ -3029,6 +3094,10 @@ export const POS = (() => {
       if (e.key === 'F1' && state.mode === 'sale') { e.preventDefault(); ge('pos-search-input')?.focus(); }
       if (e.key === 'F2' && state.mode === 'sale') {
         e.preventDefault();
+        if (!ge('modal-buscar-cliente')?.classList.contains('hidden')) {
+          confirmarClienteBuscar();
+          return;
+        }
         const clientInput = ge('client-search-input');
         const noClient = !state.clienteId && (!clientInput || clientInput.value.trim() === '');
         const firstChip = document.querySelector('#payment-chips .pchip');

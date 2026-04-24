@@ -294,6 +294,13 @@ main#app { overflow: hidden; }
 .buscar-result-item:hover { background: #f0f4ff; border-color: #667eea; }
 .buscar-result-name { font-weight: 700; font-size: 0.92em; color: #333; }
 .buscar-result-meta { font-size: 0.78em; color: #888; margin-top: 2px; display: flex; align-items: center; gap: 6px; }
+.buscar-kpi-row { display: flex; gap: 8px; margin-top: 4px; }
+.buscar-kpi-card { flex: 1; background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px 8px; text-align: center; min-width: 0; }
+.buscar-kpi-label { font-size: 0.68em; color: #888; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
+.buscar-kpi-value { font-size: 0.82em; color: #333; font-weight: 600; line-height: 1.4; word-break: break-word; }
+.buscar-kpi-card.kpi-deuda .buscar-kpi-value { color: #c62828; }
+.buscar-kpi-card.kpi-favor .buscar-kpi-value { color: #2e7d32; }
+.buscar-cliente-selected-name { font-weight: 700; font-size: 0.95em; color: #333; margin-bottom: 10px; padding: 8px 12px; background: #f0f4ff; border-radius: 6px; border-left: 3px solid #667eea; }
 
 /* Cobro toggle (simple / múltiple) */
 .cobro-toggle-wrap {
@@ -933,6 +940,28 @@ main#app { overflow: hidden; }
           placeholder="Buscar por N° de lote o UF..." autocomplete="off" style="width:100%;box-sizing:border-box;">
         <div id="buscar-lote-results" class="buscar-results-list"></div>
       </div>
+      <!-- Preview: visible solo cuando hay cliente seleccionado -->
+      <div id="buscar-cliente-preview" style="display:none;">
+        <div id="buscar-selected-name" class="buscar-cliente-selected-name"></div>
+        <div class="buscar-kpi-row">
+          <div class="buscar-kpi-card" id="buscar-kpi-saldo">
+            <div class="buscar-kpi-label">Cuenta corriente</div>
+            <div class="buscar-kpi-value" id="buscar-kpi-saldo-val">—</div>
+          </div>
+          <div class="buscar-kpi-card" id="buscar-kpi-productos">
+            <div class="buscar-kpi-label">Más compra</div>
+            <div class="buscar-kpi-value" id="buscar-kpi-productos-val">—</div>
+          </div>
+          <div class="buscar-kpi-card" id="buscar-kpi-comentarios">
+            <div class="buscar-kpi-label">Comentarios</div>
+            <div class="buscar-kpi-value" id="buscar-kpi-comentarios-val" style="color:#aaa;font-style:italic;">Sin comentarios</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pmodal-footer">
+      <button class="mbtn mbtn-secondary" id="btn-buscar-cancelar">Cancelar · ESC</button>
+      <button class="mbtn mbtn-primary" id="btn-buscar-confirmar" disabled>Confirmar · F2</button>
     </div>
   </div>
 </div>
