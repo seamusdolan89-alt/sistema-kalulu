@@ -289,6 +289,44 @@ main#app { overflow: hidden; }
 .btn-cliente-rapido { margin-top: 8px; font-size: 0.82em; color: #667eea; background: none; border: 1px dashed #c5cdf9; border-radius: 6px; padding: 5px 10px; cursor: pointer; width: 100%; }
 .btn-cliente-rapido:hover { background: #f5f7ff; }
 
+/* Cobro toggle (simple / múltiple) */
+.cobro-toggle-wrap {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; background: var(--color-surface, #f8f9fa);
+  border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 10px;
+}
+.cobro-toggle-opt { font-size: 12px; font-weight: 500; color: #aaa; transition: color 0.15s; white-space: nowrap; }
+.cobro-toggle-active { color: #333; font-weight: 700; }
+.cobro-toggle-switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+.cobro-toggle-switch input { opacity: 0; width: 0; height: 0; }
+.cobro-toggle-track {
+  position: absolute; inset: 0; background: var(--color-primary, #667eea);
+  border-radius: 22px; cursor: pointer; transition: background 0.2s;
+}
+.cobro-toggle-switch input:checked ~ .cobro-toggle-track { background: #7c3aed; }
+.cobro-toggle-track::before {
+  content: ''; position: absolute; left: 3px; top: 3px;
+  width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: transform 0.2s;
+}
+.cobro-toggle-switch input:checked ~ .cobro-toggle-track::before { transform: translateX(18px); }
+
+/* Multi-payment layout */
+.mpay-total-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 12px; background: #eeeeee; border-radius: 8px;
+  font-weight: 700; margin-bottom: 6px;
+}
+.mpay-total-val { font-size: 1.1em; color: #333; }
+.mpay-row {
+  display: flex; align-items: center; gap: 8px; padding: 4px 0;
+}
+.mpay-icon { width: 110px; font-size: 0.82em; font-weight: 600; color: #555; flex-shrink: 0; }
+.mpay-field {
+  flex: 1; padding: 8px 10px; border: 1px solid #e0e0e0; border-radius: 6px;
+  font-size: 0.95em; text-align: right; background: white;
+}
+.mpay-field:focus { border-color: #667eea; outline: none; }
+
 /* Payment chips */
 .payment-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .pchip {
@@ -677,6 +715,14 @@ main#app { overflow: hidden; }
           <!-- PAYMENT -->
           <div>
             <div class="sale-sec-title">Medio de pago</div>
+            <div class="cobro-toggle-wrap" id="cobro-toggle-wrap">
+              <span class="cobro-toggle-opt cobro-toggle-active" id="cobro-lbl-simple">Cobro simple</span>
+              <label class="cobro-toggle-switch">
+                <input type="checkbox" id="cobro-multiple-toggle">
+                <span class="cobro-toggle-track"></span>
+              </label>
+              <span class="cobro-toggle-opt" id="cobro-lbl-multiple">Cobro múltiple</span>
+            </div>
             <div class="payment-chips" id="payment-chips"></div>
             <div class="payment-inputs" id="payment-inputs"></div>
             <div id="debt-toggle-row" style="display:none; margin-top:8px; font-size:0.85em;">

@@ -534,6 +534,7 @@ export const POS = (() => {
       activeMedios: new Set(['efectivo']),
       pagosAmounts: { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0, cuenta_corriente: 0 },
       recibeEfectivo: null,
+      cobroMultiple: false,
       descuentoGlobal: 0,
       descItemIdx: null,
       descTipo: 'monto',
@@ -595,7 +596,13 @@ export const POS = (() => {
     const getCartSubtotal = () => state.cart.reduce((s, i) => s + i.cantidad * i.precioUnitario, 0);
     const getCartDescuento = () => state.cart.reduce((s, i) => s + (i.descuentoItem || 0), 0) + state.descuentoGlobal + state.descuentoTotal + (state.promoDescuentos || 0);
     const getCartTotal = () => Math.max(0, getCartSubtotal() - getCartDescuento());
-    const getTotalAsignado = () => [...state.activeMedios].reduce((s, m) => s + (state.pagosAmounts[m] || 0), 0);
+    const getTotalAsignado = () => {
+      if (state.cobroMultiple) {
+        return ['efectivo','mercadopago','tarjeta','transferencia']
+          .reduce((s, m) => s + (state.pagosAmounts[m] || 0), 0);
+      }
+      return [...state.activeMedios].reduce((s, m) => s + (state.pagosAmounts[m] || 0), 0);
+    };
 
     const getEffectiveTotal = () => {
       const base = getCartTotal();
@@ -907,10 +914,20 @@ export const POS = (() => {
       updateConfirmBtn();
     };
 
+    const updateCobroToggleLabels = () => {
+      const simple   = ge('cobro-lbl-simple');
+      const multiple = ge('cobro-lbl-multiple');
+      if (!simple || !multiple) return;
+      simple.classList.toggle('cobro-toggle-active', !state.cobroMultiple);
+      multiple.classList.toggle('cobro-toggle-active', state.cobroMultiple);
+    };
+
     // ── PAYMENT CHIPS ──────────────────────────────────────────────
     const renderPaymentChips = () => {
       const container = ge('payment-chips');
       if (!container) return;
+      if (state.cobroMultiple) { container.style.display = 'none'; return; }
+      container.style.display = '';
       container.innerHTML = MEDIOS.map(m => `
         <div class="pchip ${state.activeMedios.has(m.id) ? 'active' : ''} pc-${m.id}" data-medio="${m.id}">
           ${m.icon} ${m.nombre}
@@ -930,8 +947,10 @@ export const POS = (() => {
 
     // Auto-fill active payment method with effective total
     const autoFillPayment = () => {
-      const mid = [...state.activeMedios][0];
-      if (mid) state.pagosAmounts[mid] = getEffectiveTotal();
+      if (!state.cobroMultiple) {
+        const mid = [...state.activeMedios][0];
+        if (mid) state.pagosAmounts[mid] = getEffectiveTotal();
+      }
       renderFavorSection();
       renderPaymentInputs();
     };
@@ -1032,9 +1051,65 @@ export const POS = (() => {
       updateConfirmBtn();
     };
 
+    const renderMultiPaymentInputs = () => {
+      const container = ge('payment-inputs');
+      if (!container) return;
+      const effTotal = getEffectiveTotal();
+      const MPAY = [
+        { id: 'efectivo',      icon: '💵', nombre: 'Efectivo' },
+        { id: 'mercadopago',   icon: '📱', nombre: 'Mercado Pago' },
+        { id: 'tarjeta',       icon: '💳', nombre: 'Tarjeta' },
+        { id: 'transferencia', icon: '🏦', nombre: 'Transferencia' },
+      ];
+      let html = `<div class="mpay-total-row">
+        <span>Total a cobrar</span>
+        <span class="mpay-total-val">${formatCurrency(effTotal)}</span>
+      </div>`;
+      for (const m of MPAY) {
+        const val = state.pagosAmounts[m.id] || 0;
+        html += `<div class="mpay-row">
+          <span class="mpay-icon">${m.icon} ${m.nombre}</span>
+          <input type="number" class="mpay-field" data-medio="${m.id}"
+            value="${val > 0 ? val.toFixed(2) : ''}"
+            min="0" step="0.01" placeholder="0.00" autocomplete="off">
+        </div>`;
+      }
+      html += `<div id="mpay-status"></div>`;
+      container.innerHTML = html;
+
+      const updateMpayStatus = () => {
+        const asig  = MPAY.reduce((s, m) => s + (state.pagosAmounts[m.id] || 0), 0);
+        const falta = Math.max(0, effTotal - asig);
+        const el = ge('mpay-status');
+        if (!el) return;
+        if (asig < 0.01) { el.className = ''; el.innerHTML = ''; return; }
+        if (falta > 0.01) {
+          el.className = 'pinput-vuelto falta';
+          el.innerHTML = `Falta: ${formatCurrency(falta)}`;
+        } else {
+          const sobrante = asig - effTotal;
+          el.className = 'pinput-vuelto ok';
+          el.innerHTML = `✓ Cubierto${sobrante > 0.01 ? ` · Vuelto: ${formatCurrency(sobrante)}` : ''}`;
+        }
+      };
+
+      container.querySelectorAll('.mpay-field').forEach(inp => {
+        inp.addEventListener('input', () => {
+          state.pagosAmounts[inp.dataset.medio] = parseFloat(inp.value) || 0;
+          updateMpayStatus();
+          updateConfirmBtn();
+        });
+      });
+
+      updateMpayStatus();
+      updateConfirmBtn();
+      renderDebtToggle();
+    };
+
     const renderPaymentInputs = () => {
       const container = ge('payment-inputs');
       if (!container) return;
+      if (state.cobroMultiple) { renderMultiPaymentInputs(); return; }
 
       const effTotal = getEffectiveTotal();
       const isFavorCovered = state.ccAplicarFavor && state.clienteSaldo < -0.01 && effTotal < 0.01;
@@ -1115,6 +1190,12 @@ export const POS = (() => {
       }
 
       if (favorSinCliente || deudaSinCliente) ge('client-search-input')?.focus();
+
+      if (state.cobroMultiple) {
+        const mpayOk = asig >= tot - 0.01 || (state.ccRegistrarDeuda && !!state.clienteId);
+        btn.disabled = !(state.sesionActiva && state.cart.length > 0 && mpayOk && !deudaSinCliente);
+        return;
+      }
 
       // For efectivo: pagosAmounts.efectivo is always pre-filled to effTotal by autoFillPayment(),
       // so asig >= tot is always true even when cashier typed less in "Recibe $".
@@ -1375,6 +1456,7 @@ export const POS = (() => {
       state.pagosAmounts = { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0, cuenta_corriente: 0 };
       state.activeMedios = new Set(['efectivo']);
       state.recibeEfectivo = null;
+      state.cobroMultiple = false;
       state.ccCobrarDeuda = false;
       state.ccAplicarFavor = false;
       clearCliente();
@@ -1397,6 +1479,7 @@ export const POS = (() => {
       state.pagosAmounts = { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0, cuenta_corriente: 0 };
       state.activeMedios = new Set(['efectivo']);
       state.recibeEfectivo = null;
+      state.cobroMultiple = false;
       state.ccCobrarDeuda = false;
       state.ccAplicarFavor = false;
       clearCliente();
@@ -1438,6 +1521,21 @@ export const POS = (() => {
       if (dash) dash.style.display = 'none';
       if (sale) sale.classList.remove('hidden');
       renderPaymentChips();
+      updateCobroToggleLabels();
+      const toggleEl = ge('cobro-multiple-toggle');
+      if (toggleEl) {
+        const fresh = toggleEl.cloneNode(true);
+        toggleEl.parentNode.replaceChild(fresh, toggleEl);
+        fresh.checked = state.cobroMultiple;
+        fresh.addEventListener('change', () => {
+          state.cobroMultiple = fresh.checked;
+          Object.keys(state.pagosAmounts).forEach(k => { state.pagosAmounts[k] = 0; });
+          state.recibeEfectivo = null;
+          updateCobroToggleLabels();
+          renderPaymentChips();
+          autoFillPayment();
+        });
+      }
       renderCart();
       renderSaleTotals();
       autoFillPayment();
@@ -2608,51 +2706,58 @@ export const POS = (() => {
       }
       const asig = getTotalAsignado();
       const effTotal = getEffectiveTotal();
-      // Final safety: catch efectivo shortfall regardless of how confirm was triggered (click, F10, etc.)
-      const recibeShortFinal = state.activeMedios.has('efectivo') &&
-        state.recibeEfectivo > 0 && state.recibeEfectivo < effTotal - 0.01;
-      const recibeZeroFinal = state.activeMedios.has('efectivo') &&
-        (state.recibeEfectivo === 0 || state.recibeEfectivo === null) && effTotal > 0.01;
-      if ((asig < effTotal - 0.01 || recibeShortFinal || recibeZeroFinal) && !state.ccRegistrarDeuda) {
-        alert('Pago insuficiente. El monto recibido no cubre el total.');
-        return;
-      }
-      if (Math.abs(asig - effTotal) > 0.01 && !state.ccRegistrarDeuda) { alert('El monto asignado no coincide con el total'); return; }
 
-      // Calculate saldo a favor to apply
-      const saldoFavorApplied = (state.ccAplicarFavor && state.clienteSaldo < -0.01)
-        ? Math.min(Math.abs(state.clienteSaldo), getCartTotal())
-        : 0;
+      let pagos;
+      if (state.cobroMultiple) {
+        if (asig < effTotal - 0.01 && !state.ccRegistrarDeuda) {
+          alert('Pago insuficiente. La suma de los medios no cubre el total.');
+          return;
+        }
+        pagos = ['efectivo','mercadopago','tarjeta','transferencia']
+          .filter(m => (state.pagosAmounts[m] || 0) > 0.001)
+          .map(m => ({ medio: m, monto: state.pagosAmounts[m], referencia: null }));
+        if (state.ccRegistrarDeuda) {
+          const collected = pagos.reduce((s, p) => s + p.monto, 0);
+          const debtAmount = Math.max(0, effTotal - collected);
+          if (debtAmount > 0.001) pagos.push({ medio: 'cuenta_corriente', monto: debtAmount, referencia: null });
+        }
+      } else {
+        // Final safety: catch efectivo shortfall regardless of how confirm was triggered (click, F10, etc.)
+        const recibeShortFinal = state.activeMedios.has('efectivo') &&
+          state.recibeEfectivo > 0 && state.recibeEfectivo < effTotal - 0.01;
+        const recibeZeroFinal = state.activeMedios.has('efectivo') &&
+          (state.recibeEfectivo === 0 || state.recibeEfectivo === null) && effTotal > 0.01;
+        if ((asig < effTotal - 0.01 || recibeShortFinal || recibeZeroFinal) && !state.ccRegistrarDeuda) {
+          alert('Pago insuficiente. El monto recibido no cubre el total.');
+          return;
+        }
+        if (Math.abs(asig - effTotal) > 0.01 && !state.ccRegistrarDeuda) { alert('El monto asignado no coincide con el total'); return; }
 
-      // For efectivo + ccRegistrarDeuda: pagosAmounts.efectivo is auto-filled to the full total
-      // but the actual cash received is recibeEfectivo. Use recibeEfectivo as the real cash amount.
-      const pagos = [...state.activeMedios]
-        .filter(m => {
-          if (m === 'efectivo' && state.ccRegistrarDeuda && state.recibeEfectivo !== null) {
-            return state.recibeEfectivo > 0.001;
-          }
-          return (state.pagosAmounts[m] || 0) > 0.001;
-        })
-        .map(m => {
-          if (m === 'efectivo' && state.ccRegistrarDeuda && state.recibeEfectivo !== null) {
-            return { medio: 'efectivo', monto: Math.min(state.recibeEfectivo, effTotal), referencia: null };
-          }
-          return { medio: m, monto: state.pagosAmounts[m], referencia: null };
-        });
+        const saldoFavorApplied = (state.ccAplicarFavor && state.clienteSaldo < -0.01)
+          ? Math.min(Math.abs(state.clienteSaldo), getCartTotal())
+          : 0;
 
-      // Add saldo_favor as its own payment entry (not efectivo)
-      if (saldoFavorApplied > 0.001) {
-        pagos.push({ medio: 'saldo_favor', monto: saldoFavorApplied, referencia: null });
-      }
+        pagos = [...state.activeMedios]
+          .filter(m => {
+            if (m === 'efectivo' && state.ccRegistrarDeuda && state.recibeEfectivo !== null) {
+              return state.recibeEfectivo > 0.001;
+            }
+            return (state.pagosAmounts[m] || 0) > 0.001;
+          })
+          .map(m => {
+            if (m === 'efectivo' && state.ccRegistrarDeuda && state.recibeEfectivo !== null) {
+              return { medio: 'efectivo', monto: Math.min(state.recibeEfectivo, effTotal), referencia: null };
+            }
+            return { medio: m, monto: state.pagosAmounts[m], referencia: null };
+          });
 
-      // Debt via ccRegistrarDeuda: the difference between effTotal and what was actually collected.
-      // Flows through registrarVenta so it updates venta_pagos, sesiones_caja.total_cuenta_corriente,
-      // and cuenta_corriente (client balance) all in one consistent path.
-      if (state.ccRegistrarDeuda) {
-        const collected = pagos.filter(p => p.medio !== 'saldo_favor').reduce((s, p) => s + p.monto, 0);
-        const debtAmount = Math.max(0, effTotal - collected);
-        if (debtAmount > 0.001) {
-          pagos.push({ medio: 'cuenta_corriente', monto: debtAmount, referencia: null });
+        if (saldoFavorApplied > 0.001) {
+          pagos.push({ medio: 'saldo_favor', monto: saldoFavorApplied, referencia: null });
+        }
+        if (state.ccRegistrarDeuda) {
+          const collected = pagos.filter(p => p.medio !== 'saldo_favor').reduce((s, p) => s + p.monto, 0);
+          const debtAmount = Math.max(0, effTotal - collected);
+          if (debtAmount > 0.001) pagos.push({ medio: 'cuenta_corriente', monto: debtAmount, referencia: null });
         }
       }
 
