@@ -286,8 +286,14 @@ main#app { overflow: hidden; }
 .client-clear:hover { color: #f44336; }
 .deuda-row { background: #fff3e0; border-radius: 6px; padding: 8px 12px; font-size: 0.85em; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 .deuda-row label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
-.btn-cliente-rapido { margin-top: 8px; font-size: 0.82em; color: #667eea; background: none; border: 1px dashed #c5cdf9; border-radius: 6px; padding: 5px 10px; cursor: pointer; width: 100%; }
-.btn-cliente-rapido:hover { background: #f5f7ff; }
+.client-action-row { display: flex; gap: 6px; margin-top: 8px; }
+.btn-cliente-accion { flex: 1; font-size: 0.82em; color: #667eea; background: none; border: 1px dashed #c5cdf9; border-radius: 6px; padding: 5px 8px; cursor: pointer; text-align: center; }
+.btn-cliente-accion:hover { background: #f5f7ff; }
+.buscar-results-list { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; margin-top: 8px; }
+.buscar-result-item { padding: 10px 12px; border: 1px solid #e0e0e0; border-radius: 6px; cursor: pointer; transition: background 0.15s; }
+.buscar-result-item:hover { background: #f0f4ff; border-color: #667eea; }
+.buscar-result-name { font-weight: 700; font-size: 0.92em; color: #333; }
+.buscar-result-meta { font-size: 0.78em; color: #888; margin-top: 2px; display: flex; align-items: center; gap: 6px; }
 
 /* Cobro toggle (simple / múltiple) */
 .cobro-toggle-wrap {
@@ -709,7 +715,10 @@ main#app { overflow: hidden; }
               <span>💳 Tiene deuda: <strong id="client-deuda-amount"></strong></span>
               <label><input type="checkbox" id="chk-aplicar-deuda" checked> Aplicar en esta venta</label>
             </div>
-            <button class="btn-cliente-rapido" id="btn-cliente-rapido">+ Cliente rápido</button>
+            <div class="client-action-row">
+              <button class="btn-cliente-accion" id="btn-buscar-cliente">🔍 Buscar cliente</button>
+              <button class="btn-cliente-accion" id="btn-cliente-rapido">+ Cliente rápido</button>
+            </div>
           </div>
 
           <!-- PAYMENT -->
@@ -905,6 +914,20 @@ main#app { overflow: hidden; }
 </div>
 
 <!-- Cliente Rápido -->
+<div id="modal-buscar-cliente" class="pbackdrop hidden">
+  <div class="pmodal" style="max-width:480px">
+    <div class="pmodal-hdr">
+      <span class="pmodal-title">🔍 Buscar cliente</span>
+      <button class="pmodal-close" id="btn-buscar-cliente-close">✕</button>
+    </div>
+    <div class="pmodal-body">
+      <input type="text" id="buscar-cliente-query" class="fi"
+        placeholder="Nombre, apellido o N° de lote..." autocomplete="off" style="width:100%;box-sizing:border-box;">
+      <div id="buscar-cliente-results" class="buscar-results-list"></div>
+    </div>
+  </div>
+</div>
+
 <div id="modal-cliente-rapido" class="pbackdrop hidden">
   <div class="pmodal narrow">
     <div class="pmodal-hdr">
