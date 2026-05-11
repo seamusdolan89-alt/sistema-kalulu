@@ -257,9 +257,12 @@
       // Inicializar auth (solo restaura sesión si ya existía)
       await window.SGA_Auth.initialize();
 
+      // URL de retorno (admin-pos pasa ?returnTo=../admin-pos/)
+      const returnTo = new URLSearchParams(location.search).get('returnTo') || '../index.html#pos';
+
       // Si ya hay sesión activa, redirigir directamente
       if (window.SGA_Auth.isAuthenticated()) {
-        window.location.href = '../index.html#pos';
+        window.location.href = returnTo;
         return;
       }
 
@@ -284,7 +287,7 @@
           errorAlert.classList.remove('show');
 
           await window.SGA_Auth.login(username, password);
-          window.location.href = '../index.html#pos';
+          window.location.href = returnTo;
         } catch (error) {
           errorAlert.textContent = error.message || 'Error al iniciar sesión';
           errorAlert.classList.add('show');
@@ -330,7 +333,7 @@
           await import('../js/seed.js').then(m => m.default());
           // En dev mode, login automático
           await window.SGA_Auth.login('admin', 'admin123');
-          window.location.href = '../index.html#pos';
+          window.location.href = returnTo;
         } catch (error) {
           alert('Error: ' + error.message);
           seedBtn.disabled = false;

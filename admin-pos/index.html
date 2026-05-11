@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Sistema Kalulu - Panel de Administración">
+  <meta name="theme-color" content="#0066cc">
+  <title>Sistema Kalulu - Administración</title>
+
+  <!-- CSS (mismos que el POS, un nivel arriba) -->
+  <link rel="stylesheet" href="../css/reset.css">
+  <link rel="stylesheet" href="../css/variables.css">
+  <link rel="stylesheet" href="../css/layout.css">
+  <link rel="stylesheet" href="../css/components.css">
+
+  <style>
+    /* ── Overlay de sincronización inicial ── */
+    #initial-sync-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      z-index: 9999;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      color: #fff;
+    }
+    #initial-sync-overlay h2 { font-size: 1.2rem; margin: 0; }
+    #initial-sync-progress {
+      font-size: 0.9rem;
+      color: #aaa;
+      max-width: 320px;
+      text-align: center;
+    }
+    .sync-spinner {
+      width: 40px; height: 40px;
+      border: 4px solid #444;
+      border-top-color: #0066cc;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+  <!-- Overlay de carga inicial desde Firestore -->
+  <div id="initial-sync-overlay">
+    <div class="sync-spinner"></div>
+    <h2>Descargando datos...</h2>
+    <p id="initial-sync-progress">Conectando a Firebase...</p>
+  </div>
+
+  <!-- Header (idéntico al POS) -->
+  <header>
+    <h1>🏪 Kalulu Admin</h1>
+    <div class="header-user">
+      <span id="user-name">Usuario</span>
+      <span id="sync-badge" title="Firebase Sync" style="font-size:12px;cursor:default;user-select:none;">⚫</span>
+      <div class="backup-menu" id="backup-menu">
+        <button class="btn btn-outline btn-sm" id="backup-btn" title="Backup de base de datos">💾</button>
+        <div class="backup-dropdown" id="backup-dropdown">
+          <button id="backup-export-btn">Exportar backup</button>
+          <label id="backup-import-label">
+            Restaurar backup
+            <input type="file" id="backup-import-input" accept=".sqlite" style="display:none">
+          </label>
+        </div>
+      </div>
+      <button id="logout-btn" class="btn btn-outline btn-sm">Salir</button>
+    </div>
+  </header>
+
+  <!-- Sidebar (llenado por app.js, igual que en el POS) -->
+  <aside class="sidebar">
+    <nav>
+      <ul>
+        <!-- Navegación generada por app.js con NAV_BY_ROLE[admin_pos] -->
+      </ul>
+    </nav>
+  </aside>
+
+  <!-- Contenido principal -->
+  <main id="app">
+    <div class="alert alert-info">
+      <strong>Cargando...</strong> Inicializando panel de administración...
+    </div>
+  </main>
+
+  <!-- Firebase SDK (9 compat) -->
+  <script src="../js/firebase-config.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-storage-compat.js"></script>
+
+  <!-- Tesseract.js para OCR (facturas de compra) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js"></script>
+
+  <!-- SheetJS para exportar a Excel -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <!-- html2canvas -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
+  <!-- Módulos del sistema (mismo código que el POS) -->
+  <script src="../js/utils.js?v=3"></script>
+  <script src="../js/db.js?v=3"></script>
+  <script src="../js/auth.js?v=3"></script>
+  <script src="../js/sync.js?v=3"></script>
+  <script src="../js/print.js"></script>
+
+  <script type="module">
+    // Flags que app.js lee para saber que está en modo administrador
+    window.ADMIN_MODE = true;
+    window.VIEWS_BASE_PATH = '../views/';
+
+    const v = Date.now();
+    await import(`../js/app.js?v=${v}`);
+  </script>
+
+</body>
+</html>

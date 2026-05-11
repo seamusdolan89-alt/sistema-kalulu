@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="theme-color" content="#1a1a2e">
+  <title>Kalulu Admin</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+  <!-- ── LOGIN ── -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-card">
+      <div class="login-logo">🏪</div>
+      <h1 class="login-title">Kalulu Admin</h1>
+      <p class="login-subtitle">Panel de administración</p>
+      <form id="login-form" autocomplete="on">
+        <div class="field">
+          <label>Email</label>
+          <input type="email" id="login-email" placeholder="admin@kalulu.com" required autocomplete="username">
+        </div>
+        <div class="field">
+          <label>Contraseña</label>
+          <input type="password" id="login-password" placeholder="••••••••" required autocomplete="current-password">
+        </div>
+        <div id="login-error" class="login-error" style="display:none"></div>
+        <button type="submit" id="login-btn" class="btn-primary">Ingresar</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── APP SHELL ── -->
+  <div id="app-shell" class="app-shell" style="display:none">
+
+    <header class="app-header">
+      <div class="header-left">
+        <span class="header-logo">🏪</span>
+        <span class="header-title">Kalulu Admin</span>
+      </div>
+      <div class="header-right">
+        <span id="sync-dot" class="sync-dot" title="Conectado a Firestore">🟢</span>
+        <button id="logout-btn" class="btn-icon" title="Cerrar sesión">⏻</button>
+      </div>
+    </header>
+
+    <main id="main-content" class="main-content">
+      <div class="loading-spinner">Cargando...</div>
+    </main>
+
+    <nav class="bottom-nav">
+      <button class="nav-tab active" data-tab="dashboard">
+        <span class="nav-icon">📊</span>
+        <span class="nav-label">Dashboard</span>
+      </button>
+      <button class="nav-tab" data-tab="ventas">
+        <span class="nav-icon">🧾</span>
+        <span class="nav-label">Ventas</span>
+      </button>
+      <button class="nav-tab" data-tab="caja">
+        <span class="nav-icon">💰</span>
+        <span class="nav-label">Caja</span>
+      </button>
+      <button class="nav-tab" data-tab="stock">
+        <span class="nav-icon">📦</span>
+        <span class="nav-label">Stock</span>
+      </button>
+      <button class="nav-tab" data-tab="informes">
+        <span class="nav-icon">📋</span>
+        <span class="nav-label">Informes</span>
+      </button>
+    </nav>
+
+  </div>
+
+  <!-- ── TEMPLATES ── -->
+
+  <template id="tpl-dashboard">
+    <div class="page">
+      <div class="page-header">
+        <h2 class="page-title">Dashboard</h2>
+        <span id="dash-fecha" class="page-subtitle"></span>
+      </div>
+      <div class="kpi-grid">
+        <div class="kpi-card accent-green">
+          <div class="kpi-label">Ventas hoy</div>
+          <div class="kpi-value" id="kpi-ventas-total">—</div>
+          <div class="kpi-sub" id="kpi-ventas-count">— transacciones</div>
+        </div>
+        <div class="kpi-card accent-blue">
+          <div class="kpi-label">Caja efectivo</div>
+          <div class="kpi-value" id="kpi-caja-efectivo">—</div>
+          <div class="kpi-sub" id="kpi-caja-estado">—</div>
+        </div>
+        <div class="kpi-card accent-purple">
+          <div class="kpi-label">Ticket promedio</div>
+          <div class="kpi-value" id="kpi-ticket-prom">—</div>
+          <div class="kpi-sub">por venta</div>
+        </div>
+        <div class="kpi-card accent-orange">
+          <div class="kpi-label">Alertas stock</div>
+          <div class="kpi-value" id="kpi-stock-alertas">—</div>
+          <div class="kpi-sub">productos bajos</div>
+        </div>
+      </div>
+      <h3 class="section-title">Últimas ventas</h3>
+      <div id="dash-ventas-recientes" class="list-cards">
+        <div class="empty-state">Cargando...</div>
+      </div>
+    </div>
+  </template>
+
+  <template id="tpl-ventas">
+    <div class="page">
+      <div class="page-header">
+        <h2 class="page-title">Ventas</h2>
+        <div class="filter-row">
+          <button class="chip active" data-periodo="hoy">Hoy</button>
+          <button class="chip" data-periodo="semana">7 días</button>
+          <button class="chip" data-periodo="mes">30 días</button>
+        </div>
+      </div>
+      <div id="ventas-resumen" class="resumen-row"></div>
+      <div id="ventas-list" class="list-cards">
+        <div class="empty-state">Cargando...</div>
+      </div>
+    </div>
+  </template>
+
+  <template id="tpl-caja">
+    <div class="page">
+      <div class="page-header">
+        <h2 class="page-title">Caja</h2>
+        <span id="caja-estado-badge" class="badge badge-green">—</span>
+      </div>
+      <div class="medios-grid" id="caja-medios-grid">
+        <div class="empty-state">Cargando...</div>
+      </div>
+      <h3 class="section-title">Egresos de hoy</h3>
+      <div id="caja-egresos-list" class="list-cards">
+        <div class="empty-state">Sin egresos</div>
+      </div>
+    </div>
+  </template>
+
+  <template id="tpl-stock">
+    <div class="page">
+      <div class="page-header">
+        <h2 class="page-title">Stock</h2>
+        <span class="page-subtitle">Solo productos con alerta</span>
+      </div>
+      <div id="stock-list" class="list-cards">
+        <div class="empty-state">Cargando...</div>
+      </div>
+    </div>
+  </template>
+
+  <!-- ── TEMPLATE: INFORMES ── -->
+  <template id="tpl-informes">
+    <div class="page inf-page">
+      <div class="page-header">
+        <h2 class="page-title">Informes</h2>
+      </div>
+
+      <div class="inf-toolbar">
+        <div class="inf-row">
+          <select id="inf-reporte" class="inf-select">
+            <option value="resumen_diario">Resumen Diario de Caja</option>
+            <option value="ventas_producto">Ventas por Producto</option>
+            <option value="ventas_transaccion">Ventas por Transacción</option>
+            <option value="ventas_vendedor">Ventas por Vendedor</option>
+            <option value="gastos">Gastos del Período</option>
+            <option value="aging_cc">Aging Cuenta Corriente</option>
+            <option value="stock_actual">Stock Actual</option>
+          </select>
+        </div>
+        <div class="inf-row inf-dates-row">
+          <div class="inf-date-group">
+            <label>Desde</label>
+            <input type="date" id="inf-desde" class="inf-date-input">
+          </div>
+          <div class="inf-date-group">
+            <label>Hasta</label>
+            <input type="date" id="inf-hasta" class="inf-date-input">
+          </div>
+        </div>
+        <div class="inf-row inf-quick-row">
+          <button class="chip" data-period="hoy">Hoy</button>
+          <button class="chip" data-period="semana">Esta semana</button>
+          <button class="chip active" data-period="mes">Este mes</button>
+          <button class="chip" data-period="mes_ant">Mes ant.</button>
+          <button class="chip" data-period="anio">Este año</button>
+        </div>
+        <div class="inf-row">
+          <button id="inf-generar" class="btn-primary inf-generar-btn">Generar reporte</button>
+        </div>
+      </div>
+
+      <div id="inf-results" class="inf-results"></div>
+    </div>
+  </template>
+
+  <!-- Firebase SDK -->
+  <script src="../js/firebase-config.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+  <!-- SheetJS para exportar a Excel -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="./app.js"></script>
+
+</body>
+</html>

@@ -69,7 +69,8 @@
 
       // Try to use OPFS
       const root = await navigator.storage.getDirectory();
-      fileHandle = await root.getFileHandle('sga.db', { create: true });
+      const dbFileName = window.ADMIN_MODE ? 'sga-admin.db' : 'sga.db';
+      fileHandle = await root.getFileHandle(dbFileName, { create: true });
       db.usingOPFS = true;
       console.log('✅ OPFS storage initialized');
     } catch (error) {

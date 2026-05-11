@@ -2916,6 +2916,7 @@ export const POS = (() => {
       const effTotal = getEffectiveTotal();
 
       let pagos;
+      let saldoFavorApplied = 0;
       if (state.cobroMultiple) {
         if (asig < effTotal - 0.01 && !state.ccRegistrarDeuda) {
           alert('Pago insuficiente. La suma de los medios no cubre el total.');
@@ -2941,7 +2942,7 @@ export const POS = (() => {
         }
         if (Math.abs(asig - effTotal) > 0.01 && !state.ccRegistrarDeuda) { alert('El monto asignado no coincide con el total'); return; }
 
-        const saldoFavorApplied = (state.ccAplicarFavor && state.clienteSaldo < -0.01)
+        saldoFavorApplied = (state.ccAplicarFavor && state.clienteSaldo < -0.01)
           ? Math.min(Math.abs(state.clienteSaldo), getCartTotal())
           : 0;
 
