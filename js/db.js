@@ -954,6 +954,12 @@
           comprobante TEXT,
           proveedor_id TEXT REFERENCES proveedores(id),
           observaciones TEXT,
+          periodo TEXT,
+          subcategoria TEXT,
+          subtotal_neto REAL,
+          iva_alicuota TEXT,
+          iva_monto REAL,
+          iibb_monto REAL,
           sync_status TEXT DEFAULT 'pending',
           updated_at TEXT
         )
