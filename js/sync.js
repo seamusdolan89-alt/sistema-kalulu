@@ -538,11 +538,16 @@
   function applyProveedorFull(data) {
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO proveedores
-        (id, razon_social, cuit, telefono, email, contacto_nombre, condicion_pago, activo, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,'synced',?)`,
+        (id, razon_social, cuit, telefono, email, contacto_nombre, condicion_pago,
+         tipo_proveedor, alias, condicion_iva, agente_retencion_iva, agente_retencion_iibb,
+         condicion_compra, order_day, activo, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.razon_social || '?', data.cuit || null, data.telefono || null,
        data.email || null, data.contacto_nombre || null, data.condicion_pago || null,
-       data.activo !== false ? 1 : 0, data.updated_at || null]
+       data.tipo_proveedor || 'mercaderia', data.alias || null,
+       data.condicion_iva || null, data.agente_retencion_iva ? 1 : 0,
+       data.agente_retencion_iibb ? 1 : 0, data.condicion_compra || null,
+       data.order_day ?? null, data.activo !== false ? 1 : 0, data.updated_at || null]
     );
   }
 
