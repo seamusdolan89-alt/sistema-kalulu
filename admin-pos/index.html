@@ -65,6 +65,7 @@
     <div class="header-user">
       <span id="user-name">Usuario</span>
       <span id="sync-badge" title="Firebase Sync" style="font-size:12px;cursor:default;user-select:none;">⚫</span>
+      <button id="push-pos-btn" class="btn btn-sm" title="Enviar cambios pendientes al POS" style="background:#2d7a4f;border:1px solid #4ade80;color:#fff;font-weight:600;min-width:90px;">⬆ Push POS</button>
       <div class="backup-menu" id="backup-menu">
         <button class="btn btn-outline btn-sm" id="backup-btn" title="Backup de base de datos">💾</button>
         <div class="backup-dropdown" id="backup-dropdown">
@@ -130,6 +131,30 @@
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js').catch(() => {});
     }
+  </script>
+  <script>
+    (function() {
+      const btn = document.getElementById('push-pos-btn');
+      if (!btn) return;
+
+      btn.addEventListener('click', async () => {
+        if (!window.SGA_Sync?.isInitialized()) {
+          btn.textContent = '❌ Sin conexión';
+          setTimeout(() => { btn.textContent = '⬆ Push POS'; }, 3000);
+          return;
+        }
+        btn.disabled = true;
+        btn.textContent = '⏳ Enviando...';
+        try {
+          const count = await window.SGA_Sync.pushToPos();
+          btn.textContent = count > 0 ? `✓ ${count} enviado${count !== 1 ? 's' : ''}` : '✓ Sin pendientes';
+        } catch (err) {
+          console.error('Push POS error:', err.message);
+          btn.textContent = '❌ Error';
+        }
+        setTimeout(() => { btn.textContent = '⬆ Push POS'; btn.disabled = false; }, 3000);
+      });
+    })();
   </script>
 
 </body>

@@ -87,21 +87,7 @@
     if (!initialized || !firestoreDb) return;
 
     if (window.ADMIN_MODE) {
-      // Admin-pos: subir cambios del admin a Firestore (POS los bajará via _pulled:false)
-      const ADMIN_PUSH_TABLES = ['productos', 'proveedores', 'clientes', 'compras',
-                                  'ordenes_compra', 'pagos_proveedores', 'gastos',
-                                  'promociones', 'stock', 'cuenta_corriente'];
-      const adminSources = SYNC_SOURCES.filter(s => ADMIN_PUSH_TABLES.includes(s.table));
-      let adminPushed = 0;
-      for (const source of adminSources) {
-        try { adminPushed += await syncAdminSource(source); }
-        catch (err) { console.warn(`Admin push error (${source.table}):`, err.message); }
-      }
-      if (adminPushed > 0) console.log(`⬆️  Admin push: ${adminPushed} registros enviados a Firestore`);
-
-      // Bajar todos los datos recientes de Firestore via _synced_at
-      // NO usar pullFromFirestore() acá — admin-pos marcaría _pulled:true
-      // antes de que el POS pueda verlos
+      // Admin-pos: solo monitoreo automático. El push al POS es manual (botón Push POS).
       await syncMonitoringData();
     } else {
       // POS: primero bajar cambios del admin, luego subir los del POS
@@ -208,6 +194,25 @@
     }
 
     return rows.length;
+  }
+
+  // ─── PUSH manual desde admin-pos al POS ──────────────────────────────────────
+
+  const ADMIN_PUSH_TABLES = ['productos', 'proveedores', 'clientes', 'compras',
+                              'ordenes_compra', 'pagos_proveedores', 'gastos',
+                              'promociones', 'stock', 'cuenta_corriente'];
+
+  async function pushToPos() {
+    if (!initialized || !firestoreDb) throw new Error('Firebase no conectado');
+
+    const adminSources = SYNC_SOURCES.filter(s => ADMIN_PUSH_TABLES.includes(s.table));
+    let total = 0;
+    for (const source of adminSources) {
+      try { total += await syncAdminSource(source); }
+      catch (err) { console.warn(`Push error (${source.table}):`, err.message); }
+    }
+    if (total > 0) console.log(`⬆️  Push manual: ${total} registros enviados a Firestore`);
+    return total;
   }
 
   // ─── PULL ────────────────────────────────────────────────────────────────────
@@ -858,6 +863,7 @@
   window.SGA_Sync = {
     initialize,
     syncNow,
+    pushToPos,
     initialSyncFromFirestore,
     syncMonitoringData,
     getFirestore: () => firestoreDb,
