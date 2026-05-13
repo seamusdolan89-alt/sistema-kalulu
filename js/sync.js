@@ -50,7 +50,7 @@
     { collection: 'ordenes_compra',    applyFn: applyOrdenCompra },
     { collection: 'pagos_proveedores', applyFn: applyPagoProveedor },
     { collection: 'gastos',            applyFn: applyGasto },
-    { collection: 'productos',         applyFn: applyProductoUpdate },
+    { collection: 'productos',         applyFn: applyProductoFull },
     { collection: 'promociones',       applyFn: applyPromocion },
   ];
 
