@@ -86,17 +86,23 @@
   async function syncNow() {
     if (!initialized || !firestoreDb) return;
 
-    // Primero bajar cambios del admin, luego subir los del POS
-    const pulled = await pullFromFirestore();
-    let pushed = 0;
-    for (const source of SYNC_SOURCES) {
-      try { pushed += await syncSource(source); }
-      catch (err) { console.warn(`Push error en ${source.table}:`, err.message); }
+    if (window.ADMIN_MODE) {
+      // Admin-pos: bajar datos de monitoreo (ventas, sesiones, egresos) + pull de cambios
+      await syncMonitoringData();
+      await pullFromFirestore();
+    } else {
+      // POS: primero bajar cambios del admin, luego subir los del POS
+      const pulled = await pullFromFirestore();
+      let pushed = 0;
+      for (const source of SYNC_SOURCES) {
+        try { pushed += await syncSource(source); }
+        catch (err) { console.warn(`Push error en ${source.table}:`, err.message); }
+      }
+      if (pulled > 0) console.log(`⬇️  Pull: ${pulled} registros aplicados desde admin`);
+      if (pushed > 0) console.log(`⬆️  Push: ${pushed} registros enviados a Firestore`);
     }
 
     lastSyncAt = new Date();
-    if (pulled > 0) console.log(`⬇️  Pull: ${pulled} registros aplicados desde admin`);
-    if (pushed > 0) console.log(`⬆️  Push: ${pushed} registros enviados a Firestore`);
     updateSyncBadge('ok');
   }
 
@@ -534,6 +540,120 @@
     );
   }
 
+  function applySesionCajaFull(data) {
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO sesiones_caja
+        (id, sucursal_id, usuario_apertura_id, usuario_cierre_id,
+         fecha_apertura, fecha_cierre, saldo_inicial,
+         total_efectivo, total_mercadopago, total_tarjeta,
+         total_transferencia, total_cuenta_corriente,
+         total_egresos, saldo_final_esperado, saldo_final_real,
+         diferencia, detalle_billetes, estado, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+      [data.id, data.sucursal_id || null,
+       data.usuario_apertura_id || null, data.usuario_cierre_id || null,
+       data.fecha_apertura || null, data.fecha_cierre || null,
+       data.saldo_inicial || 0,
+       data.total_efectivo || 0, data.total_mercadopago || 0,
+       data.total_tarjeta || 0, data.total_transferencia || 0,
+       data.total_cuenta_corriente || 0, data.total_egresos || 0,
+       data.saldo_final_esperado || 0, data.saldo_final_real ?? null,
+       data.diferencia ?? null, data.detalle_billetes || null,
+       data.estado || 'abierta', data.updated_at || null]
+    );
+  }
+
+  function applyEgresoCajaFull(data) {
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO egresos_caja
+        (id, sesion_caja_id, monto, descripcion, fecha, usuario_id)
+      VALUES (?,?,?,?,?,?)`,
+      [data.id, data.sesion_caja_id || null,
+       data.monto || 0, data.descripcion || null,
+       data.fecha || null, data.usuario_id || null]
+    );
+  }
+
+  function applyVentaFull(data) {
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO ventas
+        (id, sucursal_id, sesion_caja_id, cliente_id, usuario_id,
+         fecha, subtotal, descuento, total, estado, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+      [data.id, data.sucursal_id || null, data.sesion_caja_id || null,
+       data.cliente_id || null, data.usuario_id || null,
+       data.fecha, data.subtotal || 0, data.descuento || 0,
+       data.total || 0, data.estado || 'completada', data.updated_at || null]
+    );
+
+    for (const item of (data.items || [])) {
+      try {
+        window.SGA_DB.run(`
+          INSERT OR REPLACE INTO venta_items
+            (id, venta_id, producto_id, cantidad, precio_unitario,
+             costo_unitario, descuento_item, subtotal, comision_pct)
+          VALUES (?,?,?,?,?,?,?,?,?)`,
+          [item.id, data.id, item.producto_id || null,
+           item.cantidad || 0, item.precio_unitario || 0,
+           item.costo_unitario || item.costo_actual || 0,
+           item.descuento_item || 0, item.subtotal || 0,
+           item.comision_pct || 0]
+        );
+      } catch (_) {}
+    }
+
+    for (const pago of (data.pagos || [])) {
+      try {
+        window.SGA_DB.run(`
+          INSERT OR REPLACE INTO venta_pagos (id, venta_id, medio, monto, referencia)
+          VALUES (?,?,?,?,?)`,
+          [pago.id, data.id, pago.medio, pago.monto || 0, pago.referencia || null]
+        );
+      } catch (_) {}
+    }
+  }
+
+  // ─── Sync incremental de datos de monitoreo (solo ADMIN_MODE) ────────────────
+
+  async function syncMonitoringData() {
+    if (!firestoreDb) return 0;
+
+    const MONITOR_SOURCES = [
+      { name: 'sesiones_caja', applyFn: applySesionCajaFull },
+      { name: 'egresos_caja',  applyFn: applyEgresoCajaFull },
+      { name: 'ventas',        applyFn: applyVentaFull },
+    ];
+
+    const lastSync = localStorage.getItem('admin_monitor_sync_at');
+    let total = 0;
+
+    for (const { name, applyFn } of MONITOR_SOURCES) {
+      try {
+        let q = firestoreDb.collection(name);
+        if (lastSync) {
+          q = q.where('_synced_at', '>', lastSync).limit(200);
+        } else {
+          // Primera vez: últimos 90 días
+          const desde = new Date();
+          desde.setDate(desde.getDate() - 90);
+          q = q.where('_synced_at', '>', desde.toISOString()).limit(500);
+        }
+
+        const snap = await q.get();
+        for (const doc of snap.docs) {
+          try { applyFn(doc.data()); total++; }
+          catch (err) { console.warn(`Monitor apply error (${name}):`, err.message); }
+        }
+      } catch (err) {
+        console.warn(`Monitor sync skip (${name}):`, err.message);
+      }
+    }
+
+    localStorage.setItem('admin_monitor_sync_at', new Date().toISOString());
+    if (total > 0) console.log(`📡 Monitor sync: ${total} registros actualizados`);
+    return total;
+  }
+
   // ─── Sincronización inicial completa (admin-pos primer arranque) ──────────────
 
   async function initialSyncFromFirestore(progressFn = () => {}) {
@@ -559,16 +679,19 @@
     }
 
     const COLLECTIONS = [
-      { name: 'categorias',        applyFn: applyCategoria,       label: 'Categorías' },
-      { name: 'proveedores',       applyFn: applyProveedorFull,   label: 'Proveedores' },
-      { name: 'productos',         applyFn: applyProductoFull,    label: 'Productos' },
-      { name: 'clientes',          applyFn: applyClienteFull,     label: 'Clientes' },
-      { name: 'stock',             applyFn: applyStockFull,       label: 'Stock' },
-      { name: 'compras',           applyFn: applyCompra,          label: 'Compras' },
-      { name: 'ordenes_compra',    applyFn: applyOrdenCompra,     label: 'Órdenes' },
-      { name: 'gastos',            applyFn: applyGasto,           label: 'Gastos' },
-      { name: 'promociones',       applyFn: applyPromocion,       label: 'Promociones' },
-      { name: 'pagos_proveedores', applyFn: applyPagoProveedor,   label: 'Pagos proveedores' },
+      { name: 'categorias',        applyFn: applyCategoria,        label: 'Categorías' },
+      { name: 'proveedores',       applyFn: applyProveedorFull,    label: 'Proveedores' },
+      { name: 'productos',         applyFn: applyProductoFull,     label: 'Productos' },
+      { name: 'clientes',          applyFn: applyClienteFull,      label: 'Clientes' },
+      { name: 'stock',             applyFn: applyStockFull,        label: 'Stock' },
+      { name: 'sesiones_caja',     applyFn: applySesionCajaFull,   label: 'Sesiones de caja' },
+      { name: 'egresos_caja',      applyFn: applyEgresoCajaFull,   label: 'Egresos' },
+      { name: 'ventas',            applyFn: applyVentaFull,        label: 'Ventas' },
+      { name: 'compras',           applyFn: applyCompra,           label: 'Compras' },
+      { name: 'ordenes_compra',    applyFn: applyOrdenCompra,      label: 'Órdenes' },
+      { name: 'gastos',            applyFn: applyGasto,            label: 'Gastos' },
+      { name: 'promociones',       applyFn: applyPromocion,        label: 'Promociones' },
+      { name: 'pagos_proveedores', applyFn: applyPagoProveedor,    label: 'Pagos proveedores' },
     ];
 
     for (const { name, applyFn, label } of COLLECTIONS) {
@@ -635,6 +758,7 @@
     initialize,
     syncNow,
     initialSyncFromFirestore,
+    syncMonitoringData,
     getFirestore: () => firestoreDb,
     isInitialized: () => initialized,
     getStatus: () => ({ initialized, lastSyncAt }),
