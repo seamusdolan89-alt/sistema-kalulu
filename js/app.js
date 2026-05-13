@@ -424,7 +424,22 @@
         // Sync periódico normal
         window.SGA_Sync.initialize().catch(() => {});
       } else {
-        // Initialize Firebase Sync (async, no bloquea el inicio del POS)
+        // POS: sincronización inicial desde Firestore si la BD está vacía (dispositivo nuevo)
+        const productCount = window.SGA_DB.query('SELECT COUNT(*) as n FROM productos');
+        const isEmpty = !productCount || productCount[0]?.n === 0;
+        if (isEmpty && window.SGA_Sync?.initialSyncFromFirestore) {
+          const overlay = document.getElementById('initial-sync-overlay');
+          const progressEl = document.getElementById('initial-sync-progress');
+          if (overlay) overlay.style.display = 'flex';
+          try {
+            await window.SGA_Sync.initialSyncFromFirestore((msg) => {
+              if (progressEl) progressEl.textContent = msg;
+            });
+          } catch (e) {
+            console.warn('Initial sync failed:', e.message);
+          }
+          if (overlay) overlay.style.display = 'none';
+        }
         window.SGA_Sync.initialize().catch(() => {});
       }
 
