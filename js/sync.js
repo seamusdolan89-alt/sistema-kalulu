@@ -99,9 +99,10 @@
       }
       if (adminPushed > 0) console.log(`⬆️  Admin push: ${adminPushed} registros enviados a Firestore`);
 
-      // Bajar todos los datos recientes de Firestore (bidireccional)
+      // Bajar todos los datos recientes de Firestore via _synced_at
+      // NO usar pullFromFirestore() acá — admin-pos marcaría _pulled:true
+      // antes de que el POS pueda verlos
       await syncMonitoringData();
-      await pullFromFirestore();
     } else {
       // POS: primero bajar cambios del admin, luego subir los del POS
       const pulled = await pullFromFirestore();
