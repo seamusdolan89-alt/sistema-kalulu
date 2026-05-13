@@ -4,16 +4,22 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Sistema Kalulu - Panel de Administración">
-  <meta name="theme-color" content="#0066cc">
+  <meta name="theme-color" content="#1a5c2e">
   <title>Sistema Kalulu - Administración</title>
 
   <!-- CSS (mismos que el POS, un nivel arriba) -->
+  <link rel="manifest" href="./manifest.json">
   <link rel="stylesheet" href="../css/reset.css">
   <link rel="stylesheet" href="../css/variables.css">
   <link rel="stylesheet" href="../css/layout.css">
   <link rel="stylesheet" href="../css/components.css">
 
   <style>
+    /* ── Header verde para distinguir admin del POS ── */
+    header {
+      background-color: #1a5c2e;
+    }
+
     /* ── Overlay de sincronización inicial ── */
     #initial-sync-overlay {
       display: none;
@@ -119,6 +125,11 @@
 
     const v = Date.now();
     await import(`../js/app.js?v=${v}`);
+  </script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
   </script>
 
 </body>

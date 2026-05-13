@@ -81,5 +81,10 @@
     const v = Date.now();
     await import(`./js/app.js?v=${v}`);
   </script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
+  </script>
 </body>
 </html>

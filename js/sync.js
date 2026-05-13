@@ -549,7 +549,7 @@
          total_transferencia, total_cuenta_corriente,
          total_egresos, saldo_final_esperado, saldo_final_real,
          diferencia, detalle_billetes, estado, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.sucursal_id || null,
        data.usuario_apertura_id || null, data.usuario_cierre_id || null,
        data.fecha_apertura || null, data.fecha_cierre || null,
@@ -651,7 +651,40 @@
 
     localStorage.setItem('admin_monitor_sync_at', new Date().toISOString());
     if (total > 0) console.log(`📡 Monitor sync: ${total} registros actualizados`);
+
+    // Cerrar sesiones fantasma: abiertas localmente sin ventas, cuando otra sesión abierta sí tiene ventas
+    closeOrphanSessions();
+
     return total;
+  }
+
+  function closeOrphanSessions() {
+    if (!window.SGA_DB) return;
+    try {
+      // Si hay múltiples sesiones abiertas, cerrar las que no tienen ventas
+      const openSessions = window.SGA_DB.query(
+        `SELECT id FROM sesiones_caja WHERE estado = 'abierta'`
+      );
+      if (openSessions.length <= 1) return;
+
+      // Sesiones abiertas con al menos una venta
+      const withVentas = window.SGA_DB.query(
+        `SELECT DISTINCT sesion_caja_id AS id FROM ventas
+         WHERE sesion_caja_id IN (SELECT id FROM sesiones_caja WHERE estado = 'abierta')`
+      );
+      if (withVentas.length === 0) return;
+
+      const keepIds = new Set(withVentas.map(r => r.id));
+      const toClose = openSessions.filter(r => !keepIds.has(r.id));
+      for (const { id } of toClose) {
+        window.SGA_DB.run(
+          `UPDATE sesiones_caja SET estado = 'cerrada' WHERE id = ?`, [id]
+        );
+        console.log(`🧹 Sesión fantasma cerrada en admin-pos: ${id}`);
+      }
+    } catch (e) {
+      console.warn('closeOrphanSessions error:', e.message);
+    }
   }
 
   // ─── Sincronización inicial completa (admin-pos primer arranque) ──────────────
@@ -733,6 +766,7 @@
       report(`✓ ${label}: ${count}`);
     }
 
+    closeOrphanSessions();
     report('¡Sincronización inicial completa!');
   }
 
