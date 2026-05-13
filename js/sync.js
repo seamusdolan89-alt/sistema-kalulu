@@ -87,7 +87,19 @@
     if (!initialized || !firestoreDb) return;
 
     if (window.ADMIN_MODE) {
-      // Admin-pos: bajar datos de monitoreo (ventas, sesiones, egresos) + pull de cambios
+      // Admin-pos: subir cambios del admin a Firestore (POS los bajará via _pulled:false)
+      const ADMIN_PUSH_TABLES = ['productos', 'proveedores', 'clientes', 'compras',
+                                  'ordenes_compra', 'pagos_proveedores', 'gastos',
+                                  'promociones', 'stock', 'cuenta_corriente'];
+      const adminSources = SYNC_SOURCES.filter(s => ADMIN_PUSH_TABLES.includes(s.table));
+      let adminPushed = 0;
+      for (const source of adminSources) {
+        try { adminPushed += await syncAdminSource(source); }
+        catch (err) { console.warn(`Admin push error (${source.table}):`, err.message); }
+      }
+      if (adminPushed > 0) console.log(`⬆️  Admin push: ${adminPushed} registros enviados a Firestore`);
+
+      // Bajar todos los datos recientes de Firestore (bidireccional)
       await syncMonitoringData();
       await pullFromFirestore();
     } else {
@@ -130,6 +142,51 @@
       data._synced_at = new Date().toISOString();
       // Registros del POS NO llevan _pulled para no mezclarse con los del admin
       delete data._pulled;
+
+      batch.set(firestoreDb.collection(collection).doc(docId), data, { merge: true });
+    }
+
+    await batch.commit();
+
+    for (const row of rows) {
+      try {
+        if (pk) {
+          window.SGA_DB.run(`UPDATE ${table} SET sync_status = 'synced' WHERE ${pk} = ?`, [row[pk]]);
+        } else {
+          window.SGA_DB.run(
+            `UPDATE ${table} SET sync_status = 'synced' WHERE ${compositeKey.map(k => k + ' = ?').join(' AND ')}`,
+            compositeKey.map(k => row[k])
+          );
+        }
+      } catch (_) {}
+    }
+
+    return rows.length;
+  }
+
+  // ─── PUSH desde admin-pos (con _pulled:false para que POS los descargue) ───────
+
+  async function syncAdminSource({ table, collection, pk, compositeKey, denormalize }) {
+    let rows;
+    try {
+      rows = window.SGA_DB.query(
+        `SELECT * FROM ${table} WHERE sync_status = 'pending' LIMIT ${BATCH_LIMIT}`
+      );
+    } catch (_) { return 0; }
+
+    if (!rows || rows.length === 0) return 0;
+
+    const batch = firestoreDb.batch();
+    const sucursalId = window.SK_SUCURSAL_FIREBASE_ID || 'sucursal-1';
+
+    for (const row of rows) {
+      const docId = pk ? row[pk] : compositeKey.map(k => row[k]).join('_');
+      if (!docId) continue;
+
+      let data = denormalize ? denormalize(row) : { ...row };
+      data._sucursal  = sucursalId;
+      data._synced_at = new Date().toISOString();
+      data._pulled    = false; // POS filtra por este campo para descargar cambios del admin
 
       batch.set(firestoreDb.collection(collection).doc(docId), data, { merge: true });
     }
@@ -619,9 +676,18 @@
     if (!firestoreDb) return 0;
 
     const MONITOR_SOURCES = [
-      { name: 'sesiones_caja', applyFn: applySesionCajaFull },
-      { name: 'egresos_caja',  applyFn: applyEgresoCajaFull },
-      { name: 'ventas',        applyFn: applyVentaFull },
+      { name: 'sesiones_caja',     applyFn: applySesionCajaFull },
+      { name: 'egresos_caja',      applyFn: applyEgresoCajaFull },
+      { name: 'ventas',            applyFn: applyVentaFull },
+      { name: 'compras',           applyFn: applyCompra },
+      { name: 'ordenes_compra',    applyFn: applyOrdenCompra },
+      { name: 'pagos_proveedores', applyFn: applyPagoProveedor },
+      { name: 'gastos',            applyFn: applyGasto },
+      { name: 'productos',         applyFn: applyProductoFull },
+      { name: 'clientes',          applyFn: applyClienteFull },
+      { name: 'proveedores',       applyFn: applyProveedorFull },
+      { name: 'stock',             applyFn: applyStockFull },
+      { name: 'promociones',       applyFn: applyPromocion },
     ];
 
     const lastSync = localStorage.getItem('admin_monitor_sync_at');
