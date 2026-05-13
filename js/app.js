@@ -54,7 +54,9 @@
     if (!user) {
       // Not authenticated - redirect to login
       console.log('🔐 Not authenticated, redirecting to login...');
-      window.location.href = './views/login.html';
+      const loginBase = window.VIEWS_BASE_PATH || './views/';
+      const returnTo = window.ADMIN_MODE ? encodeURIComponent('../admin-pos/') : '';
+      window.location.href = loginBase + 'login.html' + (returnTo ? '?returnTo=' + returnTo : '');
       return false;
     }
 
@@ -66,7 +68,7 @@
    * Router: parse URL hash and load corresponding view
    */
   async function router() {
-    const hash = window.location.hash.slice(1) || 'pos';
+    const hash = window.location.hash.slice(1) || (window.ADMIN_MODE ? 'productos' : 'pos');
     const [route, ...params] = hash.split('/');
 
     app.currentRoute = route;
@@ -114,7 +116,8 @@
       const v = Date.now();
 
       // Always fetch HTML fresh (no cache)
-      const response = await fetch(`./views/${moduleName}.html?v=${v}`, { cache: 'no-store' });
+      const viewsBase = window.VIEWS_BASE_PATH || './views/';
+      const response = await fetch(`${viewsBase}${moduleName}.html?v=${v}`, { cache: 'no-store' });
       if (!response.ok) throw new Error(`View not found: ${moduleName}`);
 
       const html = await response.text();
@@ -139,6 +142,15 @@
       `;
     }
   }
+
+  // Módulos permitidos por rol (el cajero solo ve POS y Caja)
+  const NAV_BY_ROLE = {
+    admin:     ['pos', 'productos', 'clientes', 'cajas', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios'],
+    encargado: ['pos', 'productos', 'clientes', 'cajas', 'operaciones_stock', 'ordenes', 'proveedores', 'promociones', 'etiquetas', 'informes', 'gastos'],
+    cajero:    ['pos', 'cajas'],
+    // En modo admin-pos: todo excepto venta directa y cajas
+    admin_pos: ['pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno'],
+  };
 
   /**
    * Initialize navigation
@@ -166,16 +178,21 @@
       { name: 'etiquetas', label: '🏷️ Etiquetas' },
       { name: 'informes', label: '📊 Informes' },
       { name: 'gastos', label: '💸 Gastos Generales' },
-      { name: 'usuarios', label: '👤 Usuarios', adminOnly: true },
+      { name: 'usuarios', label: '👤 Usuarios' },
     ];
 
     const hasPendingResumen = !!localStorage.getItem('compras_resumen_pending');
     const currentUserRole = app.user?.rol || window.SGA_Auth.getCurrentUser()?.rol;
+    const roleKey = window.ADMIN_MODE ? 'admin_pos' : (currentUserRole || 'cajero');
+    const allowedModules = NAV_BY_ROLE[roleKey] || NAV_BY_ROLE.cajero;
     const currentHash = window.location.hash.slice(1) || '';
     const [currentRoute, currentMedio] = currentHash.split('/');
 
     navContainer.innerHTML = moduleList
-      .filter(({ adminOnly }) => !adminOnly || currentUserRole === 'admin')
+      .filter(({ name, type, group }) => {
+        const key = type === 'group' ? group : name;
+        return allowedModules.includes(key);
+      })
       .map((item) => {
         if (item.type === 'group') {
           const isActive = currentRoute === 'caja';
@@ -245,7 +262,9 @@
 
       logoutBtn.addEventListener('click', async () => {
         await window.SGA_Auth.logout();
-        window.location.href = './views/login.html';
+        const loginBase = window.VIEWS_BASE_PATH || './views/';
+        const returnTo = window.ADMIN_MODE ? encodeURIComponent('../admin-pos/') : '';
+        window.location.href = loginBase + 'login.html' + (returnTo ? '?returnTo=' + returnTo : '');
       });
     }
 
@@ -318,7 +337,7 @@
    * Handle navigation — with POS sale guard
    */
   window.addEventListener('hashchange', (e) => {
-    const newHash = window.location.hash.slice(1) || 'pos';
+    const newHash = window.location.hash.slice(1) || (window.ADMIN_MODE ? 'productos' : 'pos');
     const [route] = newHash.split('/');
 
     // Navigation guard: if POS has an active sale with cart items, block and notify
@@ -380,16 +399,48 @@
       console.log('🔐 Checking authentication...');
       const isAuth = await checkAuth();
       if (!isAuth) return; // Redirect to login handled by checkAuth
-      
+
       // Initialize networking
       initNetworkDetection();
-      
+
+      // En modo admin-pos: sincronización inicial si la BD está vacía
+      if (window.ADMIN_MODE) {
+        const productCount = window.SGA_DB.query('SELECT COUNT(*) as n FROM productos');
+        const isEmpty = !productCount || productCount[0]?.n === 0;
+        if (isEmpty && window.SGA_Sync?.initialSyncFromFirestore) {
+          const overlay = document.getElementById('initial-sync-overlay');
+          const progressEl = document.getElementById('initial-sync-progress');
+          if (overlay) overlay.style.display = 'flex';
+          try {
+            await window.SGA_Sync.initialSyncFromFirestore((msg) => {
+              if (progressEl) progressEl.textContent = msg;
+            });
+          } catch (e) {
+            console.error('Initial sync failed:', e);
+            if (progressEl) progressEl.textContent = 'Error en sincronización: ' + e.message;
+          }
+          if (overlay) overlay.style.display = 'none';
+        }
+        // Sync periódico normal
+        window.SGA_Sync.initialize().catch(() => {});
+      } else {
+        // Initialize Firebase Sync (async, no bloquea el inicio del POS)
+        window.SGA_Sync.initialize().catch(() => {});
+      }
+
       // Initialize navigation
       initNav();
-      
+
       // Update header
       updateHeader();
-      
+
+      // Los cajeros siempre arrancan en el POS; admin-pos arranca en productos
+      if (app.user?.rol === 'cajero' && !window.location.hash) {
+        window.location.hash = '#pos';
+      } else if (window.ADMIN_MODE && !window.location.hash) {
+        window.location.hash = '#productos';
+      }
+
       // Route to initial view
       await router();
       

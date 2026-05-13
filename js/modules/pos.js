@@ -652,6 +652,7 @@ export const POS = (() => {
 
     // ── ADD TO CART ────────────────────────────────────────────────
     const addToCart = (producto) => {
+      if (window.ADMIN_MODE) return;
       if (!state.sesionActiva) { showModalApertura(); return; }
       const existIdx = state.cart.findIndex(i => i.productoId === producto.id);
       if (existIdx >= 0) {
@@ -1501,6 +1502,7 @@ export const POS = (() => {
     };
 
     const enterSaleMode = (retomar = false) => {
+      if (window.ADMIN_MODE) return;
       if (!state.sesionActiva) { showModalApertura(); return; }
       if (!retomar) {
         // Only warn about abandoning if we are already actively in a sale
@@ -1687,8 +1689,8 @@ export const POS = (() => {
       `;
 
       const rol = state.currentUser?.rol;
-      const canAnular = (rol === 'admin' || rol === 'encargado') && venta.estado === 'completada';
-      const canEditar = venta.estado === 'completada';
+      const canAnular = !window.ADMIN_MODE && (rol === 'admin' || rol === 'encargado') && venta.estado === 'completada';
+      const canEditar = !window.ADMIN_MODE && venta.estado === 'completada';
       footer.innerHTML = `
         <button class="dp-btn" id="dp-btn-reimprimir">🖨️ Reimprimir</button>
         <button class="dp-btn danger" id="dp-btn-anular" ${canAnular ? '' : 'disabled'} title="${canAnular ? '' : 'Sin permiso o ya anulada'}">↩ Anular</button>
@@ -2669,65 +2671,202 @@ export const POS = (() => {
     // Cliente rápido
     safeOn('btn-cliente-rapido', 'click', () => showModal('modal-cliente-rapido'));
 
+    let pendingClienteBuscar = null;
+
     const openBuscarClienteModal = () => {
+      pendingClienteBuscar = null;
       showModal('modal-buscar-cliente');
-      const q = ge('buscar-cliente-query');
-      if (q) { q.value = ''; q.focus(); renderBuscarResultados(''); }
+      ['buscar-nombre-query','buscar-lote-query'].forEach(id => { const el = ge(id); if (el) el.value = ''; });
+      ['buscar-nombre-results','buscar-lote-results'].forEach(id => { const el = ge(id); if (el) el.innerHTML = ''; });
+      const preview = ge('buscar-cliente-preview');
+      if (preview) preview.style.display = 'none';
+      const confirmBtn = ge('btn-buscar-confirmar');
+      if (confirmBtn) confirmBtn.disabled = true;
+      ge('buscar-nombre-query')?.focus();
     };
 
-    const renderBuscarResultados = (query) => {
-      const container = ge('buscar-cliente-results');
-      if (!container) return;
-      const trimmed = query.trim();
-      if (!trimmed) { container.innerHTML = '<div style="color:#aaa;font-size:0.85em;padding:8px 4px;">Escribí un nombre, apellido o número de lote para buscar.</div>'; return; }
-      const like = `%${trimmed}%`;
-      const rows = window.SGA_DB.query(
-        `SELECT c.id, c.nombre, c.apellido, c.lote, c.telefono,
-           COALESCE((SELECT SUM(monto) FROM cuenta_corriente WHERE cliente_id = c.id), 0) AS saldo
-         FROM clientes c WHERE c.activo = 1
-           AND (c.nombre LIKE ? OR c.apellido LIKE ? OR c.lote LIKE ?)
-         ORDER BY c.nombre, c.apellido LIMIT 20`,
-        [like, like, like]
-      );
-      if (!rows.length) {
-        container.innerHTML = '<div style="color:#aaa;font-size:0.85em;padding:8px 4px;">Sin resultados.</div>';
-        return;
-      }
-      container.innerHTML = rows.map(c => {
-        const nombre = `${c.nombre} ${c.apellido || ''}`.trim();
-        const lote = c.lote ? `Lote ${c.lote}` : '';
-        const tel  = c.telefono || '';
-        const saldo = c.saldo || 0;
-        let badgeHtml = '';
-        if (saldo > 0.01)       badgeHtml = `<span class="saldo-badge deuda">Debe ${formatCurrency(saldo)}</span>`;
-        else if (saldo < -0.01) badgeHtml = `<span class="saldo-badge favor">Saldo ${formatCurrency(Math.abs(saldo))}</span>`;
-        const meta = [lote, tel].filter(Boolean).join(' · ');
-        return `<div class="buscar-result-item" data-id="${c.id}" data-nombre="${c.nombre}" data-apellido="${c.apellido || ''}" data-telefono="${c.telefono || ''}" data-saldo="${saldo}">
-          <div class="buscar-result-name">${nombre} ${badgeHtml}</div>
-          ${meta ? `<div class="buscar-result-meta">${meta}</div>` : ''}
-        </div>`;
-      }).join('');
+    const cancelarClienteBuscar = () => {
+      pendingClienteBuscar = null;
+      hideModal('modal-buscar-cliente');
+    };
 
-      container.querySelectorAll('.buscar-result-item').forEach(item => {
-        item.addEventListener('click', () => {
-          selectCliente({
-            id: item.dataset.id,
-            nombre: item.dataset.nombre,
-            apellido: item.dataset.apellido,
-            telefono: item.dataset.telefono,
-            saldo_actual: parseFloat(item.dataset.saldo) || 0,
-          });
-          hideModal('modal-buscar-cliente');
+    const confirmarClienteBuscar = () => {
+      if (!pendingClienteBuscar) return;
+      selectCliente(pendingClienteBuscar);
+      hideModal('modal-buscar-cliente');
+      pendingClienteBuscar = null;
+    };
+
+    const renderBuscarPreview = (c) => {
+      const fullName = `${c.nombre} ${c.apellido || ''}`.trim();
+      const nameEl = ge('buscar-selected-name');
+      if (nameEl) nameEl.textContent = `✓ ${fullName}${c.lote ? ' · Lote ' + c.lote : ''}`;
+
+      // Saldo CC
+      const saldo = parseFloat(c.saldo) || 0;
+      const saldoCard = ge('buscar-kpi-saldo');
+      const saldoVal  = ge('buscar-kpi-saldo-val');
+      if (saldoVal) {
+        if (Math.abs(saldo) < 0.01) {
+          saldoVal.textContent = 'Sin deuda';
+          saldoCard?.classList.remove('kpi-deuda','kpi-favor');
+        } else if (saldo > 0) {
+          saldoVal.textContent = `Debe ${formatCurrency(saldo)}`;
+          saldoCard?.classList.add('kpi-deuda'); saldoCard?.classList.remove('kpi-favor');
+        } else {
+          saldoVal.textContent = `A favor ${formatCurrency(Math.abs(saldo))}`;
+          saldoCard?.classList.add('kpi-favor'); saldoCard?.classList.remove('kpi-deuda');
+        }
+      }
+
+      // Top productos
+      const topProd = window.SGA_DB.query(
+        `SELECT p.nombre, COUNT(*) AS veces
+         FROM venta_items vi
+         JOIN ventas v ON vi.venta_id = v.id
+         JOIN productos p ON vi.producto_id = p.id
+         WHERE v.cliente_id = ?
+         GROUP BY vi.producto_id ORDER BY veces DESC LIMIT 3`,
+        [c.id]
+      );
+      const prodVal = ge('buscar-kpi-productos-val');
+      if (prodVal) {
+        prodVal.style.fontStyle = '';
+        prodVal.style.color = '';
+        prodVal.innerHTML = topProd.length
+          ? topProd.map(r => `<div>${r.nombre} <span style="color:#aaa;font-size:0.85em">(${r.veces}x)</span></div>`).join('')
+          : '<span style="color:#aaa;font-style:italic">Sin historial</span>';
+      }
+
+      const preview = ge('buscar-cliente-preview');
+      if (preview) preview.style.display = 'block';
+      const confirmBtn = ge('btn-buscar-confirmar');
+      if (confirmBtn) confirmBtn.disabled = false;
+    };
+
+    const handleBuscarSelect = (item) => {
+      const fullName = `${item.dataset.nombre} ${item.dataset.apellido || ''}`.trim();
+      const lote = item.dataset.lote || '';
+      const nombreQ = ge('buscar-nombre-query');
+      const loteQ   = ge('buscar-lote-query');
+      if (nombreQ) nombreQ.value = fullName;
+      if (loteQ)   loteQ.value   = lote;
+      ge('buscar-nombre-results') && (ge('buscar-nombre-results').innerHTML = '');
+      ge('buscar-lote-results')   && (ge('buscar-lote-results').innerHTML = '');
+      pendingClienteBuscar = {
+        id: item.dataset.id, nombre: item.dataset.nombre,
+        apellido: item.dataset.apellido, telefono: item.dataset.telefono,
+        lote, saldo_actual: parseFloat(item.dataset.saldo) || 0,
+      };
+      renderBuscarPreview({ ...pendingClienteBuscar, saldo: item.dataset.saldo });
+    };
+
+    const buildResultItem = (c) => {
+      const nombre = `${c.nombre} ${c.apellido || ''}`.trim();
+      const lote   = c.lote ? `Lote ${c.lote}` : '';
+      const tel    = c.telefono || '';
+      const saldo  = c.saldo || 0;
+      let badgeHtml = '';
+      if (saldo > 0.01)       badgeHtml = `<span class="saldo-badge deuda">Debe ${formatCurrency(saldo)}</span>`;
+      else if (saldo < -0.01) badgeHtml = `<span class="saldo-badge favor">Saldo ${formatCurrency(Math.abs(saldo))}</span>`;
+      const meta = [lote, tel].filter(Boolean).join(' · ');
+      return `<div class="buscar-result-item"
+          data-id="${c.id}" data-nombre="${c.nombre}" data-apellido="${c.apellido || ''}"
+          data-lote="${c.lote || ''}" data-telefono="${c.telefono || ''}" data-saldo="${saldo}">
+        <div class="buscar-result-name">${nombre} ${badgeHtml}</div>
+        ${meta ? `<div class="buscar-result-meta">${meta}</div>` : ''}
+      </div>`;
+    };
+
+    const bindBuscarItems = (container, sourceInput) => {
+      const items = Array.from(container.querySelectorAll('.buscar-result-item'));
+      items.forEach((item, idx) => {
+        item.setAttribute('tabindex', '0');
+        item.addEventListener('click', () => handleBuscarSelect(item));
+        item.addEventListener('keydown', e => {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            const next = items[idx + 1];
+            if (next) { next.focus(); next.scrollIntoView({ block: 'nearest' }); }
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (idx === 0) { sourceInput?.focus(); }
+            else { const prev = items[idx - 1]; prev.focus(); prev.scrollIntoView({ block: 'nearest' }); }
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            handleBuscarSelect(item);
+          } else if (e.key === 'Escape') {
+            cancelarClienteBuscar();
+          }
         });
       });
     };
 
+    const renderBuscarNombre = (query) => {
+      const container = ge('buscar-nombre-results');
+      if (!container) return;
+      const trimmed = query.trim();
+      if (!trimmed) { container.innerHTML = ''; return; }
+      const like = `%${trimmed}%`;
+      const rows = window.SGA_DB.query(
+        `SELECT c.id, c.nombre, c.apellido, c.lote, c.telefono,
+           COALESCE((SELECT SUM(monto) FROM cuenta_corriente WHERE cliente_id = c.id), 0) AS saldo
+         FROM clientes c WHERE c.activo = 1 AND (c.nombre LIKE ? OR c.apellido LIKE ?)
+         ORDER BY c.nombre, c.apellido LIMIT 15`,
+        [like, like]
+      );
+      container.innerHTML = rows.length
+        ? rows.map(buildResultItem).join('')
+        : '<div style="color:#aaa;font-size:0.85em;padding:6px 4px;">Sin resultados.</div>';
+      bindBuscarItems(container, ge('buscar-nombre-query'));
+    };
+
+    const renderBuscarLote = (query) => {
+      const container = ge('buscar-lote-results');
+      if (!container) return;
+      const trimmed = query.trim();
+      if (!trimmed) { container.innerHTML = ''; return; }
+      const like = `%${trimmed}%`;
+      const rows = window.SGA_DB.query(
+        `SELECT c.id, c.nombre, c.apellido, c.lote, c.telefono,
+           COALESCE((SELECT SUM(monto) FROM cuenta_corriente WHERE cliente_id = c.id), 0) AS saldo
+         FROM clientes c WHERE c.activo = 1 AND c.lote LIKE ?
+         ORDER BY c.lote LIMIT 15`,
+        [like]
+      );
+      container.innerHTML = rows.length
+        ? rows.map(buildResultItem).join('')
+        : '<div style="color:#aaa;font-size:0.85em;padding:6px 4px;">Sin resultados.</div>';
+      bindBuscarItems(container, ge('buscar-lote-query'));
+    };
+
     safeOn('btn-buscar-cliente',       'click', openBuscarClienteModal);
-    safeOn('btn-buscar-cliente-close', 'click', () => hideModal('modal-buscar-cliente'));
-    const buscarQuery = ge('buscar-cliente-query');
-    if (buscarQuery) {
-      buscarQuery.addEventListener('input', e => renderBuscarResultados(e.target.value));
-      buscarQuery.addEventListener('keydown', e => { if (e.key === 'Escape') hideModal('modal-buscar-cliente'); });
+    safeOn('btn-buscar-cliente-close', 'click', cancelarClienteBuscar);
+    safeOn('btn-buscar-cancelar',      'click', cancelarClienteBuscar);
+    safeOn('btn-buscar-confirmar',     'click', confirmarClienteBuscar);
+    const buscarNombreQ = ge('buscar-nombre-query');
+    const buscarLoteQ   = ge('buscar-lote-query');
+    if (buscarNombreQ) {
+      buscarNombreQ.addEventListener('input',   e => renderBuscarNombre(e.target.value));
+      buscarNombreQ.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { cancelarClienteBuscar(); return; }
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          const first = ge('buscar-nombre-results')?.querySelector('.buscar-result-item');
+          if (first) { first.focus(); first.scrollIntoView({ block: 'nearest' }); }
+        }
+      });
+    }
+    if (buscarLoteQ) {
+      buscarLoteQ.addEventListener('input',   e => renderBuscarLote(e.target.value));
+      buscarLoteQ.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { cancelarClienteBuscar(); return; }
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          const first = ge('buscar-lote-results')?.querySelector('.buscar-result-item');
+          if (first) { first.focus(); first.scrollIntoView({ block: 'nearest' }); }
+        }
+      });
     }
     safeOn('btn-crapido-close',  'click', () => hideModal('modal-cliente-rapido'));
     safeOn('btn-crapido-cancel', 'click', () => hideModal('modal-cliente-rapido'));
@@ -2779,6 +2918,7 @@ export const POS = (() => {
       const effTotal = getEffectiveTotal();
 
       let pagos;
+      let saldoFavorApplied = 0;
       if (state.cobroMultiple) {
         if (asig < effTotal - 0.01 && !state.ccRegistrarDeuda) {
           alert('Pago insuficiente. La suma de los medios no cubre el total.');
@@ -2804,7 +2944,7 @@ export const POS = (() => {
         }
         if (Math.abs(asig - effTotal) > 0.01 && !state.ccRegistrarDeuda) { alert('El monto asignado no coincide con el total'); return; }
 
-        const saldoFavorApplied = (state.ccAplicarFavor && state.clienteSaldo < -0.01)
+        saldoFavorApplied = (state.ccAplicarFavor && state.clienteSaldo < -0.01)
           ? Math.min(Math.abs(state.clienteSaldo), getCartTotal())
           : 0;
 
@@ -2989,6 +3129,10 @@ export const POS = (() => {
       if (e.key === 'F1' && state.mode === 'sale') { e.preventDefault(); ge('pos-search-input')?.focus(); }
       if (e.key === 'F2' && state.mode === 'sale') {
         e.preventDefault();
+        if (!ge('modal-buscar-cliente')?.classList.contains('hidden')) {
+          confirmarClienteBuscar();
+          return;
+        }
         const clientInput = ge('client-search-input');
         const noClient = !state.clienteId && (!clientInput || clientInput.value.trim() === '');
         const firstChip = document.querySelector('#payment-chips .pchip');
@@ -3040,11 +3184,30 @@ export const POS = (() => {
       }
     });
 
+    // ── ADMIN_MODE: deshabilitar controles de acción ───────────────
+    if (window.ADMIN_MODE) {
+      [
+        'btn-nueva-venta', 'btn-cerrar-caja', 'btn-devolucion-header',
+        'btn-pedidos-header', 'btn-cliente-rapido', 'btn-pausar-venta',
+      ].forEach(id => {
+        const el = ge(id);
+        if (el) { el.disabled = true; el.title = 'Solo lectura — modo administrador'; }
+      });
+      // Banner visible que identifica el modo
+      const dash = ge('pos-dashboard');
+      if (dash) {
+        const banner = document.createElement('div');
+        banner.style.cssText = 'background:#1e3a5f;color:#7ec8e3;font-size:12px;font-weight:600;text-align:center;padding:5px 12px;letter-spacing:0.04em';
+        banner.textContent = '👁 MODO ADMINISTRADOR — Solo lectura';
+        dash.prepend(banner);
+      }
+    }
+
     // ── INITIAL LOAD ───────────────────────────────────────────────
     checkSesion();
     enterDashboard();
-    if (_hasOrphanCart) showRecoverBanner();
-    if (!state.sesionActiva) showModalApertura();
+    if (_hasOrphanCart && !window.ADMIN_MODE) showRecoverBanner();
+    if (!state.sesionActiva && !window.ADMIN_MODE) showModalApertura();
 
     // Handle deep-link actions passed via URL (e.g. #pos/devolucion)
     if (params && params[0] === 'devolucion') {

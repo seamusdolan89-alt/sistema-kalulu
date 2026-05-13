@@ -74,6 +74,7 @@ const Caja = (() => {
   // ── PERMISSION ───────────────────────────────────────────────────────────────
 
   function canManage() {
+    if (window.ADMIN_MODE) return false;
     return ['admin', 'encargado'].includes(state.user && state.user.rol);
   }
 
@@ -428,17 +429,17 @@ const Caja = (() => {
         <div class="caja-apertura-card">
           <div class="caja-apertura-icon">💰</div>
           <h3>No hay caja abierta</h3>
-          <p>Para comenzar a registrar ventas, debés abrir una sesión de caja.</p>
-          <div class="caja-apertura-field">
+          <p>${window.ADMIN_MODE ? 'No hay sesión de caja activa en este momento.' : 'Para comenzar a registrar ventas, debés abrir una sesión de caja.'}</p>
+          ${!window.ADMIN_MODE ? `<div class="caja-apertura-field">
             <label for="caja-saldo-inicial">Saldo inicial en efectivo</label>
             ${saldoInputHtml}
           </div>
-          <button id="btn-abrir-caja" class="btn btn-primary btn-lg">Abrir Caja</button>
+          <button id="btn-abrir-caja" class="btn btn-primary btn-lg">Abrir Caja</button>` : ''}
         </div>
       </div>
     `;
 
-    ge('btn-abrir-caja').addEventListener('click', () => {
+    ge('btn-abrir-caja')?.addEventListener('click', () => {
       const saldo = parseFloat(ge('caja-saldo-inicial').value) || 0;
       const result = abrirCaja(state.user.sucursal_id, state.user.id, saldo);
       if (result.success) {

@@ -502,9 +502,16 @@ const EditorProducto = (() => {
   <div id="section-promociones" class="editor-section" style="display:none">
     <h3 class="ed-section-title">🏷️ Promociones</h3>
     <div id="ed-promociones-list" style="margin-bottom:12px"></div>
-    <button class="btn btn-secondary" disabled style="opacity:0.6">
-      + Agregar a promoción &nbsp;<span class="badge-proximamente">🔜 Próximamente</span>
-    </button>
+    <div id="ed-promo-add-panel" style="display:none;margin-bottom:10px;display:none">
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="ed-promo-select" class="input-full" style="flex:1"></select>
+        <input type="number" id="ed-promo-qty" class="input-full" value="1" min="1" step="1"
+               style="width:70px;flex:none" title="Cantidad requerida">
+        <button class="btn btn-primary btn-sm" id="ed-btn-promo-confirmar">Agregar</button>
+        <button class="btn btn-secondary btn-sm" id="ed-btn-promo-cancelar">✕</button>
+      </div>
+    </div>
+    <button class="btn btn-secondary" id="ed-btn-agregar-promo">+ Agregar a promoción</button>
   </div>
 
   <!-- ── VENCIMIENTOS ───────────────────────────────────────────── -->
@@ -2110,19 +2117,65 @@ const EditorProducto = (() => {
     if (!list) return;
 
     const promos = window.SGA_DB.query(`
-      SELECT pr.nombre, pr.tipo, pr.activa
+      SELECT pr.id, pr.nombre, pr.tipo, pr.activa, pi.cantidad_requerida
       FROM promocion_items pi
       JOIN promociones pr ON pr.id = pi.promocion_id
       WHERE pi.producto_id = ?
+      ORDER BY pr.activa DESC, pr.nombre ASC
     `, [state.productoId]);
 
     list.innerHTML = promos.length
       ? promos.map(pr => `
-          <div class="ed-sust-row">
-            <span>${escapeHtml(pr.nombre)}</span>
-            <span class="badge ${pr.activa ? 'badge-success' : 'badge-secondary'}">${pr.activa ? 'Activa' : 'Inactiva'}</span>
+          <div class="ed-sust-row" style="justify-content:space-between">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span>${escapeHtml(pr.nombre)}</span>
+              ${pr.cantidad_requerida > 1 ? `<span class="ed-text-muted" style="font-size:11px">×${pr.cantidad_requerida}</span>` : ''}
+              <span class="badge ${pr.activa ? 'badge-success' : 'badge-secondary'}">${pr.activa ? 'Activa' : 'Inactiva'}</span>
+            </div>
+            <button class="btn btn-sm btn-danger" data-promo-id="${escapeHtml(pr.id)}" data-action="quitar-promo">Quitar</button>
           </div>`).join('')
-      : '<p class="ed-text-muted">Este producto no pertenece a ninguna promoción activa.</p>';
+      : '<p class="ed-text-muted">Este producto no pertenece a ninguna promoción.</p>';
+
+    // Delegated click for "Quitar"
+    list.onclick = (e) => {
+      const btn = e.target.closest('[data-action="quitar-promo"]');
+      if (!btn) return;
+      const promoId = btn.dataset.promoId;
+      if (!confirm('¿Quitar este producto de la promoción?')) return;
+      window.SGA_DB.run(
+        'DELETE FROM promocion_items WHERE promocion_id = ? AND producto_id = ?',
+        [promoId, state.productoId]
+      );
+      renderPromociones();
+      showToast('Producto quitado de la promoción');
+    };
+  };
+
+  const openAgregarPromoPanel = () => {
+    const panel = ge('ed-promo-add-panel');
+    const sel   = ge('ed-promo-select');
+    if (!panel || !sel) return;
+
+    // Load promotions not yet containing this product
+    const disponibles = window.SGA_DB.query(`
+      SELECT id, nombre, activa FROM promociones
+      WHERE id NOT IN (
+        SELECT promocion_id FROM promocion_items WHERE producto_id = ?
+      )
+      ORDER BY activa DESC, nombre ASC
+    `, [state.productoId]);
+
+    if (!disponibles.length) {
+      showToast('No hay promociones disponibles para agregar');
+      return;
+    }
+
+    sel.innerHTML = disponibles.map(p =>
+      `<option value="${escapeHtml(p.id)}">${escapeHtml(p.nombre)}${p.activa ? '' : ' (inactiva)'}</option>`
+    ).join('');
+
+    panel.style.display = '';
+    ge('ed-btn-agregar-promo').style.display = 'none';
   };
 
   // ── PEDIDO UNIDAD UI ───────────────────────────────────────────────────────
@@ -2341,6 +2394,30 @@ const EditorProducto = (() => {
     // Familia: agregar hijo button
     ge('ed-btn-agregar-hijo') && ge('ed-btn-agregar-hijo').addEventListener('click', () => {
       openAgregarHijoModal();
+    });
+
+    // Promociones section
+    ge('ed-btn-agregar-promo') && ge('ed-btn-agregar-promo').addEventListener('click', openAgregarPromoPanel);
+    ge('ed-btn-promo-cancelar') && ge('ed-btn-promo-cancelar').addEventListener('click', () => {
+      const panel = ge('ed-promo-add-panel');
+      if (panel) panel.style.display = 'none';
+      const btn = ge('ed-btn-agregar-promo');
+      if (btn) btn.style.display = '';
+    });
+    ge('ed-btn-promo-confirmar') && ge('ed-btn-promo-confirmar').addEventListener('click', () => {
+      const promoId = ge('ed-promo-select')?.value;
+      const qty     = parseInt(ge('ed-promo-qty')?.value || '1', 10) || 1;
+      if (!promoId) return;
+      window.SGA_DB.run(
+        'INSERT OR REPLACE INTO promocion_items (promocion_id, producto_id, cantidad_requerida) VALUES (?,?,?)',
+        [promoId, state.productoId, qty]
+      );
+      const panel = ge('ed-promo-add-panel');
+      if (panel) panel.style.display = 'none';
+      const btn = ge('ed-btn-agregar-promo');
+      if (btn) btn.style.display = '';
+      renderPromociones();
+      showToast('Producto agregado a la promoción');
     });
 
     // Sustitutos section: events are wired inside renderSustitutos() on each render

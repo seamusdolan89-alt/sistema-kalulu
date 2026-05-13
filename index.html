@@ -22,6 +22,7 @@
     <h1>🏪 Sistema Kalulu</h1>
     <div class="header-user">
       <span id="user-name">Usuario</span>
+      <span id="sync-badge" title="Firebase Sync" style="font-size:12px;cursor:default;user-select:none;">⚫</span>
       <div class="backup-menu" id="backup-menu">
         <button class="btn btn-outline btn-sm" id="backup-btn" title="Backup de base de datos">💾</button>
         <div class="backup-dropdown" id="backup-dropdown">
@@ -54,6 +55,7 @@
 
   <!-- Core JavaScript Modules -->
   <!-- Firebase SDK (9 compat) -->
+  <script src="./js/firebase-config.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
@@ -78,6 +80,11 @@
   <script type="module">
     const v = Date.now();
     await import(`./js/app.js?v=${v}`);
+  </script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
   </script>
 </body>
 </html>
