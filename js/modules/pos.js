@@ -652,6 +652,7 @@ export const POS = (() => {
 
     // ── ADD TO CART ────────────────────────────────────────────────
     const addToCart = (producto) => {
+      if (window.ADMIN_MODE) return;
       if (!state.sesionActiva) { showModalApertura(); return; }
       const existIdx = state.cart.findIndex(i => i.productoId === producto.id);
       if (existIdx >= 0) {
@@ -1501,6 +1502,7 @@ export const POS = (() => {
     };
 
     const enterSaleMode = (retomar = false) => {
+      if (window.ADMIN_MODE) return;
       if (!state.sesionActiva) { showModalApertura(); return; }
       if (!retomar) {
         // Only warn about abandoning if we are already actively in a sale
@@ -1687,8 +1689,8 @@ export const POS = (() => {
       `;
 
       const rol = state.currentUser?.rol;
-      const canAnular = (rol === 'admin' || rol === 'encargado') && venta.estado === 'completada';
-      const canEditar = venta.estado === 'completada';
+      const canAnular = !window.ADMIN_MODE && (rol === 'admin' || rol === 'encargado') && venta.estado === 'completada';
+      const canEditar = !window.ADMIN_MODE && venta.estado === 'completada';
       footer.innerHTML = `
         <button class="dp-btn" id="dp-btn-reimprimir">🖨️ Reimprimir</button>
         <button class="dp-btn danger" id="dp-btn-anular" ${canAnular ? '' : 'disabled'} title="${canAnular ? '' : 'Sin permiso o ya anulada'}">↩ Anular</button>
@@ -3182,11 +3184,30 @@ export const POS = (() => {
       }
     });
 
+    // ── ADMIN_MODE: deshabilitar controles de acción ───────────────
+    if (window.ADMIN_MODE) {
+      [
+        'btn-nueva-venta', 'btn-cerrar-caja', 'btn-devolucion-header',
+        'btn-pedidos-header', 'btn-cliente-rapido', 'btn-pausar-venta',
+      ].forEach(id => {
+        const el = ge(id);
+        if (el) { el.disabled = true; el.title = 'Solo lectura — modo administrador'; }
+      });
+      // Banner visible que identifica el modo
+      const dash = ge('pos-dashboard');
+      if (dash) {
+        const banner = document.createElement('div');
+        banner.style.cssText = 'background:#1e3a5f;color:#7ec8e3;font-size:12px;font-weight:600;text-align:center;padding:5px 12px;letter-spacing:0.04em';
+        banner.textContent = '👁 MODO ADMINISTRADOR — Solo lectura';
+        dash.prepend(banner);
+      }
+    }
+
     // ── INITIAL LOAD ───────────────────────────────────────────────
     checkSesion();
     enterDashboard();
-    if (_hasOrphanCart) showRecoverBanner();
-    if (!state.sesionActiva) showModalApertura();
+    if (_hasOrphanCart && !window.ADMIN_MODE) showRecoverBanner();
+    if (!state.sesionActiva && !window.ADMIN_MODE) showModalApertura();
 
     // Handle deep-link actions passed via URL (e.g. #pos/devolucion)
     if (params && params[0] === 'devolucion') {

@@ -149,7 +149,7 @@
     encargado: ['pos', 'productos', 'clientes', 'cajas', 'operaciones_stock', 'ordenes', 'proveedores', 'promociones', 'etiquetas', 'informes', 'gastos'],
     cajero:    ['pos', 'cajas'],
     // En modo admin-pos: todo excepto venta directa y cajas
-    admin_pos: ['productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno'],
+    admin_pos: ['pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno'],
   };
 
   /**
@@ -393,9 +393,7 @@
       }
       
       // Pre-load caja module so window.SGA_Caja is always available (used by POS data layer)
-      if (!window.ADMIN_MODE) {
-        await import('./modules/caja.js');
-      }
+      await import('./modules/caja.js');
 
       // Check authentication
       console.log('🔐 Checking authentication...');
