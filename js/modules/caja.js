@@ -437,7 +437,13 @@ const Caja = (() => {
           <button id="btn-abrir-caja" class="btn btn-primary btn-lg">Abrir Caja</button>` : ''}
         </div>
       </div>
+      <div style="padding: var(--spacing-lg)">
+        <h3 style="margin-bottom: var(--spacing-md)">Cajas anteriores</h3>
+        <div id="caja-tab-content"></div>
+      </div>
     `;
+
+    renderHistorial();
 
     ge('btn-abrir-caja')?.addEventListener('click', () => {
       const saldo = parseFloat(ge('caja-saldo-inicial').value) || 0;
