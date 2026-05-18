@@ -77,10 +77,7 @@
 
       await syncNow();
 
-      if (window.ADMIN_MODE) {
-        // Admin: monitoreo completo cada 30 segundos
-        syncIntervalId = setInterval(syncNow, ADMIN_INTERVAL_MS);
-      } else {
+      if (!window.ADMIN_MODE) {
         // POS: solo pull automático cada 30 minutos; push es event-driven
         syncIntervalId = setInterval(() => {
           pullFromFirestore()
@@ -100,8 +97,8 @@
     if (!initialized || !firestoreDb) return;
 
     if (window.ADMIN_MODE) {
-      // Admin-pos: solo monitoreo automático. El push al POS es manual (botón Push POS).
-      await syncMonitoringData();
+      // Admin-pos: pull manual (botón Pull) o al iniciar. Push al POS es manual (botón Push POS).
+      return await syncMonitoringData();
     } else {
       // POS: primero bajar cambios del admin, luego subir los del POS
       const pulled = await pullFromFirestore();
@@ -397,6 +394,20 @@
        data.metodo_pago || 'efectivo', data.proveedor_id || null,
        data.observaciones || null, data.periodo || null,
        data.subcategoria || null, data.updated_at || now]
+    );
+  }
+
+  function applyCajaAdmin(data) {
+    const now = new Date().toISOString();
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO caja_admin
+        (id, tipo, monto, concepto, egreso_caja_id, compra_id, proveedor_id,
+         fecha, usuario_id, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,'synced',?)`,
+      [data.id, data.tipo, data.monto, data.concepto || null,
+       data.egreso_caja_id || null, data.compra_id || null,
+       data.proveedor_id || null, data.fecha, data.usuario_id,
+       data.updated_at || now]
     );
   }
 
@@ -729,6 +740,7 @@
       { name: 'proveedores',       applyFn: applyProveedorFull },
       { name: 'stock',             applyFn: applyStockFull },
       { name: 'promociones',       applyFn: applyPromocion },
+      { name: 'caja_admin',        applyFn: applyCajaAdmin },
     ];
 
     const lastSync = localStorage.getItem('admin_monitor_sync_at');
@@ -832,6 +844,7 @@
       { name: 'gastos',            applyFn: applyGasto,            label: 'Gastos' },
       { name: 'promociones',       applyFn: applyPromocion,        label: 'Promociones' },
       { name: 'pagos_proveedores', applyFn: applyPagoProveedor,    label: 'Pagos proveedores' },
+      { name: 'caja_admin',        applyFn: applyCajaAdmin,        label: 'Caja Seamus' },
     ];
 
     for (const { name, applyFn, label } of COLLECTIONS) {

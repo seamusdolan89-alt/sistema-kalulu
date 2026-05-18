@@ -65,6 +65,7 @@
     <div class="header-user">
       <span id="user-name">Usuario</span>
       <span id="sync-badge" title="Firebase Sync" style="font-size:12px;cursor:default;user-select:none;">⚫</span>
+      <button id="pull-btn" class="btn btn-sm" title="Actualizar datos desde el local" style="background:#1a4a7a;border:1px solid #64b5f6;color:#fff;font-weight:600;min-width:90px;">⬇ Pull</button>
       <button id="push-pos-btn" class="btn btn-sm" title="Enviar cambios pendientes al POS" style="background:#2d7a4f;border:1px solid #4ade80;color:#fff;font-weight:600;min-width:90px;">⬆ Push POS</button>
       <div class="backup-menu" id="backup-menu">
         <button class="btn btn-outline btn-sm" id="backup-btn" title="Backup de base de datos">💾</button>
@@ -133,6 +134,28 @@
     }
   </script>
   <script>
+    (function() {
+      const pullBtn = document.getElementById('pull-btn');
+      if (pullBtn) {
+        pullBtn.addEventListener('click', async () => {
+          if (!window.SGA_Sync?.isInitialized()) {
+            pullBtn.textContent = '❌ Sin conexión';
+            setTimeout(() => { pullBtn.textContent = '⬇ Pull'; }, 3000);
+            return;
+          }
+          pullBtn.disabled = true;
+          pullBtn.textContent = '⏳ Actualizando...';
+          try {
+            const count = await window.SGA_Sync.syncNow();
+            pullBtn.textContent = count > 0 ? `✓ ${count} nuevo${count !== 1 ? 's' : ''}` : '✓ Al día';
+          } catch (err) {
+            console.error('Pull error:', err.message);
+            pullBtn.textContent = '❌ Error';
+          }
+          setTimeout(() => { pullBtn.textContent = '⬇ Pull'; pullBtn.disabled = false; }, 3000);
+        });
+      }
+    })();
     (function() {
       const btn = document.getElementById('push-pos-btn');
       if (!btn) return;
