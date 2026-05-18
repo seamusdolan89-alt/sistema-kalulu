@@ -2167,6 +2167,14 @@ const ComprasV2 = (() => {
           const saldoResta  = Math.max(0, saldoCompra - aAplicar);
           const sobrante    = Math.max(0, totalCredito - saldoCompra);
 
+          // Build method summary for orphan payments
+          const pagoIds = pagos.map(p => `'${p.id}'`).join(',');
+          const metodosRows = pagoIds.length
+            ? db().query(`SELECT metodo, SUM(monto) as total FROM pagos_proveedores_metodos WHERE pago_id IN (${pagoIds}) GROUP BY metodo`)
+            : [];
+          const METODO_LABEL = { efectivo: 'Efectivo', transferencia: 'Transferencia', caja_seamus: 'Caja Seamus', mercadopago: 'MercadoPago' };
+          const metodosLabel = metodosRows.map(m => `${METODO_LABEL[m.metodo] || m.metodo}: ${fmt$(m.total)}`).join(' · ');
+
           creditoWrap.innerHTML = `
             <div class="cv2-post-credito-banner" id="cv2-credito-banner">
               <div class="cv2-post-credito-icon">💡</div>
@@ -2174,7 +2182,7 @@ const ComprasV2 = (() => {
                 <strong>Pago adelantado disponible</strong>
                 <span>
                   Hay <strong>${fmt$(totalCredito)}</strong> en pagos sin aplicar de
-                  <em>${esc(state.proveedorNombre)}</em>.
+                  <em>${esc(state.proveedorNombre)}</em>${metodosLabel ? ` <small style="opacity:.75">(${metodosLabel})</small>` : ''}.
                   ${aAplicar < saldoCompra
                     ? `Aplicando quedaría un saldo de <strong>${fmt$(saldoResta)}</strong>.`
                     : `Aplicando, la compra quedará <strong>completamente saldada</strong>.`}

@@ -44,6 +44,7 @@
     'roturas':         () => import('./modules/roturas.js').then(m => m.default),
     'gastos':          () => import('./modules/gastos.js').then(m => m.default),
     'caja_admin':      () => import('./modules/caja_admin.js').then(m => m.default),
+    'adelanto_pago':   () => import('./modules/adelanto_pago.js').then(m => m.default),
   };
 
   /**
@@ -145,7 +146,7 @@
   }
 
   // Módulos del admin-pos (panel remoto): siempre completo
-  const ADMIN_POS_MODULES = ['pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno'];
+  const ADMIN_POS_MODULES = ['pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'adelanto_pago'];
 
   function getAllowedModules() {
     if (window.ADMIN_MODE) return ADMIN_POS_MODULES;
@@ -198,6 +199,7 @@
       { name: 'etiquetas', label: '🏷️ Etiquetas' },
       { name: 'informes', label: '📊 Informes' },
       { name: 'gastos', label: '💸 Gastos Generales' },
+      { name: 'adelanto_pago', label: '💳 Adelanto de Pago', adminOnly: true },
       { name: 'caja_admin', label: '💼 Caja Seamus', adminOnly: true },
       { name: 'usuarios', label: '👤 Usuarios' },
     ];

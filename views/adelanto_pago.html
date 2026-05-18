@@ -1,0 +1,97 @@
+<!-- views/adelanto_pago.html — Registrar adelanto de pago a proveedor (admin only) -->
+<div class="page-header">
+  <h2>💳 Adelanto de Pago</h2>
+</div>
+
+<div id="adelanto-pago-container" style="max-width:520px;margin:0 auto;padding:0 4px;">
+
+  <div id="ap-form-card" class="card" style="padding:24px 20px;">
+
+    <div class="form-group">
+      <label style="font-size:15px;font-weight:600;">Proveedor</label>
+      <select id="ap-proveedor" style="font-size:16px;padding:12px 10px;height:auto;">
+        <option value="">— Seleccionar proveedor —</option>
+      </select>
+    </div>
+
+    <!-- Caja Seamus -->
+    <div class="form-group" style="border:1px solid var(--color-border);border-radius:10px;padding:14px 16px;margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="font-size:15px;font-weight:600;min-width:140px;">💼 Caja Seamus</span>
+        <div style="display:flex;align-items:center;gap:6px;flex:1;">
+          <span style="color:var(--color-text-secondary);font-weight:700;">$</span>
+          <input type="number" id="ap-monto-caja_seamus" min="0" step="any" placeholder="0"
+            style="font-size:1.4rem;font-weight:700;padding:8px 10px;flex:1;text-align:right;">
+        </div>
+      </div>
+    </div>
+
+    <!-- Transferencia -->
+    <div class="form-group" style="border:1px solid var(--color-border);border-radius:10px;padding:14px 16px;margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="font-size:15px;font-weight:600;min-width:140px;">🏦 Transferencia</span>
+        <div style="display:flex;align-items:center;gap:6px;flex:1;">
+          <span style="color:var(--color-text-secondary);font-weight:700;">$</span>
+          <input type="number" id="ap-monto-transferencia" min="0" step="any" placeholder="0"
+            style="font-size:1.4rem;font-weight:700;padding:8px 10px;flex:1;text-align:right;">
+        </div>
+      </div>
+      <div id="ap-ref-transferencia-wrap" style="margin-top:10px;display:none;">
+        <input type="text" id="ap-ref-transferencia" placeholder="Nro. comprobante / CBU origen"
+          style="font-size:14px;padding:10px;width:100%;box-sizing:border-box;">
+      </div>
+    </div>
+
+    <!-- MercadoPago -->
+    <div class="form-group" style="border:1px solid var(--color-border);border-radius:10px;padding:14px 16px;margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="font-size:15px;font-weight:600;min-width:140px;">📲 MercadoPago</span>
+        <div style="display:flex;align-items:center;gap:6px;flex:1;">
+          <span style="color:var(--color-text-secondary);font-weight:700;">$</span>
+          <input type="number" id="ap-monto-mercadopago" min="0" step="any" placeholder="0"
+            style="font-size:1.4rem;font-weight:700;padding:8px 10px;flex:1;text-align:right;">
+        </div>
+      </div>
+      <div id="ap-ref-mercadopago-wrap" style="margin-top:10px;display:none;">
+        <input type="text" id="ap-ref-mercadopago" placeholder="Nro. operación / referencia"
+          style="font-size:14px;padding:10px;width:100%;box-sizing:border-box;">
+      </div>
+    </div>
+
+    <!-- Total dinámico -->
+    <div id="ap-total-row" style="display:none;text-align:right;font-size:1.1rem;font-weight:700;
+         color:var(--color-text);margin:4px 0 12px;padding:0 4px;">
+      Total: <span id="ap-total-val"></span>
+    </div>
+
+    <div class="form-group">
+      <label style="font-size:15px;font-weight:600;">Fecha del pago</label>
+      <input type="date" id="ap-fecha" style="font-size:15px;padding:12px 10px;height:auto;">
+    </div>
+
+    <div class="form-group">
+      <label style="font-size:15px;font-weight:600;">Notas (opcional)</label>
+      <input type="text" id="ap-observaciones" placeholder="Ej: Pago factura mayo, anticipo, etc."
+        style="font-size:15px;padding:12px 10px;height:auto;">
+    </div>
+
+    <div id="ap-error" class="alert alert-danger" style="display:none;margin-top:8px;"></div>
+
+    <button id="ap-btn-registrar" class="btn btn-primary"
+      style="width:100%;padding:16px;font-size:18px;font-weight:700;margin-top:8px;border-radius:10px;">
+      Registrar Pago
+    </button>
+
+  </div>
+
+  <!-- Success panel -->
+  <div id="ap-success" class="card" style="display:none;padding:32px 20px;text-align:center;margin-top:16px;">
+    <div style="font-size:3rem;margin-bottom:12px;">✅</div>
+    <div style="font-size:1.2rem;font-weight:700;margin-bottom:8px;">Pago registrado</div>
+    <div id="ap-success-msg" style="color:var(--color-text-secondary);margin-bottom:20px;font-size:15px;line-height:1.5;"></div>
+    <button id="ap-btn-nuevo" class="btn btn-secondary" style="padding:12px 28px;font-size:15px;">
+      Registrar otro pago
+    </button>
+  </div>
+
+</div>
