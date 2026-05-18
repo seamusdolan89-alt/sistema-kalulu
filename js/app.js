@@ -214,7 +214,7 @@
 
     navContainer.innerHTML = moduleList
       .filter(({ name, type, group, adminOnly }) => {
-        if (adminOnly && !isAdmin) return false;
+        if (adminOnly && !isAdmin && !window.ADMIN_MODE) return false;
         const key = type === 'group' ? group : name;
         return allowedModules.includes(key) || adminOnly;
       })
