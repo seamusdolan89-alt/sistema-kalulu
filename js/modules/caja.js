@@ -305,6 +305,18 @@ const Caja = (() => {
          VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
         [id, sesionId, parseFloat(monto), descripcion, tipo, now, usuarioId, now]
       );
+
+      // Todo retiro de caja va automáticamente a Caja Seamus
+      if (tipo === 'retiro') {
+        const adminId = window.SGA_Utils.generateUUID();
+        window.SGA_DB.run(
+          `INSERT INTO caja_admin
+            (id, tipo, monto, concepto, egreso_caja_id, fecha, usuario_id, sync_status, updated_at)
+           VALUES (?, 'ingreso', ?, ?, ?, ?, ?, 'pending', ?)`,
+          [adminId, parseFloat(monto), descripcion || 'Retiro de caja', id, now, usuarioId, now]
+        );
+      }
+
       return { success: true };
     } catch (e) {
       console.error('registrarEgreso:', e);

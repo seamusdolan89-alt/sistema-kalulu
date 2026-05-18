@@ -41,6 +41,7 @@
     { table: 'clientes',          collection: 'clientes',          pk: 'id',   denormalize: null },
     { table: 'promociones',       collection: 'promociones',       pk: 'id',   denormalize: denormalizePromocion },
     { table: 'proveedores',       collection: 'proveedores',       pk: 'id',   denormalize: null },
+    { table: 'caja_admin',        collection: 'caja_admin',        pk: 'id',   denormalize: null },
   ];
 
   // ─── PULL: colecciones Firestore → SQLite ─────────────────────────────────────

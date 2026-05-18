@@ -1,0 +1,84 @@
+<!-- views/caja_admin.html — Caja Seamus (fondo personal del administrador) -->
+<div class="page-header">
+  <h2>💼 Caja Seamus</h2>
+  <button class="btn btn-primary" id="btn-registrar-pago">+ Registrar Pago</button>
+</div>
+
+<!-- Saldo actual -->
+<div id="caja-admin-saldo-card" class="card" style="margin-top:var(--spacing-lg);padding:20px 28px;display:flex;align-items:center;gap:32px;">
+  <div>
+    <div style="font-size:12px;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Saldo disponible</div>
+    <div id="caja-admin-saldo" style="font-size:2rem;font-weight:700;color:var(--color-text);">$0</div>
+  </div>
+  <div style="display:flex;gap:24px;margin-left:auto;">
+    <div style="text-align:right;">
+      <div style="font-size:11px;color:var(--color-text-secondary);">Total ingresos</div>
+      <div id="caja-admin-total-ing" style="font-size:1.1rem;font-weight:600;color:#2e7d32;">$0</div>
+    </div>
+    <div style="text-align:right;">
+      <div style="font-size:11px;color:var(--color-text-secondary);">Total egresos</div>
+      <div id="caja-admin-total-egr" style="font-size:1.1rem;font-weight:600;color:#c62828;">$0</div>
+    </div>
+  </div>
+</div>
+
+<!-- Historial de movimientos -->
+<div class="card" style="margin-top:var(--spacing-lg);">
+  <div style="padding:16px 20px 12px;border-bottom:1px solid var(--color-border);">
+    <strong>Movimientos</strong>
+  </div>
+  <div id="caja-admin-movimientos">
+    <div style="padding:32px;text-align:center;color:var(--color-text-secondary);">Cargando...</div>
+  </div>
+</div>
+
+<!-- Modal: Registrar pago desde Caja Seamus -->
+<div id="modal-caja-admin-pago" class="modal-overlay" style="display:none;">
+  <div class="modal-container" style="max-width:540px;">
+    <div class="modal-header">
+      <h3>Registrar Pago desde Caja Seamus</h3>
+      <button class="modal-close" id="btn-cerrar-modal-pago-admin">&times;</button>
+    </div>
+    <div class="modal-body">
+
+      <div class="form-group">
+        <label>Proveedor</label>
+        <select id="cadmin-proveedor">
+          <option value="">— Todos los proveedores —</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Compra <span style="color:var(--color-danger)">*</span></label>
+        <select id="cadmin-compra">
+          <option value="">— Seleccionar compra —</option>
+        </select>
+        <small id="cadmin-compra-info" style="color:var(--color-text-secondary);display:none;margin-top:4px;display:block;"></small>
+      </div>
+
+      <div class="form-group">
+        <label>Monto a pagar <span style="color:var(--color-danger)">*</span></label>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="color:var(--color-text-secondary);font-size:1.1rem;">$</span>
+          <input type="number" id="cadmin-monto" min="1" placeholder="0" style="flex:1;">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Concepto / Nota</label>
+        <input type="text" id="cadmin-concepto" placeholder="Ej: Pago factura mayo">
+      </div>
+
+      <div id="cadmin-saldo-disponible" style="
+        background:#f3f8ff;border:1px solid #bbdefb;border-radius:8px;
+        padding:10px 14px;font-size:14px;color:#1565c0;margin-top:4px;
+      "></div>
+
+      <div id="cadmin-error" class="alert alert-danger" style="display:none;margin-top:10px;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="btn-cancelar-pago-admin">Cancelar</button>
+      <button class="btn btn-primary" id="btn-confirmar-pago-admin">Confirmar Pago</button>
+    </div>
+  </div>
+</div>

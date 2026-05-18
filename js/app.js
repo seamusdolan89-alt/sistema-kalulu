@@ -43,6 +43,7 @@
     'vencimientos':    () => import('./modules/vencimientos.js').then(m => m.default),
     'roturas':         () => import('./modules/roturas.js').then(m => m.default),
     'gastos':          () => import('./modules/gastos.js').then(m => m.default),
+    'caja_admin':      () => import('./modules/caja_admin.js').then(m => m.default),
   };
 
   /**
@@ -197,6 +198,7 @@
       { name: 'etiquetas', label: '🏷️ Etiquetas' },
       { name: 'informes', label: '📊 Informes' },
       { name: 'gastos', label: '💸 Gastos Generales' },
+      { name: 'caja_admin', label: '💼 Caja Seamus', adminOnly: true },
       { name: 'usuarios', label: '👤 Usuarios' },
     ];
 
@@ -205,10 +207,14 @@
     const currentHash = window.location.hash.slice(1) || '';
     const [currentRoute, currentMedio] = currentHash.split('/');
 
+    const currentUser = window.SGA_Auth.getCurrentUser();
+    const isAdmin = currentUser?.rol === 'admin';
+
     navContainer.innerHTML = moduleList
-      .filter(({ name, type, group }) => {
+      .filter(({ name, type, group, adminOnly }) => {
+        if (adminOnly && !isAdmin) return false;
         const key = type === 'group' ? group : name;
-        return allowedModules.includes(key);
+        return allowedModules.includes(key) || adminOnly;
       })
       .map((item) => {
         if (item.type === 'group') {
