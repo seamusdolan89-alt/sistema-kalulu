@@ -1647,6 +1647,7 @@ const ComprasV2 = (() => {
 
       state.herenciaSincronizados = [];
       showSuccessScreen({ compraId, total, neto, saldoAplicado, sesion });
+      window.SGA_Sync?.pushPending?.();
 
     } catch (e) {
       db().rollbackBatch();

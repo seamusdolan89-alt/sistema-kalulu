@@ -453,6 +453,7 @@ const Caja = (() => {
         state.currentTab = 'resumen';
         render();
         startAutoRefresh();
+        window.SGA_Sync?.pushPending?.();
       } else {
         showToast(result.error, 'error');
       }
@@ -1693,6 +1694,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     };
     const result = cerrarCaja(sesionId, state.user.id, saldoReal, detalleCompleto);
     if (result.success) {
+      window.SGA_Sync?.pushPending?.();
       closeModal();
       stopAutoRefresh();
       let sesionCerrada = null;

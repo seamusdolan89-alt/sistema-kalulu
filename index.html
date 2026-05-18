@@ -23,6 +23,7 @@
     <div class="header-user">
       <span id="user-name">Usuario</span>
       <span id="sync-badge" title="Firebase Sync" style="font-size:12px;cursor:default;user-select:none;">⚫</span>
+      <button id="sync-now-btn" class="btn btn-outline btn-sm" title="Sincronizar ahora" style="min-width:70px;">⟳ Sync</button>
       <div class="backup-menu" id="backup-menu">
         <button class="btn btn-outline btn-sm" id="backup-btn" title="Backup de base de datos">💾</button>
         <div class="backup-dropdown" id="backup-dropdown">
@@ -93,6 +94,28 @@
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js').catch(() => {});
     }
+  </script>
+  <script>
+    (function() {
+      const btn = document.getElementById('sync-now-btn');
+      if (!btn) return;
+      btn.addEventListener('click', async () => {
+        if (!window.SGA_Sync?.isInitialized()) {
+          btn.textContent = '❌ Sin conexión';
+          setTimeout(() => { btn.textContent = '⟳ Sync'; }, 3000);
+          return;
+        }
+        btn.disabled = true;
+        btn.textContent = '⏳ Sync...';
+        try {
+          await window.SGA_Sync.syncNow();
+          btn.textContent = '✓ Listo';
+        } catch (err) {
+          btn.textContent = '❌ Error';
+        }
+        setTimeout(() => { btn.textContent = '⟳ Sync'; btn.disabled = false; }, 3000);
+      });
+    })();
   </script>
 </body>
 </html>

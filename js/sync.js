@@ -20,7 +20,8 @@
   let initialized = false;
   let lastSyncAt = null;
 
-  const SYNC_INTERVAL_MS = 30000;
+  const PULL_INTERVAL_MS  = 30 * 60 * 1000; // 30 min — POS pull automático
+  const ADMIN_INTERVAL_MS = 30 * 1000;       // 30 s  — admin monitoring
   const BATCH_LIMIT = 50;
 
   // ─── PUSH: tablas SQLite → Firestore ─────────────────────────────────────────
@@ -74,7 +75,18 @@
       updateSyncBadge('pending');
 
       await syncNow();
-      syncIntervalId = setInterval(syncNow, SYNC_INTERVAL_MS);
+
+      if (window.ADMIN_MODE) {
+        // Admin: monitoreo completo cada 30 segundos
+        syncIntervalId = setInterval(syncNow, ADMIN_INTERVAL_MS);
+      } else {
+        // POS: solo pull automático cada 30 minutos; push es event-driven
+        syncIntervalId = setInterval(() => {
+          pullFromFirestore()
+            .then(n => { if (n > 0) { console.log(`⬇️  Pull auto: ${n} registros`); updateSyncBadge('ok'); } })
+            .catch(() => {});
+        }, PULL_INTERVAL_MS);
+      }
     } catch (err) {
       console.warn('Firebase Sync no disponible:', err.message);
       updateSyncBadge('error');
@@ -194,6 +206,23 @@
     }
 
     return rows.length;
+  }
+
+  // ─── PUSH event-driven desde POS (llamado por módulos al completar acciones) ──
+
+  async function pushPending() {
+    if (!initialized || !firestoreDb) return 0;
+    let pushed = 0;
+    for (const source of SYNC_SOURCES) {
+      try { pushed += await syncSource(source); }
+      catch (err) { console.warn(`Push error (${source.table}):`, err.message); }
+    }
+    if (pushed > 0) {
+      console.log(`⬆️  Push: ${pushed} registros enviados`);
+      lastSyncAt = new Date();
+      updateSyncBadge('ok');
+    }
+    return pushed;
   }
 
   // ─── PUSH manual desde admin-pos al POS ──────────────────────────────────────
@@ -868,6 +897,7 @@
   window.SGA_Sync = {
     initialize,
     syncNow,
+    pushPending,
     pushToPos,
     initialSyncFromFirestore,
     syncMonitoringData,

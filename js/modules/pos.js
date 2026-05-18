@@ -2420,6 +2420,7 @@ export const POS = (() => {
         hideModal('modal-apertura');
         updateHeaderStatus();
         loadDashboard();
+        window.SGA_Sync?.pushPending?.();
       } else {
         alert('Error: ' + result.error);
       }
@@ -2447,6 +2448,7 @@ export const POS = (() => {
         hideModal('modal-cierre');
         updateHeaderStatus();
         loadDashboard();
+        window.SGA_Sync?.pushPending?.();
       } else {
         alert('Error: ' + result.error);
       }
@@ -3060,6 +3062,7 @@ export const POS = (() => {
       state.editingVentaId = null;
 
       showModalTicket(result.ticketData);
+      window.SGA_Sync?.pushPending?.();
     });
 
     // Discount modal

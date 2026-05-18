@@ -767,6 +767,7 @@ const Gastos = (() => {
         window.SGA_Utils.showNotification(isSueldos ? 'Sueldo registrado' : 'Gasto registrado', 'success');
         renderProvTab(tabKey, { periodo: pShift(periodo, 1) });
       }
+      window.SGA_Sync?.pushPending?.();
     } catch (e) {
       fail('Error: ' + e.message);
     }
