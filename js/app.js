@@ -143,14 +143,31 @@
     }
   }
 
-  // Módulos permitidos por rol (el cajero solo ve POS y Caja)
-  const NAV_BY_ROLE = {
-    admin:     ['pos', 'productos', 'clientes', 'cajas', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios'],
-    encargado: ['pos', 'productos', 'clientes', 'cajas', 'operaciones_stock', 'ordenes', 'proveedores', 'promociones', 'etiquetas', 'informes', 'gastos'],
-    cajero:    ['pos', 'cajas'],
-    // En modo admin-pos: todo excepto venta directa y cajas
-    admin_pos: ['pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno'],
-  };
+  // Módulos del admin-pos (panel remoto): siempre completo
+  const ADMIN_POS_MODULES = ['pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno'];
+
+  function getAllowedModules() {
+    if (window.ADMIN_MODE) return ADMIN_POS_MODULES;
+    const u = window.SGA_Auth.getCurrentUser();
+    if (!u) return [];
+    // Admin: acceso total
+    if (u.rol === 'admin') return ['pos', 'cajas', 'productos', 'clientes', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios'];
+    // Colaboradores: según permisos individuales
+    const P = window.SGA_Permisos;
+    const allowed = ['pos', 'cajas']; // siempre visibles
+    if (P.can('can_productos'))         allowed.push('productos');
+    if (P.can('can_clientes'))          allowed.push('clientes');
+    if (P.can('can_compras'))           allowed.push('compras_v2');
+    if (P.can('can_ordenes'))           allowed.push('ordenes');
+    if (P.can('can_proveedores'))       allowed.push('proveedores', 'cuenta_corriente_proveedores');
+    if (P.can('can_operaciones_stock')) allowed.push('operaciones_stock');
+    if (P.can('can_consumo_interno'))   allowed.push('consumo_interno');
+    if (P.can('can_promociones'))       allowed.push('promociones');
+    if (P.can('can_informes'))          allowed.push('informes');
+    if (P.can('can_gastos'))            allowed.push('gastos');
+    if (P.can('can_etiquetas'))         allowed.push('etiquetas');
+    return allowed;
+  }
 
   /**
    * Initialize navigation
@@ -174,6 +191,8 @@
       { name: 'ordenes', label: '📋 Órdenes' },
       { name: 'proveedores', label: '🏢 Proveedores' },
       { name: 'cuenta_corriente_proveedores', label: '📒 Ctas. Ctes. Proveedores' },
+      { name: 'compras_v2', label: '🛒 Compras' },
+      { name: 'consumo_interno', label: '🔄 Consumo Interno' },
       { name: 'promociones', label: '🏷️ Promociones' },
       { name: 'etiquetas', label: '🏷️ Etiquetas' },
       { name: 'informes', label: '📊 Informes' },
@@ -182,9 +201,7 @@
     ];
 
     const hasPendingResumen = !!localStorage.getItem('compras_resumen_pending');
-    const currentUserRole = app.user?.rol || window.SGA_Auth.getCurrentUser()?.rol;
-    const roleKey = window.ADMIN_MODE ? 'admin_pos' : (currentUserRole || 'cajero');
-    const allowedModules = NAV_BY_ROLE[roleKey] || NAV_BY_ROLE.cajero;
+    const allowedModules = getAllowedModules();
     const currentHash = window.location.hash.slice(1) || '';
     const [currentRoute, currentMedio] = currentHash.split('/');
 

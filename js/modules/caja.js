@@ -71,12 +71,14 @@ const Caja = (() => {
     return window.SGA_Utils.DENOMINACIONES.slice();
   }
 
-  // ── PERMISSION ───────────────────────────────────────────────────────────────
+  // ── PERMISOS ─────────────────────────────────────────────────────────────────
 
-  function canManage() {
-    if (window.ADMIN_MODE) return false;
-    return ['admin', 'encargado'].includes(state.user && state.user.rol);
-  }
+  const P = {
+    cerrarCaja:       () => !window.ADMIN_MODE && window.SGA_Permisos.can('can_cerrar_caja'),
+    registrarEgreso:  () => !window.ADMIN_MODE && window.SGA_Permisos.can('can_registrar_egreso'),
+    registrarIngreso: () => !window.ADMIN_MODE && window.SGA_Permisos.can('can_registrar_ingreso'),
+    pagoProveedor:    () => !window.ADMIN_MODE && window.SGA_Permisos.can('can_pago_proveedor'),
+  };
 
   // ── DATA LAYER ────────────────────────────────────────────────────────────────
 
@@ -488,7 +490,7 @@ const Caja = (() => {
           </small>
         </div>
         <div class="caja-toolbar-right">
-          ${isEfectivo && canManage() ? `<button id="btn-cierre-caja" class="btn btn-danger">Cerrar Caja</button>` : ''}
+          ${isEfectivo && P.cerrarCaja() ? `<button id="btn-cierre-caja" class="btn btn-danger">Cerrar Caja</button>` : ''}
         </div>
       </div>
       <div class="caja-tabs">${tabsHtml}</div>
@@ -502,7 +504,7 @@ const Caja = (() => {
       });
     });
 
-    if (canManage()) {
+    if (P.cerrarCaja()) {
       const btnCierre = ge('btn-cierre-caja');
       if (btnCierre) btnCierre.addEventListener('click', openCierreModal);
     }
@@ -696,22 +698,25 @@ case 'egresos':     renderEgresosIngresos(content);   break;
         <h3>Egresos</h3>
         <div style="display:flex;gap:8px">
           <button id="btn-pago-proveedor" class="btn btn-sm" style="background:#e3f2fd;color:#1565c0;border:1.5px solid #90caf9;font-weight:600">💳 Pago a Proveedor</button>
-          ${canManage() ? `<button id="btn-nuevo-egreso" class="btn btn-sm btn-danger">+ Egreso</button>` : ''}
+          ${P.registrarEgreso() ? `<button id="btn-nuevo-egreso" class="btn btn-sm btn-danger">+ Egreso</button>` : ''}
         </div>
       </div>
       ${eHtml}
       <div class="caja-ei-header" style="margin-top:24px">
         <h3>Ingresos extra</h3>
-        ${canManage() ? `<button id="btn-nuevo-ingreso" class="btn btn-sm btn-success">+ Ingreso</button>` : ''}
+        ${P.registrarIngreso() ? `<button id="btn-nuevo-ingreso" class="btn btn-sm btn-success">+ Ingreso</button>` : ''}
       </div>
       ${iHtml}
     `;
 
-    ge('btn-pago-proveedor').addEventListener('click', openPagoProveedorModal);
-    if (canManage()) {
+    if (P.pagoProveedor()) ge('btn-pago-proveedor').addEventListener('click', openPagoProveedorModal);
+    else ge('btn-pago-proveedor').style.display = 'none';
+    if (P.registrarEgreso()) {
       const btnE = ge('btn-nuevo-egreso');
-      const btnI = ge('btn-nuevo-ingreso');
       if (btnE) btnE.addEventListener('click', openEgresoModal);
+    }
+    if (P.registrarIngreso()) {
+      const btnI = ge('btn-nuevo-ingreso');
       if (btnI) btnI.addEventListener('click', openIngresoModal);
     }
   }
@@ -1215,7 +1220,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
         <p style="margin:0;font-size:14px;color:#666">
           Contá los billetes y monedas en caja en cualquier momento de la sesión.
         </p>
-        ${state.user && state.user.rol === 'admin'
+        ${window.SGA_Permisos.can('can_cerrar_caja')
           ? `<button id="btn-editar-denoms" class="btn btn-outline btn-sm" style="white-space:nowrap;margin-left:12px">⚙ Editar denominaciones</button>`
           : ''}
       </div>

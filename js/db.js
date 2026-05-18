@@ -851,6 +851,7 @@
     const usuariosMigrations = [
       `ALTER TABLE usuarios ADD COLUMN username TEXT`,
       `ALTER TABLE usuarios ADD COLUMN password_hash TEXT`,
+      `ALTER TABLE usuarios ADD COLUMN permisos_json TEXT`,
     ];
     for (const sql of usuariosMigrations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }
