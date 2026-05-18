@@ -1688,9 +1688,8 @@ export const POS = (() => {
         </div>
       `;
 
-      const rol = state.currentUser?.rol;
-      const canAnular = !window.ADMIN_MODE && (rol === 'admin' || rol === 'encargado') && venta.estado === 'completada';
-      const canEditar = !window.ADMIN_MODE && venta.estado === 'completada';
+      const canAnular = !window.ADMIN_MODE && window.SGA_Permisos.can('can_anular_venta') && venta.estado === 'completada';
+      const canEditar = !window.ADMIN_MODE && window.SGA_Permisos.can('can_editar_venta') && venta.estado === 'completada';
       footer.innerHTML = `
         <button class="dp-btn" id="dp-btn-reimprimir">🖨️ Reimprimir</button>
         <button class="dp-btn danger" id="dp-btn-anular" ${canAnular ? '' : 'disabled'} title="${canAnular ? '' : 'Sin permiso o ya anulada'}">↩ Anular</button>
@@ -2908,9 +2907,8 @@ export const POS = (() => {
           const topeRows = window.SGA_DB.query(`SELECT tope_deuda FROM clientes WHERE id = ?`, [state.clienteId]);
           const topeVal = topeRows.length ? topeRows[0].tope_deuda : 0;
           const msg = `La deuda de ${clienteNombre} superaría el tope de ${formatCurrency(topeVal)}.\n¿Confirmar de todas formas?`;
-          const u = state.currentUser;
-          if (u && u.rol === 'cajero') {
-            alert(`La deuda de ${clienteNombre} superaría el tope de ${formatCurrency(topeVal)}. Solo un encargado o admin puede autorizar esto.`);
+          if (!window.SGA_Permisos.can('can_sobrepasar_tope_cc')) {
+            alert(`La deuda de ${clienteNombre} superaría el tope de ${formatCurrency(topeVal)}. No tenés permiso para autorizar esto.`);
             return;
           }
           if (!confirm(msg)) return;
@@ -3085,8 +3083,15 @@ export const POS = (() => {
       const item = state.cart[idx];
       if (!item) { hideModal('modal-desc'); return; }
       const raw = parseFloat(ge('desc-amount-input')?.value) || 0;
+      const maxPct = window.SGA_Permisos.maxDescuento();
+      const subtotalItem = item.cantidad * item.precioUnitario;
+      const pctAplicado = state.descTipo === 'pct' ? raw : (subtotalItem > 0 ? (raw / subtotalItem) * 100 : 0);
+      if (pctAplicado > maxPct) {
+        alert(`Tu límite de descuento es ${maxPct}%. El descuento ingresado supera ese límite.`);
+        return;
+      }
       if (state.descTipo === 'pct') {
-        item.descuentoItem = (item.cantidad * item.precioUnitario) * (raw / 100);
+        item.descuentoItem = subtotalItem * (raw / 100);
       } else {
         item.descuentoItem = raw;
       }
@@ -3111,8 +3116,15 @@ export const POS = (() => {
     });
     safeOn('btn-desc-total-confirm', 'click', () => {
       const raw = parseFloat(ge('desc-total-input')?.value) || 0;
+      const maxPct = window.SGA_Permisos.maxDescuento();
+      const subtotal = getCartSubtotal();
+      const pctAplicado = state.descTipoTotal === 'pct' ? raw : (subtotal > 0 ? (raw / subtotal) * 100 : 0);
+      if (pctAplicado > maxPct) {
+        alert(`Tu límite de descuento es ${maxPct}%. El descuento ingresado supera ese límite.`);
+        return;
+      }
       if (state.descTipoTotal === 'pct') {
-        state.descuentoTotal = getCartSubtotal() * (raw / 100);
+        state.descuentoTotal = subtotal * (raw / 100);
       } else {
         state.descuentoTotal = raw;
       }

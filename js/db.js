@@ -851,6 +851,7 @@
     const usuariosMigrations = [
       `ALTER TABLE usuarios ADD COLUMN username TEXT`,
       `ALTER TABLE usuarios ADD COLUMN password_hash TEXT`,
+      `ALTER TABLE usuarios ADD COLUMN permisos_json TEXT`,
     ];
     for (const sql of usuariosMigrations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }
@@ -965,6 +966,25 @@
         )
       `);
     } catch(e) { console.warn('gastos:', e.message); }
+
+    // ── Caja Admin (fondo propio del administrador) ───────────────────────────
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS caja_admin (
+          id TEXT PRIMARY KEY,
+          tipo TEXT NOT NULL CHECK(tipo IN ('ingreso','egreso')),
+          monto REAL NOT NULL,
+          concepto TEXT,
+          egreso_caja_id TEXT,  -- referencia al retiro de caja que generó el ingreso
+          compra_id TEXT,       -- referencia a la compra que se pagó (egresos)
+          proveedor_id TEXT,    -- proveedor de la compra (desnormalizado para rapidez)
+          fecha TEXT NOT NULL,
+          usuario_id TEXT NOT NULL,
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
+        )
+      `);
+    } catch(e) { console.warn('caja_admin:', e.message); }
 
     // Primera vez: si no hay usuarios, crear sucursal y admin por defecto
     try {
