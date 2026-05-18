@@ -146,14 +146,14 @@
   }
 
   // Módulos del admin-pos (panel remoto): siempre completo
-  const ADMIN_POS_MODULES = ['pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'adelanto_pago'];
+  const ADMIN_POS_MODULES = ['pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'adelanto_pago', 'caja_admin'];
 
   function getAllowedModules() {
     if (window.ADMIN_MODE) return ADMIN_POS_MODULES;
     const u = window.SGA_Auth.getCurrentUser();
     if (!u) return [];
     // Admin: acceso total
-    if (u.rol === 'admin') return ['pos', 'cajas', 'productos', 'clientes', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios'];
+    if (u.rol === 'admin') return ['pos', 'cajas', 'productos', 'clientes', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'caja_admin', 'adelanto_pago'];
     // Colaboradores: según permisos individuales
     const P = window.SGA_Permisos;
     const allowed = ['pos', 'cajas']; // siempre visibles
