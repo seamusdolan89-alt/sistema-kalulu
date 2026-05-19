@@ -45,6 +45,8 @@
     'gastos':          () => import('./modules/gastos.js').then(m => m.default),
     'caja_admin':      () => import('./modules/caja_admin.js').then(m => m.default),
     'adelanto_pago':   () => import('./modules/adelanto_pago.js').then(m => m.default),
+    'configuracion':   () => import('./modules/configuracion.js').then(m => m.default),
+    'flujo':           () => import('./modules/flujo.js').then(m => m.default),
   };
 
   /**
@@ -146,7 +148,7 @@
   }
 
   // Módulos del admin-pos (panel remoto): siempre completo
-  const ADMIN_POS_MODULES = ['pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'adelanto_pago', 'caja_admin'];
+  const ADMIN_POS_MODULES = ['pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'adelanto_pago', 'caja_admin', 'configuracion', 'flujo'];
 
   function getAllowedModules() {
     if (window.ADMIN_MODE) return ADMIN_POS_MODULES;
@@ -190,17 +192,15 @@
         ],
       },
       { name: 'operaciones_stock', label: '📦 Operaciones de Stock' },
-      { name: 'ordenes', label: '📋 Órdenes' },
       { name: 'proveedores', label: '🏢 Proveedores' },
-      { name: 'cuenta_corriente_proveedores', label: '📒 Ctas. Ctes. Proveedores' },
-      { name: 'compras_v2', label: '🛒 Compras' },
       { name: 'promociones', label: '🏷️ Promociones' },
       { name: 'etiquetas', label: '🏷️ Etiquetas' },
       { name: 'informes', label: '📊 Informes' },
       { name: 'gastos', label: '💸 Gastos Generales' },
-      { name: 'adelanto_pago', label: '💳 Adelanto de Pago', adminOnly: true },
       { name: 'caja_admin', label: '💼 Caja Seamus', adminOnly: true },
       { name: 'usuarios', label: '👤 Usuarios' },
+      { name: 'flujo', label: '🌊 Flujo de Fondos', adminPosOnly: true },
+      { name: 'configuracion', label: '⚙️ Configuración', adminOnly: true },
     ];
 
     const hasPendingResumen = !!localStorage.getItem('compras_resumen_pending');
@@ -212,10 +212,11 @@
     const isAdmin = currentUser?.rol === 'admin';
 
     navContainer.innerHTML = moduleList
-      .filter(({ name, type, group, adminOnly }) => {
+      .filter(({ name, type, group, adminOnly, adminPosOnly }) => {
+        if (adminPosOnly && !window.ADMIN_MODE) return false;
         if (adminOnly && !isAdmin && !window.ADMIN_MODE) return false;
         const key = type === 'group' ? group : name;
-        return allowedModules.includes(key) || adminOnly;
+        return allowedModules.includes(key) || adminOnly || (adminPosOnly && window.ADMIN_MODE);
       })
       .map((item) => {
         if (item.type === 'group') {

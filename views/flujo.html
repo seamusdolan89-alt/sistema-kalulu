@@ -1,0 +1,75 @@
+<!-- views/flujo.html — Flujo de Fondos (admin-pos only) -->
+<style>
+  .flujo-table {
+    border-collapse: collapse;
+    font-size: 13px;
+    width: 100%;
+  }
+  .flujo-table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--color-background, #f5f5f5);
+    z-index: 2;
+    padding: 6px 10px;
+    text-align: center;
+    white-space: nowrap;
+    border-bottom: 2px solid var(--color-border, #ddd);
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .flujo-label-col {
+    position: sticky;
+    left: 0;
+    background: var(--color-card-bg, #fff);
+    z-index: 3;
+    min-width: 170px;
+    text-align: left !important;
+    padding: 5px 10px 5px 14px !important;
+    border-right: 2px solid var(--color-border, #ddd);
+    white-space: nowrap;
+  }
+  thead th.flujo-label-col { z-index: 4; background: var(--color-background, #f5f5f5); }
+  .flujo-cell {
+    padding: 5px 10px;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--color-border, #eee);
+    min-width: 100px;
+  }
+  .flujo-cell-past   { background: #f8f8f8; }
+  .flujo-cell-today  { background: #fffde7; }
+  .flujo-cell-future { background: #fff; }
+  .flujo-col-past   { background: #f0f0f0; }
+  .flujo-col-today  { background: #fff9c4; color: var(--color-primary, #0066cc); }
+  .flujo-col-future { background: var(--color-background, #f5f5f5); }
+  .flujo-section-header td {
+    background: #eceff1;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: #546e7a;
+    padding: 8px 14px 4px;
+    border-top: 2px solid #cfd8dc;
+  }
+  .flujo-row-total td {
+    border-top: 1px solid #ccc;
+    background: inherit;
+    font-weight: 700;
+  }
+  .flujo-row-saldo td { color: #1565c0; }
+  .flujo-row-green td { color: #2e7d32; }
+  .flujo-row-red   td { color: #c62828; }
+  .flujo-sub { padding-left: 4px; color: var(--color-text-secondary); font-size: 12px; }
+  .flujo-editable:hover { background: #e3f2fd !important; cursor: pointer; }
+  .flujo-editable input {
+    width: 88px; text-align: right; font-size: 13px;
+    padding: 3px 6px; border: 2px solid var(--color-primary, #0066cc);
+    border-radius: 4px; background: #fff;
+  }
+  #flujo-scroll-wrapper { border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.08); overflow-x: auto; }
+</style>
+
+<div class="page-header">
+  <h2>📊 Flujo de Fondos</h2>
+</div>
+<div id="flujo-root" style="padding-bottom: 40px;"></div>

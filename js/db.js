@@ -1012,6 +1012,20 @@
       `);
     } catch(e) { console.warn('caja_admin:', e.message); }
 
+    // ── Flujo de Fondos — proyecciones manuales de ingresos / egresos ─────────
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS flujo_forecast (
+          id TEXT PRIMARY KEY,
+          fecha TEXT NOT NULL,
+          tipo TEXT NOT NULL CHECK(tipo IN ('ingreso','egreso')),
+          monto REAL NOT NULL DEFAULT 0,
+          updated_at TEXT,
+          UNIQUE(fecha, tipo)
+        )
+      `);
+    } catch(e) { console.warn('flujo_forecast:', e.message); }
+
     // Primera vez: si no hay usuarios, crear sucursal y admin por defecto
     try {
       const stmt = database.prepare('SELECT COUNT(*) as count FROM usuarios');
