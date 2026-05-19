@@ -23,7 +23,6 @@ const CajaAdminModule = (() => {
     }
     renderSaldo();
     renderMovimientos();
-    bindEvents();
   }
 
   // ─── Saldo y totales ─────────────────────────────────────────────────────

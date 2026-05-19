@@ -195,7 +195,6 @@
       { name: 'etiquetas', label: '🏷️ Etiquetas' },
       { name: 'informes', label: '📊 Informes' },
       { name: 'gastos', label: '💸 Gastos Generales' },
-      { name: 'adelanto_pago', label: '💳 Adelanto de Pago', adminOnly: true },
       { name: 'caja_admin', label: '💼 Caja Seamus', adminOnly: true },
       { name: 'usuarios', label: '👤 Usuarios' },
     ];
