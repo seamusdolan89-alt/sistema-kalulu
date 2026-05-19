@@ -75,6 +75,22 @@
       console.log('✅ Firebase Sync inicializado (bidireccional)');
       updateSyncBadge('pending');
 
+      // Fix de una sola vez: en admin-pos, resetear pagos con caja_seamus/mercadopago
+      // que quedaron como 'synced' con el CHECK constraint viejo, para que se re-pusheen.
+      if (window.ADMIN_MODE && !localStorage.getItem('fix_ppm_check_repush_done')) {
+        try {
+          window.SGA_DB.run(`
+            UPDATE pagos_proveedores SET sync_status = 'pending'
+            WHERE id IN (
+              SELECT pago_id FROM pagos_proveedores_metodos
+              WHERE metodo IN ('caja_seamus', 'mercadopago')
+            )
+          `);
+          localStorage.setItem('fix_ppm_check_repush_done', '1');
+          console.log('🔧 Fix pagos_proveedores_metodos: pagos reseteados a pending para re-push');
+        } catch(e) { console.warn('Fix pagos_proveedores_metodos:', e.message); }
+      }
+
       await syncNow();
 
       if (!window.ADMIN_MODE) {
@@ -364,7 +380,7 @@
 
     for (const metodo of (data._metodos || [])) {
       window.SGA_DB.run(`
-        INSERT OR IGNORE INTO pagos_proveedores_metodos
+        INSERT OR REPLACE INTO pagos_proveedores_metodos
           (id, pago_id, metodo, monto, referencia)
         VALUES (?,?,?,?,?)`,
         [metodo.id, data.id, metodo.metodo, metodo.monto, metodo.referencia || null]
