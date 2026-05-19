@@ -307,8 +307,9 @@ const SGA_PagosProveedores = (() => {
           `SELECT metodo, referencia FROM pagos_proveedores_metodos WHERE pago_id = ?`,
           [i.pago_id]
         );
+        const MLBL = { efectivo: 'Efectivo', transferencia: 'Transferencia', caja_seamus: 'Caja Seamus', mercadopago: 'MercadoPago' };
         const desc = metodos.map(m =>
-          (m.metodo === 'efectivo' ? 'Efectivo' : 'Transferencia')
+          (MLBL[m.metodo] || m.metodo)
           + (m.referencia ? ` (${m.referencia})` : '')
         ).join(' + ') || i.observaciones || 'Pago';
         return { fecha: i.fecha, monto: parseFloat(i.monto_imputado) || 0, desc, pago_id: i.pago_id };
@@ -337,8 +338,9 @@ const SGA_PagosProveedores = (() => {
         `SELECT metodo, referencia FROM pagos_proveedores_metodos WHERE pago_id = ?`,
         [p.id]
       );
+      const MLBL = { efectivo: 'Efectivo', transferencia: 'Transferencia', caja_seamus: 'Caja Seamus', mercadopago: 'MercadoPago' };
       const desc = metodos.map(m =>
-        (m.metodo === 'efectivo' ? 'Efectivo' : 'Transferencia')
+        (MLBL[m.metodo] || m.metodo)
         + (m.referencia ? ` (${m.referencia})` : '')
       ).join(' + ') || p.observaciones || 'Pago';
       return {
@@ -504,7 +506,7 @@ const CuentaCorrienteProveedores = (() => {
 
     let proveedores = data().getResumenProveedores();
 
-    if (state.soloDeuda) proveedores = proveedores.filter(p => p.saldo > 0.01);
+    if (state.soloDeuda) proveedores = proveedores.filter(p => Math.abs(p.saldo) > 0.01);
     if (state.search) {
       const q = state.search.toLowerCase();
       proveedores = proveedores.filter(p =>
@@ -534,7 +536,7 @@ const CuentaCorrienteProveedores = (() => {
       ${!proveedores.length ? `
         <div class="ccprov-empty">
           <div class="ccprov-empty-icon">📒</div>
-          <p>${state.search ? 'Sin resultados.' : state.soloDeuda ? 'No hay proveedores con deuda pendiente.' : 'No hay proveedores registrados.'}</p>
+          <p>${state.search ? 'Sin resultados.' : state.soloDeuda ? 'No hay proveedores con saldo pendiente.' : 'No hay proveedores registrados.'}</p>
           ${state.soloDeuda ? `<button class="ccprov-btn-link" id="btn-ver-todos">Ver todos los proveedores</button>` : ''}
         </div>
       ` : `
@@ -612,7 +614,7 @@ const CuentaCorrienteProveedores = (() => {
         <input type="text" class="ccprov-search" id="ccprov-search"
           placeholder="Buscar proveedor…" autocomplete="off" spellcheck="false">
         <button class="ccprov-toggle ${state.soloDeuda ? 'active' : ''}" id="btn-toggle-deuda">
-          Solo con deuda
+          Con saldo
         </button>
       </div>
 
