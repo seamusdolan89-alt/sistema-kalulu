@@ -121,8 +121,9 @@ const SGA_PagosProveedores = (() => {
         `SELECT metodo, monto, referencia FROM pagos_proveedores_metodos WHERE pago_id = ?`,
         [p.id]
       );
+      const METODO_LABEL = { efectivo: 'Efectivo', transferencia: 'Transferencia', caja_seamus: 'Caja Seamus', mercadopago: 'MercadoPago' };
       const desc = metodos.map(m =>
-        (m.metodo === 'efectivo' ? 'Efectivo' : 'Transferencia')
+        (METODO_LABEL[m.metodo] || m.metodo)
         + (m.referencia ? ` (${m.referencia})` : '')
       ).join(' + ');
       return {

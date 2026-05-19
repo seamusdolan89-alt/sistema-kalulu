@@ -20,7 +20,7 @@
   let initialized = false;
   let lastSyncAt = null;
 
-  const PULL_INTERVAL_MS  = 30 * 60 * 1000; // 30 min — POS pull automático
+  const PULL_INTERVAL_MS  = 5 * 60 * 1000;  // 5 min — POS pull automático
   const ADMIN_INTERVAL_MS = 30 * 1000;       // 30 s  — admin monitoring
   const BATCH_LIMIT = 50;
 

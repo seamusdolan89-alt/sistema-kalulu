@@ -106,6 +106,17 @@ const AdelantoPagoModule = (() => {
 
     ge('ap-form-card').style.display = 'none';
     ge('ap-success').style.display   = '';
+
+    // Push inmediato para que el POS local reciba el pago sin esperar
+    if (window.SGA_Sync?.isInitialized()) {
+      const pushMsg = document.createElement('div');
+      pushMsg.style.cssText = 'font-size:13px;color:#888;margin-top:8px;';
+      pushMsg.textContent = '⏳ Enviando al POS local...';
+      ge('ap-success').appendChild(pushMsg);
+      window.SGA_Sync.pushToPos()
+        .then(n => { pushMsg.textContent = '✅ Pago enviado al POS local. La cajera lo recibirá en el próximo pull.'; })
+        .catch(() => { pushMsg.textContent = '⚠️ No se pudo enviar automáticamente. Usá el botón Push POS.'; });
+    }
   }
 
   function resetForm() {
