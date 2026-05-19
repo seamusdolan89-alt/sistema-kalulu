@@ -523,7 +523,39 @@
   }
   .ccprov-btn-vincular:hover { background: #1976d2; }
   .ccprov-remitos-empty { padding: 28px 20px; text-align: center; color: #8090a0; font-size: 14px; }
+
+  /* ── Tabs de sección ── */
+  .prov-section-tabs {
+    display: flex;
+    padding: 0 20px;
+    border-bottom: 2px solid var(--color-border);
+    background: var(--color-background);
+  }
+  .prov-section-tab {
+    padding: 10px 18px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+  }
+  .prov-section-tab:hover { color: var(--color-primary, #0066cc); }
+  .prov-section-tab.active {
+    color: var(--color-primary, #0066cc);
+    border-bottom-color: var(--color-primary, #0066cc);
+  }
 </style>
+
+<div class="prov-section-tabs">
+  <button class="prov-section-tab" onclick="window.location.hash='proveedores'">🏢 Proveedores</button>
+  <button class="prov-section-tab" onclick="window.location.hash='ordenes'">📋 Órdenes</button>
+  <button class="prov-section-tab active" onclick="window.location.hash='cuenta_corriente_proveedores'">📒 Cuentas Corrientes</button>
+</div>
 
 <div id="ccprov-root"></div>
 <div id="ccprov-overlay" class="ccprov-overlay hidden"></div>
