@@ -96,28 +96,7 @@
     }
   </script>
 
-  <!-- Bloqueo de DevTools para el POS (la vendedora no necesita acceso a la consola) -->
-  <script>
-    (function() {
-      // Bloquear atajos de teclado que abren DevTools
-      document.addEventListener('keydown', function(e) {
-        // F12
-        if (e.key === 'F12') { e.preventDefault(); e.stopPropagation(); return false; }
-        // Ctrl+Shift+I / Ctrl+Shift+J / Ctrl+Shift+C (Inspect / Console / Elements)
-        if (e.ctrlKey && e.shiftKey && ['i','I','j','J','c','C'].includes(e.key)) {
-          e.preventDefault(); e.stopPropagation(); return false;
-        }
-        // Ctrl+U (ver código fuente)
-        if (e.ctrlKey && e.key === 'u') { e.preventDefault(); e.stopPropagation(); return false; }
-      }, true);
-
-      // Bloquear clic derecho (evita "Inspeccionar elemento")
-      document.addEventListener('contextmenu', function(e) {
-        e.preventDefault();
-        return false;
-      }, true);
-    })();
-  </script>
+  <!-- DevTools desbloqueado temporalmente para depuración -->
   <script>
     (function() {
       const btn = document.getElementById('sync-now-btn');
