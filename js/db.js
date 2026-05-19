@@ -778,13 +778,39 @@
         CREATE TABLE IF NOT EXISTS pagos_proveedores_metodos (
           id TEXT PRIMARY KEY,
           pago_id TEXT NOT NULL REFERENCES pagos_proveedores(id),
-          metodo TEXT NOT NULL CHECK(metodo IN ('efectivo','transferencia')),
+          metodo TEXT NOT NULL CHECK(metodo IN ('efectivo','transferencia','caja_seamus','mercadopago')),
           monto REAL NOT NULL,
           referencia TEXT,
           sesion_caja_id TEXT REFERENCES sesiones_caja(id)
         )
       `);
     } catch(e) { console.warn('pagos_proveedores_metodos:', e.message); }
+
+    // Migración: ampliar CHECK constraint de pagos_proveedores_metodos para incluir caja_seamus y mercadopago
+    try {
+      const ppmSchema = database.prepare(
+        `SELECT sql FROM sqlite_master WHERE type='table' AND name='pagos_proveedores_metodos'`
+      );
+      let ppmSql = '';
+      if (ppmSchema.step()) ppmSql = ppmSchema.getAsObject().sql || '';
+      ppmSchema.free();
+      if (ppmSql && !ppmSql.includes('caja_seamus')) {
+        database.run(`ALTER TABLE pagos_proveedores_metodos RENAME TO pagos_proveedores_metodos_bak`);
+        database.run(`
+          CREATE TABLE pagos_proveedores_metodos (
+            id TEXT PRIMARY KEY,
+            pago_id TEXT NOT NULL REFERENCES pagos_proveedores(id),
+            metodo TEXT NOT NULL CHECK(metodo IN ('efectivo','transferencia','caja_seamus','mercadopago')),
+            monto REAL NOT NULL,
+            referencia TEXT,
+            sesion_caja_id TEXT REFERENCES sesiones_caja(id)
+          )
+        `);
+        database.run(`INSERT INTO pagos_proveedores_metodos SELECT * FROM pagos_proveedores_metodos_bak`);
+        database.run(`DROP TABLE pagos_proveedores_metodos_bak`);
+        console.log('✅ Migración pagos_proveedores_metodos: CHECK constraint ampliado');
+      }
+    } catch(e) { console.warn('migración pagos_proveedores_metodos:', e.message); }
 
     // imputaciones_pagos: links a payment (or portion) to a specific compra
     // compra_id NULL means the credit is "orphan" (paid in advance, not yet matched)
