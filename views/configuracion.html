@@ -1,0 +1,43 @@
+<!-- views/configuracion.html — Configuración y herramientas del sistema -->
+<div class="page-header">
+  <h2>⚙️ Configuración</h2>
+</div>
+
+<div style="max-width:600px;">
+
+  <!-- Clientes -->
+  <div class="card" style="margin-top:var(--spacing-lg);padding:20px 24px;">
+    <h3 style="margin:0 0 16px;font-size:1rem;color:var(--color-text);">👥 Clientes</h3>
+
+    <div class="form-group" style="margin-bottom:0;">
+      <label style="font-weight:600;font-size:14px;">Límite de deuda predeterminado para nuevos clientes</label>
+      <p style="font-size:12px;color:var(--color-text-secondary);margin:4px 0 10px;">
+        Se aplica automáticamente al crear un cliente. Cada cliente puede tener su propio límite individual.
+      </p>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:1.1rem;color:var(--color-text-secondary);">$</span>
+        <input type="number" id="cfg-tope-deuda" min="0" step="1000" placeholder="50000"
+          style="font-size:1.1rem;font-weight:600;padding:8px 12px;max-width:180px;text-align:right;">
+        <button class="btn btn-primary" id="cfg-btn-guardar-tope" style="padding:8px 18px;">Guardar</button>
+      </div>
+      <div id="cfg-tope-msg" style="font-size:13px;margin-top:8px;display:none;"></div>
+    </div>
+  </div>
+
+  <!-- Herramientas de desarrollo -->
+  <div class="card" style="margin-top:var(--spacing-lg);padding:20px 24px;border:2px solid #ffb300;">
+    <h3 style="margin:0 0 6px;font-size:1rem;color:#e65100;">⚠️ Herramientas de desarrollo</h3>
+    <p style="margin:0 0 14px;font-size:13px;color:var(--color-text-secondary);">
+      Estas acciones son destructivas e irreversibles. Usar solo en entorno de desarrollo antes de la migración final.
+    </p>
+    <button class="btn" id="cfg-btn-reset-db"
+      style="background:#e53935;color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:14px;cursor:pointer;font-weight:600;">
+      Borrar base de datos completa
+    </button>
+    <p style="margin:10px 0 0;font-size:12px;color:#999;">
+      Elimina todos los datos (productos, ventas, clientes, stock, etc.).
+      Los proveedores se pueden recuperar desde el Excel exportado. La app se recarga automáticamente.
+    </p>
+  </div>
+
+</div>
