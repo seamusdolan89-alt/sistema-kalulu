@@ -194,7 +194,6 @@
       { name: 'proveedores', label: '🏢 Proveedores' },
       { name: 'cuenta_corriente_proveedores', label: '📒 Ctas. Ctes. Proveedores' },
       { name: 'compras_v2', label: '🛒 Compras' },
-      { name: 'consumo_interno', label: '🔄 Consumo Interno' },
       { name: 'promociones', label: '🏷️ Promociones' },
       { name: 'etiquetas', label: '🏷️ Etiquetas' },
       { name: 'informes', label: '📊 Informes' },
