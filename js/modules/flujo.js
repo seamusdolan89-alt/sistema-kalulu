@@ -1,220 +1,198 @@
 /**
- * flujo.js — Flujo de Fondos (admin-pos only)
+ * flujo.js — Flujo de Fondos
  *
- * Columnas = días (últimos 3 + hoy + próximos 10, scrollable hasta +30).
- * Pasado = sombreado (actuals desde DB). Presente/futuro = blanco (forecast manual).
- * Segunda tabla: variación forecast vs real para días pasados con proyección cargada.
+ * Tabla de 14 días (hoy + 13).
+ * Filas: Saldo inicial MP · Dinero a liquidar · pagos por proveedor · Saldo Final.
+ * Estimados en amarillo, reales/manuales en blanco.
  */
 
 const FlujoModule = (() => {
   'use strict';
 
-  const fmt = (n) => (n == null ? '—' : window.SGA_Utils.formatCurrency(Math.round(n)));
+  const DB  = () => window.SGA_DB;
+  const fmt = (n) => (n == null || isNaN(n) ? '—' : '$ ' + Math.round(n).toLocaleString('es-AR'));
 
-  const MEDIOS = ['efectivo', 'mercadopago', 'tarjeta', 'transferencia'];
-  const MLBL   = {
-    efectivo:      '💵 Efectivo',
-    mercadopago:   '📲 MercadoPago',
-    tarjeta:       '💳 Tarjeta',
-    transferencia: '🏦 Transferencia',
-  };
-  const DIAS_S = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-
-  // State
-  let allDias  = [];   // 33 días (3 past + hoy + 29 future)
-  let diasShow = [];   // subset mostrado (14 initial)
-  let actuals  = {};   // { 'YYYY-MM-DD': { ventas:{m:n}, gastos:{m:n}, pagos:{m:n} } }
-  let forecast = {};   // { 'YYYY-MM-DD': { ingreso:n, egreso:n } }
-  let saldoIni = {};   // { 'YYYY-MM-DD': { efectivo:n, mercadopago:n, tarjeta:n, transferencia:n } }
+  const DIAS_LABEL = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const DIAS_FULL  = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
 
   const HOY = new Date().toISOString().slice(0, 10);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
-  function dateAdd(str, d) {
-    const dt = new Date(str + 'T12:00:00');
+  function dateAdd(base, d) {
+    const dt = new Date(base + 'T12:00:00');
     dt.setDate(dt.getDate() + d);
     return dt.toISOString().slice(0, 10);
   }
 
-  function dayLabel(dia) {
-    const d  = new Date(dia + 'T12:00:00');
-    const dd = String(d.getDate()).padStart(2, '0');
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dow = DIAS_S[d.getDay()];
-    const isHoy = dia === HOY;
-    return `${isHoy ? '<strong>' : ''}${dow}<br><span style="font-size:11px;">${dd}/${mm}</span>${isHoy ? '</strong>' : ''}`;
+  function dayOfWeek(fecha) {
+    return new Date(fecha + 'T12:00:00').getDay(); // 0=Dom
   }
 
-  function colCls(dia) {
-    if (dia < HOY) return 'flujo-col-past';
-    if (dia === HOY) return 'flujo-col-today';
-    return 'flujo-col-future';
+  // Map JS getDay() (0=Dom) to our dia_entrega storage (1=Lun..7=Dom)
+  function jsDoW2stored(jsDay) {
+    return jsDay === 0 ? 7 : jsDay;
   }
-  function cellCls(dia) {
-    if (dia < HOY) return 'flujo-cell-past';
-    if (dia === HOY) return 'flujo-cell-today';
-    return 'flujo-cell-future';
+
+  function buildDias() {
+    const dias = [];
+    for (let i = 0; i < 14; i++) dias.push(dateAdd(HOY, i));
+    return dias;
   }
+
+  // ── State ──────────────────────────────────────────────────────────────────
+
+  let dias        = [];
+  let proveedores = [];   // [{id, razon_social, alias, dia_entrega}]
+  let comprasProv = {};   // { 'provId|fecha': total }
+  let liquidar    = {};   // { 'fecha': monto }
+  let pagosManual = {};   // { 'provId|fecha': {monto, es_estimado} }
+  let promedios   = {};   // { 'provId': avg_last3 }
+  let saldoIniBase = 0;   // saldo inicial del día 0
 
   // ── Data loading ───────────────────────────────────────────────────────────
 
-  function buildRange() {
-    const start = dateAdd(HOY, -3);
-    allDias = [];
-    for (let i = 0; i < 33; i++) allDias.push(dateAdd(start, i));
-    diasShow = allDias.slice(0, 14);
-  }
+  function loadData() {
+    dias = buildDias();
+    const fechaMin = dias[0];
+    const fechaMax = dias[dias.length - 1];
 
-  function loadActuals() {
-    actuals = {};
-    const ensure = (dia) => {
-      if (!actuals[dia]) actuals[dia] = { ventas: {}, gastos: {}, pagos: {} };
-    };
-
-    const ventas = window.SGA_DB.query(`
-      SELECT DATE(v.fecha) as dia, vp.medio, SUM(vp.monto) as monto
-      FROM venta_pagos vp
-      JOIN ventas v ON v.id = vp.venta_id
-      WHERE vp.medio IN ('efectivo','mercadopago','tarjeta','transferencia')
-      GROUP BY dia, vp.medio
-    `);
-    for (const r of ventas) {
-      ensure(r.dia);
-      actuals[r.dia].ventas[r.medio] = (actuals[r.dia].ventas[r.medio] || 0) + (r.monto || 0);
-    }
-
-    const gastos = window.SGA_DB.query(`
-      SELECT DATE(fecha) as dia,
-             COALESCE(metodo_pago,'efectivo') as medio,
-             SUM(monto) as monto
-      FROM gastos
-      GROUP BY dia, medio
-    `);
-    for (const r of gastos) {
-      ensure(r.dia);
-      const m = MEDIOS.includes(r.medio) ? r.medio : 'efectivo';
-      actuals[r.dia].gastos[m] = (actuals[r.dia].gastos[m] || 0) + (r.monto || 0);
-    }
-
-    const pagos = window.SGA_DB.query(`
-      SELECT DATE(pp.fecha) as dia, ppm.metodo as medio, SUM(ppm.monto) as monto
-      FROM pagos_proveedores pp
-      JOIN pagos_proveedores_metodos ppm ON ppm.pago_id = pp.id
-      WHERE ppm.metodo IN ('efectivo','mercadopago','tarjeta','transferencia')
-      GROUP BY dia, ppm.metodo
-    `);
-    for (const r of pagos) {
-      ensure(r.dia);
-      actuals[r.dia].pagos[r.medio] = (actuals[r.dia].pagos[r.medio] || 0) + (r.monto || 0);
-    }
-  }
-
-  function loadForecast() {
-    forecast = {};
-    const rows = window.SGA_DB.query(`SELECT fecha, tipo, monto FROM flujo_forecast`);
-    for (const r of rows) {
-      if (!forecast[r.fecha]) forecast[r.fecha] = {};
-      forecast[r.fecha][r.tipo] = r.monto;
-    }
-  }
-
-  function saveForecast(fecha, tipo, monto) {
-    const now = new Date().toISOString();
-    window.SGA_DB.run(
-      `INSERT INTO flujo_forecast (id, fecha, tipo, monto, updated_at)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(fecha, tipo) DO UPDATE SET monto = excluded.monto, updated_at = excluded.updated_at`,
-      [window.SGA_Utils.generateUUID(), fecha, tipo, monto, now]
+    // Proveedores activos que tienen dia_entrega o compras recientes
+    const recentProvIds = new Set(
+      DB().query(
+        `SELECT DISTINCT proveedor_id FROM compras WHERE fecha >= date('now', '-90 days') AND proveedor_id IS NOT NULL`
+      ).map(r => r.proveedor_id)
     );
-    if (!forecast[fecha]) forecast[fecha] = {};
-    forecast[fecha][tipo] = monto;
+
+    const allProv = DB().query(
+      `SELECT id, razon_social, alias, dia_entrega FROM proveedores WHERE activo = 1 ORDER BY razon_social`
+    );
+    proveedores = allProv.filter(p => p.dia_entrega != null || recentProvIds.has(p.id));
+
+    // Compras reales en el rango visible
+    comprasProv = {};
+    DB().query(
+      `SELECT proveedor_id, DATE(fecha) as dia, SUM(total) as total
+       FROM compras
+       WHERE fecha >= ? AND fecha <= ? AND proveedor_id IS NOT NULL
+       GROUP BY proveedor_id, dia`,
+      [fechaMin, fechaMax + 'T23:59:59']
+    ).forEach(r => { comprasProv[r.proveedor_id + '|' + r.dia] = r.total || 0; });
+
+    // Overrides manuales / estimados guardados
+    pagosManual = {};
+    DB().query(
+      `SELECT proveedor_id, fecha, monto, es_estimado FROM flujo_pagos_prov WHERE fecha >= ? AND fecha <= ?`,
+      [fechaMin, fechaMax]
+    ).forEach(r => { pagosManual[r.proveedor_id + '|' + r.fecha] = { monto: r.monto, es_estimado: r.es_estimado }; });
+
+    // Dinero a liquidar
+    liquidar = {};
+    DB().query(
+      `SELECT fecha, monto FROM flujo_liquidar WHERE fecha >= ? AND fecha <= ?`,
+      [fechaMin, fechaMax]
+    ).forEach(r => { liquidar[r.fecha] = r.monto || 0; });
+
+    // Saldo inicial MP (guardado en flujo_liquidar con fecha='__saldo_ini__')
+    const saldoRow = DB().query(`SELECT monto FROM flujo_liquidar WHERE fecha = '__saldo_ini__'`);
+    saldoIniBase = saldoRow.length ? (saldoRow[0].monto || 0) : 0;
+
+    // Promedio últimas 3 compras por proveedor
+    promedios = {};
+    proveedores.forEach(p => {
+      const rows = DB().query(
+        `SELECT total FROM compras WHERE proveedor_id = ? AND total > 0 ORDER BY fecha DESC LIMIT 3`,
+        [p.id]
+      );
+      if (rows.length) {
+        promedios[p.id] = rows.reduce((s, r) => s + (r.total || 0), 0) / rows.length;
+      }
+    });
   }
 
-  // ── Saldo computation ──────────────────────────────────────────────────────
+  // ── Celda de proveedor ─────────────────────────────────────────────────────
+
+  function getProvCell(provId, fecha) {
+    // 1. Compra real cargada
+    const real = comprasProv[provId + '|' + fecha];
+    if (real != null) return { monto: real, tipo: 'real' };
+
+    // 2. Override manual guardado
+    const manual = pagosManual[provId + '|' + fecha];
+    if (manual != null) return { monto: manual.monto, tipo: manual.es_estimado ? 'estimado' : 'manual' };
+
+    return null;
+  }
+
+  function getProvAutoEstimate(provId, fecha) {
+    const prov = proveedores.find(p => p.id === provId);
+    if (!prov || prov.dia_entrega == null) return null;
+    if (jsDoW2stored(dayOfWeek(fecha)) !== prov.dia_entrega) return null;
+    return promedios[provId] || null;
+  }
+
+  // ── Saldos ─────────────────────────────────────────────────────────────────
 
   function computeSaldos() {
-    const startDia = allDias[0];
-
-    // Baseline: cumulative balance per medio for all history BEFORE startDia
-    const running = { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0 };
-    for (const dia of Object.keys(actuals).sort()) {
-      if (dia >= startDia) break;
-      const d = actuals[dia];
-      for (const m of MEDIOS) {
-        running[m] += (d.ventas[m] || 0) - (d.gastos[m] || 0) - (d.pagos[m] || 0);
-      }
+    const saldos = {};
+    let running = saldoIniBase;
+    for (const fecha of dias) {
+      saldos[fecha] = { ini: running };
+      const liq   = liquidar[fecha] || 0;
+      const pagos = getTotalPagos(fecha);
+      const fin   = running + liq - pagos;
+      saldos[fecha].fin = fin;
+      running = fin;
     }
-
-    saldoIni = {};
-    let prev = { ...running };
-
-    for (const dia of allDias) {
-      saldoIni[dia] = { ...prev };
-
-      const isPastOrToday = dia <= HOY;
-      const d = actuals[dia] || { ventas: {}, gastos: {}, pagos: {} };
-
-      if (isPastOrToday) {
-        for (const m of MEDIOS) {
-          prev[m] += (d.ventas[m] || 0) - (d.gastos[m] || 0) - (d.pagos[m] || 0);
-        }
-      } else {
-        // Future: total cascades via forecast; per-caja allocation stays frozen
-        const fcIng = forecast[dia]?.ingreso || 0;
-        const fcEgr = forecast[dia]?.egreso  || 0;
-        const delta = fcIng - fcEgr;
-        // Distribute delta proportionally across medios (or dump to efectivo)
-        const posTotal = MEDIOS.reduce((s, m) => s + Math.max(0, prev[m]), 0);
-        if (posTotal > 0) {
-          for (const m of MEDIOS) prev[m] += delta * (Math.max(0, prev[m]) / posTotal);
-        } else {
-          prev.efectivo += delta;
-        }
-      }
-    }
+    return saldos;
   }
 
-  // ── Cell getters ───────────────────────────────────────────────────────────
-
-  function getSaldoTotal(dia) {
-    const s = saldoIni[dia] || {};
-    return MEDIOS.reduce((sum, m) => sum + (s[m] || 0), 0);
+  function getTotalPagos(fecha) {
+    return proveedores.reduce((sum, p) => {
+      const cell = getProvCell(p.id, fecha);
+      if (cell) return sum + (cell.monto || 0);
+      const est = getProvAutoEstimate(p.id, fecha);
+      if (est) return sum + est;
+      return sum;
+    }, 0);
   }
 
-  function getSaldoFinalTotal(dia) {
-    const nextDia = dateAdd(dia, 1);
-    if (saldoIni[nextDia]) return getSaldoTotal(nextDia);
-    // Last day in allDias
-    const ini = getSaldoTotal(dia);
-    return ini + getTotalIngresos(dia) - getTotalEgresos(dia);
+  // ── Save helpers ───────────────────────────────────────────────────────────
+
+  function saveLiquidar(fecha, monto) {
+    const now = new Date().toISOString();
+    DB().run(
+      `INSERT INTO flujo_liquidar (fecha, monto, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(fecha) DO UPDATE SET monto = excluded.monto, updated_at = excluded.updated_at`,
+      [fecha, monto, now]
+    );
+    liquidar[fecha] = monto;
   }
 
-  function getSaldoFinalMedio(dia, m) {
-    const nextDia = dateAdd(dia, 1);
-    if (saldoIni[nextDia]) return saldoIni[nextDia][m] || 0;
-    const isPastOrToday = dia <= HOY;
-    if (!isPastOrToday) return null; // no per-caja for future last day
-    const d = actuals[dia] || { ventas: {}, gastos: {}, pagos: {} };
-    return (saldoIni[dia][m] || 0) + (d.ventas[m] || 0) - (d.gastos[m] || 0) - (d.pagos[m] || 0);
+  function saveSaldoIni(monto) {
+    const now = new Date().toISOString();
+    DB().run(
+      `INSERT INTO flujo_liquidar (fecha, monto, updated_at) VALUES ('__saldo_ini__', ?, ?)
+       ON CONFLICT(fecha) DO UPDATE SET monto = excluded.monto, updated_at = excluded.updated_at`,
+      [monto, now]
+    );
+    saldoIniBase = monto;
   }
 
-  function getTotalIngresos(dia) {
-    const isPastOrToday = dia <= HOY;
-    if (isPastOrToday) {
-      const d = actuals[dia] || { ventas: {} };
-      return MEDIOS.reduce((s, m) => s + (d.ventas[m] || 0), 0);
-    }
-    return forecast[dia]?.ingreso || 0;
+  function saveProvPago(provId, fecha, monto) {
+    const now = new Date().toISOString();
+    const id  = window.SGA_Utils.generateUUID();
+    DB().run(
+      `INSERT INTO flujo_pagos_prov (id, proveedor_id, fecha, monto, es_estimado, updated_at) VALUES (?, ?, ?, ?, 0, ?)
+       ON CONFLICT(proveedor_id, fecha) DO UPDATE SET monto = excluded.monto, es_estimado = 0, updated_at = excluded.updated_at`,
+      [id, provId, fecha, monto, now]
+    );
+    pagosManual[provId + '|' + fecha] = { monto, es_estimado: 0 };
   }
 
-  function getTotalEgresos(dia) {
-    const isPastOrToday = dia <= HOY;
-    if (isPastOrToday) {
-      const d = actuals[dia] || { gastos: {}, pagos: {} };
-      return MEDIOS.reduce((s, m) => s + (d.gastos[m] || 0) + (d.pagos[m] || 0), 0);
-    }
-    return forecast[dia]?.egreso || 0;
+  function clearProvPago(provId, fecha) {
+    DB().run(`DELETE FROM flujo_pagos_prov WHERE proveedor_id = ? AND fecha = ?`, [provId, fecha]);
+    delete pagosManual[provId + '|' + fecha];
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -222,265 +200,199 @@ const FlujoModule = (() => {
   function render() {
     const root = document.getElementById('flujo-root');
     if (!root) return;
-    root.innerHTML = buildMainTable() + buildVarianceTable();
-    bindEditableCells();
-    document.getElementById('flujo-btn-expand')?.addEventListener('click', () => {
-      diasShow = allDias;
-      render();
-    });
+    root.innerHTML = buildTable();
+    bindCells();
   }
 
-  function th(dia) {
-    return `<th class="${colCls(dia)} flujo-label-col" style="position:sticky;top:0;">${dayLabel(dia)}</th>`;
-  }
+  function buildTable() {
+    const saldos = computeSaldos();
+    const n      = dias.length;
 
-  function sectionRow(label, n) {
-    return `<tr class="flujo-section-header"><td colspan="${n + 1}">${label}</td></tr>`;
-  }
-
-  function dataRow(label, cells, cls = '') {
-    return `<tr class="flujo-data-row ${cls}">
-      <td class="flujo-label-col">${label}</td>${cells.join('')}
-    </tr>`;
-  }
-
-  function numCell(val, dia, negative = false) {
-    const cls = cellCls(dia);
-    if (val == null) return `<td class="flujo-cell ${cls}" style="text-align:right;color:#ccc;">—</td>`;
-    const v = Math.round(val);
-    const color = negative ? '#c62828' : (v < 0 ? '#c62828' : 'inherit');
-    const display = v === 0 ? '<span style="color:#ccc;">—</span>' : fmt(v);
-    return `<td class="flujo-cell ${cls}" style="text-align:right;color:${color};">${display}</td>`;
-  }
-
-  function totalCell(val, dia, negative = false) {
-    const v = Math.round(val || 0);
-    const color = negative ? '#c62828' : (v < 0 ? '#c62828' : 'inherit');
-    return `<td class="flujo-cell ${cellCls(dia)}" style="text-align:right;font-weight:700;color:${color};">${fmt(v)}</td>`;
-  }
-
-  function editableCell(fecha, tipo, val) {
-    const cls = cellCls(fecha);
-    const display = val > 0
-      ? `<span style="font-weight:600;">${fmt(val)}</span>`
-      : `<span style="color:#bbb;font-size:12px;">ingresar</span>`;
-    return `<td class="flujo-cell ${cls} flujo-editable" style="text-align:right;"
-              data-fecha="${fecha}" data-tipo="${tipo}" data-val="${val || 0}">${display}</td>`;
-  }
-
-  function buildMainTable() {
-    const n = diasShow.length;
-    const headers = diasShow.map(d => `<th class="${colCls(d)}">${dayLabel(d)}</th>`).join('');
+    // Header: fechas
+    const thDias = dias.map(fecha => {
+      const d   = new Date(fecha + 'T12:00:00');
+      const dia = String(d.getDate()).padStart(2, '0');
+      const mes = d.toLocaleDateString('es-AR', { month: 'short' });
+      const dow = DIAS_LABEL[d.getDay()];
+      const isHoy = fecha === HOY;
+      return `<th class="ff-th${isHoy ? ' ff-th-hoy' : ''}">${dia}-${mes}<br><span class="ff-dow">${dow}</span></th>`;
+    }).join('');
 
     const rows = [];
 
-    // ── SALDO INICIAL ────────────────────────────────────────────────────────
-    rows.push(sectionRow('💰 Saldo inicial', n));
-    for (const m of MEDIOS) {
-      rows.push(dataRow(
-        `<span class="flujo-sub">${MLBL[m]}</span>`,
-        diasShow.map(dia => numCell(saldoIni[dia]?.[m] ?? 0, dia)),
-        'flujo-row-saldo'
-      ));
-    }
-    rows.push(dataRow(
-      '<strong>Total</strong>',
-      diasShow.map(dia => totalCell(getSaldoTotal(dia), dia)),
-      'flujo-row-total flujo-row-saldo'
-    ));
+    // ── SALDO INICIAL MP ──────────────────────────────────────────────────────
+    const saldoIniCells = dias.map((fecha, i) => {
+      const val = saldos[fecha].ini;
+      if (i === 0) {
+        return `<td class="ff-cell ff-cell-saldo ff-editable" data-tipo="saldo_ini" data-fecha="${fecha}" data-val="${val}">
+          <span class="ff-val">${fmt(val)}</span>
+        </td>`;
+      }
+      return `<td class="ff-cell ff-cell-saldo">${fmt(val)}</td>`;
+    }).join('');
+    rows.push(`<tr class="ff-row-header">
+      <td class="ff-label-col"><strong>Saldo inicial MP</strong></td>${saldoIniCells}
+    </tr>`);
 
-    // ── INGRESOS ─────────────────────────────────────────────────────────────
-    rows.push(sectionRow('📈 Ingresos', n));
-    for (const m of MEDIOS) {
-      rows.push(dataRow(
-        `<span class="flujo-sub">${MLBL[m]}</span>`,
-        diasShow.map(dia => {
-          const isPastOrToday = dia <= HOY;
-          const val = isPastOrToday ? (actuals[dia]?.ventas[m] || 0) : null;
-          return numCell(val, dia);
-        })
-      ));
-    }
-    // Proyección (editable, todos los días — past = histórica, future = principal input)
-    rows.push(dataRow(
-      '<span class="flujo-sub">📝 Proyección / Otros</span>',
-      diasShow.map(dia => editableCell(dia, 'ingreso', forecast[dia]?.ingreso || 0)),
-      'flujo-row-otros'
-    ));
-    rows.push(dataRow(
-      '<strong>Total ingresos</strong>',
-      diasShow.map(dia => totalCell(getTotalIngresos(dia), dia)),
-      'flujo-row-total flujo-row-green'
-    ));
+    // ── DINERO A LIQUIDAR ─────────────────────────────────────────────────────
+    const liquidarCells = dias.map(fecha => {
+      const val = liquidar[fecha] || 0;
+      return `<td class="ff-cell ff-cell-liquidar ff-editable" data-tipo="liquidar" data-fecha="${fecha}" data-val="${val}">
+        <span class="ff-val">${val > 0 ? fmt(val) : '<span class="ff-empty">+</span>'}</span>
+      </td>`;
+    }).join('');
+    rows.push(`<tr class="ff-row-header">
+      <td class="ff-label-col"><strong>Dinero a liquidar</strong></td>${liquidarCells}
+    </tr>`);
 
-    // ── EGRESOS ──────────────────────────────────────────────────────────────
-    rows.push(sectionRow('📉 Egresos', n));
-    rows.push(dataRow(
-      '<span class="flujo-sub">💸 Gastos generales</span>',
-      diasShow.map(dia => {
-        const isPastOrToday = dia <= HOY;
-        const d = actuals[dia] || { gastos: {} };
-        const val = isPastOrToday ? MEDIOS.reduce((s, m) => s + (d.gastos[m] || 0), 0) : null;
-        return numCell(val, dia, true);
-      })
-    ));
-    rows.push(dataRow(
-      '<span class="flujo-sub">🏪 Pagos proveedores</span>',
-      diasShow.map(dia => {
-        const isPastOrToday = dia <= HOY;
-        const d = actuals[dia] || { pagos: {} };
-        const val = isPastOrToday ? MEDIOS.reduce((s, m) => s + (d.pagos[m] || 0), 0) : null;
-        return numCell(val, dia, true);
-      })
-    ));
-    rows.push(dataRow(
-      '<span class="flujo-sub">📝 Proyección / Otros</span>',
-      diasShow.map(dia => editableCell(dia, 'egreso', forecast[dia]?.egreso || 0)),
-      'flujo-row-otros'
-    ));
-    rows.push(dataRow(
-      '<strong>Total egresos</strong>',
-      diasShow.map(dia => totalCell(getTotalEgresos(dia), dia, true)),
-      'flujo-row-total flujo-row-red'
-    ));
+    // ── SEPARADOR ─────────────────────────────────────────────────────────────
+    rows.push(`<tr class="ff-section-sep"><td colspan="${n + 1}">Pagos a proveedores</td></tr>`);
 
-    // ── SALDO FINAL ──────────────────────────────────────────────────────────
-    rows.push(sectionRow('💼 Saldo final', n));
-    for (const m of MEDIOS) {
-      rows.push(dataRow(
-        `<span class="flujo-sub">${MLBL[m]}</span>`,
-        diasShow.map(dia => {
-          const val = getSaldoFinalMedio(dia, m);
-          return numCell(val, dia);
-        }),
-        'flujo-row-saldo'
-      ));
-    }
-    rows.push(dataRow(
-      '<strong>Total</strong>',
-      diasShow.map(dia => totalCell(getSaldoFinalTotal(dia), dia)),
-      'flujo-row-total flujo-row-saldo'
-    ));
+    // ── PROVEEDORES ───────────────────────────────────────────────────────────
+    proveedores.forEach(prov => {
+      const cells = dias.map(fecha => {
+        const cell = getProvCell(prov.id, fecha);
+        if (cell) {
+          const cls = cell.tipo === 'real' ? 'ff-cell-real' : (cell.tipo === 'estimado' ? 'ff-cell-est' : 'ff-cell-manual');
+          return `<td class="ff-cell ${cls} ff-editable" data-tipo="prov" data-prov="${prov.id}" data-fecha="${fecha}" data-val="${cell.monto}">
+            <span class="ff-val">${fmt(cell.monto)}</span>
+          </td>`;
+        }
+        const est = getProvAutoEstimate(prov.id, fecha);
+        if (est) {
+          return `<td class="ff-cell ff-cell-est ff-editable" data-tipo="prov" data-prov="${prov.id}" data-fecha="${fecha}" data-val="${est}" data-auto="1">
+            <span class="ff-val">${fmt(est)}</span>
+          </td>`;
+        }
+        return `<td class="ff-cell ff-cell-blank ff-editable" data-tipo="prov" data-prov="${prov.id}" data-fecha="${fecha}" data-val="0">
+          <span class="ff-val ff-empty">—</span>
+        </td>`;
+      }).join('');
 
-    const showExpand = diasShow.length < allDias.length;
+      const label = prov.alias || prov.razon_social;
+      const diaHab = prov.dia_entrega ? `<span class="ff-dia-hab">${DIAS_FULL[prov.dia_entrega === 7 ? 0 : prov.dia_entrega]}</span>` : '';
+      rows.push(`<tr class="ff-row-prov">
+        <td class="ff-label-col">${escHtml(label)}${diaHab}</td>${cells}
+      </tr>`);
+    });
+
+    // ── TOTAL PAGOS ───────────────────────────────────────────────────────────
+    const totalCells = dias.map(fecha => {
+      const tot = getTotalPagos(fecha);
+      return `<td class="ff-cell ff-cell-total">${tot > 0 ? fmt(tot) : '<span class="ff-empty">—</span>'}</td>`;
+    }).join('');
+    rows.push(`<tr class="ff-row-total">
+      <td class="ff-label-col"><strong>Total pagos</strong></td>${totalCells}
+    </tr>`);
+
+    // ── SALDO FINAL ───────────────────────────────────────────────────────────
+    const saldoFinCells = dias.map(fecha => {
+      const val = saldos[fecha].fin;
+      const cls = val < 0 ? ' ff-negativo' : (val < saldoIniBase * 0.2 ? ' ff-alerta' : '');
+      return `<td class="ff-cell ff-cell-saldo${cls}"><strong>${fmt(val)}</strong></td>`;
+    }).join('');
+    rows.push(`<tr class="ff-row-header ff-row-final">
+      <td class="ff-label-col"><strong>Saldo Final</strong></td>${saldoFinCells}
+    </tr>`);
 
     return `
-      <div id="flujo-scroll-wrapper" style="margin-top:var(--spacing-lg);border-radius:8px;overflow-x:auto;box-shadow:0 1px 4px rgba(0,0,0,.08);">
-        <table class="flujo-table">
-          <thead>
-            <tr>
-              <th class="flujo-label-col" style="z-index:4;background:var(--color-background,#f5f5f5);">Concepto</th>
-              ${headers}
-            </tr>
-          </thead>
+      <div style="overflow-x:auto;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.1);margin-top:16px;">
+        <table class="ff-table">
+          <thead><tr>
+            <th class="ff-label-col ff-th">Concepto</th>
+            ${thDias}
+          </tr></thead>
           <tbody>${rows.join('')}</tbody>
         </table>
       </div>
-      ${showExpand ? `
-        <div style="text-align:right;margin-top:8px;">
-          <button id="flujo-btn-expand" class="btn btn-secondary"
-            style="font-size:13px;padding:5px 14px;">
-            Ver más días (hasta +30 días) →
-          </button>
-        </div>` : ''}`;
+      <p style="font-size:12px;color:var(--color-text-secondary);margin-top:10px;">
+        💡 Hacé clic en cualquier celda para editar. <span style="background:#fffde7;padding:2px 6px;border-radius:3px;">Amarillo</span> = estimado · Blanco = real/manual · Clic en "—" de proveedor para ingresar un monto.
+      </p>`;
   }
 
-  // ── Variance table ─────────────────────────────────────────────────────────
-
-  function buildVarianceTable() {
-    const pastWithFc = allDias.filter(d => d < HOY && forecast[d]);
-    if (!pastWithFc.length) return '';
-
-    const rows = pastWithFc.map(dia => {
-      const d = actuals[dia] || { ventas: {}, gastos: {}, pagos: {} };
-      const actualIng = MEDIOS.reduce((s, m) => s + (d.ventas[m] || 0), 0);
-      const actualEgr = MEDIOS.reduce((s, m) => s + (d.gastos[m] || 0) + (d.pagos[m] || 0), 0);
-      const fcIng = forecast[dia]?.ingreso || 0;
-      const fcEgr = forecast[dia]?.egreso  || 0;
-      const diffIng = actualIng - fcIng;
-      const diffEgr = actualEgr - fcEgr;
-
-      const diffColor = (v, invert = false) => {
-        if (v === 0) return '#999';
-        return (invert ? v < 0 : v > 0) ? '#2e7d32' : '#c62828';
-      };
-      const sign = (v) => (v > 0 ? '+' : '') + fmt(Math.round(v));
-
-      return `<tr>
-        <td style="white-space:nowrap;padding:6px 12px;color:var(--color-text-secondary);">${dia}</td>
-        <td style="text-align:right;">${fmt(fcIng)}</td>
-        <td style="text-align:right;">${fmt(actualIng)}</td>
-        <td style="text-align:right;font-weight:700;color:${diffColor(diffIng)};">${sign(diffIng)}</td>
-        <td style="text-align:right;padding-left:20px;">${fmt(fcEgr)}</td>
-        <td style="text-align:right;">${fmt(actualEgr)}</td>
-        <td style="text-align:right;font-weight:700;color:${diffColor(diffEgr, true)};">${sign(diffEgr)}</td>
-      </tr>`;
-    }).join('');
-
-    return `
-      <h3 style="margin:32px 0 8px;font-size:1rem;color:var(--color-text);">📊 Variación Forecast vs Real</h3>
-      <div style="overflow-x:auto;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);">
-        <table class="table" style="font-size:13px;margin:0;">
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th style="text-align:right;">Ing. Forecast</th>
-              <th style="text-align:right;">Ing. Real</th>
-              <th style="text-align:right;">Δ Ingresos</th>
-              <th style="text-align:right;padding-left:20px;">Egr. Forecast</th>
-              <th style="text-align:right;">Egr. Real</th>
-              <th style="text-align:right;">Δ Egresos</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>`;
+  function escHtml(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
-  // ── Editable cells ─────────────────────────────────────────────────────────
+  // ── Edición inline ─────────────────────────────────────────────────────────
 
-  function bindEditableCells() {
-    document.querySelectorAll('.flujo-editable').forEach(td => {
+  function bindCells() {
+    document.querySelectorAll('.ff-editable').forEach(td => {
       td.addEventListener('click', () => startEdit(td));
     });
   }
 
   function startEdit(td) {
     if (td.querySelector('input')) return;
-    const fecha = td.dataset.fecha;
     const tipo  = td.dataset.tipo;
+    const fecha = td.dataset.fecha;
     const val   = parseFloat(td.dataset.val) || 0;
+    const isAuto = td.dataset.auto === '1';
 
-    td.innerHTML = `<input type="number" min="0" step="1000"
-      value="${val || ''}" placeholder="0"
-      style="width:90px;text-align:right;font-size:13px;padding:3px 6px;
-        border:2px solid var(--color-primary,#0066cc);border-radius:4px;background:#fff;">`;
+    // Para celdas reales (compra cargada) no permitir edición directa
+    if (td.classList.contains('ff-cell-real')) {
+      showToast('Este monto viene de una factura de compra cargada');
+      return;
+    }
 
-    const input = td.querySelector('input');
-    input.focus();
-    input.select();
+    const input = document.createElement('input');
+    input.type        = 'number';
+    input.min         = '0';
+    input.step        = '1000';
+    input.value       = val || '';
+    input.placeholder = '0';
+    input.style.cssText = 'width:88px;text-align:right;font-size:13px;padding:3px 6px;border:2px solid var(--color-primary,#0066cc);border-radius:4px;background:#fff;';
+
+    const clearBtn = tipo === 'prov' && !isAuto
+      ? `<div style="font-size:11px;text-align:center;margin-top:2px;cursor:pointer;color:#999;" class="ff-clear-btn" data-prov="${td.dataset.prov}" data-fecha="${fecha}">borrar</div>`
+      : '';
+
+    td.innerHTML = input.outerHTML + clearBtn;
+    const inp = td.querySelector('input');
+    inp.focus();
+    inp.select();
+
+    td.querySelector('.ff-clear-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (tipo === 'prov') {
+        clearProvPago(td.dataset.prov, fecha);
+        computeSaldos();
+        render();
+      }
+    });
 
     const commit = () => {
-      const newVal = parseFloat(input.value) || 0;
-      saveForecast(fecha, tipo, newVal);
-      computeSaldos();
+      const newVal = parseFloat(inp.value) || 0;
+      if (tipo === 'saldo_ini') {
+        saveSaldoIni(newVal);
+      } else if (tipo === 'liquidar') {
+        saveLiquidar(fecha, newVal);
+      } else if (tipo === 'prov') {
+        if (newVal > 0) saveProvPago(td.dataset.prov, fecha, newVal);
+        else clearProvPago(td.dataset.prov, fecha);
+      }
       render();
     };
 
-    input.addEventListener('blur', commit);
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') commit();
+    inp.addEventListener('blur', commit);
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
       if (e.key === 'Escape') render();
     });
+  }
+
+  function showToast(msg) {
+    const t = document.createElement('div');
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:10px 20px;border-radius:8px;font-size:14px;z-index:9999;pointer-events:none;';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 3000);
   }
 
   // ── Init ───────────────────────────────────────────────────────────────────
 
   function init() {
-    buildRange();
-    loadActuals();
-    loadForecast();
-    computeSaldos();
+    loadData();
     render();
   }
 

@@ -48,8 +48,8 @@ const SGA_Proveedores = (() => {
           (id, razon_social, alias, cuit, condicion_iva,
            agente_retencion_iva, agente_retencion_iibb,
            telefono, email, contacto_nombre,
-           condicion_pago, condicion_compra, tipo_proveedor, activo, sync_status, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'pending', ?)
+           condicion_pago, condicion_compra, tipo_proveedor, dia_entrega, activo, sync_status, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'pending', ?)
       `, [
         id,
         (data.razon_social    || '').trim(),
@@ -64,6 +64,7 @@ const SGA_Proveedores = (() => {
         data.condicion_pago   || null,
         data.condicion_compra || null,
         data.tipo_proveedor   || 'mercaderia',
+        data.dia_entrega      ?? null,
         now(),
       ]);
       return { success: true, id };
@@ -89,6 +90,7 @@ const SGA_Proveedores = (() => {
           condicion_pago        = ?,
           condicion_compra      = ?,
           tipo_proveedor        = ?,
+          dia_entrega           = ?,
           sync_status           = 'pending',
           updated_at            = ?
         WHERE id = ?
@@ -105,6 +107,7 @@ const SGA_Proveedores = (() => {
         data.condicion_pago   || null,
         data.condicion_compra || null,
         data.tipo_proveedor   || 'mercaderia',
+        data.dia_entrega      ?? null,
         now(),
         id,
       ]);
@@ -376,6 +379,15 @@ const Proveedores = (() => {
               </select>
             </div>
           </div>
+          <div class="prov-field">
+            <label for="pf-dia-entrega">Día de entrega habitual (flujo de fondos)</label>
+            <select id="pf-dia-entrega" class="prov-input">
+              <option value="">— Sin día fijo —</option>
+              ${['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'].map((d, i) =>
+                `<option value="${i+1}" ${prov && prov.dia_entrega === (i+1) ? 'selected' : ''}>${d}</option>`
+              ).join('')}
+            </select>
+          </div>
 
           <p id="prov-form-error" class="prov-form-error" style="display:none"></p>
         </div>
@@ -436,6 +448,7 @@ const Proveedores = (() => {
         condicion_pago:        ge('pf-condpago').value   || null,
         condicion_compra:      ge('pf-condcompra').value || null,
         tipo_proveedor:        ge('pf-tipo-toggle').checked ? 'servicios' : 'mercaderia',
+        dia_entrega:           ge('pf-dia-entrega').value ? parseInt(ge('pf-dia-entrega').value) : null,
       };
 
       const res = prov

@@ -1026,6 +1026,34 @@
       `);
     } catch(e) { console.warn('flujo_forecast:', e.message); }
 
+    try {
+      database.run(`ALTER TABLE proveedores ADD COLUMN dia_entrega INTEGER DEFAULT NULL`);
+    } catch(e) { /* columna ya existe */ }
+
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS flujo_liquidar (
+          fecha TEXT PRIMARY KEY,
+          monto REAL NOT NULL DEFAULT 0,
+          updated_at TEXT
+        )
+      `);
+    } catch(e) { console.warn('flujo_liquidar:', e.message); }
+
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS flujo_pagos_prov (
+          id TEXT PRIMARY KEY,
+          proveedor_id TEXT NOT NULL,
+          fecha TEXT NOT NULL,
+          monto REAL NOT NULL DEFAULT 0,
+          es_estimado INTEGER NOT NULL DEFAULT 1,
+          updated_at TEXT,
+          UNIQUE(proveedor_id, fecha)
+        )
+      `);
+    } catch(e) { console.warn('flujo_pagos_prov:', e.message); }
+
     // Primera vez: si no hay usuarios, crear sucursal y admin por defecto
     try {
       const stmt = database.prepare('SELECT COUNT(*) as count FROM usuarios');

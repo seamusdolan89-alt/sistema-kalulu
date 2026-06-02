@@ -1,11 +1,24 @@
-<!-- views/flujo.html — Flujo de Fondos (admin-pos only) -->
+<!-- views/flujo.html — Flujo de Fondos -->
 <style>
-  .flujo-table {
+  .ff-table {
     border-collapse: collapse;
     font-size: 13px;
     width: 100%;
+    background: #fff;
   }
-  .flujo-table thead th {
+  .ff-label-col {
+    position: sticky;
+    left: 0;
+    background: #fff;
+    z-index: 3;
+    min-width: 160px;
+    max-width: 200px;
+    padding: 6px 12px 6px 14px;
+    border-right: 2px solid var(--color-border, #ddd);
+    white-space: nowrap;
+    text-align: left;
+  }
+  .ff-th {
     position: sticky;
     top: 0;
     background: var(--color-background, #f5f5f5);
@@ -14,34 +27,38 @@
     text-align: center;
     white-space: nowrap;
     border-bottom: 2px solid var(--color-border, #ddd);
-    font-size: 12px;
     font-weight: 700;
-  }
-  .flujo-label-col {
-    position: sticky;
-    left: 0;
-    background: var(--color-card-bg, #fff);
-    z-index: 3;
-    min-width: 170px;
-    text-align: left !important;
-    padding: 5px 10px 5px 14px !important;
-    border-right: 2px solid var(--color-border, #ddd);
-    white-space: nowrap;
-  }
-  thead th.flujo-label-col { z-index: 4; background: var(--color-background, #f5f5f5); }
-  .flujo-cell {
-    padding: 5px 10px;
-    white-space: nowrap;
-    border-bottom: 1px solid var(--color-border, #eee);
+    font-size: 12px;
     min-width: 100px;
   }
-  .flujo-cell-past   { background: #f8f8f8; }
-  .flujo-cell-today  { background: #fffde7; }
-  .flujo-cell-future { background: #fff; }
-  .flujo-col-past   { background: #f0f0f0; }
-  .flujo-col-today  { background: #fff9c4; color: var(--color-primary, #0066cc); }
-  .flujo-col-future { background: var(--color-background, #f5f5f5); }
-  .flujo-section-header td {
+  .ff-th.ff-label-col { z-index: 4; }
+  .ff-th-hoy {
+    background: #fff9c4 !important;
+    color: var(--color-primary, #0066cc);
+  }
+  .ff-dow { font-weight: 400; font-size: 11px; opacity: .75; }
+
+  .ff-cell {
+    padding: 5px 10px;
+    text-align: right;
+    white-space: nowrap;
+    border-bottom: 1px solid #eee;
+    min-width: 100px;
+  }
+  .ff-cell-saldo  { color: #1565c0; }
+  .ff-cell-real   { background: #fff; }
+  .ff-cell-est    { background: #fffde7; }
+  .ff-cell-manual { background: #e8f5e9; }
+  .ff-cell-blank  { background: #fafafa; }
+  .ff-cell-total  { border-top: 1px solid #ccc; background: #fafafa; }
+  .ff-negativo    { color: #c62828 !important; }
+  .ff-alerta      { color: #e65100 !important; }
+
+  .ff-row-header td { background: #f0f4f8; border-top: 2px solid #c5cae9; }
+  .ff-row-final td  { background: #e8eaf6; border-top: 2px solid #9fa8da; }
+  .ff-row-total td  { border-top: 1px solid #ccc; }
+  .ff-row-prov:hover td { background: #f5f5f5 !important; }
+  .ff-section-sep td {
     background: #eceff1;
     font-size: 11px;
     font-weight: 700;
@@ -51,22 +68,22 @@
     padding: 8px 14px 4px;
     border-top: 2px solid #cfd8dc;
   }
-  .flujo-row-total td {
-    border-top: 1px solid #ccc;
-    background: inherit;
-    font-weight: 700;
-  }
-  .flujo-row-saldo td { color: #1565c0; }
-  .flujo-row-green td { color: #2e7d32; }
-  .flujo-row-red   td { color: #c62828; }
-  .flujo-sub { padding-left: 4px; color: var(--color-text-secondary); font-size: 12px; }
-  .flujo-editable:hover { background: #e3f2fd !important; cursor: pointer; }
-  .flujo-editable input {
+
+  .ff-editable:hover { cursor: pointer; filter: brightness(.96); }
+  .ff-editable input {
     width: 88px; text-align: right; font-size: 13px;
     padding: 3px 6px; border: 2px solid var(--color-primary, #0066cc);
-    border-radius: 4px; background: #fff;
+    border-radius: 4px; background: #fff; display: block;
   }
-  #flujo-scroll-wrapper { border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.08); overflow-x: auto; }
+  .ff-empty { color: #bbb; }
+  .ff-val   { display: block; text-align: right; }
+  .ff-dia-hab {
+    display: block;
+    font-size: 10px;
+    color: var(--color-text-secondary, #888);
+    font-weight: 400;
+  }
+  .ff-cell-liquidar { color: #2e7d32; }
 </style>
 
 <div class="page-header">
