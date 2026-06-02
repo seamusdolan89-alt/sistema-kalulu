@@ -1903,7 +1903,7 @@
     getElement('btn-edit-save')?.addEventListener('click', saveEditModal);
 
     getElement('btn-descargar-plantilla')?.addEventListener('click', downloadTemplate);
-    getElement('btn-nuevo-producto')?.addEventListener('click', () => openProductModal());
+    getElement('btn-nuevo-producto')?.addEventListener('click', () => { window.location.hash = '#editor-producto/new'; });
     getElement('btn-importar-excel')?.addEventListener('click', () => openImportModal());
     getElement('btn-bajo-minimo')?.addEventListener('click', () => {
       // Clear all filters and show only below-minimum products

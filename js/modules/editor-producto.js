@@ -22,6 +22,7 @@ const EditorProducto = (() => {
 
   const state = {
     productoId: null,
+    isNew: false,
     producto: null,
     barcodes: [],
     barcodesDeleted: [],
@@ -49,10 +50,45 @@ const EditorProducto = (() => {
   const init = (params) => {
     const productoId = params && params[0];
     if (!productoId) { window.location.hash = '#productos'; return; }
+    if (productoId === 'new') { initNewProduct(); return; }
     loadEditorData(productoId);
   };
 
+  const BLANK_PRODUCTO = {
+    id: null, nombre: '', descripcion: '',
+    categoria_id: null, categoria_nombre: null,
+    proveedor_principal_id: null, proveedor_nombre: null, proveedor_alternativo_id: null,
+    unidad_medida: 'unidad',
+    costo: 0, costo_paquete: 0, precio_venta: 0,
+    stock_minimo: 0, stock_alerta: 0,
+    cant_pedido: 0, pedido_unidad: 'unidad', pedido_unidades_por_paquete: null,
+    activo: 1, es_madre: 0, producto_madre_id: null, precio_independiente: 0,
+    unidad_compra: 'Unidad', unidades_por_paquete_compra: 1, unidad_venta: 'Unidad',
+    precio_lista_por: 'Unidad', precio_lista_divisor: 1,
+    es_oferta: 0, oferta_desde: null, oferta_hasta: null,
+    imagen: null, ultima_modificacion_precio: null,
+  };
+
+  const initNewProduct = () => {
+    state.productoId      = null;
+    state.isNew           = true;
+    state.producto        = Object.assign({}, BLANK_PRODUCTO);
+    state.categorias      = window.SGA_DB.query('SELECT id, nombre FROM categorias ORDER BY nombre');
+    state.proveedores     = window.SGA_DB.query('SELECT id, razon_social FROM proveedores WHERE activo = 1 ORDER BY razon_social');
+    state.sucursales      = window.SGA_DB.query('SELECT id, nombre FROM sucursales WHERE activa = 1 ORDER BY nombre');
+    state.barcodes        = [];
+    state.barcodesDeleted = [];
+    state.dirty           = false;
+    state.imagenBase64    = null;
+    state.imagenDeleted   = false;
+    setupAppShell();
+    renderContent();
+    switchSection('datos-basicos');
+    attachEvents();
+  };
+
   const loadEditorData = (productoId) => {
+    state.isNew      = false;
     state.productoId = productoId;
 
     const rows = window.SGA_DB.query(`
@@ -94,22 +130,24 @@ const EditorProducto = (() => {
 
   const setupAppShell = () => {
     const p = state.producto;
+    const displayNombre = state.isNew ? 'Nuevo Producto' : (p.nombre || '');
 
     // Header
     const h1 = qs('header h1');
     if (h1) {
       const codigoPrincipal = state.barcodes[0]?.codigo || '';
       const codigoHtml = codigoPrincipal ? ` <span style="font-size:0.65em;font-weight:400;opacity:0.75;letter-spacing:0.02em">${escapeHtml(codigoPrincipal)}</span>` : '';
-      h1.innerHTML = `<a href="#productos" class="ed-back-link">← Productos</a> / <span id="ed-header-nombre">${escapeHtml(p.nombre)}</span>${codigoHtml}`;
+      h1.innerHTML = `<a href="#productos" class="ed-back-link">← Productos</a> / <span id="ed-header-nombre">${escapeHtml(displayNombre)}</span>${codigoHtml}`;
     }
 
     // Replace aside
     const aside = qs('aside.sidebar');
     if (aside) {
       aside.classList.add('editor-mode');
+      const saveBtnLabel = state.isNew ? '✨ Crear producto' : '💾 Guardar cambios';
       aside.innerHTML = `
         <div class="editor-sidebar-header">
-          <div class="editor-product-name" id="ed-aside-nombre">${escapeHtml(p.nombre)}</div>
+          <div class="editor-product-name" id="ed-aside-nombre">${escapeHtml(displayNombre)}</div>
           <div class="editor-product-cat">${escapeHtml(p.categoria_nombre || 'Sin categoría')}</div>
         </div>
         <nav>
@@ -124,7 +162,7 @@ const EditorProducto = (() => {
           </ul>
         </nav>
         <div class="editor-sidebar-footer">
-          <button id="ed-btn-save" class="btn btn-primary" style="width:100%;margin-bottom:8px">💾 Guardar cambios</button>
+          <button id="ed-btn-save" class="btn btn-primary" style="width:100%;margin-bottom:8px">${saveBtnLabel}</button>
           <button id="ed-btn-cancel" class="btn btn-outline" style="width:100%">Cancelar</button>
         </div>
       `;
@@ -884,6 +922,7 @@ const EditorProducto = (() => {
   };
 
   const saveStockImmediate = (sucursalId, cantidad) => {
+    if (state.isNew) { showToast('Creá el producto primero para guardar stock'); return; }
     const now = window.SGA_Utils.formatISODate(new Date());
     const exists = window.SGA_DB.query(
       'SELECT 1 FROM stock WHERE producto_id = ? AND sucursal_id = ?',
@@ -2569,23 +2608,8 @@ const EditorProducto = (() => {
     const newPrecioVenta = parseFloat((ge('ed-precio-venta') || {}).value) || 0;
     const precioChanged = newPrecioVenta !== (state.producto.precio_venta || 0);
 
-    window.SGA_DB.run(`
-      UPDATE productos SET
-        nombre = ?, descripcion = ?,
-        categoria_id = ?, proveedor_principal_id = ?, proveedor_alternativo_id = ?,
-        unidad_medida = ?,
-        costo = ?, costo_paquete = ?, precio_venta = ?,
-        stock_minimo = ?, stock_alerta = ?, cant_pedido = ?, pedido_unidad = ?, pedido_unidades_por_paquete = ?,
-        activo = ?,
-        es_madre = ?, producto_madre_id = ?, precio_independiente = ?,
-        unidad_compra = ?, unidades_por_paquete_compra = ?, unidad_venta = ?,
-        precio_lista_por = ?, precio_lista_divisor = ?,
-        es_oferta = ?, oferta_desde = ?, oferta_hasta = ?,
-        imagen = ?,
-        ultima_modificacion_precio = CASE WHEN ? THEN ? ELSE ultima_modificacion_precio END,
-        fecha_modificacion = ?, sync_status = 'pending', updated_at = ?
-      WHERE id = ?
-    `, [
+    // fieldValues: 27 items, nombre → imagen (shared between INSERT and UPDATE)
+    const fieldValues = [
       nombre,
       (ge('ed-descripcion') || {}).value || '',
       (ge('ed-categoria') || {}).value || null,
@@ -2594,8 +2618,8 @@ const EditorProducto = (() => {
       (ge('ed-unidad') || {}).value || 'unidad',
       parseFloat((ge('ed-costo') || {}).value) || 0,
       parseFloat((ge('ed-costo-paquete') || {}).value) || 0,
-      parseFloat((ge('ed-precio-venta') || {}).value) || 0,
-      stockAlerta,   // keep stock_minimo in sync for backward compat
+      newPrecioVenta,
+      stockAlerta,
       stockAlerta,
       cantPedido,
       (ge('ed-pedido-unidad') || {}).value || 'unidad',
@@ -2613,6 +2637,58 @@ const EditorProducto = (() => {
       (ge('ed-oferta-desde') || {}).value || null,
       (ge('ed-oferta-hasta') || {}).value || null,
       imagen,
+    ];
+
+    if (state.isNew) {
+      const newId = window.SGA_Utils.generateUUID();
+      window.SGA_DB.run(`
+        INSERT INTO productos (
+          id, nombre, descripcion,
+          categoria_id, proveedor_principal_id, proveedor_alternativo_id,
+          unidad_medida,
+          costo, costo_paquete, precio_venta,
+          stock_minimo, stock_alerta, cant_pedido, pedido_unidad, pedido_unidades_por_paquete,
+          activo,
+          es_madre, producto_madre_id, precio_independiente,
+          unidad_compra, unidades_por_paquete_compra, unidad_venta,
+          precio_lista_por, precio_lista_divisor,
+          es_oferta, oferta_desde, oferta_hasta,
+          imagen,
+          fecha_modificacion, sync_status, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+      `, [newId, ...fieldValues, now, now]);
+
+      state.barcodes.forEach(bc => {
+        window.SGA_DB.run(
+          'INSERT OR IGNORE INTO codigos_barras (id, producto_id, codigo, es_principal) VALUES (?, ?, ?, ?)',
+          [window.SGA_Utils.generateUUID(), newId, bc.codigo, bc.es_principal]
+        );
+      });
+
+      showToast('✅ Producto creado');
+      sessionStorage.removeItem('editor_returnTo');
+      window.location.hash = '#editor-producto/' + newId;
+      return;
+    }
+
+    window.SGA_DB.run(`
+      UPDATE productos SET
+        nombre = ?, descripcion = ?,
+        categoria_id = ?, proveedor_principal_id = ?, proveedor_alternativo_id = ?,
+        unidad_medida = ?,
+        costo = ?, costo_paquete = ?, precio_venta = ?,
+        stock_minimo = ?, stock_alerta = ?, cant_pedido = ?, pedido_unidad = ?, pedido_unidades_por_paquete = ?,
+        activo = ?,
+        es_madre = ?, producto_madre_id = ?, precio_independiente = ?,
+        unidad_compra = ?, unidades_por_paquete_compra = ?, unidad_venta = ?,
+        precio_lista_por = ?, precio_lista_divisor = ?,
+        es_oferta = ?, oferta_desde = ?, oferta_hasta = ?,
+        imagen = ?,
+        ultima_modificacion_precio = CASE WHEN ? THEN ? ELSE ultima_modificacion_precio END,
+        fecha_modificacion = ?, sync_status = 'pending', updated_at = ?
+      WHERE id = ?
+    `, [
+      ...fieldValues,
       precioChanged ? 1 : 0, now,
       now, now,
       state.productoId,
@@ -2655,7 +2731,10 @@ const EditorProducto = (() => {
   };
 
   const handleCancel = () => {
-    if (state.dirty && !confirm('¿Descartar los cambios sin guardar?')) return;
+    const confirmMsg = state.isNew
+      ? '¿Cancelar la creación del nuevo producto?'
+      : '¿Descartar los cambios sin guardar?';
+    if ((state.dirty || state.isNew) && !confirm(confirmMsg)) return;
     const returnTo = sessionStorage.getItem('editor_returnTo');
     if (returnTo) {
       sessionStorage.removeItem('editor_returnTo');
