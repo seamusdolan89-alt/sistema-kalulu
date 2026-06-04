@@ -1040,6 +1040,21 @@
       `);
     } catch(e) { console.warn('flujo_liquidar:', e.message); }
 
+    // ── Medios de Cobro — configurable payment methods ────────────────────────
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS medios_cobro (
+          id TEXT PRIMARY KEY,
+          nombre TEXT NOT NULL,
+          icono TEXT DEFAULT '',
+          activo INTEGER DEFAULT 1,
+          orden INTEGER DEFAULT 0
+        )
+      `);
+      database.run(`INSERT OR IGNORE INTO medios_cobro (id, nombre, icono, activo, orden) VALUES ('efectivo', 'Efectivo', '💵', 1, 0)`);
+      database.run(`INSERT OR IGNORE INTO medios_cobro (id, nombre, icono, activo, orden) VALUES ('mercadopago', 'Mercado Pago', '📲', 1, 1)`);
+    } catch(e) { console.warn('medios_cobro:', e.message); }
+
     try {
       database.run(`
         CREATE TABLE IF NOT EXISTS flujo_pagos_prov (

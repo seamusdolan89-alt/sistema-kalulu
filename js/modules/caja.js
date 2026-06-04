@@ -8,7 +8,7 @@
 const Caja = (() => {
   'use strict';
 
-  const MEDIOS =['efectivo', 'mercadopago', 'tarjeta', 'transferencia', 'cuenta_corriente'];
+  const MEDIOS = ['efectivo', 'mercadopago', 'cuenta_corriente'];
   const MEDIOS_LABEL = {
     efectivo: 'Efectivo',
     mercadopago: 'Mercado Pago',
@@ -16,6 +16,19 @@ const Caja = (() => {
     transferencia: 'Transferencia',
     cuenta_corriente: 'Cta. Corriente',
   };
+
+  function getMediosDynamic() {
+    try {
+      const rows = window.SGA_DB.query(
+        `SELECT id, nombre, icono FROM medios_cobro WHERE activo = 1 ORDER BY orden ASC, nombre ASC`
+      );
+      if (rows.length) return rows;
+    } catch(e) {}
+    return [
+      { id: 'efectivo', nombre: 'Efectivo', icono: '💵' },
+      { id: 'mercadopago', nombre: 'Mercado Pago', icono: '📲' },
+    ];
+  }
   const EGRESO_TIPOS = ['retiro', 'gasto_operativo', 'pago_proveedor', 'otro'];
   const EGRESO_TIPO_LABEL = {
     retiro: 'Retiro',
@@ -543,11 +556,11 @@ case 'egresos':     renderEgresosIngresos(content);   break;
 
   function openMediosPagoOverlay() {
     const tot = getTotalesSesion(state.sesion.id);
-    const mediosRows = MEDIOS
-      .filter(m => tot.totPagos[m] > 0)
+    const mediosRows = Object.keys(tot.totPagos)
+      .filter(m => (tot.totPagos[m] || 0) > 0)
       .map(m => `
         <div class="caja-stat-row">
-          <span>${MEDIOS_LABEL[m]}</span>
+          <span>${MEDIOS_LABEL[m] || m}</span>
           <span>${fmtPeso(tot.totPagos[m])}</span>
         </div>
       `).join('');
@@ -1432,12 +1445,13 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     state.cierre = { mediosInformados: {}, explicaciones: {} };
 
     // medios to show: efectivo always; others only if they have sales activity
-    const mediosCierre = [
-      { id: 'efectivo',      label: '💵 Efectivo',      esperado: tot.saldoEsperado },
-      { id: 'mercadopago',   label: '📱 Mercado Pago',  esperado: tot.totPagos['mercadopago']   || 0 },
-      { id: 'tarjeta',       label: '💳 Tarjeta',       esperado: tot.totPagos['tarjeta']       || 0 },
-      { id: 'transferencia', label: '🏦 Transferencia', esperado: tot.totPagos['transferencia'] || 0 },
-    ].filter(m => m.id === 'efectivo' || m.esperado > 0);
+    const mediosCierre = getMediosDynamic()
+      .map(m => ({
+        id: m.id,
+        label: `${m.icono || ''} ${m.nombre}`.trim(),
+        esperado: m.id === 'efectivo' ? tot.saldoEsperado : (tot.totPagos[m.id] || 0),
+      }))
+      .filter(m => m.id === 'efectivo' || m.esperado > 0);
 
     // Init informed amounts (efectivo from recuento if available, else saldo esperado)
     mediosCierre.forEach(m => {
@@ -1738,17 +1752,12 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     const diferencia    = saldoReal - saldoEsperado;
     const difClass      = diferencia > 0.005 ? 'text-success' : diferencia < -0.005 ? 'text-danger' : '';
 
-    const MEDIOS_ICON = {
-      efectivo: '💵 Efectivo', mercadopago: '📱 Mercado Pago',
-      tarjeta: '💳 Tarjeta', transferencia: '🏦 Transferencia',
-    };
-
-    const mediosHtml = ['efectivo', 'mercadopago', 'tarjeta', 'transferencia']
-      .filter(m => tot && (tot.totPagos[m] || 0) > 0)
+    const mediosHtml = getMediosDynamic()
+      .filter(m => tot && (tot.totPagos[m.id] || 0) > 0)
       .map(m => `
         <div class="caja-stat-row">
-          <span>${MEDIOS_ICON[m]}</span>
-          <span>${fmtPeso(tot.totPagos[m])}</span>
+          <span>${m.icono || ''} ${m.nombre}</span>
+          <span>${fmtPeso(tot.totPagos[m.id])}</span>
         </div>
       `).join('');
 
@@ -1994,8 +2003,6 @@ case 'egresos':     renderEgresosIngresos(content);   break;
         .caja-overview-card:hover{transform:translateY(-3px);box-shadow:0 8px 24px rgba(0,0,0,.13);border-color:var(--color-primary)}
         .caja-overview-card.co-efectivo{background:linear-gradient(135deg,#f0f4ff,#e8ecff)}
         .caja-overview-card.co-mercadopago{background:linear-gradient(135deg,#e3f2fd,#d0eafc)}
-        .caja-overview-card.co-tarjeta{background:linear-gradient(135deg,#e1f5fe,#ccedfb)}
-        .caja-overview-card.co-transferencia{background:linear-gradient(135deg,#f3e5f5,#ead5f7)}
         .caja-overview-icon{font-size:2.2em;margin-bottom:10px}
         .caja-overview-label{font-size:.88em;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#666;margin-bottom:10px}
         .caja-overview-value{font-size:1.7em;font-weight:700;color:#333;margin-bottom:6px}
@@ -2007,28 +2014,17 @@ case 'egresos':     renderEgresosIngresos(content);   break;
 
     const tot = state.sesion ? getTotalesSesion(state.sesion.id) : null;
 
-    const cajas = [
-      {
-        medio: 'efectivo', icon: '💵', label: 'Efectivo',
-        value: tot ? tot.saldoEsperado : 0,
-        sub: tot ? `Cobrado: ${fmtPeso(tot.totPagos['efectivo'] || 0)} · Inicial: ${fmtPeso(tot.saldoInicial)}` : 'Sin sesión activa',
-      },
-      {
-        medio: 'mercadopago', icon: '📲', label: 'Mercado Pago',
-        value: tot ? (tot.totPagos['mercadopago'] || 0) : 0,
-        sub: `${tot ? (tot.totPagos['mercadopago'] > 0 ? 'Cobrado hoy' : 'Sin movimientos') : 'Sin sesión activa'}`,
-      },
-      {
-        medio: 'tarjeta', icon: '💳', label: 'Tarjeta',
-        value: tot ? (tot.totPagos['tarjeta'] || 0) : 0,
-        sub: `${tot ? (tot.totPagos['tarjeta'] > 0 ? 'Cobrado hoy' : 'Sin movimientos') : 'Sin sesión activa'}`,
-      },
-      {
-        medio: 'transferencia', icon: '🏦', label: 'Transferencia',
-        value: tot ? (tot.totPagos['transferencia'] || 0) : 0,
-        sub: `${tot ? (tot.totPagos['transferencia'] > 0 ? 'Cobrado hoy' : 'Sin movimientos') : 'Sin sesión activa'}`,
-      },
-    ];
+    const cajas = getMediosDynamic().map(m => ({
+      medio: m.id,
+      icon: m.icono || '💰',
+      label: m.nombre,
+      value: tot ? (m.id === 'efectivo' ? tot.saldoEsperado : (tot.totPagos[m.id] || 0)) : 0,
+      sub: tot
+        ? (m.id === 'efectivo'
+            ? `Cobrado: ${fmtPeso(tot.totPagos['efectivo'] || 0)} · Inicial: ${fmtPeso(tot.saldoInicial)}`
+            : ((tot.totPagos[m.id] || 0) > 0 ? 'Cobrado hoy' : 'Sin movimientos'))
+        : 'Sin sesión activa',
+    }));
 
     root.innerHTML = `
       <div class="caja-toolbar">
@@ -2067,7 +2063,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     state.user = window.SGA_Auth.getCurrentUser();
     if (!state.user) { window.location.hash = '#pos'; return; }
 
-    const VALID_MEDIOS = ['efectivo', 'mercadopago', 'tarjeta', 'transferencia'];
+    const VALID_MEDIOS = getMediosDynamic().map(r => r.id);
     const medio = params[0];
     state.sesion = getSesionActiva(state.user.sucursal_id);
 
@@ -2078,7 +2074,12 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     }
 
     state.activeMedio = medio;
-    state.currentTab = 'resumen';
+    // Preserve the active tab across re-inits (router re-entering module).
+    // Only fall back to 'resumen' if the current tab is invalid for this medio.
+    const validTabs = medio === 'efectivo'
+      ? ['resumen', 'egresos', 'historial', 'recuento']
+      : ['resumen', 'historial'];
+    if (!validTabs.includes(state.currentTab)) state.currentTab = 'resumen';
     render();
     if (state.sesion) startAutoRefresh();
   };

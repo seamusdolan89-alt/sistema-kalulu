@@ -24,6 +24,50 @@
     </div>
   </div>
 
+  <!-- Cajas -->
+  <div class="card" style="margin-top:var(--spacing-lg);padding:20px 24px;">
+    <h3 style="margin:0 0 16px;font-size:1rem;color:var(--color-text);">🏪 Cajas</h3>
+    <div id="cfg-cajas-list" style="margin-bottom:12px;"></div>
+    <button class="btn btn-primary" id="cfg-btn-nueva-caja" style="font-size:13px;padding:7px 16px;">+ Nueva Caja</button>
+    <div id="cfg-nueva-caja-msg" style="font-size:13px;margin-top:8px;display:none;"></div>
+    <div id="cfg-nueva-caja-form" style="display:none;margin-top:14px;background:#f8f9fa;border-radius:8px;padding:16px;">
+      <div style="margin-bottom:10px;">
+        <label style="font-weight:600;font-size:14px;display:block;margin-bottom:6px;">Nombre</label>
+        <input type="text" id="cfg-nueva-caja-nombre" placeholder="ej: Caja 2" style="width:auto;max-width:260px;">
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary" id="cfg-btn-guardar-caja" style="font-size:13px;padding:7px 16px;">Guardar</button>
+        <button class="btn btn-outline" id="cfg-btn-cancelar-caja" style="font-size:13px;padding:7px 16px;">Cancelar</button>
+      </div>
+      <div id="cfg-caja-form-msg" style="font-size:13px;margin-top:8px;display:none;"></div>
+    </div>
+  </div>
+
+  <!-- Medios de Cobro -->
+  <div class="card" style="margin-top:var(--spacing-lg);padding:20px 24px;">
+    <h3 style="margin:0 0 16px;font-size:1rem;color:var(--color-text);">💳 Medios de Cobro</h3>
+    <div id="cfg-medios-list" style="margin-bottom:12px;"></div>
+    <button class="btn btn-primary" id="cfg-btn-nuevo-medio" style="font-size:13px;padding:7px 16px;">+ Nuevo Medio</button>
+    <div id="cfg-nuevo-medio-msg" style="font-size:13px;margin-top:8px;display:none;"></div>
+    <div id="cfg-nuevo-medio-form" style="display:none;margin-top:14px;background:#f8f9fa;border-radius:8px;padding:16px;">
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;">
+        <div>
+          <label style="font-weight:600;font-size:14px;display:block;margin-bottom:6px;">Nombre</label>
+          <input type="text" id="cfg-nuevo-medio-nombre" placeholder="ej: Débito" style="width:auto;max-width:200px;">
+        </div>
+        <div>
+          <label style="font-weight:600;font-size:14px;display:block;margin-bottom:6px;">Ícono (emoji)</label>
+          <input type="text" id="cfg-nuevo-medio-icono" placeholder="💳" style="width:auto;max-width:72px;text-align:center;">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary" id="cfg-btn-guardar-medio" style="font-size:13px;padding:7px 16px;">Guardar</button>
+        <button class="btn btn-outline" id="cfg-btn-cancelar-medio" style="font-size:13px;padding:7px 16px;">Cancelar</button>
+      </div>
+      <div id="cfg-medio-form-msg" style="font-size:13px;margin-top:8px;display:none;"></div>
+    </div>
+  </div>
+
   <!-- Herramientas de desarrollo -->
   <div class="card" style="margin-top:var(--spacing-lg);padding:20px 24px;border:2px solid #ffb300;">
     <h3 style="margin:0 0 6px;font-size:1rem;color:#e65100;">⚠️ Herramientas de desarrollo</h3>
