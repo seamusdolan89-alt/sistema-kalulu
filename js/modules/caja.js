@@ -2088,6 +2088,22 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     const medio = params[0];
     state.sesion = getSesionActiva(state.user.sucursal_id);
 
+    // If POS just closed a session, show post-close summary directly
+    const justClosedId = sessionStorage.getItem('caja_just_closed');
+    if (justClosedId && !state.sesion && medio === 'efectivo') {
+      sessionStorage.removeItem('caja_just_closed');
+      try {
+        const sesionCerrada = window.SGA_DB.query(
+          `SELECT * FROM sesiones_caja WHERE id = ?`, [justClosedId]
+        )[0] || null;
+        const tot = getTotalesSesion(justClosedId);
+        state.activeMedio = 'efectivo';
+        stopAutoRefresh();
+        renderPostCierreSummary(sesionCerrada, tot);
+        return;
+      } catch (e) { /* fallthrough to normal render */ }
+    }
+
     if (!medio || !VALID_MEDIOS.includes(medio)) {
       state.activeMedio = null;
       renderOverview();

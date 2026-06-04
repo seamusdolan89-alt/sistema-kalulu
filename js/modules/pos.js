@@ -2466,15 +2466,18 @@ export const POS = (() => {
     safeOn('btn-cierre-close',  'click', () => hideModal('modal-cierre'));
     safeOn('btn-cierre-cancel', 'click', () => hideModal('modal-cierre'));
     safeOn('btn-cierre-confirm', 'click', () => {
-      const billJson = JSON.parse(ge('billetes-json')?.value || '{}');
+      const billJson  = JSON.parse(ge('billetes-json')?.value || '{}');
       const saldoReal = billJson.total || 0;
-      const result = cerrarCaja(state.sesionActiva.id, saldoReal, billJson.billetes || {});
+      const sesionId  = state.sesionActiva.id;
+      const result    = cerrarCaja(sesionId, saldoReal, billJson.billetes || {});
       if (result.success) {
+        // Signal caja module to show post-close summary when navigating there
+        sessionStorage.setItem('caja_just_closed', sesionId);
         state.sesionActiva = null;
         hideModal('modal-cierre');
         updateHeaderStatus();
-        loadDashboard();
         window.SGA_Sync?.pushPending?.();
+        window.location.hash = '#caja/efectivo';
       } else {
         alert('Error: ' + result.error);
       }
