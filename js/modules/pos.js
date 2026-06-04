@@ -1779,8 +1779,35 @@ export const POS = (() => {
     const hideModal  = id => ge(id)?.classList.add('hidden');
 
     const showModalApertura = () => {
+      const inp  = ge('apertura-saldo-input');
+      const hint = ge('apertura-saldo-hint');
+      if (inp) {
+        try {
+          const rows = window.SGA_DB.query(
+            `SELECT saldo_final_real FROM sesiones_caja
+             WHERE sucursal_id = ? AND estado = 'cerrada'
+             ORDER BY fecha_cierre DESC LIMIT 1`,
+            [state.currentSucursal.id]
+          );
+          if (rows.length && rows[0].saldo_final_real != null) {
+            inp.value    = parseFloat(rows[0].saldo_final_real) || 0;
+            inp.readOnly = true;
+            inp.style.background = '#f5f5f5';
+            inp.style.color      = '#666';
+            if (hint) hint.style.display = 'block';
+          } else {
+            inp.value    = 0;
+            inp.readOnly = false;
+            inp.style.background = '';
+            inp.style.color      = '';
+            if (hint) hint.style.display = 'none';
+          }
+        } catch (e) {
+          inp.value = 0;
+        }
+      }
       showModal('modal-apertura');
-      setTimeout(() => ge('apertura-saldo-input')?.focus(), 80);
+      if (!inp?.readOnly) setTimeout(() => inp?.focus(), 80);
     };
 
     const showModalTicket = (ticketData) => {

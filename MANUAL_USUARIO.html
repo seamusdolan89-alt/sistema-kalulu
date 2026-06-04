@@ -1,0 +1,1671 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Manual de Usuario — Sistema Kalulu</title>
+  <style>
+    :root {
+      --blue: #0066cc;
+      --blue-light: #e8f0fb;
+      --green: #2e7d32;
+      --green-light: #e8f5e9;
+      --orange: #e65100;
+      --orange-light: #fff3e0;
+      --red: #c62828;
+      --red-light: #fce4e4;
+      --border: #dde3ea;
+      --text: #1a1a2e;
+      --text-muted: #6b7280;
+      --bg: #f7f9fc;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.65;
+      color: var(--text);
+      background: #fff;
+    }
+
+    /* ── COVER ── */
+    .cover {
+      background: linear-gradient(135deg, #0055bb 0%, #003d99 100%);
+      color: #fff;
+      min-height: 280px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 48px 24px;
+    }
+    .cover h1 { font-size: 2.4rem; font-weight: 700; margin-bottom: 8px; }
+    .cover h2 { font-size: 1.1rem; font-weight: 400; opacity: .85; margin-bottom: 24px; }
+    .cover .subtitle {
+      background: rgba(255,255,255,.15);
+      border-radius: 8px;
+      padding: 10px 24px;
+      font-size: 0.9rem;
+    }
+
+    /* ── LAYOUT ── */
+    .wrapper { max-width: 900px; margin: 0 auto; padding: 40px 24px 80px; }
+
+    /* ── TOC ── */
+    .toc {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px 28px;
+      margin-bottom: 48px;
+    }
+    .toc h3 { font-size: 1rem; color: var(--blue); margin-bottom: 14px; letter-spacing: .04em; text-transform: uppercase; }
+    .toc ol { padding-left: 20px; }
+    .toc li { margin: 5px 0; }
+    .toc a { color: var(--blue); text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+
+    /* ── SECTIONS ── */
+    section { margin-bottom: 56px; }
+    h2.section-title {
+      font-size: 1.5rem;
+      color: var(--blue);
+      border-bottom: 2px solid var(--blue);
+      padding-bottom: 8px;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    h3.sub-title {
+      font-size: 1.1rem;
+      color: var(--text);
+      margin: 28px 0 12px;
+      padding-left: 12px;
+      border-left: 4px solid var(--blue);
+    }
+    p { margin-bottom: 12px; }
+
+    /* ── STEPS ── */
+    .steps { counter-reset: step; list-style: none; padding: 0; }
+    .steps li {
+      counter-increment: step;
+      position: relative;
+      padding: 10px 14px 10px 52px;
+      margin-bottom: 8px;
+      background: var(--bg);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 26px;
+      height: 26px;
+      background: var(--blue);
+      color: #fff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.8rem;
+    }
+    .steps li strong { color: var(--blue); }
+
+    /* ── CALLOUTS ── */
+    .tip, .warn, .danger, .info {
+      padding: 14px 18px;
+      border-radius: 8px;
+      margin: 16px 0;
+      border-left: 5px solid;
+    }
+    .tip   { background: var(--green-light);  border-color: var(--green);  }
+    .warn  { background: var(--orange-light); border-color: var(--orange); }
+    .danger{ background: var(--red-light);    border-color: var(--red);    }
+    .info  { background: var(--blue-light);   border-color: var(--blue);   }
+    .tip   .label { color: var(--green);  font-weight: 700; }
+    .warn  .label { color: var(--orange); font-weight: 700; }
+    .danger .label{ color: var(--red);    font-weight: 700; }
+    .info  .label { color: var(--blue);   font-weight: 700; }
+
+    /* ── IMÁGENES ── */
+    /*
+     * Cada captura usa este patrón:
+     *   <figure class="captura">
+     *     <img onerror="this.classList.add('error')" src="capturas/NOMBRE.png" alt="...">
+     *     <figcaption>Descripción</figcaption>
+     *   </figure>
+     *
+     * Si el archivo existe → muestra la imagen.
+     * Si NO existe       → muestra el cuadro gris con el nombre de archivo.
+     */
+    .captura {
+      margin: 18px 0;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: 0 2px 8px rgba(0,0,0,.08);
+    }
+    .captura img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+    /* Cuando la imagen falla → ocultar el img y mostrar el placeholder */
+    .captura img.error { display: none; }
+    .captura .placeholder {
+      display: none;          /* oculto por defecto */
+      min-height: 180px;
+      background: linear-gradient(135deg, #eef2f7 0%, #e2e8f0 100%);
+      border-bottom: 1px solid var(--border);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 24px;
+      text-align: center;
+      color: #718096;
+      font-size: 0.88rem;
+    }
+    .captura img.error + .placeholder { display: flex; }
+    .captura .placeholder .icono { font-size: 2.2rem; }
+    .captura .placeholder strong { color: #4a5568; font-size: 0.95rem; display: block; }
+    .captura .placeholder code {
+      background: #fff;
+      border: 1px solid #cbd5e0;
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 0.85rem;
+      color: var(--blue);
+      margin-top: 4px;
+      display: inline-block;
+    }
+    .captura figcaption {
+      padding: 8px 14px;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      background: #f8fafc;
+      border-top: 1px solid var(--border);
+      font-style: italic;
+    }
+
+    /* ── TABLE ── */
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th { background: var(--blue); color: #fff; padding: 10px 14px; text-align: left; font-size: 0.88rem; }
+    td { padding: 9px 14px; border-bottom: 1px solid var(--border); font-size: 0.92rem; }
+    tr:nth-child(even) td { background: var(--bg); }
+
+    /* ── BADGE ── */
+    .badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+    .badge-blue   { background: var(--blue-light);   color: var(--blue);   }
+    .badge-green  { background: var(--green-light);  color: var(--green);  }
+    .badge-orange { background: var(--orange-light); color: var(--orange); }
+
+    /* ── CONCEPT BOX ── */
+    .concept {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+      margin: 14px 0;
+    }
+    .concept .concept-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--blue);
+      margin-bottom: 6px;
+    }
+
+    /* ── PRINT ── */
+    @media print {
+      .cover { background: #003d99 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .captura { box-shadow: none; }
+      .captura .placeholder { min-height: 120px; }
+      section { page-break-inside: avoid; }
+      h2.section-title { page-break-after: avoid; }
+    }
+    @media (max-width: 600px) {
+      .cover h1 { font-size: 1.6rem; }
+      .wrapper { padding: 20px 14px 60px; }
+    }
+  </style>
+
+</head>
+<body>
+
+<!-- ══════════════ INSTRUCCIONES PARA AGREGAR CAPTURAS ══════════════
+     1. Creá una carpeta llamada  "capturas"  en la misma ubicación que este archivo HTML.
+     2. Tomá capturas de pantalla del sistema.
+     3. Guardá cada captura con el nombre exacto indicado en el cuadro gris de cada sección.
+     4. Recargá esta página — las imágenes aparecerán automáticamente.
+════════════════════════════════════════════════════════════════════ -->
+
+<!-- ══════════════ PORTADA ══════════════ -->
+<div class="cover">
+  <h1>🏪 Sistema Kalulu</h1>
+  <h2>Manual de Uso para Cajera y Encargada del Local</h2>
+  <div class="subtitle">Gestión de Almacén · Punto de Venta · Caja · Compras</div>
+</div>
+
+<div class="wrapper">
+
+<!-- ══════════════ ÍNDICE ══════════════ -->
+<div class="toc">
+  <h3>📋 Índice de Contenidos</h3>
+  <ol>
+    <li><a href="#s1">Acceso al sistema</a></li>
+    <li><a href="#s2">Cómo navegar por el sistema</a></li>
+    <li><a href="#s3">Abrir la caja</a></li>
+    <li><a href="#s4">Efectuar una venta (POS)</a></li>
+    <li><a href="#s4b">Escenarios de venta con cliente: saldo, deuda y fiado</a></li>
+    <li><a href="#s5">Cancelar o anular una venta</a></li>
+    <li><a href="#s6">Cuenta corriente de clientes</a></li>
+    <li><a href="#s7">Egresos e ingresos de caja</a></li>
+    <li><a href="#s8">Cierre y arqueo de caja</a></li>
+    <li><a href="#s9">Gestión de productos</a></li>
+    <li><a href="#s10">Producto Madre y Producto Sustituto</a></li>
+    <li><a href="#s11">Cargar una compra</a></li>
+    <li><a href="#s12">Pagos a proveedores</a></li>
+    <li><a href="#s13">Gestión de clientes</a></li>
+    <li><a href="#s14">Stock y operaciones de stock</a></li>
+    <li><a href="#s15">Usuarios y permisos</a></li>
+    <li><a href="#s16">Backup y seguridad de datos</a></li>
+    <li><a href="#s17">Preguntas frecuentes</a></li>
+  </ol>
+</div>
+
+
+<!-- ══════════════ 1. ACCESO ══════════════ -->
+<section id="s1">
+  <h2 class="section-title">🔐 1. Acceso al sistema</h2>
+
+  <p>El Sistema Kalulu se abre desde el navegador web del equipo del local. Buscá el ícono de acceso directo en el escritorio o en el marcador del navegador.</p>
+
+  <h3 class="sub-title">Iniciar sesión</h3>
+  <ol class="steps">
+    <li>Abrí el navegador y accedé a la dirección del sistema (el administrador te la indicará).</li>
+    <li>Ingresá tu <strong>nombre de usuario</strong> en el primer campo.</li>
+    <li>Ingresá tu <strong>contraseña</strong> en el segundo campo.</li>
+    <li>Hacé clic en el botón <strong>"Ingresar"</strong>.</li>
+    <li>Si los datos son correctos, el sistema te llevará directamente al <strong>Punto de Venta</strong>.</li>
+  </ol>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/01-login.png" alt="Pantalla de login">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Pantalla de login con campos de usuario y contraseña</strong>
+      <span>Guardá en la carpeta <strong>capturas</strong> con el nombre:</span>
+      <code>01-login.png</code>
+    </div>
+    <figcaption>Pantalla de inicio de sesión del Sistema Kalulu</figcaption>
+  </figure>
+
+  <div class="warn">
+    <span class="label">⚠️ Importante:</span> No compartás tu contraseña con nadie. Si olvidás tu contraseña, contactá al administrador para que te la restablezca.
+  </div>
+
+  <h3 class="sub-title">Cerrar sesión</h3>
+  <p>Al terminar el turno, hacé clic en el botón <strong>"Salir"</strong> en la esquina superior derecha. La sesión se cierra automáticamente al cerrar la pestaña del navegador.</p>
+</section>
+
+
+<!-- ══════════════ 2. NAVEGACIÓN ══════════════ -->
+<section id="s2">
+  <h2 class="section-title">🗺️ 2. Cómo navegar por el sistema</h2>
+
+  <p>El sistema tiene dos zonas principales:</p>
+
+  <table>
+    <tr><th>Zona</th><th>Descripción</th></tr>
+    <tr><td><strong>Barra lateral izquierda (Menú)</strong></td><td>Permite acceder a todos los módulos: POS, Caja, Productos, Compras, etc. Solo se muestran las secciones a las que tenés permiso.</td></tr>
+    <tr><td><strong>Área principal (derecha)</strong></td><td>Muestra el contenido del módulo seleccionado.</td></tr>
+    <tr><td><strong>Barra superior</strong></td><td>Muestra tu nombre de usuario, el estado de sincronización y el botón de salida.</td></tr>
+  </table>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/02-pantalla-principal.png" alt="Pantalla principal con menú lateral">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Pantalla principal con menú lateral y el POS activo</strong>
+      <span>Guardá en la carpeta <strong>capturas</strong> con el nombre:</span>
+      <code>02-pantalla-principal.png</code>
+    </div>
+    <figcaption>Vista general del sistema: menú lateral izquierdo y área de trabajo</figcaption>
+  </figure>
+
+  <div class="info">
+    <span class="label">ℹ️ Sincronización:</span> En la barra superior hay un círculo de color. Verde = conectado y sincronizado. Negro = sin conexión (funciona igual, los datos se sincronizan automáticamente cuando vuelva internet).
+  </div>
+</section>
+
+
+<!-- ══════════════ 3. APERTURA DE CAJA ══════════════ -->
+<section id="s3">
+  <h2 class="section-title">💰 3. Abrir la caja</h2>
+
+  <p>Al comenzar el turno, lo primero que tenés que hacer es <strong>abrir la caja</strong>. Sin caja abierta, no podés registrar ventas en efectivo.</p>
+
+  <ol class="steps">
+    <li>En el menú lateral, hacé clic en <strong>Caja</strong>.</li>
+    <li>Si la caja está cerrada, verás una pantalla con el botón <strong>"Abrir Caja"</strong>.</li>
+    <li>Ingresá el <strong>saldo inicial</strong>: es el dinero con el que arrancás la caja (billetes y monedas que ya están en el cajón). Si no había dinero anterior, dejá en cero.</li>
+    <li>Hacé clic en <strong>"Abrir Caja"</strong>.</li>
+    <li>La caja quedará marcada como <span class="badge badge-green">Abierta</span> y ya podés empezar a vender.</li>
+  </ol>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/03-apertura-caja.png" alt="Apertura de caja">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Pantalla de apertura de caja con campo de saldo inicial</strong>
+      <span>Guardá en la carpeta <strong>capturas</strong> con el nombre:</span>
+      <code>03-apertura-caja.png</code>
+    </div>
+    <figcaption>Pantalla de apertura de caja al inicio del turno</figcaption>
+  </figure>
+
+  <div class="tip">
+    <span class="label">✅ Buena práctica:</span> Contá siempre el efectivo del cajón antes de abrir la caja y asegurate de que el saldo inicial sea correcto. Esto facilita el arqueo al cierre del turno.
+  </div>
+</section>
+
+
+<!-- ══════════════ 4. POS - VENTA ══════════════ -->
+<section id="s4">
+  <h2 class="section-title">🛒 4. Efectuar una venta (Punto de Venta)</h2>
+
+  <p>El módulo <strong>POS</strong> (Punto de Venta) es el que más vas a usar durante el día. Desde acá registrás todas las ventas.</p>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/04-pos-completo.png" alt="Pantalla completa del POS">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Pantalla completa del Punto de Venta (POS)</strong>
+      <span>Mostrá la búsqueda de productos a la izquierda y el carrito a la derecha</span>
+      <code>04-pos-completo.png</code>
+    </div>
+    <figcaption>Vista completa del módulo Punto de Venta con carrito de compra</figcaption>
+  </figure>
+
+  <h3 class="sub-title">Agregar productos a la venta</h3>
+
+  <p>Hay tres formas de agregar un producto:</p>
+
+  <table>
+    <tr><th>Método</th><th>Cómo hacerlo</th></tr>
+    <tr>
+      <td><strong>🔍 Buscar por nombre</strong></td>
+      <td>Escribí el nombre del producto en la barra de búsqueda y hacé clic sobre el resultado.</td>
+    </tr>
+    <tr>
+      <td><strong>📦 Escanear código de barras</strong></td>
+      <td>Con el lector de código de barras apuntado al producto, escanealo. Se agrega solo al carrito.</td>
+    </tr>
+    <tr>
+      <td><strong># Código manual</strong></td>
+      <td>Escribí el código de barras a mano en la barra de búsqueda y presioná Enter.</td>
+    </tr>
+  </table>
+
+  <h3 class="sub-title">Modificar cantidades y descuentos</h3>
+  <ol class="steps">
+    <li>Para cambiar la <strong>cantidad</strong>, hacé clic sobre el número de cantidad del item en el carrito y modificalo.</li>
+    <li>Para aplicar un <strong>descuento individual</strong> a un item, buscá el ícono de descuento (%) al lado del producto.</li>
+    <li>Para aplicar un <strong>descuento global</strong> a toda la venta, buscá la sección de descuento en la parte inferior del carrito.</li>
+  </ol>
+
+  <div class="warn">
+    <span class="label">⚠️ Descuento máximo:</span> Cada usuario tiene un límite de descuento configurado por el administrador. Si necesitás aplicar un descuento mayor, contactá al encargado.
+  </div>
+
+  <h3 class="sub-title">Asignar un cliente a la venta</h3>
+  <ol class="steps">
+    <li>Hacé clic en el botón <strong>"Cliente"</strong> o en el buscador de clientes.</li>
+    <li>Escribí el nombre, apellido o teléfono del cliente.</li>
+    <li>Seleccioná el cliente de la lista.</li>
+    <li>Si el cliente no existe, podés crearlo desde ese mismo buscador.</li>
+  </ol>
+
+  <h3 class="sub-title">Registrar el pago</h3>
+  <ol class="steps">
+    <li>Una vez que el carrito está completo, hacé clic en <strong>"Cobrar"</strong> o <strong>"Registrar Venta"</strong>.</li>
+    <li>Se abre la pantalla de pago. Seleccioná el <strong>medio de pago</strong>:</li>
+  </ol>
+
+  <table>
+    <tr><th>Medio de pago</th><th>Cuándo usarlo</th></tr>
+    <tr><td>💵 Efectivo</td><td>Pago en billetes y monedas</td></tr>
+    <tr><td>📱 Mercado Pago</td><td>QR, link de pago, transferencia por MP</td></tr>
+    <tr><td>💳 Tarjeta</td><td>Débito o crédito con terminal POS</td></tr>
+    <tr><td>🏦 Transferencia</td><td>Transferencia bancaria</td></tr>
+    <tr><td>📒 Cuenta Corriente</td><td>Fiado / crédito del cliente</td></tr>
+  </table>
+
+  <ol class="steps" start="3">
+    <li>Si el cliente paga con <strong>efectivo</strong>, ingresá el monto recibido y el sistema calculará el vuelto automáticamente.</li>
+    <li>Si el cliente paga con <strong>múltiples medios</strong> (por ejemplo, parte en efectivo y parte en tarjeta), podés dividir el pago: ingresá el monto de cada medio.</li>
+    <li>Hacé clic en <strong>"Confirmar Venta"</strong>.</li>
+    <li>El sistema descuenta el stock automáticamente y la venta queda registrada.</li>
+  </ol>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/05-pos-cobro.png" alt="Modal de cobro">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Modal de cobro mostrando medios de pago y campo de efectivo recibido</strong>
+      <code>05-pos-cobro.png</code>
+    </div>
+    <figcaption>Pantalla de cobro al finalizar una venta</figcaption>
+  </figure>
+
+  <div class="tip">
+    <span class="label">✅ Consejo:</span> Si el cliente ya tiene un saldo a favor en cuenta corriente, el sistema lo aplica automáticamente y te avisa.
+  </div>
+
+  <h3 class="sub-title">Imprimir comprobante</h3>
+  <p>Luego de confirmar la venta, el sistema puede imprimir un comprobante en la impresora térmica. Si la impresora está conectada y configurada, el ticket se imprime automáticamente. Si necesitás reimprimir, buscá la venta en el historial del POS y usá el botón de reimprimir.</p>
+</section>
+
+
+<!-- ══════════════ 4b. ESCENARIOS DE VENTA CON CLIENTE ══════════════ -->
+<section id="s4b">
+  <h2 class="section-title">💳 Escenarios de venta con cliente: saldo, deuda y fiado</h2>
+
+  <p>Cuando la venta tiene un cliente asignado, el sistema maneja automáticamente distintas situaciones de cuenta corriente. A continuación se describen los tres escenarios más comunes.</p>
+
+  <div class="danger">
+    <span class="label">🚨 Requisito previo — opción "Registrar deuda":</span> Para que cualquiera de estos escenarios funcione correctamente, al momento de cobrar debe estar <strong>tildada la opción de registrar en cuenta corriente</strong> (o "fiado"). Si esa opción no está activa, el sistema no guardará el saldo a favor ni la deuda del cliente.
+  </div>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/18-cobro-cuenta.png" alt="Opción registrar deuda en pantalla de cobro">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Pantalla de cobro mostrando la opción "Registrar en cuenta corriente" tildada</strong>
+      <span>Guardá en la carpeta <strong>capturas</strong> con el nombre:</span>
+      <code>18-cobro-cuenta.png</code>
+    </div>
+    <figcaption>La opción de cuenta corriente debe estar activa para registrar deudas y saldos</figcaption>
+  </figure>
+
+  <!-- ── ESCENARIO A ── -->
+  <h3 class="sub-title">Escenario A — El cliente tiene saldo a favor</h3>
+
+  <p>Esto ocurre cuando el cliente pagó de más en una ocasión anterior, o cuando se le registró un saldo a favor manualmente. El sistema detecta ese saldo y lo aplica automáticamente al cobrar.</p>
+
+  <div class="concept">
+    <div class="concept-title">Ejemplo: María tiene $500 a favor. Compra por $1.200.</div>
+    <p>El sistema aplica los $500 de saldo a favor automáticamente. Solo resta cobrar <strong>$700</strong>. El saldo a favor de María queda en $0.</p>
+  </div>
+
+  <ol class="steps">
+    <li>Agregá los productos al carrito y asigná el cliente (<strong>María</strong>).</li>
+    <li>Al hacer clic en <strong>"Cobrar"</strong>, el sistema detecta el saldo a favor y muestra un aviso: <em>"Se aplicarán $500 de saldo a favor"</em>.</li>
+    <li>El total a cobrar se reduce automáticamente. Solo ingresás el medio de pago por la diferencia ($700).</li>
+    <li>Confirmás la venta. El saldo a favor queda consumido.</li>
+  </ol>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/19-cc-saldo-favor.png" alt="Venta con saldo a favor aplicado">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Pantalla de cobro mostrando el saldo a favor del cliente aplicado automáticamente</strong>
+      <span>Guardá en la carpeta <strong>capturas</strong> con el nombre:</span>
+      <code>19-cc-saldo-favor.png</code>
+    </div>
+    <figcaption>El saldo a favor del cliente se descuenta automáticamente del total a cobrar</figcaption>
+  </figure>
+
+  <div class="tip">
+    <span class="label">✅ Consejo:</span> Si el saldo a favor cubre el total de la venta, el sistema registra la venta sin necesidad de cobrar nada más. El excedente queda como nuevo saldo a favor.
+  </div>
+
+  <!-- ── ESCENARIO B ── -->
+  <h3 class="sub-title">Escenario B — El cliente tiene deuda preexistente y paga parte de la venta actual</h3>
+
+  <p>El cliente debe dinero de compras anteriores y en esta visita paga algo en efectivo. Ese pago puede aplicarse a la venta de hoy, a la deuda anterior, o repartirse entre ambas.</p>
+
+  <div class="concept">
+    <div class="concept-title">Ejemplo: Juan debe $2.000 de antes. Compra $800 y paga $500 en efectivo.</div>
+    <p>Los $500 cubren parte de la venta de hoy. Los $300 restantes de la venta se suman a su deuda. La deuda total de Juan pasa a ser <strong>$2.300</strong>.</p>
+  </div>
+
+  <ol class="steps">
+    <li>Agregá los productos ($800) y asigná el cliente (<strong>Juan</strong>). El sistema muestra su deuda actual.</li>
+    <li>Al hacer clic en <strong>"Cobrar"</strong>, seleccioná <strong>Efectivo</strong> e ingresá $500.</li>
+    <li>Para la diferencia ($300), seleccioná <strong>Cuenta Corriente</strong> como segundo medio de pago.</li>
+    <li>Verificá que la opción de registrar en cuenta corriente esté <strong>tildada</strong>.</li>
+    <li>Confirmá. El sistema registra el pago parcial y suma $300 a la deuda de Juan.</li>
+  </ol>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/20-cc-pago-parcial.png" alt="Pago parcial con deuda preexistente">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Pantalla de cobro con pago mixto: efectivo + cuenta corriente, mostrando deuda preexistente</strong>
+      <span>Guardá en la carpeta <strong>capturas</strong> con el nombre:</span>
+      <code>20-cc-pago-parcial.png</code>
+    </div>
+    <figcaption>Pago parcial: parte en efectivo y el resto suma a la deuda existente del cliente</figcaption>
+  </figure>
+
+  <div class="warn">
+    <span class="label">⚠️ Atención:</span> Si el cliente tiene deuda preexistente, el sistema puede mostrar una advertencia o bloquear la venta si se superó el tope de crédito configurado. En ese caso, hay que cobrar algo antes de continuar, o un usuario con permiso especial puede habilitar la venta igual.
+  </div>
+
+  <!-- ── ESCENARIO C ── -->
+  <h3 class="sub-title">Escenario C — El cliente no paga y deja registrada la deuda (fiado)</h3>
+
+  <p>El cliente se lleva la mercadería y no paga nada ahora. Toda la venta queda registrada como deuda en su cuenta corriente.</p>
+
+  <div class="concept">
+    <div class="concept-title">Ejemplo: Ana compra $1.500 y no paga nada hoy.</div>
+    <p>Se registra la venta y los $1.500 se suman a la cuenta corriente de Ana. La próxima vez que venga y pague, ese monto se reduce.</p>
+  </div>
+
+  <ol class="steps">
+    <li>Agregá los productos y asigná el cliente (<strong>Ana</strong>). <em>El cliente es obligatorio para registrar deuda.</em></li>
+    <li>Al hacer clic en <strong>"Cobrar"</strong>, seleccioná <strong>Cuenta Corriente</strong> como único medio de pago e ingresá el monto total.</li>
+    <li>Verificá que la opción de registrar en cuenta corriente esté <strong>tildada</strong>. Sin este tilde, la deuda no se registra.</li>
+    <li>Confirmá la venta. Los $1.500 se suman a la deuda de Ana.</li>
+    <li>El sistema puede imprimir un comprobante de la deuda para que el cliente lo tenga.</li>
+  </ol>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/21-cc-fiado-total.png" alt="Venta completa en cuenta corriente (fiado)">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Pantalla de cobro con la venta completa en cuenta corriente (fiado total)</strong>
+      <span>Guardá en la carpeta <strong>capturas</strong> con el nombre:</span>
+      <code>21-cc-fiado-total.png</code>
+    </div>
+    <figcaption>Venta completamente en cuenta corriente: el total pasa a ser deuda del cliente</figcaption>
+  </figure>
+
+  <div class="danger">
+    <span class="label">🚨 Recordá siempre:</span> Para los escenarios B y C, la opción <strong>"Registrar en cuenta corriente"</strong> debe estar <strong>tildada</strong> antes de confirmar. Si no está tildada, el sistema puede marcar la venta como pagada sin registrar la deuda, y el dinero quedará sin registrar en la cuenta del cliente.
+  </div>
+
+  <table>
+    <tr><th>Escenario</th><th>Tiene saldo a favor</th><th>Paga algo hoy</th><th>Queda con deuda</th></tr>
+    <tr><td><strong>A — Saldo a favor</strong></td><td>✅ Sí</td><td>Solo la diferencia</td><td>No (o menos)</td></tr>
+    <tr><td><strong>B — Pago parcial</strong></td><td>No</td><td>✅ Parte en efectivo</td><td>✅ Sí, el resto</td></tr>
+    <tr><td><strong>C — Fiado total</strong></td><td>No</td><td>❌ No paga nada</td><td>✅ Sí, todo</td></tr>
+  </table>
+
+</section>
+
+
+<!-- ══════════════ 5. ANULAR VENTA ══════════════ -->
+<section id="s5">
+  <h2 class="section-title">❌ 5. Cancelar o anular una venta</h2>
+
+  <h3 class="sub-title">Cancelar antes de confirmar</h3>
+  <p>Si todavía no confirmaste la venta, podés limpiar el carrito con el botón <strong>"Cancelar"</strong> o eliminando los items uno por uno con el ícono de papelera de cada producto.</p>
+
+  <h3 class="sub-title">Anular una venta ya registrada</h3>
+  <div class="warn">
+    <span class="label">⚠️ Requiere permiso:</span> La anulación de ventas confirmadas requiere autorización. Solo usuarios con el permiso <em>"Anular ventas"</em> pueden hacerlo.
+  </div>
+  <ol class="steps">
+    <li>En el POS, buscá el botón de <strong>Historial de ventas</strong> (ícono de reloj o lista en la parte superior).</li>
+    <li>Buscá la venta que querés anular.</li>
+    <li>Hacé clic en <strong>"Anular venta"</strong>.</li>
+    <li>El sistema te pedirá confirmación y, al aceptar, revertirá el stock y el movimiento de caja.</li>
+  </ol>
+</section>
+
+
+<!-- ══════════════ 6. CUENTA CORRIENTE CLIENTES ══════════════ -->
+<section id="s6">
+  <h2 class="section-title">📒 6. Cuenta corriente de clientes</h2>
+
+  <p>La cuenta corriente permite que un cliente se lleve mercadería y pague después (fiado). El sistema lleva el registro del saldo que debe cada cliente.</p>
+
+  <h3 class="sub-title">Vender en cuenta corriente</h3>
+  <ol class="steps">
+    <li>Antes de cobrar, asigná el <strong>cliente</strong> a la venta (es obligatorio para usar cuenta corriente).</li>
+    <li>En la pantalla de cobro, seleccioná <strong>Cuenta Corriente</strong> como medio de pago.</li>
+    <li>Ingresá el monto a cargar en cuenta y confirmá la venta.</li>
+    <li>El saldo del cliente aumentará en ese monto.</li>
+  </ol>
+
+  <h3 class="sub-title">Registrar un pago del cliente</h3>
+  <ol class="steps">
+    <li>En el menú lateral, accedé a <strong>Clientes</strong>.</li>
+    <li>Buscá y seleccioná el cliente.</li>
+    <li>Hacé clic en <strong>"Registrar pago"</strong>.</li>
+    <li>Ingresá el monto y el medio de pago (efectivo, transferencia, etc.).</li>
+    <li>El saldo se reduce automáticamente.</li>
+  </ol>
+
+  <div class="tip">
+    <span class="label">✅ Consejo:</span> Podés ver el historial completo de movimientos de cada cliente (ventas + pagos) desde su ficha en el módulo Clientes.
+  </div>
+</section>
+
+
+<!-- ══════════════ 7. EGRESOS E INGRESOS ══════════════ -->
+<section id="s7">
+  <h2 class="section-title">💸 7. Egresos e ingresos de caja</h2>
+
+  <p>Durante el turno puede haber salidas o entradas de dinero que no son ventas (por ejemplo, pagar el flete, sacar dinero para cambio, etc.).</p>
+
+  <h3 class="sub-title">Registrar un egreso (salida de dinero)</h3>
+  <ol class="steps">
+    <li>En el menú, accedé a <strong>Caja</strong>.</li>
+    <li>Hacé clic en la pestaña <strong>"Egresos e Ingresos"</strong>.</li>
+    <li>En la sección <strong>Egresos</strong>, hacé clic en <strong>"Nuevo egreso"</strong>.</li>
+    <li>Ingresá el <strong>monto</strong> y una <strong>descripción</strong> del motivo (ej: "Pago flete", "Limpieza").</li>
+    <li>Confirmá.</li>
+  </ol>
+
+  <h3 class="sub-title">Registrar un ingreso extra</h3>
+  <ol class="steps">
+    <li>En la misma pestaña, usá la sección <strong>Ingresos</strong>.</li>
+    <li>Ingresá el monto y el motivo del ingreso extra.</li>
+    <li>Confirmá.</li>
+  </ol>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/06-caja-egresos.png" alt="Pestaña egresos e ingresos">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Pestaña "Egresos e Ingresos" dentro del módulo Caja</strong>
+      <code>06-caja-egresos.png</code>
+    </div>
+    <figcaption>Registro de egresos e ingresos durante el turno</figcaption>
+  </figure>
+
+  <div class="info">
+    <span class="label">ℹ️ Pagos a proveedores:</span> Los pagos a proveedores también salen de la caja. Se registran desde el módulo <strong>Proveedores → Cuenta Corriente</strong> (ver sección 12).
+  </div>
+</section>
+
+
+<!-- ══════════════ 8. CIERRE Y ARQUEO ══════════════ -->
+<section id="s8">
+  <h2 class="section-title">🏁 8. Cierre y arqueo de caja</h2>
+
+  <p>Al finalizar el turno se realiza el <strong>cierre de caja</strong>, donde se cuenta el dinero físico y se compara con lo que el sistema dice que debería haber.</p>
+
+  <h3 class="sub-title">Resumen de caja (durante el turno)</h3>
+  <p>En cualquier momento podés consultar el resumen del turno actual:</p>
+  <ol class="steps">
+    <li>Accedé a <strong>Caja</strong> en el menú.</li>
+    <li>La pestaña <strong>Resumen</strong> muestra el total de ventas, egresos y el saldo esperado en efectivo.</li>
+    <li>También podés ver los totales por medio de pago haciendo clic en <strong>"Cobranzas por medio de pago"</strong>.</li>
+  </ol>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/07-caja-resumen.png" alt="Resumen de caja">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Pantalla de resumen de caja con totales por medio de pago</strong>
+      <code>07-caja-resumen.png</code>
+    </div>
+    <figcaption>Resumen del turno de caja con desglose por medio de pago</figcaption>
+  </figure>
+
+  <h3 class="sub-title">Recuento de dinero</h3>
+  <ol class="steps">
+    <li>Antes de cerrar, hacé clic en la pestaña <strong>"Recuento de dinero"</strong>.</li>
+    <li>Ingresá la cantidad de cada billete y moneda que hay en el cajón.</li>
+    <li>El sistema calcula el total automáticamente y te muestra si hay diferencia con lo esperado.</li>
+  </ol>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/08-caja-recuento.png" alt="Recuento de dinero">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Pantalla de recuento de dinero por denominaciones de billete</strong>
+      <code>08-caja-recuento.png</code>
+    </div>
+    <figcaption>Recuento físico del efectivo al cierre del turno</figcaption>
+  </figure>
+
+  <h3 class="sub-title">Cerrar la caja</h3>
+  <div class="warn">
+    <span class="label">⚠️ Requiere permiso:</span> El cierre de caja puede requerir autorización del encargado, según la configuración.
+  </div>
+  <ol class="steps">
+    <li>Hacé clic en el botón <strong>"Cerrar Caja"</strong> (aparece en la parte superior derecha cuando la caja está abierta).</li>
+    <li>El sistema muestra el resumen final: total vendido, egresos, saldo esperado y diferencia.</li>
+    <li>Podés ingresar el <strong>saldo real</strong> contado en el cajón.</li>
+    <li>Confirmá el cierre. La caja queda como <span class="badge badge-orange">Cerrada</span>.</li>
+    <li>Una vez cerrada, ya no podés agregar más movimientos a ese turno.</li>
+  </ol>
+
+  <div class="tip">
+    <span class="label">✅ Procedimiento recomendado:</span>
+    <ol style="margin-top:8px;padding-left:20px;">
+      <li>Contá el efectivo con el cajón.</li>
+      <li>Completá el recuento por denominaciones en la pestaña "Recuento de dinero".</li>
+      <li>Revisá si hay diferencia (faltante/sobrante).</li>
+      <li>Si hay diferencia, verificá si faltó registrar algún egreso o si hubo un error.</li>
+      <li>Cerrá la caja y anotá la observación si es necesario.</li>
+    </ol>
+  </div>
+</section>
+
+
+<!-- ══════════════ 9. GESTIÓN DE PRODUCTOS ══════════════ -->
+<section id="s9">
+  <h2 class="section-title">📦 9. Gestión de productos</h2>
+
+  <div class="info">
+    <span class="label">ℹ️ Permiso requerido:</span> Solo los usuarios con permiso "Gestionar productos" pueden ver y editar productos.
+  </div>
+
+  <h3 class="sub-title">Ver el listado de productos</h3>
+  <ol class="steps">
+    <li>En el menú lateral, hacé clic en <strong>Productos</strong>.</li>
+    <li>Se muestra la lista de todos los productos activos con nombre, precio, costo y stock.</li>
+    <li>Podés buscar por nombre o filtrar por categoría o proveedor.</li>
+  </ol>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/09-productos-lista.png" alt="Listado de productos">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Módulo de Productos con listado y barra de búsqueda</strong>
+      <code>09-productos-lista.png</code>
+    </div>
+    <figcaption>Listado de productos con búsqueda y filtros</figcaption>
+  </figure>
+
+  <h3 class="sub-title">Crear un producto nuevo</h3>
+  <ol class="steps">
+    <li>En el módulo Productos, hacé clic en <strong>"Nuevo Producto"</strong>.</li>
+    <li>Se abre el <strong>editor completo de producto</strong>. Completá los campos:</li>
+  </ol>
+
+  <table>
+    <tr><th>Campo</th><th>Descripción</th><th>Obligatorio</th></tr>
+    <tr><td>Nombre</td><td>Nombre del producto tal como aparece en el POS y en los tickets</td><td>✅ Sí</td></tr>
+    <tr><td>Código de barras</td><td>Código EAN del producto. Podés escanear con el lector o escribirlo</td><td>No</td></tr>
+    <tr><td>Categoría</td><td>Grupo al que pertenece (ej: Lácteos, Bebidas, Limpieza)</td><td>No</td></tr>
+    <tr><td>Proveedor</td><td>Proveedor principal del que lo comprás</td><td>No</td></tr>
+    <tr><td>Costo</td><td>Precio de compra del producto</td><td>✅ Sí</td></tr>
+    <tr><td>Precio de venta</td><td>Precio al que lo vendés</td><td>✅ Sí</td></tr>
+    <tr><td>Unidad de medida</td><td>Unidad, kg, litro, etc.</td><td>No</td></tr>
+    <tr><td>Stock mínimo</td><td>Cantidad mínima antes de que el sistema avise que hay que reponer</td><td>No</td></tr>
+    <tr><td>Imagen</td><td>Foto del producto (opcional, aparece en el POS)</td><td>No</td></tr>
+  </table>
+
+  <ol class="steps" start="3">
+    <li>Hacé clic en <strong>"Guardar"</strong> para crear el producto.</li>
+  </ol>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/10-editor-producto.png" alt="Editor de producto">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Editor completo de producto con todos los campos</strong>
+      <code>10-editor-producto.png</code>
+    </div>
+    <figcaption>Editor de producto con campos de nombre, precio, costo y más</figcaption>
+  </figure>
+
+  <h3 class="sub-title">Editar un producto existente</h3>
+  <ol class="steps">
+    <li>Buscá el producto en la lista.</li>
+    <li>Hacé clic sobre el producto o en el ícono de edición (lápiz).</li>
+    <li>Modificá los campos que necesitás y guardá.</li>
+  </ol>
+
+  <h3 class="sub-title">Configurar precio de oferta</h3>
+  <ol class="steps">
+    <li>En el editor del producto, buscá la sección <strong>Oferta</strong>.</li>
+    <li>Activá la opción de oferta.</li>
+    <li>Ingresá el precio de oferta y las fechas "desde" y "hasta".</li>
+    <li>Guardá. Durante ese período, el POS aplicará el precio de oferta automáticamente.</li>
+  </ol>
+</section>
+
+
+<!-- ══════════════ 10. PRODUCTO MADRE Y SUSTITUTOS ══════════════ -->
+<section id="s10">
+  <h2 class="section-title">🧩 10. Producto Madre y Producto Sustituto</h2>
+
+  <p>El Sistema Kalulu tiene dos conceptos especiales para organizar productos relacionados: el <strong>Producto Madre</strong> y el <strong>Producto Sustituto</strong>. Es importante entenderlos para cargar los productos correctamente.</p>
+
+  <div class="concept">
+    <div class="concept-title">🧩 ¿Qué es un Producto Madre?</div>
+    <p>Un <strong>Producto Madre</strong> es un producto base que "da origen" a otros productos que son versiones o presentaciones del mismo artículo. Los productos que dependen de él se llaman <strong>productos hijo</strong>.</p>
+    <p><strong>Ejemplo práctico:</strong> "Aceite de girasol" es el producto madre. Las presentaciones hijas son:</p>
+    <ul style="padding-left:20px;margin-top:6px;">
+      <li>Aceite de girasol 900ml</li>
+      <li>Aceite de girasol 1.5 litros</li>
+      <li>Aceite de girasol bidón 5 litros</li>
+    </ul>
+    <p style="margin-top:10px;">Los productos hijo <strong>heredan</strong> el costo y el precio del producto madre por defecto. Cuando actualizás el precio del madre, todos los hijos se actualizan solos. Podés configurar un hijo para que tenga precio independiente si necesitás.</p>
+  </div>
+
+  <div class="concept">
+    <div class="concept-title">🔄 ¿Qué es un Producto Sustituto?</div>
+    <p>Los <strong>Productos Sustitutos</strong> son productos <em>distintos</em> que pueden reemplazarse entre sí cuando uno no tiene stock. Son productos de marcas o tipos diferentes que sirven para lo mismo.</p>
+    <p><strong>Ejemplo práctico:</strong> Si se te acaba el "Aceite La Suprema 900ml", el sistema puede sugerirte vender en su lugar el "Aceite Cocinero 900ml" porque están marcados como sustitutos.</p>
+    <p style="margin-top:8px;">En el POS, si un producto no tiene stock, el sistema te mostrará los sustitutos disponibles para que puedas ofrecerle una alternativa al cliente.</p>
+  </div>
+
+  <h3 class="sub-title">Cómo crear un producto hijo (dependiente de una madre)</h3>
+  <ol class="steps">
+    <li>Abrí el editor del producto que querás hacer hijo.</li>
+    <li>Buscá el campo <strong>"Producto Madre"</strong>.</li>
+    <li>Escribí el nombre del producto madre y seleccionalo.</li>
+    <li>Definí si este producto hereda precio y costo del madre o si tiene precio independiente.</li>
+    <li>Guardá el producto.</li>
+  </ol>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/11-editor-producto-madre.png" alt="Campo Producto Madre en editor">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Editor de producto mostrando el campo "Producto Madre" y opciones de herencia</strong>
+      <code>11-editor-producto-madre.png</code>
+    </div>
+    <figcaption>Configuración de producto hijo con selección del producto madre</figcaption>
+  </figure>
+
+  <h3 class="sub-title">Cómo asignar sustitutos a un producto</h3>
+  <ol class="steps">
+    <li>Abrí el editor del producto.</li>
+    <li>Buscá la sección <strong>"Productos Sustitutos"</strong>.</li>
+    <li>Hacé clic en <strong>"Agregar sustituto"</strong>.</li>
+    <li>Buscá y seleccioná el producto que puede reemplazarlo.</li>
+    <li>Guardá.</li>
+  </ol>
+
+  <table>
+    <tr><th>Concepto</th><th>Ejemplo</th><th>Para qué sirve</th></tr>
+    <tr>
+      <td><strong>Producto Madre</strong></td>
+      <td>Aceite girasol → hijos: 900ml, 1.5L, 5L</td>
+      <td>Herencia de precios, organización por presentaciones</td>
+    </tr>
+    <tr>
+      <td><strong>Producto Sustituto</strong></td>
+      <td>Aceite La Suprema ↔ Aceite Cocinero</td>
+      <td>Sugerir alternativas cuando falta stock</td>
+    </tr>
+  </table>
+</section>
+
+
+<!-- ══════════════ 11. CARGAR UNA COMPRA ══════════════ -->
+<section id="s11">
+  <h2 class="section-title">🧾 11. Cargar una compra</h2>
+
+  <p>Cada vez que recibís mercadería de un proveedor tenés que registrar la compra en el sistema. Esto actualiza el stock y el costo de los productos automáticamente.</p>
+
+  <div class="info">
+    <span class="label">ℹ️ Cómo acceder:</span> En el menú lateral, hacé clic en <strong>Operaciones de Stock</strong> y luego en la pestaña o sección <strong>Compras</strong>.
+  </div>
+
+  <!-- PASO 1: CABECERA -->
+  <h3 class="sub-title">Paso 1 — Completar la cabecera de la compra</h3>
+
+  <p>Lo primero que pide el sistema es la información del comprobante. Completá los siguientes campos:</p>
+
+  <table>
+    <tr><th>Campo</th><th>Descripción</th></tr>
+    <tr>
+      <td><strong>Proveedor</strong></td>
+      <td>Escribí el nombre del proveedor y seleccionalo de la lista. Si no existe, crealo desde el módulo Proveedores.</td>
+    </tr>
+    <tr>
+      <td><strong>Condición de compra</strong></td>
+      <td>Tipo de comprobante recibido: <em>Factura A</em>, <em>Factura B</em>, <em>Factura C</em>, <em>Ticket</em> o <em>Remito</em>.</td>
+    </tr>
+    <tr>
+      <td><strong>N° de factura</strong></td>
+      <td>Punto de venta y número del comprobante (ej: 0001 - 00004532).</td>
+    </tr>
+    <tr>
+      <td><strong>Fecha</strong></td>
+      <td>Fecha que figura en el comprobante.</td>
+    </tr>
+    <tr>
+      <td><strong>Total</strong></td>
+      <td>Monto total de la factura.</td>
+    </tr>
+  </table>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/12-compra-nueva.png" alt="Cabecera de nueva compra">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Cabecera de nueva compra: proveedor, condición, factura y total</strong>
+      <code>12-compra-nueva.png</code>
+    </div>
+    <figcaption>Campos de cabecera de la compra</figcaption>
+  </figure>
+
+  <h3 class="sub-title">Campos adicionales para Factura A</h3>
+
+  <p>Si la condición de compra es <strong>Factura A</strong>, el sistema muestra campos fiscales adicionales. El total se calcula automáticamente sumando todos los conceptos:</p>
+
+  <table>
+    <tr><th>Campo fiscal</th><th>Qué es</th></tr>
+    <tr><td>Subtotal neto</td><td>Monto antes de impuestos</td></tr>
+    <tr><td>IVA 10,5%</td><td>IVA a tasa reducida (ej: carnes, frutas)</td></tr>
+    <tr><td>IVA 21%</td><td>IVA tasa general</td></tr>
+    <tr><td>Impuesto Interno</td><td>Impuestos específicos (bebidas, cigarrillos, etc.)</td></tr>
+    <tr><td>Percepción IVA</td><td>Percepción de IVA si el proveedor es agente de retención</td></tr>
+    <tr><td>Percepción IIBB</td><td>Percepción de Ingresos Brutos</td></tr>
+  </table>
+
+  <div class="tip">
+    <span class="label">✅ Consejo:</span> En Factura A el total <strong>se calcula solo</strong> — no lo ingresás manualmente, surge de sumar los campos fiscales. Solo completá los renglones que figuran en la factura.
+  </div>
+
+  <p>Una vez completada la cabecera, hacé clic en <strong>"Continuar"</strong> o <strong>"Siguiente"</strong> para pasar a cargar los productos.</p>
+
+  <!-- PASO 2: PRODUCTOS -->
+  <h3 class="sub-title">Paso 2 — Cargar los productos de la factura</h3>
+
+  <ol class="steps">
+    <li>Escribí el nombre del producto o escaneá su código de barras en la barra de búsqueda.</li>
+    <li>Seleccioná el producto de la lista.</li>
+    <li>Ingresá la <strong>cantidad</strong> recibida y el <strong>costo</strong> unitario (según la factura).</li>
+    <li>Repetí para cada producto del comprobante.</li>
+    <li>Cuando terminés de cargar todos los productos, hacé clic en <strong>"Confirmar"</strong>.</li>
+  </ol>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/13-compra-items.png" alt="Productos de la compra">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Lista de productos cargados en la compra con cantidades y costos</strong>
+      <code>13-compra-items.png</code>
+    </div>
+    <figcaption>Carga de productos de la factura</figcaption>
+  </figure>
+
+  <div class="tip">
+    <span class="label">✅ ¿Qué pasa al confirmar?</span>
+    <ul style="padding-left:20px;margin-top:6px;">
+      <li>El <strong>stock</strong> de cada producto aumenta según las cantidades ingresadas.</li>
+      <li>El <strong>costo</strong> se actualiza al nuevo precio de compra.</li>
+      <li>La compra queda registrada como deuda hacia el proveedor.</li>
+    </ul>
+  </div>
+
+  <!-- SIN FACTURA -->
+  <h3 class="sub-title">Ingresar mercadería sin factura (Remito)</h3>
+
+  <p>A veces el proveedor entrega la mercadería con un remito pero la factura llega después. El sistema permite ingresar la mercadería primero y asociar la factura más adelante.</p>
+
+  <ol class="steps">
+    <li>En la cabecera, hacé clic en el botón <strong>"Sin factura"</strong> o <strong>"Remito"</strong>.</li>
+    <li>Ingresá el proveedor y, si tenés, el número de remito.</li>
+    <li>Cargá los productos normalmente y confirmá el ingreso.</li>
+    <li>El stock se actualiza en el momento, pero <strong>no queda una deuda registrada</strong> hasta que asociés la factura.</li>
+  </ol>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/12b-compra-sin-factura.png" alt="Ingreso sin factura (remito)">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Modo "Sin factura": botón activo y campo de número de remito</strong>
+      <code>12b-compra-sin-factura.png</code>
+    </div>
+    <figcaption>Ingreso de mercadería sin factura — se asocia la factura cuando llega</figcaption>
+  </figure>
+
+  <h3 class="sub-title">Asociar una factura a un remito ya ingresado</h3>
+
+  <ol class="steps">
+    <li>Cuando llegue la factura del proveedor, volvé a <strong>Operaciones de Stock → Compras</strong>.</li>
+    <li>Buscá los remitos pendientes (aparecen en una sección separada).</li>
+    <li>Seleccioná el remito que corresponde a esa factura.</li>
+    <li>Completá los datos del comprobante (condición, número, importes).</li>
+    <li>Confirmá la asociación. La deuda con el proveedor queda registrada en ese momento.</li>
+  </ol>
+
+  <div class="warn">
+    <span class="label">⚠️ Importante:</span> Los remitos sin factura no generan deuda con el proveedor. Si pagás una entrega antes de asociar la factura, registrá el pago manualmente en la cuenta corriente del proveedor.
+  </div>
+
+</section>
+
+
+<!-- ══════════════ 12. PAGOS A PROVEEDORES ══════════════ -->
+<section id="s12">
+  <h2 class="section-title">🤝 12. Pagos a proveedores</h2>
+
+  <p>El sistema lleva la cuenta de lo que se le debe a cada proveedor. Cada compra registrada genera una deuda, y cada pago reduce esa deuda.</p>
+
+  <h3 class="sub-title">Ver la cuenta corriente de un proveedor</h3>
+  <ol class="steps">
+    <li>En el menú, hacé clic en <strong>Proveedores</strong>.</li>
+    <li>Buscá el proveedor y hacé clic sobre su nombre.</li>
+    <li>Se muestra el historial de compras y pagos, y el <strong>saldo pendiente</strong> actual.</li>
+  </ol>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/14-proveedor-ficha.png" alt="Ficha de proveedor">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Ficha de proveedor con historial de compras y saldo pendiente</strong>
+      <code>14-proveedor-ficha.png</code>
+    </div>
+    <figcaption>Cuenta corriente del proveedor: historial y saldo a pagar</figcaption>
+  </figure>
+
+  <h3 class="sub-title">Registrar un pago al proveedor</h3>
+  <ol class="steps">
+    <li>Desde el módulo <strong>Proveedores</strong>, seleccioná el proveedor.</li>
+    <li>Hacé clic en <strong>"Registrar Pago"</strong>.</li>
+    <li>Ingresá el <strong>monto</strong> pagado.</li>
+    <li>Seleccioná el <strong>medio de pago</strong> (efectivo, transferencia, cheque, etc.).</li>
+    <li>Si el pago es en efectivo y sale de la caja, el sistema lo registra como egreso de caja automáticamente.</li>
+    <li>Confirmá el pago.</li>
+  </ol>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/15-proveedor-pago.png" alt="Modal pago a proveedor">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Modal de registro de pago a proveedor con monto y medio de pago</strong>
+      <code>15-proveedor-pago.png</code>
+    </div>
+    <figcaption>Registro de pago al proveedor</figcaption>
+  </figure>
+
+  <div class="tip">
+    <span class="label">✅ Buena práctica:</span> Pedile siempre un recibo o comprobante al proveedor al realizar el pago, y registrá el número de referencia en la descripción del pago.
+  </div>
+
+  <h3 class="sub-title">Flujo de fondos (pagos estimados)</h3>
+  <p>En el módulo <strong>Flujo de Fondos</strong> podés ver los próximos vencimientos y pagos estimados a proveedores, organizado por fecha. Esto te ayuda a planificar qué dinero necesitás tener disponible cada semana.</p>
+</section>
+
+
+<!-- ══════════════ 13. CLIENTES ══════════════ -->
+<section id="s13">
+  <h2 class="section-title">👥 13. Gestión de clientes</h2>
+
+  <h3 class="sub-title">Crear un cliente nuevo</h3>
+  <ol class="steps">
+    <li>En el menú, hacé clic en <strong>Clientes</strong>.</li>
+    <li>Hacé clic en <strong>"Nuevo Cliente"</strong>.</li>
+    <li>Completá los datos: nombre, apellido, teléfono, email y/o DNI.</li>
+    <li>Guardá.</li>
+  </ol>
+
+  <h3 class="sub-title">Buscar un cliente</h3>
+  <p>En el listado de clientes, podés buscar por nombre, apellido, teléfono o DNI. También podés buscarlo directamente desde el POS al momento de hacer una venta.</p>
+
+  <h3 class="sub-title">Ver el saldo de cuenta corriente</h3>
+  <ol class="steps">
+    <li>Hacé clic sobre el nombre del cliente en el listado.</li>
+    <li>Se muestra su ficha con el <strong>saldo actual</strong> (en rojo si debe, en verde si tiene saldo a favor).</li>
+    <li>Más abajo aparece el <strong>historial de movimientos</strong>: ventas en cuenta y pagos realizados.</li>
+  </ol>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/16-cliente-ficha.png" alt="Ficha de cliente">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Ficha de cliente con saldo de cuenta corriente e historial de movimientos</strong>
+      <code>16-cliente-ficha.png</code>
+    </div>
+    <figcaption>Ficha del cliente con saldo y movimientos de cuenta corriente</figcaption>
+  </figure>
+</section>
+
+
+<!-- ══════════════ 14. STOCK ══════════════ -->
+<section id="s14">
+  <h2 class="section-title">📊 14. Stock y operaciones de stock</h2>
+
+  <p>El stock se actualiza automáticamente con cada venta y cada compra. Pero a veces es necesario hacer ajustes manuales.</p>
+
+  <h3 class="sub-title">Ver el stock actual</h3>
+  <p>El stock de cada producto se puede ver en el listado de productos (columna stock) o en el módulo <strong>Operaciones de Stock</strong>.</p>
+
+  <h3 class="sub-title">Ajuste manual de stock</h3>
+  <p>Si contaste físicamente el stock y hay diferencia con el sistema (por rotura, vencimiento, etc.):</p>
+  <ol class="steps">
+    <li>En el menú, hacé clic en <strong>Operaciones de Stock</strong>.</li>
+    <li>Hacé clic en <strong>"Nuevo ajuste"</strong>.</li>
+    <li>Seleccioná el tipo de ajuste: ajuste positivo (agregar stock) o ajuste negativo (quitar stock).</li>
+    <li>Buscá el producto y la cantidad a ajustar.</li>
+    <li>Ingresá el motivo (rotación, vencimiento, recuento físico, etc.).</li>
+    <li>Confirmá el ajuste.</li>
+  </ol>
+
+  <h3 class="sub-title">Registrar una rotura o pérdida</h3>
+  <ol class="steps">
+    <li>En el menú, accedé a <strong>Roturas</strong>.</li>
+    <li>Registrá el producto roto o perdido con la cantidad y el motivo.</li>
+    <li>El stock se descuenta automáticamente.</li>
+  </ol>
+
+  <h3 class="sub-title">Registrar consumo interno</h3>
+  <p>Si usaron productos del local para uso propio (limpieza, consumo del personal, etc.), registralo en <strong>Consumo Interno</strong> para que el stock sea correcto.</p>
+
+  <div class="warn">
+    <span class="label">⚠️ Importante:</span> Nunca hagas un ajuste de stock sin un motivo claro. Todo movimiento queda registrado con usuario, fecha y motivo para auditoría.
+  </div>
+</section>
+
+
+<!-- ══════════════ 15. USUARIOS ══════════════ -->
+<section id="s15">
+  <h2 class="section-title">👤 15. Usuarios y permisos</h2>
+
+  <div class="info">
+    <span class="label">ℹ️ Solo administradores:</span> Esta sección es solo para el administrador del sistema.
+  </div>
+
+  <p>El sistema tiene tres tipos de roles:</p>
+
+  <table>
+    <tr><th>Rol</th><th>Descripción</th></tr>
+    <tr><td><span class="badge badge-blue">admin</span></td><td>Acceso total a todos los módulos y configuraciones. Solo debe haber uno o dos usuarios con este rol.</td></tr>
+    <tr><td><span class="badge badge-orange">encargado</span></td><td>Acceso a funciones de gestión (compras, stock, informes) según los permisos asignados.</td></tr>
+    <tr><td><span class="badge badge-green">cajero</span></td><td>Acceso principalmente al POS y caja. Permisos limitados.</td></tr>
+  </table>
+
+  <h3 class="sub-title">Crear un usuario nuevo</h3>
+  <ol class="steps">
+    <li>En el menú, accedé a <strong>Usuarios</strong>.</li>
+    <li>Hacé clic en <strong>"Nuevo Usuario"</strong>.</li>
+    <li>Ingresá el nombre completo, nombre de usuario y contraseña.</li>
+    <li>Seleccioná el rol.</li>
+    <li>Configurá los permisos específicos (qué puede y qué no puede hacer).</li>
+    <li>Guardá.</li>
+  </ol>
+
+  <h3 class="sub-title">Permisos disponibles</h3>
+  <table>
+    <tr><th>Permiso</th><th>Descripción</th></tr>
+    <tr><td>Anular ventas</td><td>Permite cancelar ventas ya confirmadas</td></tr>
+    <tr><td>Cerrar caja</td><td>Permite cerrar el turno de caja</td></tr>
+    <tr><td>Registrar egresos</td><td>Permite registrar salidas de dinero de la caja</td></tr>
+    <tr><td>Descuento máximo (%)</td><td>Límite de descuento que puede aplicar en el POS</td></tr>
+    <tr><td>Pagos a proveedores</td><td>Permite registrar pagos a proveedores desde caja</td></tr>
+    <tr><td>Gestionar productos</td><td>Acceso al módulo de productos</td></tr>
+    <tr><td>Gestionar compras</td><td>Acceso al módulo de compras</td></tr>
+    <tr><td>Ver informes</td><td>Acceso a los informes y estadísticas</td></tr>
+  </table>
+
+  <figure class="captura">
+    <img onerror="this.classList.add('error')" src="capturas/17-usuario-permisos.png" alt="Configuración de usuario y permisos">
+    <div class="placeholder">
+      <div class="icono">📸</div>
+      <strong>Pantalla de configuración de usuario con lista de permisos</strong>
+      <code>17-usuario-permisos.png</code>
+    </div>
+    <figcaption>Gestión de usuarios y asignación de permisos</figcaption>
+  </figure>
+</section>
+
+
+<!-- ══════════════ 16. BACKUP ══════════════ -->
+<section id="s16">
+  <h2 class="section-title">💾 16. Backup y seguridad de datos</h2>
+
+  <p>El sistema guarda todos los datos localmente en el navegador. Es muy importante hacer backups regulares para no perder información.</p>
+
+  <h3 class="sub-title">Exportar un backup</h3>
+  <ol class="steps">
+    <li>En la barra superior, hacé clic en el ícono de <strong>💾 disquete</strong>.</li>
+    <li>Seleccioná <strong>"Exportar backup"</strong>.</li>
+    <li>Se descargará un archivo <code>.sqlite</code> con todos los datos del sistema.</li>
+    <li>Guardá ese archivo en un lugar seguro: nube, pendrive o carpeta de Dropbox.</li>
+  </ol>
+
+  <div class="danger">
+    <span class="label">🚨 MUY IMPORTANTE:</span> Hacé un backup al menos <strong>una vez por semana</strong>. Si el navegador pierde los datos (limpieza de caché, actualización del equipo), el backup es la única manera de recuperar la información.
+  </div>
+
+  <h3 class="sub-title">Restaurar un backup</h3>
+  <ol class="steps">
+    <li>En la pantalla de login o en el menú de backup, hacé clic en <strong>"Restaurar backup"</strong>.</li>
+    <li>Seleccioná el archivo <code>.sqlite</code> del backup que querés restaurar.</li>
+    <li>Confirmá la acción (reemplazará todos los datos actuales).</li>
+    <li>El sistema se recargará con los datos del backup.</li>
+  </ol>
+
+  <div class="warn">
+    <span class="label">⚠️ Atención:</span> Restaurar un backup reemplaza TODOS los datos actuales. Solo hacelo si es necesario y asegurate de que el backup sea el correcto y el más reciente.
+  </div>
+
+  <h3 class="sub-title">Sincronización con la nube</h3>
+  <p>El sistema se sincroniza automáticamente con Firebase cuando hay conexión a internet. El ícono en la barra superior indica el estado:</p>
+  <table>
+    <tr><th>Color del ícono</th><th>Significado</th></tr>
+    <tr><td>🟢 Verde</td><td>Conectado y sincronizado</td></tr>
+    <tr><td>🟡 Amarillo</td><td>Sincronizando...</td></tr>
+    <tr><td>⚫ Negro/Gris</td><td>Sin conexión (funciona igual, sincronizará al reconectarse)</td></tr>
+  </table>
+</section>
+
+
+<!-- ══════════════ 17. FAQ ══════════════ -->
+<section id="s17">
+  <h2 class="section-title">❓ 17. Preguntas frecuentes</h2>
+
+  <div class="concept">
+    <div class="concept-title">¿Qué hago si el sistema no carga o está en blanco?</div>
+    <p>Recargá la página con F5. Si el problema persiste, verificá la conexión a internet (aunque el sistema funciona sin internet, necesita conectarse la primera vez). Si sigue sin funcionar, contactá al administrador.</p>
+  </div>
+
+  <div class="concept">
+    <div class="concept-title">¿Qué pasa si cierro el navegador a mitad de un turno?</div>
+    <p>No hay problema. Al volver a abrir el sistema e iniciar sesión, la caja seguirá abierta con todos los movimientos registrados. Nada se pierde.</p>
+  </div>
+
+  <div class="concept">
+    <div class="concept-title">¿Puedo hacer una venta si no hay conexión a internet?</div>
+    <p>Sí. El sistema funciona 100% sin internet. Todos los datos se guardan localmente. Cuando vuelva la conexión, se sincronizará automáticamente con la nube.</p>
+  </div>
+
+  <div class="concept">
+    <div class="concept-title">¿Qué hago si el lector de código de barras no funciona?</div>
+    <p>Asegurate de que el cursor esté en la barra de búsqueda del POS. El lector envía el código como si fuera texto escrito desde el teclado. Si el código no se reconoce, buscá el producto por nombre.</p>
+  </div>
+
+  <div class="concept">
+    <div class="concept-title">¿Qué hago si un producto no tiene stock pero necesito venderlo?</div>
+    <p>El sistema puede avisarte que el stock es insuficiente. Si necesitás venderlo igual, contactá al encargado o administrador. También podés consultar si hay un producto sustituto disponible.</p>
+  </div>
+
+  <div class="concept">
+    <div class="concept-title">¿Cómo sé si una venta quedó registrada correctamente?</div>
+    <p>Luego de confirmar la venta, aparece un mensaje de confirmación. También podés ver la venta en el historial del POS (ícono de lista/reloj) o en el resumen de caja.</p>
+  </div>
+
+  <div class="concept">
+    <div class="concept-title">¿Qué hago si hay una diferencia en el arqueo de caja?</div>
+    <p>Verificá si faltó registrar algún egreso o pago. Revisá el historial de ventas del turno. Si la diferencia es pequeña (centavos por redondeo), es normal. Si la diferencia es significativa, anotala y avisá al encargado.</p>
+  </div>
+
+  <div class="concept">
+    <div class="concept-title">¿Puedo ver el historial de ventas de días anteriores?</div>
+    <p>Sí, desde el módulo <strong>Informes</strong> (si tenés ese permiso). Podés filtrar por fecha, vendedor, medio de pago, etc.</p>
+  </div>
+</section>
+
+<!-- ══════════════ FOOTER ══════════════ -->
+<hr style="border:none;border-top:1px solid var(--border);margin:40px 0 20px">
+<p style="text-align:center;color:var(--text-muted);font-size:0.82rem;">
+  Manual de Usuario — Sistema Kalulu &nbsp;·&nbsp; Versión 2025 &nbsp;·&nbsp; Para consultas: contactá al administrador del sistema
+</p>
+
+</div><!-- /wrapper -->
+
+<!-- ══════════════ SISTEMA DE NOTAS ══════════════ -->
+<style>
+  /* Botón 📝 junto al título de cada sección */
+  .nota-btn {
+    margin-left: auto;
+    background: none;
+    border: 1.5px dashed #a0aec0;
+    border-radius: 6px;
+    padding: 2px 9px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    color: #718096;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: all .15s;
+  }
+  .nota-btn:hover { background: #fefcbf; border-color: #d69e2e; color: #744210; }
+  .nota-btn.tiene-nota {
+    background: #fefcbf;
+    border-color: #d69e2e;
+    border-style: solid;
+    color: #744210;
+    font-weight: 600;
+  }
+
+  /* Panel amarillo de nota debajo del título */
+  .nota-panel {
+    display: none;
+    background: #fefce8;
+    border: 1.5px solid #f6e05e;
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin: -16px 0 20px;
+  }
+  .nota-panel.visible { display: block; }
+  .nota-panel textarea {
+    width: 100%;
+    min-height: 80px;
+    border: 1px solid #f6e05e;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    background: #fffff0;
+    resize: vertical;
+    outline: none;
+  }
+  .nota-panel textarea:focus { border-color: #d69e2e; box-shadow: 0 0 0 2px #faf08940; }
+  .nota-acciones {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+    justify-content: flex-end;
+  }
+  .nota-guardar {
+    background: #d69e2e; color: #fff; border: none;
+    border-radius: 6px; padding: 5px 14px; cursor: pointer; font-size: 0.85rem; font-weight: 600;
+  }
+  .nota-guardar:hover { background: #b7791f; }
+  .nota-cerrar {
+    background: none; color: #718096; border: 1px solid #cbd5e0;
+    border-radius: 6px; padding: 5px 14px; cursor: pointer; font-size: 0.85rem;
+  }
+  .nota-cerrar:hover { background: #f7fafc; }
+  .nota-eliminar {
+    background: none; color: #e53e3e; border: 1px solid #feb2b2;
+    border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 0.85rem; margin-right: auto;
+  }
+  .nota-eliminar:hover { background: #fff5f5; }
+
+  /* Botón flotante "Ver notas" */
+  #btn-ver-notas {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: #d69e2e;
+    color: #fff;
+    border: none;
+    border-radius: 50px;
+    padding: 10px 18px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,0,0,.25);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    transition: transform .15s;
+  }
+  #btn-ver-notas:hover { transform: scale(1.05); }
+  #nota-contador {
+    background: #fff;
+    color: #d69e2e;
+    border-radius: 50%;
+    width: 20px; height: 20px;
+    font-size: 0.75rem;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800;
+  }
+
+  /* Panel "Ver todas las notas" */
+  #panel-notas-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.45);
+    z-index: 1001;
+    align-items: center;
+    justify-content: center;
+  }
+  #panel-notas-overlay.visible { display: flex; }
+  #panel-notas {
+    background: #fff;
+    border-radius: 12px;
+    width: min(680px, 94vw);
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 40px rgba(0,0,0,.3);
+    overflow: hidden;
+  }
+  #panel-notas-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  #panel-notas-header h3 { margin: 0; font-size: 1.05rem; }
+  #panel-notas-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
+  .pn-item {
+    background: #fefce8;
+    border: 1px solid #f6e05e;
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+  }
+  .pn-seccion {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #744210;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    margin-bottom: 5px;
+  }
+  .pn-texto { font-size: 0.92rem; color: #2d3748; white-space: pre-wrap; }
+  .pn-vacia { color: #a0aec0; font-size: 0.9rem; text-align: center; padding: 24px 0; }
+  #panel-notas-footer {
+    padding: 12px 20px;
+    border-top: 1px solid #e2e8f0;
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+  }
+  #btn-copiar-notas {
+    background: #0066cc; color: #fff; border: none;
+    border-radius: 7px; padding: 8px 18px; cursor: pointer; font-size: 0.88rem; font-weight: 600;
+  }
+  #btn-copiar-notas:hover { background: #0052a3; }
+  #btn-cerrar-panel {
+    background: none; border: 1px solid #cbd5e0; color: #4a5568;
+    border-radius: 7px; padding: 8px 16px; cursor: pointer; font-size: 0.88rem;
+  }
+  #copiado-msg {
+    color: #2e7d32; font-size: 0.82rem; align-self: center;
+    display: none;
+  }
+</style>
+
+<!-- Botón flotante -->
+<button id="btn-ver-notas">
+  📝 Mis notas <span id="nota-contador">0</span>
+</button>
+
+<!-- Panel de todas las notas -->
+<div id="panel-notas-overlay">
+  <div id="panel-notas">
+    <div id="panel-notas-header">
+      <h3>📝 Mis notas de revisión</h3>
+      <button id="btn-cerrar-panel" style="margin-left:auto">✕</button>
+    </div>
+    <div id="panel-notas-body"></div>
+    <div id="panel-notas-footer">
+      <span id="copiado-msg">✅ ¡Copiado!</span>
+      <button id="btn-copiar-notas">📋 Copiar todo para Claude</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const STORAGE_KEY = 'kalulu_manual_notas_v1';
+
+  function cargar() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { return {}; }
+  }
+  function guardar(notas) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(notas));
+  }
+  function actualizarContador() {
+    const n = Object.keys(cargar()).length;
+    document.getElementById('nota-contador').textContent = n;
+    document.getElementById('btn-ver-notas').style.display = 'flex';
+  }
+
+  // ── Agregar botón y panel a cada sección ──────────────────────────────────────
+  document.querySelectorAll('section[id]').forEach(section => {
+    const h2 = section.querySelector('h2.section-title');
+    if (!h2) return;
+
+    const id    = section.id;
+    const titulo = h2.textContent.trim().replace(/^[^\w]+/, '').trim(); // sin emoji
+
+    // Botón
+    const btn = document.createElement('button');
+    btn.className = 'nota-btn';
+    btn.dataset.id = id;
+    btn.title = 'Agregar / ver nota para esta sección';
+    h2.appendChild(btn);
+
+    // Panel
+    const panel = document.createElement('div');
+    panel.className = 'nota-panel';
+    panel.dataset.id = id;
+    panel.innerHTML = `
+      <textarea placeholder="Escribí tu corrección o comentario para esta sección..."></textarea>
+      <div class="nota-acciones">
+        <button class="nota-eliminar">🗑 Eliminar nota</button>
+        <button class="nota-cerrar">Cancelar</button>
+        <button class="nota-guardar">Guardar nota</button>
+      </div>`;
+    h2.insertAdjacentElement('afterend', panel);
+
+    function sincronizarEstado() {
+      const notas = cargar();
+      const val   = notas[id] || '';
+      panel.querySelector('textarea').value = val;
+      btn.textContent = val ? '📝 Nota ✓' : '📝 Nota';
+      btn.classList.toggle('tiene-nota', !!val);
+    }
+
+    sincronizarEstado();
+
+    btn.addEventListener('click', () => {
+      const abierto = panel.classList.contains('visible');
+      // Cerrar todos los otros panels abiertos
+      document.querySelectorAll('.nota-panel.visible').forEach(p => p.classList.remove('visible'));
+      if (!abierto) {
+        sincronizarEstado();
+        panel.classList.add('visible');
+        panel.querySelector('textarea').focus();
+      }
+    });
+
+    panel.querySelector('.nota-guardar').addEventListener('click', () => {
+      const notas = cargar();
+      const val   = panel.querySelector('textarea').value.trim();
+      if (val) notas[id] = val; else delete notas[id];
+      guardar(notas);
+      sincronizarEstado();
+      panel.classList.remove('visible');
+      actualizarContador();
+    });
+
+    panel.querySelector('.nota-cerrar').addEventListener('click', () => {
+      panel.classList.remove('visible');
+    });
+
+    panel.querySelector('.nota-eliminar').addEventListener('click', () => {
+      const notas = cargar();
+      delete notas[id];
+      guardar(notas);
+      sincronizarEstado();
+      panel.classList.remove('visible');
+      actualizarContador();
+    });
+  });
+
+  actualizarContador();
+
+  // ── Panel "Ver todas las notas" ────────────────────────────────────────────────
+  const overlay = document.getElementById('panel-notas-overlay');
+  const body    = document.getElementById('panel-notas-body');
+
+  function renderPanel() {
+    const notas = cargar();
+    const secciones = document.querySelectorAll('section[id]');
+    let html = '';
+    secciones.forEach(section => {
+      const id  = section.id;
+      const txt = notas[id];
+      if (!txt) return;
+      const h2  = section.querySelector('h2.section-title');
+      const tit = h2 ? h2.textContent.trim() : id;
+      html += `<div class="pn-item">
+        <div class="pn-seccion">${tit}</div>
+        <div class="pn-texto">${txt.replace(/</g,'&lt;')}</div>
+      </div>`;
+    });
+    body.innerHTML = html || '<div class="pn-vacia">Todavía no hay notas. Hacé clic en "📝 Nota" en cualquier sección del manual.</div>';
+  }
+
+  document.getElementById('btn-ver-notas').addEventListener('click', () => {
+    renderPanel();
+    overlay.classList.add('visible');
+  });
+
+  document.getElementById('btn-cerrar-panel').addEventListener('click', () => {
+    overlay.classList.remove('visible');
+  });
+
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) overlay.classList.remove('visible');
+  });
+
+  // ── Copiar para Claude ─────────────────────────────────────────────────────────
+  document.getElementById('btn-copiar-notas').addEventListener('click', () => {
+    const notas    = cargar();
+    const secciones = document.querySelectorAll('section[id]');
+    const lineas   = ['=== NOTAS DE REVISIÓN — MANUAL KALULU ===', ''];
+
+    secciones.forEach(section => {
+      const id  = section.id;
+      const txt = notas[id];
+      if (!txt) return;
+      const h2  = section.querySelector('h2.section-title');
+      const tit = h2 ? h2.textContent.trim() : id;
+      lineas.push(`[${tit}]`);
+      lineas.push(txt);
+      lineas.push('');
+    });
+
+    if (lineas.length <= 2) {
+      alert('No hay notas guardadas todavía.');
+      return;
+    }
+
+    navigator.clipboard.writeText(lineas.join('\n')).then(() => {
+      const msg = document.getElementById('copiado-msg');
+      msg.style.display = 'inline';
+      setTimeout(() => { msg.style.display = 'none'; }, 2500);
+    }).catch(() => {
+      // fallback: seleccionar el texto
+      const ta = document.createElement('textarea');
+      ta.value = lineas.join('\n');
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      const msg = document.getElementById('copiado-msg');
+      msg.style.display = 'inline';
+      setTimeout(() => { msg.style.display = 'none'; }, 2500);
+    });
+  });
+})();
+</script>
+</body>
+</html>

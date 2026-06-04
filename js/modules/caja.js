@@ -2014,16 +2014,37 @@ case 'egresos':     renderEgresosIngresos(content);   break;
 
     const tot = state.sesion ? getTotalesSesion(state.sesion.id) : null;
 
+    // When no active session, show the last known closing balance for efectivo
+    // (cash doesn't disappear just because the session is closed)
+    let ultimoSaldoEfectivo = 0;
+    let ultimoSaldoLabel    = 'Sin sesión activa';
+    if (!tot) {
+      try {
+        const rows = window.SGA_DB.query(
+          `SELECT saldo_final_real FROM sesiones_caja
+           WHERE sucursal_id = ? AND estado = 'cerrada'
+           ORDER BY fecha_cierre DESC LIMIT 1`,
+          [state.user.sucursal_id]
+        );
+        if (rows.length && rows[0].saldo_final_real != null) {
+          ultimoSaldoEfectivo = parseFloat(rows[0].saldo_final_real) || 0;
+          ultimoSaldoLabel    = 'Caja cerrada · último saldo registrado';
+        }
+      } catch (e) { /* no prev session */ }
+    }
+
     const cajas = getMediosDynamic().map(m => ({
       medio: m.id,
       icon: m.icono || '💰',
       label: m.nombre,
-      value: tot ? (m.id === 'efectivo' ? tot.saldoEsperado : (tot.totPagos[m.id] || 0)) : 0,
+      value: tot
+        ? (m.id === 'efectivo' ? tot.saldoEsperado : (tot.totPagos[m.id] || 0))
+        : (m.id === 'efectivo' ? ultimoSaldoEfectivo : 0),
       sub: tot
         ? (m.id === 'efectivo'
             ? `Cobrado: ${fmtPeso(tot.totPagos['efectivo'] || 0)} · Inicial: ${fmtPeso(tot.saldoInicial)}`
             : ((tot.totPagos[m.id] || 0) > 0 ? 'Cobrado hoy' : 'Sin movimientos'))
-        : 'Sin sesión activa',
+        : (m.id === 'efectivo' ? ultimoSaldoLabel : 'Sin sesión activa'),
     }));
 
     root.innerHTML = `
