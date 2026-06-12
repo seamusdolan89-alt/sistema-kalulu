@@ -139,7 +139,10 @@ const Caja = (() => {
       [sesionId]
     )[0] || {}).n || 0;
 
-    const saldoInicial = parseFloat((state.sesion && state.sesion.saldo_inicial) || 0);
+    const sesionRow = (window.SGA_DB.query(
+      `SELECT saldo_inicial FROM sesiones_caja WHERE id = ?`, [sesionId]
+    )[0]) || {};
+    const saldoInicial = parseFloat(sesionRow.saldo_inicial || 0);
     const efectivo = parseFloat(totPagos['efectivo'] || 0);
     const saldoEsperado = saldoInicial + efectivo - parseFloat(egresos) + parseFloat(ingresos);
 
