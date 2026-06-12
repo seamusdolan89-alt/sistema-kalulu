@@ -1867,29 +1867,58 @@ export const POS = (() => {
       if (!state.sesionActiva) return;
       const s = state.sesionActiva;
 
+      // Medios activos desde DB
+      let mediosActivos = [
+        { id: 'efectivo', nombre: 'Efectivo', icon: '💵' },
+        { id: 'mercadopago', nombre: 'Mercado Pago', icon: '📲' },
+      ];
+      try {
+        const rows = window.SGA_DB.query(
+          `SELECT id, nombre, icono FROM medios_cobro WHERE activo = 1 ORDER BY orden ASC, nombre ASC`
+        );
+        if (rows.length) mediosActivos = rows.map(m => ({ id: m.id, nombre: m.nombre, icon: m.icono || '' }));
+      } catch(e) {}
+
+      // Totales por medio desde venta_pagos (fuente de verdad)
+      const totPagos = {};
+      try {
+        const pagos = window.SGA_DB.query(
+          `SELECT vp.medio, SUM(vp.monto) AS total
+           FROM ventas v
+           JOIN venta_pagos vp ON vp.venta_id = v.id
+           WHERE v.sesion_caja_id = ? AND v.estado = 'completada'
+           GROUP BY vp.medio`,
+          [s.id]
+        );
+        for (const p of pagos) totPagos[p.medio] = parseFloat(p.total) || 0;
+      } catch(e) {}
+
+      const totalEfectivo  = totPagos['efectivo'] || 0;
+      const totalVentas    = Object.values(totPagos).reduce((sum, v) => sum + v, 0);
+      const totalEgresos   = parseFloat(s.total_egresos) || 0;
+      const saldoInicial   = parseFloat(s.saldo_inicial) || 0;
+      const saldoEsperado  = saldoInicial + totalEfectivo - totalEgresos;
+
       // Resumen tab
-      const totalVentas = (s.total_efectivo || 0) + (s.total_mercadopago || 0) + (s.total_tarjeta || 0) + (s.total_transferencia || 0) + (s.total_cuenta_corriente || 0);
       ge('ctab-resumen').innerHTML = `
         <div class="cierre-resumen-grid">
           <div class="crs-card"><div class="crs-card-label">Ventas totales</div><div class="crs-card-value">${formatCurrency(totalVentas)}</div></div>
-          <div class="crs-card"><div class="crs-card-label">Saldo inicial</div><div class="crs-card-value">${formatCurrency(s.saldo_inicial)}</div></div>
-          <div class="crs-card"><div class="crs-card-label">Egresos</div><div class="crs-card-value">${formatCurrency(s.total_egresos || 0)}</div></div>
-          <div class="crs-card"><div class="crs-card-label">Efectivo esperado</div><div class="crs-card-value">${formatCurrency((s.saldo_inicial || 0) + (s.total_efectivo || 0) - (s.total_egresos || 0))}</div></div>
+          <div class="crs-card"><div class="crs-card-label">Saldo inicial</div><div class="crs-card-value">${formatCurrency(saldoInicial)}</div></div>
+          <div class="crs-card"><div class="crs-card-label">Egresos</div><div class="crs-card-value">${formatCurrency(totalEgresos)}</div></div>
+          <div class="crs-card"><div class="crs-card-label">Efectivo esperado</div><div class="crs-card-value">${formatCurrency(saldoEsperado)}</div></div>
         </div>`;
 
-      // Medios tab
+      // Medios tab — solo medios habilitados con actividad (o efectivo siempre)
       ge('ctab-medios').innerHTML = `
-        ${MEDIOS.map(m => {
-          const key = `total_${m.id === 'mercadopago' ? 'mercadopago' : m.id === 'cuenta_corriente' ? 'cuenta_corriente' : m.id}`;
-          const v = s[key] || 0;
+        ${mediosActivos.map(m => {
+          const v = totPagos[m.id] || 0;
           return `<div class="ct-row"><span>${m.icon} ${m.nombre}</span><strong>${formatCurrency(v)}</strong></div>`;
         }).join('')}
         <div class="ct-row bold" style="border-top:1px solid #eee;margin-top:8px;padding-top:8px">
           <span>Total ventas</span><strong>${formatCurrency(totalVentas)}</strong>
         </div>`;
 
-      // Recuento tab: billetes
-      const saldoEsperado = (s.saldo_inicial || 0) + (s.total_efectivo || 0) - (s.total_egresos || 0);
+      // Recuento tab: billetes (saldoEsperado ya calculado arriba desde venta_pagos)
       ge('billetes-grid').innerHTML = DENOMINACIONES.map(d => `
         <div class="billet-lbl">$${d.toLocaleString('es-AR')}</div>
         <input type="number" class="billet-inp" data-denom="${d}" min="0" value="0">
