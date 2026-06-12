@@ -413,11 +413,102 @@ const Caja = (() => {
   // ── RENDER ROOT ───────────────────────────────────────────────────────────────
 
   function render() {
+    if (state.activeMedio && state.activeMedio !== 'efectivo') {
+      renderCajaDigital();
+      return;
+    }
     if (!state.sesion) {
       renderApertura();
     } else {
       renderCajaActiva();
     }
+  }
+
+  // ── CAJA DIGITAL (MP, Tarjeta, etc.) ─────────────────────────────────────────
+  // Sin apertura/cierre ni saldo. Solo movimientos del día para verificación.
+
+  function renderCajaDigital() {
+    const root = ge('caja-root');
+    if (!root) return;
+    const medio = state.activeMedio;
+
+    let medioInfo = { nombre: medio, icono: '' };
+    try {
+      const row = window.SGA_DB.query(
+        `SELECT nombre, icono FROM medios_cobro WHERE id = ? LIMIT 1`, [medio]
+      )[0];
+      if (row) medioInfo = row;
+    } catch(e) {}
+
+    const hoy = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+    const todayISO = new Date().toISOString().slice(0, 10);
+
+    let pagos = [];
+    let total = 0;
+    try {
+      pagos = window.SGA_DB.query(`
+        SELECT vp.monto, vp.referencia, v.fecha,
+               COALESCE(c.nombre, 'Consumidor final') AS cliente
+        FROM venta_pagos vp
+        JOIN ventas v ON v.id = vp.venta_id
+        LEFT JOIN clientes c ON c.id = v.cliente_id
+        WHERE vp.medio = ?
+          AND v.estado = 'completada'
+          AND DATE(v.fecha) = ?
+        ORDER BY v.fecha DESC
+      `, [medio, todayISO]);
+      total = pagos.reduce((s, p) => s + (parseFloat(p.monto) || 0), 0);
+    } catch(e) {}
+
+    const filas = pagos.length
+      ? pagos.map(p => `
+          <tr style="border-bottom:1px solid #f0f0f0">
+            <td style="padding:10px 8px;font-size:13px">${fmtHora(p.fecha)}</td>
+            <td style="padding:10px 8px;font-size:13px">${esc(p.cliente)}</td>
+            <td style="padding:10px 8px;font-size:13px;text-align:right;font-weight:600">${fmtPeso(p.monto)}</td>
+            <td style="padding:10px 8px;font-size:12px;color:#999">${esc(p.referencia || '')}</td>
+          </tr>`).join('')
+      : `<tr><td colspan="4" style="padding:24px;text-align:center;color:#aaa;font-size:13px">Sin cobros registrados hoy</td></tr>`;
+
+    root.innerHTML = `
+      <div class="caja-toolbar">
+        <div>
+          <h2>${esc(medioInfo.icono)} Caja · ${esc(medioInfo.nombre)}</h2>
+          <small style="color:var(--color-text-secondary);font-size:12px">${hoy}</small>
+        </div>
+      </div>
+
+      <div style="max-width:680px;margin:0 auto;padding:24px 20px">
+
+        <div style="background:linear-gradient(135deg,#e3f2fd,#bbdefb);border-radius:12px;padding:24px;margin-bottom:20px;text-align:center">
+          <div style="font-size:12px;color:#1565c0;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Total cobrado hoy</div>
+          <div style="font-size:36px;font-weight:700;color:#1565c0;line-height:1">${fmtPeso(total)}</div>
+          <div style="font-size:12px;color:#1976d2;margin-top:6px">${pagos.length} cobro${pagos.length !== 1 ? 's' : ''}</div>
+        </div>
+
+        <div style="background:#fff8e1;border:1px solid #ffe082;border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#795548">
+          💡 Verificá que este total coincida con los cobros registrados en tu cuenta de <strong>${esc(medioInfo.nombre)}</strong>.
+        </div>
+
+        <div style="background:#fff;border-radius:8px;border:1px solid #e8e8e8;overflow:hidden">
+          <div style="padding:14px 16px;border-bottom:1px solid #f0f0f0;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#666">
+            Cobros del día
+          </div>
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr style="background:#fafafa;border-bottom:1px solid #e8e8e8">
+                <th style="padding:8px 8px;font-size:11px;font-weight:600;color:#999;text-align:left">Hora</th>
+                <th style="padding:8px 8px;font-size:11px;font-weight:600;color:#999;text-align:left">Cliente</th>
+                <th style="padding:8px 8px;font-size:11px;font-weight:600;color:#999;text-align:right">Monto</th>
+                <th style="padding:8px 8px;font-size:11px;font-weight:600;color:#999;text-align:left">Ref.</th>
+              </tr>
+            </thead>
+            <tbody>${filas}</tbody>
+          </table>
+        </div>
+
+      </div>
+    `;
   }
 
   // ── APERTURA ──────────────────────────────────────────────────────────────────
@@ -2128,11 +2219,15 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     }
 
     state.activeMedio = medio;
-    // Preserve the active tab across re-inits (router re-entering module).
-    // Only fall back to 'resumen' if the current tab is invalid for this medio.
-    const validTabs = medio === 'efectivo'
-      ? ['resumen', 'egresos', 'historial', 'recuento']
-      : ['resumen', 'historial'];
+
+    if (medio !== 'efectivo') {
+      stopAutoRefresh();
+      render();
+      return;
+    }
+
+    // Solo efectivo necesita gestión de sesiones y tabs
+    const validTabs = ['resumen', 'egresos', 'historial', 'recuento'];
     if (!validTabs.includes(state.currentTab)) state.currentTab = 'resumen';
     render();
     if (state.sesion) startAutoRefresh();
