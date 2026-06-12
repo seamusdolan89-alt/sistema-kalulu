@@ -443,12 +443,14 @@ const Caja = (() => {
     const hoy = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
     const todayISO = new Date().toISOString().slice(0, 10);
 
+    // Cobros del día completo
     let pagos = [];
     let total = 0;
     try {
       pagos = window.SGA_DB.query(`
         SELECT vp.monto, vp.referencia, v.fecha,
-               COALESCE(c.nombre, 'Consumidor final') AS cliente
+               COALESCE(c.nombre, 'Consumidor final') AS cliente,
+               v.sesion_caja_id
         FROM venta_pagos vp
         JOIN ventas v ON v.id = vp.venta_id
         LEFT JOIN clientes c ON c.id = v.cliente_id
@@ -459,6 +461,25 @@ const Caja = (() => {
       `, [medio, todayISO]);
       total = pagos.reduce((s, p) => s + (parseFloat(p.monto) || 0), 0);
     } catch(e) {}
+
+    // Cobros de la sesión activa (caja actual)
+    let totalSesion = 0;
+    let countSesion = 0;
+    const sesionActiva = state.sesion;
+    if (sesionActiva) {
+      try {
+        const rows = window.SGA_DB.query(`
+          SELECT COALESCE(SUM(vp.monto), 0) AS total, COUNT(*) AS n
+          FROM venta_pagos vp
+          JOIN ventas v ON v.id = vp.venta_id
+          WHERE vp.medio = ?
+            AND v.sesion_caja_id = ?
+            AND v.estado = 'completada'
+        `, [medio, sesionActiva.id]);
+        totalSesion = parseFloat(rows[0]?.total) || 0;
+        countSesion = parseInt(rows[0]?.n) || 0;
+      } catch(e) {}
+    }
 
     const filas = pagos.length
       ? pagos.map(p => `
@@ -480,10 +501,21 @@ const Caja = (() => {
 
       <div style="max-width:680px;margin:0 auto;padding:24px 20px">
 
-        <div style="background:linear-gradient(135deg,#e3f2fd,#bbdefb);border-radius:12px;padding:24px;margin-bottom:20px;text-align:center">
-          <div style="font-size:12px;color:#1565c0;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Total cobrado hoy</div>
-          <div style="font-size:36px;font-weight:700;color:#1565c0;line-height:1">${fmtPeso(total)}</div>
-          <div style="font-size:12px;color:#1976d2;margin-top:6px">${pagos.length} cobro${pagos.length !== 1 ? 's' : ''}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px">
+          <div style="background:linear-gradient(135deg,#e3f2fd,#bbdefb);border-radius:12px;padding:20px;text-align:center">
+            <div style="font-size:11px;color:#1565c0;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Total cobrado hoy</div>
+            <div style="font-size:28px;font-weight:700;color:#1565c0;line-height:1">${fmtPeso(total)}</div>
+            <div style="font-size:11px;color:#1976d2;margin-top:6px">${pagos.length} cobro${pagos.length !== 1 ? 's' : ''}</div>
+          </div>
+          <div style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border-radius:12px;padding:20px;text-align:center">
+            <div style="font-size:11px;color:#2e7d32;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Caja actual</div>
+            ${sesionActiva
+              ? `<div style="font-size:28px;font-weight:700;color:#2e7d32;line-height:1">${fmtPeso(totalSesion)}</div>
+                 <div style="font-size:11px;color:#388e3c;margin-top:6px">${countSesion} cobro${countSesion !== 1 ? 's' : ''} · desde ${fmtHora(sesionActiva.fecha_apertura)}</div>`
+              : `<div style="font-size:20px;font-weight:700;color:#81c784;line-height:1">${fmtPeso(0)}</div>
+                 <div style="font-size:11px;color:#81c784;margin-top:6px">Sin caja abierta</div>`
+            }
+          </div>
         </div>
 
         <div style="background:#fff8e1;border:1px solid #ffe082;border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#795548">
