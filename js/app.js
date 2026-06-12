@@ -184,12 +184,20 @@
       { name: 'clientes', label: '👥 Clientes' },
       {
         type: 'group', group: 'cajas', label: '💰 Cajas',
-        items: [
-          { name: 'caja', medio: 'efectivo',       label: '💵 Efectivo' },
-          { name: 'caja', medio: 'mercadopago',    label: '📲 Mercado Pago' },
-          { name: 'caja', medio: 'tarjeta',        label: '💳 Tarjeta' },
-          { name: 'caja', medio: 'transferencia',  label: '🏦 Transferencia' },
-        ],
+        items: (() => {
+          try {
+            const medios = window.SGA_DB.query(
+              `SELECT id, nombre, icono FROM medios_cobro WHERE activo = 1 ORDER BY orden ASC, nombre ASC`
+            );
+            if (medios.length) return medios.map(m => ({
+              name: 'caja', medio: m.id, label: `${m.icono || ''} ${m.nombre}`.trim()
+            }));
+          } catch(e) {}
+          return [
+            { name: 'caja', medio: 'efectivo',    label: '💵 Efectivo' },
+            { name: 'caja', medio: 'mercadopago', label: '📲 Mercado Pago' },
+          ];
+        })(),
       },
       { name: 'operaciones_stock', label: '📦 Operaciones de Stock' },
       { name: 'proveedores', label: '🏢 Proveedores' },
