@@ -686,7 +686,7 @@ export const POS = (() => {
     };
 
     // ── PROMO DETECTION ────────────────────────────────────────────
-    const applyPromos = () => {
+    const applyPromos = (medioFiltro = null) => {
       if (!state.cart.length) {
         state.promoDescuentos = 0;
         state.promoAplicadas  = [];
@@ -713,6 +713,12 @@ export const POS = (() => {
 
       for (const promo of promos) {
         if (promo.solo_clientes_registrados && !state.clienteId) continue;
+
+        // Verificar restricción de medio de pago
+        if (promo.medios_permitidos) {
+          const allowed = promo.medios_permitidos.split(',').map(s => s.trim());
+          if (medioFiltro && !allowed.includes(medioFiltro)) continue;
+        }
 
         let items;
         try {
@@ -813,7 +819,20 @@ export const POS = (() => {
 
       for (const a of state.promoAplicadas) {
         const t = a.times > 1 ? ` ×${a.times}` : '';
-        parts.push(`<div class="promo-applied"><span class="promo-tag">🎁</span><span><strong>${a.promo.nombre}</strong>${t} — Descuento: ${formatCurrency(a.discount)}</span></div>`);
+        let medioBadge = '';
+        if (a.promo.medios_permitidos) {
+          const medioNombre = (() => {
+            try {
+              const row = window.SGA_DB.query(
+                `SELECT nombre FROM medios_cobro WHERE id = ? LIMIT 1`,
+                [a.promo.medios_permitidos]
+              )[0];
+              return row ? row.nombre : a.promo.medios_permitidos;
+            } catch(e) { return a.promo.medios_permitidos; }
+          })();
+          medioBadge = ` <span style="font-size:11px;background:#fff3cd;color:#856404;padding:1px 6px;border-radius:10px;font-weight:600">Solo ${medioNombre}</span>`;
+        }
+        parts.push(`<div class="promo-applied"><span class="promo-tag">🎁</span><span><strong>${a.promo.nombre}</strong>${t}${medioBadge} — Descuento: ${formatCurrency(a.discount)}</span></div>`);
       }
       for (const h of state.promoHints) {
         const msg = h.flexible
@@ -940,6 +959,9 @@ export const POS = (() => {
           // FIX 3: single-select
           state.activeMedios = new Set([mid]);
           Object.keys(state.pagosAmounts).forEach(k => { state.pagosAmounts[k] = 0; });
+          applyPromos(mid);
+          renderPromoArea();
+          renderSaleTotals();
           renderPaymentChips();
           autoFillPayment();
         });

@@ -61,8 +61,8 @@ export default {
            aplica_a, valor_descuento, tipo_descuento,
            precio_combo, stock_maximo, stock_vendido,
            flexible, solo_clientes_registrados, cantidad_total_requerida,
-           sync_status, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           medios_permitidos, sync_status, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `, [
         id,
         data.nombre,
@@ -80,6 +80,7 @@ export default {
         data.flexible ? 1 : 0,
         data.solo_clientes_registrados ? 1 : 0,
         data.cantidad_total_requerida || 1,
+        data.medios_permitidos || null,
         'pending',
         ts,
       ]);
@@ -418,6 +419,21 @@ export default {
     };
 
     // ── Modal ──────────────────────────────────────────────────────────
+    const populateMediosSelect = (valorActual = '') => {
+      const sel = ge('promo-medios-permitidos');
+      if (!sel) return;
+      try {
+        const medios = window.SGA_DB.query(
+          `SELECT id, nombre, icono FROM medios_cobro WHERE activo = 1 ORDER BY orden ASC, nombre ASC`
+        );
+        sel.innerHTML = '<option value="">Todos los medios de pago</option>' +
+          medios.map(m => `<option value="${m.id}">${m.icono || ''} ${m.nombre}</option>`).join('');
+      } catch(e) {
+        sel.innerHTML = '<option value="">Todos los medios de pago</option>';
+      }
+      sel.value = valorActual || '';
+    };
+
     const openModal = (editPromo = null) => {
       resetModal();
       editingId = editPromo ? editPromo.id : null;
@@ -429,6 +445,7 @@ export default {
         ge('promo-fecha-hasta').value = editPromo.fecha_hasta || '';
         ge('promo-stock-max').value   = editPromo.stock_maximo || 0;
         ge('promo-solo-registrados').checked = !!editPromo.solo_clientes_registrados;
+        populateMediosSelect(editPromo.medios_permitidos || '');
 
         setTipo(editPromo.flexible ? 'flexible' : 'fijo');
         if (editPromo.flexible) {
@@ -488,6 +505,7 @@ export default {
       setTipo('fijo');
       setDescTipo('porcentaje');
       renderComboItems();
+      populateMediosSelect('');
     };
 
     // ── Tipo toggle ─────────────────────────────────────────────────────
@@ -686,6 +704,7 @@ export default {
         tipo_descuento:           tipoDescuento,
         valor_descuento:          tipoDescuento !== 'precio_combo' ? valDesc : 0,
         precio_combo:             tipoDescuento === 'precio_combo' ? valDesc : 0,
+        medios_permitidos:        ge('promo-medios-permitidos')?.value || null,
       };
 
       savePromocion(data, comboItems);

@@ -718,6 +718,7 @@
       "ALTER TABLE promociones ADD COLUMN flexible INTEGER DEFAULT 0",
       "ALTER TABLE promociones ADD COLUMN solo_clientes_registrados INTEGER DEFAULT 0",
       "ALTER TABLE promociones ADD COLUMN cantidad_total_requerida INTEGER DEFAULT 1",
+      "ALTER TABLE promociones ADD COLUMN medios_permitidos TEXT DEFAULT NULL",
     ];
     for (const sql of columnAlterations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }
