@@ -1231,8 +1231,22 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     if (!Object.keys(state.recuento.billetes).length) {
       try {
         const saved = JSON.parse(state.sesion.detalle_billetes || '{}');
-        state.recuento.billetes = (saved.billetes && typeof saved.billetes === 'object')
+        const fromCurrent = (saved.billetes && typeof saved.billetes === 'object')
           ? saved.billetes : saved;
+        if (Object.keys(fromCurrent).length) {
+          state.recuento.billetes = fromCurrent;
+        } else {
+          // Fallback: usar billetes de la última sesión cerrada
+          const lastRow = (window.SGA_DB.query(
+            `SELECT detalle_billetes FROM sesiones_caja
+             WHERE sucursal_id = ? AND estado = 'cerrada'
+             ORDER BY fecha_cierre DESC LIMIT 1`,
+            [state.sesion.sucursal_id]
+          )[0]) || {};
+          const lastSaved = JSON.parse(lastRow.detalle_billetes || '{}');
+          state.recuento.billetes = (lastSaved.billetes && typeof lastSaved.billetes === 'object')
+            ? lastSaved.billetes : lastSaved;
+        }
       } catch (e) { /* no saved data */ }
     }
 
