@@ -1196,6 +1196,19 @@
   .cv2-cart-remito .cv2-td-nuevo-costo,
   .cv2-cart-remito .cv2-td-descuento,
   .cv2-cart-remito .cv2-td-subtotal { display: none; }
+
+  /* Columna IVA: solo visible cuando la condición de compra es Factura A */
+  .cv2-th-iva, .cv2-td-iva { display: none; }
+  .cv2-cart-table.cv2-cart-facturaA .cv2-th-iva,
+  .cv2-cart-table.cv2-cart-facturaA .cv2-td-iva { display: table-cell; }
+  .cv2-iva-select {
+    width: 100%; padding: 4px 2px; border: 1px solid #cfd8e3; border-radius: 4px;
+    font-size: 12px; background: #fff; color: #1a2744;
+  }
+
+  /* IVA calculado en el resumen del carrito (Factura A) */
+  .cv2-summary-mismatch .cv2-sum-value { color: #e65100; }
+  .cv2-summary-mismatch .cv2-sum-label::after { content: ' ⚠'; }
 </style>
 
 <div class="cv2-root" id="cv2-root">
@@ -1432,6 +1445,7 @@
             <th class="cv2-th-right">Cantidad</th>
             <th class="cv2-th-right cv2-th-costo-actual">Costo Actual</th>
             <th class="cv2-th-right cv2-th-nuevo-costo">Nuevo Costo</th>
+            <th class="cv2-th-right cv2-th-iva">IVA</th>
             <th class="cv2-th-right cv2-th-descuento">Descuento (%) · ($)</th>
             <th class="cv2-th-right cv2-th-subtotal">Subtotal</th>
             <th class="cv2-th-center">Acción</th>
@@ -1458,6 +1472,14 @@
         <div class="cv2-summary-item">
           <span class="cv2-sum-label">Descuento Total</span>
           <span class="cv2-sum-value" id="cv2-summary-descuento">$ 0,00</span>
+        </div>
+        <div class="cv2-summary-item" id="cv2-summary-iva105-wrap" style="display:none" title="IVA 10,5% calculado según los ítems marcados con esa alícuota">
+          <span class="cv2-sum-label">IVA 10,5% (calc.)</span>
+          <span class="cv2-sum-value" id="cv2-summary-iva105">$ 0,00</span>
+        </div>
+        <div class="cv2-summary-item" id="cv2-summary-iva21-wrap" style="display:none" title="IVA 21% calculado según los ítems marcados con esa alícuota">
+          <span class="cv2-sum-label">IVA 21% (calc.)</span>
+          <span class="cv2-sum-value" id="cv2-summary-iva21">$ 0,00</span>
         </div>
         <div class="cv2-summary-item cv2-summary-total-main">
           <span class="cv2-sum-label">Total Compra</span>
@@ -1540,6 +1562,7 @@
           <th class="c">Uds./Paq.</th>
           <th class="c">Uds. Total</th>
           <th class="r">Costo Unit.</th>
+          <th class="r">Descuento</th>
           <th class="r">Subtotal</th>
         </tr>
       </thead>

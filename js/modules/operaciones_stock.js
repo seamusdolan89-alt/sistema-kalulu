@@ -141,20 +141,20 @@ const OperacionesStock = (() => {
             <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Cant.</th>
             <th style="padding:7px 10px;text-align:left;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Unidad</th>
             <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Costo unit.</th>
+            <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Descuento</th>
             <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Subtotal</th>
           </tr>
         </thead>
         <tbody>
           ${(compra.items || []).map(it => {
-            const subtotal = (parseFloat(it.cantidad) || 0)
-                           * (parseFloat(it.unidades_por_paquete) || 1)
-                           * (parseFloat(it.costo_unitario) || 0);
+            const descPct = parseFloat(it.descuento_pct) || 0;
             return `<tr style="border-bottom:1px solid #eef0f3">
               <td style="padding:7px 10px">${esc(it.producto_nombre || '—')}</td>
               <td style="padding:7px 10px;text-align:right">${it.cantidad}</td>
               <td style="padding:7px 10px;color:#607080">${esc(it.unidad_compra || 'Unidad')}</td>
               <td style="padding:7px 10px;text-align:right">${fmt$(it.costo_unitario)}</td>
-              <td style="padding:7px 10px;text-align:right;font-weight:600">${fmt$(subtotal)}</td>
+              <td style="padding:7px 10px;text-align:right;color:#607080">${descPct > 0.001 ? descPct.toFixed(1) + '%' : '—'}</td>
+              <td style="padding:7px 10px;text-align:right;font-weight:600">${fmt$(it.subtotal)}</td>
             </tr>`;
           }).join('')}
         </tbody>

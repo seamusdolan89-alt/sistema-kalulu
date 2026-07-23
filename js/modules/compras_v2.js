@@ -125,6 +125,13 @@ const ComprasV2 = (() => {
     return Math.max(0, calcTotal() - calcSaldoAplicado());
   }
 
+  // Suma de IVA calculado a partir de los items del carrito para una alícuota dada ('10.5' | '21')
+  function calcIvaCalc(rate) {
+    return state.items
+      .filter(it => it.iva === rate)
+      .reduce((s, it) => s + itemSubtotal(it) * (parseFloat(rate) / 100), 0);
+  }
+
   // ── Cabecera helpers ────────────────────────────────────────────────────────
   function isFacturaA() { return state.condicionCompra === 'Factura A'; }
 
@@ -346,12 +353,14 @@ const ComprasV2 = (() => {
     if (state.items.length === 0) {
       if (empty) empty.style.display = 'flex';
       if (table) table.style.display = 'none';
+      if (table) table.classList.toggle('cv2-cart-facturaA', isFacturaA());
       renderTotals();
       return;
     }
 
     if (empty) empty.style.display = 'none';
     if (table) table.style.display = 'table';
+    if (table) table.classList.toggle('cv2-cart-facturaA', isFacturaA());
 
     tbody.innerHTML = state.items.map((it, i) => {
       const sub          = itemSubtotal(it);
@@ -376,6 +385,13 @@ const ComprasV2 = (() => {
             <input type="number" class="cv2-num-input nuevo-costo" value="${parseFloat(it.costoNuevo).toFixed(2)}"
                    min="0" step="any" style="width:80px"
                    data-idx="${i}" data-field="costoNuevo">
+          </td>
+          <td class="cv2-td-right cv2-td-iva">
+            <select class="cv2-iva-select" data-idx="${i}" data-field="iva" style="width:70px">
+              <option value=""    ${!it.iva            ? 'selected' : ''}>—</option>
+              <option value="10.5" ${it.iva === '10.5'  ? 'selected' : ''}>10,5%</option>
+              <option value="21"   ${it.iva === '21'    ? 'selected' : ''}>21%</option>
+            </select>
           </td>
           <td class="cv2-td-right cv2-td-descuento">
             <div style="display:flex;gap:3px;justify-content:flex-end">
@@ -417,6 +433,25 @@ const ComprasV2 = (() => {
 
     const descEl = ge('cv2-summary-descuento');
     if (descEl) descEl.textContent = descuento > 0.001 ? `− ${fmt$(descuento)}` : fmt$(0);
+
+    // IVA calculado a partir del carrito (solo Factura A) — para corroborar contra la factura impresa
+    const iva105Wrap = ge('cv2-summary-iva105-wrap');
+    const iva21Wrap  = ge('cv2-summary-iva21-wrap');
+    if (iva105Wrap && iva21Wrap) {
+      const show = isFacturaA();
+      iva105Wrap.style.display = show ? '' : 'none';
+      iva21Wrap.style.display  = show ? '' : 'none';
+      if (show) {
+        const calc105 = calcIvaCalc('10.5');
+        const calc21  = calcIvaCalc('21');
+        const el105 = ge('cv2-summary-iva105');
+        const el21  = ge('cv2-summary-iva21');
+        if (el105) el105.textContent = fmt$(calc105);
+        if (el21)  el21.textContent  = fmt$(calc21);
+        iva105Wrap.classList.toggle('cv2-summary-mismatch', state.iva105 > 0.01 && Math.abs(state.iva105 - calc105) > 0.5);
+        iva21Wrap.classList.toggle('cv2-summary-mismatch', state.iva21 > 0.01 && Math.abs(state.iva21 - calc21) > 0.5);
+      }
+    }
 
     const totalEl = ge('cv2-total');
     if (totalEl) totalEl.textContent = fmt$(neto);
@@ -533,7 +568,7 @@ const ComprasV2 = (() => {
     if (!q || !q.trim()) return [];
     const like = `%${q.trim()}%`;
     return db().query(`
-      SELECT p.id, p.nombre, p.costo,
+      SELECT p.id, p.nombre, p.costo, p.iva,
              p.unidad_compra, p.unidades_por_paquete_compra,
              cb.codigo AS barcode
       FROM productos p
@@ -607,6 +642,7 @@ const ComprasV2 = (() => {
       udsPaquete:   parseFloat(r.unidades_por_paquete_compra) || 1,
       costoActual:  parseFloat(r.costo) || 0,
       costoNuevo:   parseFloat(r.costo) || 0,
+      iva:          r.iva || '',
     });
     clearSearch();
   }
@@ -630,6 +666,7 @@ const ComprasV2 = (() => {
         cantidad:        1,
         descuento:       0,
         descuentoMonto:  0,
+        iva:             prod.iva || '',
       });
       targetIdx = state.items.length - 1;
     }
@@ -967,7 +1004,7 @@ const ComprasV2 = (() => {
       // Search by name (LIKE) or any barcode (exact), including aliases
       const like = `%${q}%`;
       lpResults = db().query(`
-        SELECT p.id, p.nombre, p.costo, p.unidad_compra, p.unidades_por_paquete_compra,
+        SELECT p.id, p.nombre, p.costo, p.iva, p.unidad_compra, p.unidades_por_paquete_compra,
                (SELECT codigo FROM codigos_barras WHERE producto_id=p.id AND es_principal=1 LIMIT 1) AS barcode
         FROM productos p
         WHERE p.activo = 1 AND (
@@ -1060,6 +1097,7 @@ const ComprasV2 = (() => {
       udsPaquete:   parseFloat(prod.unidades_por_paquete_compra) || 1,
       costoActual:  parseFloat(prod.costo) || 0,
       costoNuevo:   parseFloat(prod.costo) || 0,
+      iva:          prod.iva || '',
     });
     window.SGA_Utils.showNotification(`Código vinculado a "${prod.nombre}"`, 'success');
   }
@@ -1487,7 +1525,8 @@ const ComprasV2 = (() => {
         const udsPaq  = parseFloat(it.udsPaquete) || 1;
         const cantUds = cant * udsPaq;
         const costo   = parseFloat(it.costoNuevo) || parseFloat(it.costoActual) || 0;
-        const subtotal = cantUds * costo;
+        const descPct = Math.min(100, Math.max(0, parseFloat(it.descuento) || 0));
+        const subtotal = itemSubtotal(it);
         return `<tr>
           <td class="c">${i + 1}</td>
           <td>${esc(it.barcode || '—')}</td>
@@ -1496,6 +1535,7 @@ const ComprasV2 = (() => {
           <td class="c">${udsPaq}</td>
           <td class="c"><strong>${cantUds}</strong></td>
           <td class="r">${fmt$(costo)}</td>
+          <td class="r">${descPct > 0.001 ? descPct.toFixed(1) + '%' : '—'}</td>
           <td class="r"><strong>${fmt$(subtotal)}</strong></td>
         </tr>`;
       }).join('');
@@ -1549,17 +1589,20 @@ const ComprasV2 = (() => {
         const cantUds = cant * udsPaq;
         const costoNvo = parseFloat(item.costoNuevo) || parseFloat(item.costoActual) || 0;
         const costoAnt = parseFloat(item.costoActual) || 0;
-        const subtotal = cant * udsPaq * costoNvo;
+        const subtotal = itemSubtotal(item); // neto, ya con el descuento de línea aplicado
 
         db().run(`
           INSERT INTO compra_items
             (id, compra_id, producto_id, cantidad, costo_unitario, costo_anterior,
-             subtotal, costo_modificado, unidad_compra, unidades_por_paquete)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             subtotal, costo_modificado, unidad_compra, unidades_por_paquete,
+             descuento_pct, descuento_monto, iva)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [uuid(), compraId, item.productoId,
             cant, costoNvo, costoAnt, subtotal,
             Math.abs(costoNvo - costoAnt) > 0.001 ? 1 : 0,
-            item.unidadCompra || 'Unidad', udsPaq]);
+            item.unidadCompra || 'Unidad', udsPaq,
+            parseFloat(item.descuento) || 0, parseFloat(item.descuentoMonto) || 0,
+            item.iva || null]);
 
         // Stock: only increment if NOT vinculando (remito already updated stock)
         if (!state.vinculandoRemitoId) {
@@ -1589,6 +1632,14 @@ const ComprasV2 = (() => {
           db().run(
             `UPDATE productos SET costo=?, costo_paquete=?, sync_status='pending', updated_at=? WHERE id=?`,
             [costoNvo, costoNvo * udsPaq, ts, item.productoId]
+          );
+        }
+
+        // IVA: queda registrado en el producto para futuras compras (Factura A)
+        if (item.iva) {
+          db().run(
+            `UPDATE productos SET iva=?, sync_status='pending', updated_at=? WHERE id=?`,
+            [item.iva, ts, item.productoId]
           );
         }
       }
@@ -1969,12 +2020,19 @@ const ComprasV2 = (() => {
     const _pv   = snap?.facturaPv   ?? state.facturaPv;
     const _nf   = snap?.numeroFactura ?? state.numeroFactura;
     const _cond = snap?.condicionPago ?? state.condicionPago;
+    const _cc   = snap?.condicionCompra ?? state.condicionCompra;
     const _tf   = snap?.totalFactura  ?? state.totalFactura;
+    const _sn   = snap?.subtotalNeto  ?? state.subtotalNeto;
     const _prov = snap?.proveedorNombre ?? state.proveedorNombre;
     const _fecha = snap?.fecha ?? state.fecha;
     const facturaStr     = _pv && _nf ? `${_pv}-${_nf}` : (_nf || _pv || '—');
     const condStr        = _cond === 'efectivo' ? 'Contado' : 'Cta. Cte.';
-    const verifyMismatch = neto > 0.001 && Math.abs(_tf - neto) > 0.01;
+    // Factura A: el control es el Subtotal Neto (sin IVA/percepciones), igual que en la pantalla de Revisión.
+    // Para el resto, el control es el Total Factura (que ya no discrimina impuestos).
+    const isACompra       = _cc === 'Factura A';
+    const controlLabel    = isACompra ? 'Subtotal Neto' : 'Total Factura';
+    const controlValue    = isACompra ? _sn : _tf;
+    const verifyMismatch  = neto > 0.001 && controlValue > 0.001 && Math.abs(controlValue - neto) > 0.01;
 
     // Format date dd/mm/yyyy
     const fechaFmt = (() => {
@@ -2076,8 +2134,8 @@ const ComprasV2 = (() => {
             <div class="cv2-post-total-label">Total Compra: <span class="cv2-post-total-amount">${fmt$(neto)}</span></div>
             <div class="${verifyMismatch ? 'cv2-post-verify-warn' : 'cv2-post-verify-ok'}">
               ${verifyMismatch
-                ? '⚠ Advertencia: Total no coincide con Factura (Control)'
-                : '✓ Ingreso verificado: Coincide con Total Factura (Control)'}
+                ? `⚠ Advertencia: no coincide con ${controlLabel} (${fmt$(controlValue)})`
+                : `✓ Ingreso verificado: coincide con ${controlLabel} (Control)`}
             </div>
             ${state.condicionPago === 'efectivo' && !sesion
               ? `<div class="cv2-post-verify-warn">⚠ Sin sesión de caja abierta — egreso no registrado</div>`
@@ -3289,10 +3347,20 @@ const ComprasV2 = (() => {
     if (cartBody) {
       cartBody.addEventListener('change', e => {
         const inp = e.target.closest('input.cv2-num-input');
-        if (!inp) return;
-        const idx   = parseInt(inp.dataset.idx);
-        const field = inp.dataset.field;
-        if (!isNaN(idx) && field) updateItem(idx, field, inp.value);
+        if (inp) {
+          const idx   = parseInt(inp.dataset.idx);
+          const field = inp.dataset.field;
+          if (!isNaN(idx) && field) updateItem(idx, field, inp.value);
+          return;
+        }
+        const sel = e.target.closest('select[data-field="iva"]');
+        if (sel) {
+          const idx = parseInt(sel.dataset.idx);
+          if (!isNaN(idx) && state.items[idx]) {
+            state.items[idx].iva = sel.value;
+            renderTotals();
+          }
+        }
       });
 
       cartBody.addEventListener('keydown', e => {
