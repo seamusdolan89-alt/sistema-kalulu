@@ -16,6 +16,11 @@
  *   (marcándolos _pulled: false para que el POS los levante en su próximo ciclo).
  *   Ninguno de los dos corre solo — son a propósito manuales.
  *
+ * USUARIOS: sincroniza igual que el resto (login/permisos), pero el login en sí
+ *   siempre valida contra la base LOCAL — un dispositivo nuevo sin ningún usuario
+ *   local todavía no puede loguearse para disparar ningún pull. Para arrancar un
+ *   dispositivo desde cero hace falta restaurar un backup (botón 💾) primero.
+ *
  * El POS se autentica en Firebase de forma anónima (sin login visible al cajero).
  * Si no hay internet o Firebase no está configurado, falla silenciosamente.
  */
@@ -35,6 +40,7 @@
   // ─── PUSH: tablas SQLite → Firestore ─────────────────────────────────────────
 
   const SYNC_SOURCES = [
+    { table: 'usuarios',          collection: 'usuarios',          pk: 'id',   denormalize: null },
     { table: 'ventas',            collection: 'ventas',            pk: 'id',   denormalize: denormalizeVenta },
     { table: 'sesiones_caja',     collection: 'sesiones_caja',     pk: 'id',   denormalize: null },
     { table: 'egresos_caja',      collection: 'egresos_caja',      pk: 'id',   denormalize: null },
@@ -56,6 +62,7 @@
   // Cada entrada define cómo aplicar un documento admin al SQLite local.
 
   const PULL_SOURCES = [
+    { collection: 'usuarios',          applyFn: applyUsuarioFull },
     { collection: 'compras',           applyFn: applyCompra },
     { collection: 'ordenes_compra',    applyFn: applyOrdenCompra },
     { collection: 'pagos_proveedores', applyFn: applyPagoProveedor },
@@ -256,7 +263,7 @@
 
   // ─── PUSH manual desde admin-pos al POS ──────────────────────────────────────
 
-  const ADMIN_PUSH_TABLES = ['productos', 'proveedores', 'clientes', 'compras',
+  const ADMIN_PUSH_TABLES = ['usuarios', 'productos', 'proveedores', 'clientes', 'compras',
                               'ordenes_compra', 'pagos_proveedores', 'gastos',
                               'promociones', 'stock', 'cuenta_corriente'];
 
@@ -599,6 +606,20 @@
 
   // ─── Apply functions para sincronización inicial (todas las colecciones) ────────
 
+  function applyUsuarioFull(data) {
+    // firebase_uid queda fuera a propósito: es un campo vestigial (login es local,
+    // no usa Firebase Auth) y evita choques de UNIQUE entre usuarios "demo" viejos.
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO usuarios
+        (id, nombre, rol, sucursal_id, activo, username, password_hash, permisos_json,
+         sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,'synced',?)`,
+      [data.id, data.nombre || '?', data.rol || 'cajero', data.sucursal_id || null,
+       data.activo !== false ? 1 : 0, data.username || null, data.password_hash || null,
+       data.permisos_json || null, data.updated_at || new Date().toISOString()]
+    );
+  }
+
   function applyCategoria(data) {
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO categorias (id, nombre, comision_pct, sync_status, updated_at)
@@ -759,6 +780,7 @@
     if (!firestoreDb) return 0;
 
     const MONITOR_SOURCES = [
+      { name: 'usuarios',          applyFn: applyUsuarioFull },
       { name: 'sesiones_caja',     applyFn: applySesionCajaFull },
       { name: 'egresos_caja',      applyFn: applyEgresoCajaFull },
       { name: 'ventas',            applyFn: applyVentaFull },
@@ -862,6 +884,7 @@
     }
 
     const COLLECTIONS = [
+      { name: 'usuarios',          applyFn: applyUsuarioFull,      label: 'Usuarios' },
       { name: 'categorias',        applyFn: applyCategoria,        label: 'Categorías' },
       { name: 'proveedores',       applyFn: applyProveedorFull,    label: 'Proveedores' },
       { name: 'productos',         applyFn: applyProductoFull,     label: 'Productos' },
