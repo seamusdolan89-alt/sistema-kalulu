@@ -321,24 +321,31 @@
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO compras
         (id, sucursal_id, proveedor_id, usuario_id, fecha, numero_factura, total,
-         condicion_pago, estado, factura_pv, procesado_por, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+         condicion_pago, estado, factura_pv, procesado_por,
+         subtotal_neto, iva_105, iva_21, imp_interno, percepcion_iva, percepcion_iibb,
+         total_factura, condicion_compra, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.sucursal_id, data.proveedor_id, data.usuario_id, data.fecha,
        data.numero_factura, data.total, data.condicion_pago || null,
        data.estado || 'confirmada', data.factura_pv || null,
-       data.procesado_por || null, data.updated_at || now]
+       data.procesado_por || null,
+       data.subtotal_neto || 0, data.iva_105 || 0, data.iva_21 || 0, data.imp_interno || 0,
+       data.percepcion_iva || 0, data.percepcion_iibb || 0,
+       data.total_factura || 0, data.condicion_compra || null, data.updated_at || now]
     );
 
     for (const item of (data._items || [])) {
       window.SGA_DB.run(`
         INSERT OR REPLACE INTO compra_items
           (id, compra_id, producto_id, cantidad, costo_unitario, costo_anterior,
-           subtotal, costo_modificado, unidad_compra, unidades_por_paquete)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`,
+           subtotal, costo_modificado, unidad_compra, unidades_por_paquete,
+           descuento_pct, descuento_monto, iva)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [item.id, data.id, item.producto_id, item.cantidad,
          item.costo_unitario, item.costo_anterior || null,
          item.subtotal, item.costo_modificado ? 1 : 0,
-         item.unidad_compra || 'Unidad', item.unidades_por_paquete || 1]
+         item.unidad_compra || 'Unidad', item.unidades_por_paquete || 1,
+         item.descuento_pct || 0, item.descuento_monto || 0, item.iva || null]
       );
 
       // Actualizar costo del producto si el admin lo marcó como modificado
@@ -653,8 +660,8 @@
          cant_pedido, pedido_unidad, unidad_compra, unidades_por_paquete_compra,
          unidad_venta, costo_paquete, precio_lista_por, precio_lista_divisor,
          hereda_costo, hereda_precio, es_oferta, oferta_desde, oferta_hasta,
-         activo, fecha_alta, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+         activo, fecha_alta, iva, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.nombre || '?', data.descripcion || null,
        data.categoria_id || null, data.proveedor_principal_id || null, data.proveedor_alternativo_id || null,
        data.producto_madre_id || null, data.es_madre ? 1 : 0, data.precio_independiente ? 1 : 0,
@@ -667,7 +674,7 @@
        data.precio_lista_por || 'Por unidad de compra', data.precio_lista_divisor || 1,
        data.hereda_costo !== false ? 1 : 0, data.hereda_precio !== false ? 1 : 0,
        data.es_oferta ? 1 : 0, data.oferta_desde || null, data.oferta_hasta || null,
-       data.activo !== false ? 1 : 0, data.fecha_alta || null, data.updated_at || null]
+       data.activo !== false ? 1 : 0, data.fecha_alta || null, data.iva || null, data.updated_at || null]
     );
 
     for (const cb of (data.codigos_barras || [])) {
