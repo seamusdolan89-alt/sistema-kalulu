@@ -2,11 +2,19 @@
  * sync.js — Sincronización bidireccional con Firebase Firestore
  *
  * PUSH (POS → Firestore):
- *   Registros con sync_status = 'pending' se envían a Firestore cada 30s.
+ *   Registros con sync_status = 'pending' se envían a Firestore apenas se completa
+ *   la acción que los generó (venta, compra, gasto, movimiento de caja), y además
+ *   cada 5 min como respaldo (por si algún flujo no dispara el push puntual).
  *
  * PULL (Firestore → SQLite):
  *   Registros escritos desde el panel admin (con _pulled: false) se aplican
- *   al SQLite local y se marcan _pulled: true en Firestore.
+ *   al SQLite local cada 5 min automáticamente y se marcan _pulled: true en Firestore.
+ *
+ * ADMIN-POS (panel de administración, uso manual):
+ *   "⬇ Pull" trae los cambios hechos en el POS (por fecha, no por _pulled).
+ *   "⬆ Push POS" manda los cambios pendientes del admin hacia el POS
+ *   (marcándolos _pulled: false para que el POS los levante en su próximo ciclo).
+ *   Ninguno de los dos corre solo — son a propósito manuales.
  *
  * El POS se autentica en Firebase de forma anónima (sin login visible al cajero).
  * Si no hay internet o Firebase no está configurado, falla silenciosamente.
@@ -54,6 +62,9 @@
     { collection: 'gastos',            applyFn: applyGasto },
     { collection: 'productos',         applyFn: applyProductoFull },
     { collection: 'promociones',       applyFn: applyPromocion },
+    { collection: 'proveedores',       applyFn: applyProveedorFull },
+    { collection: 'clientes',          applyFn: applyClienteFull },
+    { collection: 'stock',             applyFn: applyStockFull },
   ];
 
   // ─── Inicialización ──────────────────────────────────────────────────────────
@@ -94,11 +105,15 @@
       await syncNow();
 
       if (!window.ADMIN_MODE) {
-        // POS: solo pull automático cada 30 minutos; push es event-driven
+        // POS: pull automático cada 5 minutos. El push es event-driven (se dispara
+        // después de cada venta/compra/gasto/movimiento de caja), pero además
+        // reforzamos con un push de respaldo en el mismo intervalo, por si algún
+        // flujo nuevo no lo dispara — así nunca depende de que el cajero haga nada.
         syncIntervalId = setInterval(() => {
           pullFromFirestore()
             .then(n => { if (n > 0) { console.log(`⬇️  Pull auto: ${n} registros`); updateSyncBadge('ok'); } })
             .catch(() => {});
+          pushPending().catch(() => {});
         }, PULL_INTERVAL_MS);
       }
     } catch (err) {
