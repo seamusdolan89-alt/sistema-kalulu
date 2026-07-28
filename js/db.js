@@ -393,6 +393,17 @@
         costo_modificado INTEGER DEFAULT 0
       )`,
 
+      // Matcheo aprendido: código interno del proveedor → producto. Se completa
+      // solo con el uso (carga por foto de factura) — no hace falta armarla a mano.
+      `CREATE TABLE IF NOT EXISTS producto_codigo_proveedor (
+        proveedor_id TEXT REFERENCES proveedores(id),
+        codigo TEXT NOT NULL,
+        producto_id TEXT REFERENCES productos(id),
+        sync_status TEXT DEFAULT 'pending',
+        updated_at TEXT,
+        PRIMARY KEY (proveedor_id, codigo)
+      )`,
+
       `CREATE TABLE IF NOT EXISTS ordenes_compra (
         id TEXT PRIMARY KEY,
         sucursal_id TEXT REFERENCES sucursales(id),
@@ -725,6 +736,8 @@
       "ALTER TABLE compra_items ADD COLUMN descuento_pct REAL DEFAULT 0",
       "ALTER TABLE compra_items ADD COLUMN descuento_monto REAL DEFAULT 0",
       "ALTER TABLE compra_items ADD COLUMN iva TEXT",
+      // Carga por foto (OCR con Claude Vision): de dónde vino la compra
+      "ALTER TABLE compras ADD COLUMN origen_carga TEXT DEFAULT 'tradicional'",
     ];
     for (const sql of columnAlterations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }

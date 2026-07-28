@@ -41,6 +41,8 @@
 
   const SYNC_SOURCES = [
     { table: 'usuarios',          collection: 'usuarios',          pk: 'id',   denormalize: null },
+    { table: 'producto_codigo_proveedor', collection: 'producto_codigo_proveedor', pk: null,
+      compositeKey: ['proveedor_id', 'codigo'], denormalize: null },
     { table: 'ventas',            collection: 'ventas',            pk: 'id',   denormalize: denormalizeVenta },
     { table: 'sesiones_caja',     collection: 'sesiones_caja',     pk: 'id',   denormalize: null },
     { table: 'egresos_caja',      collection: 'egresos_caja',      pk: 'id',   denormalize: null },
@@ -63,6 +65,7 @@
 
   const PULL_SOURCES = [
     { collection: 'usuarios',          applyFn: applyUsuarioFull },
+    { collection: 'producto_codigo_proveedor', applyFn: applyCodigoProveedorFull },
     { collection: 'compras',           applyFn: applyCompra },
     { collection: 'ordenes_compra',    applyFn: applyOrdenCompra },
     { collection: 'pagos_proveedores', applyFn: applyPagoProveedor },
@@ -265,7 +268,7 @@
 
   const ADMIN_PUSH_TABLES = ['usuarios', 'productos', 'proveedores', 'clientes', 'compras',
                               'ordenes_compra', 'pagos_proveedores', 'gastos',
-                              'promociones', 'stock', 'cuenta_corriente'];
+                              'promociones', 'stock', 'cuenta_corriente', 'producto_codigo_proveedor'];
 
   async function pushToPos() {
     if (!initialized || !firestoreDb) throw new Error('Firebase no conectado');
@@ -627,6 +630,15 @@
     );
   }
 
+  function applyCodigoProveedorFull(data) {
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO producto_codigo_proveedor
+        (proveedor_id, codigo, producto_id, sync_status, updated_at)
+      VALUES (?,?,?,'synced',?)`,
+      [data.proveedor_id, data.codigo, data.producto_id, data.updated_at || new Date().toISOString()]
+    );
+  }
+
   function applyCategoria(data) {
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO categorias (id, nombre, comision_pct, sync_status, updated_at)
@@ -788,6 +800,7 @@
 
     const MONITOR_SOURCES = [
       { name: 'usuarios',          applyFn: applyUsuarioFull },
+      { name: 'producto_codigo_proveedor', applyFn: applyCodigoProveedorFull },
       { name: 'sesiones_caja',     applyFn: applySesionCajaFull },
       { name: 'egresos_caja',      applyFn: applyEgresoCajaFull },
       { name: 'ventas',            applyFn: applyVentaFull },
@@ -892,6 +905,7 @@
 
     const COLLECTIONS = [
       { name: 'usuarios',          applyFn: applyUsuarioFull,      label: 'Usuarios' },
+      { name: 'producto_codigo_proveedor', applyFn: applyCodigoProveedorFull, label: 'Matcheo códigos proveedor' },
       { name: 'categorias',        applyFn: applyCategoria,        label: 'Categorías' },
       { name: 'proveedores',       applyFn: applyProveedorFull,    label: 'Proveedores' },
       { name: 'productos',         applyFn: applyProductoFull,     label: 'Productos' },

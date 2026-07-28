@@ -30,6 +30,10 @@ const ComprasV2 = (() => {
     proveedorNombre:    null,
     proveedorSaldo:     0,      // positive = nosotros le debemos | negative = nos deben
     aplicarSaldo:       false,
+    metodoCarga:        null,   // 'tradicional' | 'foto' — paso 0
+    _fotoBase64:        null,   // transient: foto de factura para OCR (sin el prefijo data:)
+    _fotoMediaType:     null,
+    _confirmandoIdx:    null,   // idx del item que se está confirmando por escaneo (carga por foto)
     condicionPago:      'pendiente',
     condicionCompra:    '',     // Factura A / B / C / Remito / Ticket
     facturaPv:          '',
@@ -294,11 +298,45 @@ const ComprasV2 = (() => {
   }
 
   function showCabecera() {
-    const cab  = ge('cv2-cabecera');
-    const cart = ge('cv2-carrito-wrap');
+    const metodo = ge('cv2-metodo-carga');
+    const foto   = ge('cv2-foto-captura');
+    const cab    = ge('cv2-cabecera');
+    const cart   = ge('cv2-carrito-wrap');
+    if (metodo) metodo.style.display = 'none';
+    if (foto)   foto.style.display   = 'none';
     if (cab)  cab.style.display  = 'flex';
     if (cart) cart.style.display = 'none';
     setTimeout(() => ge('cv2-prov-search')?.focus(), 50);
+  }
+
+  // ── Paso 0: método de carga (Tradicional / Con foto) ────────────────────────
+  function showMetodoCarga() {
+    const metodo = ge('cv2-metodo-carga');
+    const foto   = ge('cv2-foto-captura');
+    const cab    = ge('cv2-cabecera');
+    const cart   = ge('cv2-carrito-wrap');
+    if (foto) foto.style.display = 'none';
+    if (cab)  cab.style.display  = 'none';
+    if (cart) cart.style.display = 'none';
+    if (metodo) metodo.style.display = 'flex';
+  }
+
+  function showFotoCaptura() {
+    const metodo = ge('cv2-metodo-carga');
+    const foto   = ge('cv2-foto-captura');
+    if (metodo) metodo.style.display = 'none';
+    if (foto)   foto.style.display   = 'flex';
+    // Limpiar restos de una foto anterior
+    state._fotoBase64   = null;
+    state._fotoMediaType = null;
+    const previewWrap = ge('cv2-foto-preview-wrap');
+    const previewImg  = ge('cv2-foto-preview');
+    const interpretarBtn = ge('cv2-foto-interpretar');
+    if (previewWrap) previewWrap.style.display = 'none';
+    if (previewImg)  previewImg.src = '';
+    if (interpretarBtn) interpretarBtn.style.display = 'none';
+    const fotoInput = ge('cv2-foto-input');
+    if (fotoInput) fotoInput.value = '';
   }
 
   function showCarrito() {
@@ -338,7 +376,10 @@ const ComprasV2 = (() => {
     renderEfectivoInfo();
     renderCart();
     updateConfirmBtn();
-    if (!state.vinculandoRemitoId || state.items.length === 0) {
+    if (state.items.some(it => it.confirmado === false)) {
+      // Carga por foto: arrancar confirmando la primera fila pendiente
+      setTimeout(enfocarSiguientePendiente, 50);
+    } else if (!state.vinculandoRemitoId || state.items.length === 0) {
       setTimeout(() => ge('cv2-search')?.focus(), 50);
     }
   }
@@ -365,10 +406,13 @@ const ComprasV2 = (() => {
     tbody.innerHTML = state.items.map((it, i) => {
       const sub          = itemSubtotal(it);
       const costoChanged = Math.abs((parseFloat(it.costoNuevo) || 0) - (parseFloat(it.costoActual) || 0)) > 0.001;
+      const pendiente    = it.confirmado === false;
       return `
-        <tr class="cv2-cart-row" data-idx="${i}">
+        <tr class="cv2-cart-row${pendiente ? ' cv2-cart-row-pendiente' : ''}" data-idx="${i}">
           <td class="cv2-td-num">${i + 1}</td>
-          <td class="cv2-td-cod">${esc(it.barcode || '')}</td>
+          <td class="cv2-td-cod">${pendiente
+            ? `<input type="text" class="cv2-codigo-scan" data-idx="${i}" placeholder="Escanear código…" autocomplete="off">`
+            : esc(it.barcode || '')}</td>
           <td class="cv2-cart-nombre" title="${esc(it.nombre)}">
             ${esc(it.nombre)}
             ${costoChanged ? `<span class="cv2-costo-changed" title="Costo modificado">↑</span>` : ''}
@@ -534,7 +578,11 @@ const ComprasV2 = (() => {
   function updateConfirmBtn() {
     const btn = ge('cv2-btn-confirmar');
     if (!btn) return;
-    btn.disabled = !(state.proveedorId && state.items.length > 0);
+    const hayPendientes = state.items.some(it => it.confirmado === false);
+    btn.disabled = !(state.proveedorId && state.items.length > 0) || hayPendientes;
+    btn.title = hayPendientes
+      ? 'Escaneá el código de cada producto para confirmarlo antes de continuar'
+      : '';
 
     if (state.modoRemito) {
       btn.classList.remove('cv2-btn-confirmar-alert');
@@ -740,6 +788,335 @@ const ComprasV2 = (() => {
     if (state.proveedorSaldo < -0.01) renderProveedorPanel();
   }
 
+  // ── Carga por foto (OCR con Claude Vision) ───────────────────────────────────
+  // Cambiar a false una vez deployada la Cloud Function (functions/index.js) y
+  // habilitado el plan Blaze en el proyecto de Firebase.
+  const USE_MOCK_OCR = true;
+
+  function resizeImageToBase64(file, maxDim = 1600, quality = 0.8) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('No se pudo cargar la imagen'));
+        img.onload = () => {
+          let width = img.width, height = img.height;
+          if (width > maxDim || height > maxDim) {
+            const scale = maxDim / Math.max(width, height);
+            width  = Math.round(width * scale);
+            height = Math.round(height * scale);
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width  = width;
+          canvas.height = height;
+          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          resolve({ base64: dataUrl.split(',')[1], mediaType: 'image/jpeg', dataUrl });
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function interpretarFacturaReal(base64, mediaType) {
+    const fn = firebase.functions().httpsCallable('interpretarFacturaCompra');
+    const res = await fn({ imageBase64: base64, mediaType });
+    return res.data;
+  }
+
+  // Resultado ya validado a mano (factura real de Golosan) durante el diseño de esta feature.
+  function mockInterpretarFactura() {
+    return new Promise(resolve => setTimeout(() => resolve({
+      proveedor_nombre: 'GOLOSAN S.A.',
+      proveedor_cuit: '30-71058372-9',
+      condicion_compra: 'Factura A',
+      factura_pv: '0005',
+      numero_factura: '00198525',
+      fecha: '2026-07-25',
+      condicion_pago: 'efectivo',
+      subtotal_neto: 305051.04,
+      iva_105: 0,
+      iva_21: 64060.72,
+      imp_interno: 0,
+      percepcion_iva: 8703.60,
+      percepcion_iibb: 0,
+      total_factura: 377815.36,
+      items: [
+        { codigo_proveedor: '12216', descripcion: 'BON O BON DOYPACK X 130 G BITES',       cantidad: 4,  costo_unitario: 3341.27,  iva: '21', subtotal: 13365.09 },
+        { codigo_proveedor: '04010', descripcion: 'BUBBALOO X 60 U UVA',                    cantidad: 1,  costo_unitario: 4185.61,  iva: '21', subtotal: 4185.61  },
+        { codigo_proveedor: '17189', descripcion: 'GALL CACHAFAZ CACAO Y MIEL X 170 GRS',    cantidad: 4,  costo_unitario: 1334.67,  iva: '21', subtotal: 5338.68  },
+        { codigo_proveedor: '12220', descripcion: 'COFLER RELL DULCE DE LECHE X 46 G',       cantidad: 4,  costo_unitario: 1418.55,  iva: '21', subtotal: 5674.19  },
+        { codigo_proveedor: '39010', descripcion: 'PILA DURACELL AA4 X 2 U',                 cantidad: 6,  costo_unitario: 1645.91,  iva: '21', subtotal: 9875.45  },
+        { codigo_proveedor: '37082', descripcion: 'PAPEL HIG FELPITA 80 MTS X 4 SIMPLE',     cantidad: 6,  costo_unitario: 2652.40,  iva: '21', subtotal: 15914.41 },
+        { codigo_proveedor: '37030', descripcion: 'ROLLO COCINA FELPITA X 3 U',              cantidad: 6,  costo_unitario: 1320.93,  iva: '21', subtotal: 7925.56  },
+        { codigo_proveedor: '37113', descripcion: 'SERVILLETA FELPITA X 40 U',               cantidad: 4,  costo_unitario: 468.49,   iva: '21', subtotal: 1873.94  },
+        { codigo_proveedor: '23011', descripcion: 'CUNITA JORGITO X 6 U NEGRO',              cantidad: 6,  costo_unitario: 1951.07,  iva: '21', subtotal: 11706.42 },
+        { codigo_proveedor: '23023', descripcion: 'CONITO JORGITO X 12 U',                   cantidad: 1,  costo_unitario: 8587.15,  iva: '21', subtotal: 8587.15  },
+        { codigo_proveedor: '06001', descripcion: 'BOCAD. MARROC X 60',                      cantidad: 1,  costo_unitario: 28094.63, iva: '21', subtotal: 28094.63 },
+        { codigo_proveedor: '15007', descripcion: 'GALL MELBA X 120 GRS',                    cantidad: 4,  costo_unitario: 933.55,   iva: '21', subtotal: 3734.18  },
+        { codigo_proveedor: '05024', descripcion: 'CHOC. MILKA X 300 G OREO',                cantidad: 4,  costo_unitario: 15736.45, iva: '21', subtotal: 62945.78 },
+        { codigo_proveedor: '42015', descripcion: 'MERM. FRUTILLA NOEL X 454 G',             cantidad: 3,  costo_unitario: 1891.64,  iva: '21', subtotal: 5674.92  },
+        { codigo_proveedor: '21034', descripcion: 'NUTELLA X 350 G. FERRERO',                cantidad: 2,  costo_unitario: 6847.90,  iva: '21', subtotal: 13695.80 },
+        { codigo_proveedor: '15026', descripcion: 'GALL OREO X 118 GRS',                     cantidad: 6,  costo_unitario: 1417.56,  iva: '21', subtotal: 8505.36  },
+        { codigo_proveedor: '07209', descripcion: 'PRINGLES GRANDE CEBOLLA X 109 G',         cantidad: 4,  costo_unitario: 2822.91,  iva: '21', subtotal: 11291.64 },
+        { codigo_proveedor: '07212', descripcion: 'PRINGLES GRANDE ORIGINAL X 104 G',        cantidad: 4,  costo_unitario: 2822.91,  iva: '21', subtotal: 11291.64 },
+        { codigo_proveedor: '07227', descripcion: 'PRINGLES X 37 G. ORIGINAL',               cantidad: 6,  costo_unitario: 1370.25,  iva: '21', subtotal: 8221.49  },
+        { codigo_proveedor: '10063', descripcion: 'SUGUS MAX X 70 U. FRUTILLA 525 G.',       cantidad: 1,  costo_unitario: 4127.44,  iva: '21', subtotal: 4127.44  },
+        { codigo_proveedor: '21006', descripcion: 'TIC-TAC NARANJA',                         cantidad: 12, costo_unitario: 646.43,   iva: '21', subtotal: 7757.14  },
+        { codigo_proveedor: '12008', descripcion: 'AGUA SIERRA DE LOS PADRES 6 X 2 LTS.',    cantidad: 6,  costo_unitario: 4462.25,  iva: '21', subtotal: 26773.50 },
+        { codigo_proveedor: '85179', descripcion: 'SLICES PAPA PAY X 140 GRS',               cantidad: 4,  costo_unitario: 1263.93,  iva: '21', subtotal: 5055.72  },
+        { codigo_proveedor: '05008', descripcion: 'ALF. MILKA MOUSSE X 42 GRS',              cantidad: 4,  costo_unitario: 646.25,   iva: '21', subtotal: 2585.00  },
+        { codigo_proveedor: '05015', descripcion: 'CHOC. SHOT X 90 GRS',                     cantidad: 3,  costo_unitario: 2711.37,  iva: '21', subtotal: 8134.10  },
+        { codigo_proveedor: '07271', descripcion: 'SNICKERS X 48 GRS',                       cantidad: 6,  costo_unitario: 2119.37,  iva: '21', subtotal: 12716.20 },
+      ],
+    }), 900));
+  }
+
+  // Vuelca el resultado del OCR (real o mock) en la cabecera y en state.items.
+  function aplicarResultadoOCR(resultado) {
+    let proveedor = null;
+    if (resultado.proveedor_cuit) {
+      proveedor = db().query(`SELECT * FROM proveedores WHERE cuit = ?`, [resultado.proveedor_cuit])[0] || null;
+    }
+
+    if (proveedor) {
+      selectProveedor(proveedor);
+    } else {
+      clearProveedor();
+      const provInp = ge('cv2-prov-search');
+      if (provInp) provInp.value = resultado.proveedor_nombre || '';
+    }
+
+    // Lo que dice ESTA factura pisa cualquier default guardado en el proveedor
+    state.condicionCompra = resultado.condicion_compra || '';
+    const condSel = ge('cv2-condicion-compra');
+    if (condSel) condSel.value = state.condicionCompra;
+
+    state.facturaPv     = resultado.factura_pv || '';
+    state.numeroFactura = resultado.numero_factura || '';
+    const pvInp = ge('cv2-factura-pv');
+    if (pvInp) pvInp.value = state.facturaPv;
+    const facturaInp = ge('cv2-factura');
+    if (facturaInp) facturaInp.value = state.numeroFactura;
+
+    if (resultado.fecha) {
+      state.fecha = resultado.fecha;
+      const fechaInp = ge('cv2-fecha');
+      if (fechaInp) fechaInp.value = state.fecha;
+    }
+
+    state.subtotalNeto   = parseFloat(resultado.subtotal_neto)   || 0;
+    state.iva105         = parseFloat(resultado.iva_105)         || 0;
+    state.iva21          = parseFloat(resultado.iva_21)          || 0;
+    state.impInterno     = parseFloat(resultado.imp_interno)     || 0;
+    state.percepcionIva  = parseFloat(resultado.percepcion_iva)  || 0;
+    state.percepcionIibb = parseFloat(resultado.percepcion_iibb) || 0;
+
+    renderCabeceraFields();
+    const fiscalInputs = {
+      'cv2-subtotal-neto': state.subtotalNeto, 'cv2-iva-105': state.iva105, 'cv2-iva-21': state.iva21,
+      'cv2-imp-interno': state.impInterno, 'cv2-percepcion-iva': state.percepcionIva, 'cv2-percepcion-iibb': state.percepcionIibb,
+    };
+    Object.entries(fiscalInputs).forEach(([id, val]) => {
+      const inp = ge(id);
+      if (inp && val > 0) inp.value = formatARS(val);
+    });
+    if (isFacturaA()) updateTotalFactura();
+
+    state.items = (resultado.items || []).map(item => matchearItemOCR(item, proveedor?.id || null));
+
+    renderCollapsedBar();
+    showCabecera();
+  }
+
+  // Matchea un ítem leído de la factura contra productos existentes (por código
+  // de proveedor ya aprendido, o por nombre) y arma el objeto de carrito
+  // correspondiente. NO confirma nada — eso lo hace el escaneo en el Carrito.
+  function matchearItemOCR(item, proveedorId) {
+    const cantidadFacturada = parseFloat(item.cantidad) || 0;
+    const costoPorBulto     = parseFloat(item.costo_unitario) || 0;
+    const codigoProveedor   = (item.codigo_proveedor || '').trim();
+
+    let producto = null;
+    if (proveedorId && codigoProveedor) {
+      const mapeo = db().query(
+        `SELECT producto_id FROM producto_codigo_proveedor WHERE proveedor_id = ? AND codigo = ?`,
+        [proveedorId, codigoProveedor]
+      )[0];
+      if (mapeo) producto = db().query(`SELECT * FROM productos WHERE id = ?`, [mapeo.producto_id])[0] || null;
+    }
+    if (!producto && proveedorId && item.descripcion) {
+      const pista = item.descripcion.trim().split(' ').slice(0, 2).join(' ');
+      const candidatos = pista
+        ? db().query(
+            `SELECT * FROM productos
+             WHERE activo = 1 AND (proveedor_principal_id = ? OR proveedor_alternativo_id = ?)
+               AND nombre LIKE ?
+             LIMIT 1`,
+            [proveedorId, proveedorId, `%${pista}%`]
+          )
+        : [];
+      if (candidatos[0]) producto = candidatos[0];
+    }
+
+    const udsPaq = producto ? (parseFloat(producto.unidades_por_paquete_compra) || 1) : 1;
+
+    return {
+      origenFoto:       true,
+      confirmado:       false,
+      codigoProveedor:  codigoProveedor,
+      matchTentativoProductoId: producto ? producto.id : null,
+      cantidadFacturada,
+      costoPorBulto,
+      productoId:       null, // se define recién cuando se confirma por escaneo
+      barcode:          '',
+      nombre:           producto ? producto.nombre : (item.descripcion || '(sin identificar)'),
+      unidadCompra:     producto ? (producto.unidad_compra || 'Unidad') : 'Unidad',
+      udsPaquete:       udsPaq,
+      costoActual:      producto ? (parseFloat(producto.costo) || 0) : 0,
+      costoNuevo:       udsPaq > 0 ? costoPorBulto / udsPaq : costoPorBulto,
+      cantidad:         cantidadFacturada,
+      descuento:        0,
+      descuentoMonto:   0,
+      iva:              (producto && producto.iva) || item.iva || '',
+    };
+  }
+
+  // ── Confirmación por escaneo (carga por foto) ────────────────────────────────
+
+  // Se dispara al escanear (Enter) el código de una fila pendiente.
+  function procesarEscaneoConfirmacion(idx, codigo) {
+    const it = state.items[idx];
+    if (!it) return;
+
+    const row = db().query(`
+      SELECT p.* FROM codigos_barras cb
+      JOIN productos p ON p.id = cb.producto_id
+      WHERE cb.codigo = ? AND p.activo = 1
+      LIMIT 1
+    `, [codigo])[0];
+
+    if (!row) {
+      mostrarOpcionesCodigoNoReconocido(idx, codigo);
+      return;
+    }
+
+    if (it.matchTentativoProductoId && row.id !== it.matchTentativoProductoId) {
+      mostrarCartelEsperabamosEscaneaste(idx, row, codigo);
+      return;
+    }
+
+    confirmarItemCarrito(idx, { productoId: row.id, barcode: codigo });
+    window.SGA_Utils.showNotification(`✓ ${row.nombre}`, 'success');
+  }
+
+  // Cartel "esperábamos X / escaneaste Y" — el escaneo manda, pero se lo mostramos
+  // a la cajera para que confirme que no se equivocó de producto en la góndola.
+  function mostrarCartelEsperabamosEscaneaste(idx, rowEscaneado, codigo) {
+    const it = state.items[idx];
+    const container = ge('cv2-new-prod-form');
+    if (!container || !it) return;
+    const esperado = db().query(`SELECT nombre FROM productos WHERE id=?`, [it.matchTentativoProductoId])[0];
+
+    state._confirmandoIdx = idx;
+    container.style.display = 'block';
+    container.innerHTML = `
+      <div class="cv2-new-prod-header">
+        <span>⚠️ El código no coincide con lo esperado</span>
+        <button class="cv2-new-prod-close" id="cv2-esc-close">×</button>
+      </div>
+      <div class="cv2-new-prod-body">
+        <p style="margin:0 0 6px;font-size:13px;color:#607080">Esperábamos (según la factura): <strong style="color:#1a2744">${esc(esperado?.nombre || it.nombre)}</strong></p>
+        <p style="margin:0 0 14px;font-size:13px;color:#607080">Escaneaste: <strong style="color:#e65100">${esc(rowEscaneado.nombre)}</strong></p>
+        <div class="cv2-new-prod-footer">
+          <button class="btn btn-ghost" id="cv2-esc-cancel">Volver a escanear</button>
+          <button class="btn btn-primary" id="cv2-esc-confirmar">Confirmar este producto</button>
+        </div>
+      </div>
+    `;
+    ge('cv2-esc-close')     ?.addEventListener('click', hideNewProductForm);
+    ge('cv2-esc-cancel')    ?.addEventListener('click', hideNewProductForm);
+    ge('cv2-esc-confirmar') ?.addEventListener('click', () => {
+      hideNewProductForm();
+      confirmarItemCarrito(idx, { productoId: rowEscaneado.id, barcode: codigo });
+    });
+  }
+
+  // Código escaneado que no existe en el sistema — mismas dos opciones que ya
+  // existen en el carrito tradicional, reusadas tal cual.
+  function mostrarOpcionesCodigoNoReconocido(idx, codigo) {
+    state._confirmandoIdx = idx;
+    const container = ge('cv2-new-prod-form');
+    if (!container) return;
+    container.style.display = 'block';
+    container.innerHTML = `
+      <div class="cv2-new-prod-header">
+        <span>Código no encontrado: ${esc(codigo)}</span>
+        <button class="cv2-new-prod-close" id="cv2-nc-close">×</button>
+      </div>
+      <div class="cv2-new-prod-body">
+        <p style="margin:0 0 12px;font-size:13px;color:#607080">No hay ningún producto con ese código de barras. ¿Qué querés hacer?</p>
+        <div class="cv2-new-prod-footer">
+          <button class="btn btn-ghost" id="cv2-nc-cancel">Cancelar</button>
+          <button class="btn btn-secondary" id="cv2-nc-vincular">🔗 Vincular a producto existente</button>
+          <button class="btn btn-primary" id="cv2-nc-nuevo">+ Crear producto nuevo</button>
+        </div>
+      </div>
+    `;
+    ge('cv2-nc-close')    ?.addEventListener('click', hideNewProductForm);
+    ge('cv2-nc-cancel')   ?.addEventListener('click', hideNewProductForm);
+    ge('cv2-nc-nuevo')    ?.addEventListener('click', () => showNewProductForm(codigo));
+    ge('cv2-nc-vincular') ?.addEventListener('click', () => showLinkProductForm(codigo));
+  }
+
+  // Cierra/finaliza una fila pendiente: fija el producto real, recalcula
+  // cantidad/costo contra SUS datos (no los que había supuesto el OCR), y
+  // aprende el código de proveedor para la próxima compra de este proveedor.
+  function confirmarItemCarrito(idx, datos) {
+    const it = state.items[idx];
+    if (!it) return;
+
+    const producto = datos.productoId
+      ? db().query(`SELECT * FROM productos WHERE id=?`, [datos.productoId])[0]
+      : null;
+
+    const udsPaq = producto ? (parseFloat(producto.unidades_por_paquete_compra) || 1) : 1;
+    const costoPorBulto = parseFloat(it.costoPorBulto) || 0;
+
+    it.productoId   = datos.productoId || null;
+    it.barcode      = datos.barcode || '';
+    it.nombre       = producto ? producto.nombre : it.nombre;
+    it.unidadCompra = producto ? (producto.unidad_compra || 'Unidad') : it.unidadCompra;
+    it.udsPaquete   = udsPaq;
+    it.costoActual  = producto ? (parseFloat(producto.costo) || 0) : 0;
+    it.costoNuevo   = udsPaq > 0 ? costoPorBulto / udsPaq : costoPorBulto;
+    if (producto && producto.iva) it.iva = producto.iva;
+    it.confirmado   = true;
+    it.matchTentativoProductoId = null;
+
+    // Aprender el matcheo (código de este proveedor → este producto) para la próxima compra
+    if (state.proveedorId && it.codigoProveedor && datos.productoId) {
+      db().run(
+        `INSERT OR REPLACE INTO producto_codigo_proveedor (proveedor_id, codigo, producto_id, sync_status, updated_at)
+         VALUES (?,?,?,'pending',?)`,
+        [state.proveedorId, it.codigoProveedor, datos.productoId, nowISO()]
+      );
+    }
+
+    renderCart();
+    updateConfirmBtn();
+    enfocarSiguientePendiente();
+  }
+
+  function enfocarSiguientePendiente() {
+    const idx = state.items.findIndex(i => i.confirmado === false);
+    if (idx === -1) { ge('cv2-btn-confirmar')?.focus(); return; }
+    const inp = document.querySelector(`.cv2-cart-row[data-idx="${idx}"] .cv2-codigo-scan`);
+    if (inp) inp.focus();
+  }
+
   // ── New product form ─────────────────────────────────────────────────────────
   function showNewProductForm(barcode) {
     const container = ge('cv2-new-prod-form');
@@ -791,7 +1168,14 @@ const ComprasV2 = (() => {
   function hideNewProductForm() {
     const c = ge('cv2-new-prod-form');
     if (c) { c.style.display = 'none'; c.innerHTML = ''; }
-    ge('cv2-search')?.focus();
+    const confirmandoIdx = state._confirmandoIdx;
+    state._confirmandoIdx = null;
+    if (confirmandoIdx != null) {
+      const inp = document.querySelector(`.cv2-cart-row[data-idx="${confirmandoIdx}"] .cv2-codigo-scan`);
+      if (inp) inp.focus();
+    } else {
+      ge('cv2-search')?.focus();
+    }
   }
 
   function submitNewProduct(barcode) {
@@ -803,6 +1187,7 @@ const ComprasV2 = (() => {
     if (!nombre)              { alert('El nombre es obligatorio');  ge('cv2-np-nombre')?.focus(); return; }
     if (isNaN(costo) || costo < 0) { alert('Ingresá un costo válido'); ge('cv2-np-costo')?.focus();  return; }
 
+    const confirmandoIdx = state._confirmandoIdx;
     const prodId = uuid();
     const ts     = nowISO();
     const user   = state.currentUser;
@@ -832,7 +1217,11 @@ const ComprasV2 = (() => {
     }
 
     hideNewProductForm();
-    addToCart({ productoId: prodId, nombre, barcode: barcode || '', unidadCompra: unidad, udsPaquete: udsPaq, costoActual: costo, costoNuevo: costo, isNuevo: true });
+    if (confirmandoIdx != null) {
+      confirmarItemCarrito(confirmandoIdx, { productoId: prodId, barcode: barcode || '' });
+    } else {
+      addToCart({ productoId: prodId, nombre, barcode: barcode || '', unidadCompra: unidad, udsPaquete: udsPaq, costoActual: costo, costoNuevo: costo, isNuevo: true });
+    }
   }
 
   // ── Nuevo proveedor modal ────────────────────────────────────────────────────
@@ -1069,6 +1458,7 @@ const ComprasV2 = (() => {
     if (!prod) { alert('Seleccioná un producto de la lista'); ge('cv2-lp-search')?.focus(); return; }
     if (!barcode || !barcode.trim()) { alert('No hay código para vincular'); return; }
 
+    const confirmandoIdx = state._confirmandoIdx;
     const ts = nowISO();
     try {
       // Check if barcode already exists to avoid duplicate
@@ -1089,16 +1479,20 @@ const ComprasV2 = (() => {
     }
 
     hideNewProductForm();
-    addToCart({
-      productoId:   prod.id,
-      nombre:       prod.nombre,
-      barcode:      barcode,
-      unidadCompra: prod.unidad_compra || 'Unidad',
-      udsPaquete:   parseFloat(prod.unidades_por_paquete_compra) || 1,
-      costoActual:  parseFloat(prod.costo) || 0,
-      costoNuevo:   parseFloat(prod.costo) || 0,
-      iva:          prod.iva || '',
-    });
+    if (confirmandoIdx != null) {
+      confirmarItemCarrito(confirmandoIdx, { productoId: prod.id, barcode });
+    } else {
+      addToCart({
+        productoId:   prod.id,
+        nombre:       prod.nombre,
+        barcode:      barcode,
+        unidadCompra: prod.unidad_compra || 'Unidad',
+        udsPaquete:   parseFloat(prod.unidades_por_paquete_compra) || 1,
+        costoActual:  parseFloat(prod.costo) || 0,
+        costoNuevo:   parseFloat(prod.costo) || 0,
+        iva:          prod.iva || '',
+      });
+    }
     window.SGA_Utils.showNotification(`Código vinculado a "${prod.nombre}"`, 'success');
   }
 
@@ -1300,7 +1694,8 @@ const ComprasV2 = (() => {
     renderCart();
     updateConfirmBtn();
     updatePausadasBtn();
-    showCabecera();
+    state.metodoCarga = null;
+    showMetodoCarga();
   }
 
   function loadPausadas() {
@@ -3209,6 +3604,50 @@ const ComprasV2 = (() => {
       }
     });
 
+    // ── Método de carga (paso 0) ──
+    ge('cv2-metodo-tradicional')?.addEventListener('click', () => {
+      state.metodoCarga = 'tradicional';
+      showCabecera();
+    });
+    ge('cv2-metodo-foto')?.addEventListener('click', () => {
+      state.metodoCarga = 'foto';
+      showFotoCaptura();
+    });
+    ge('cv2-foto-volver')?.addEventListener('click', showMetodoCarga);
+    ge('cv2-foto-elegir')?.addEventListener('click', () => ge('cv2-foto-input')?.click());
+    ge('cv2-foto-input')?.addEventListener('change', async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        const { base64, mediaType, dataUrl } = await resizeImageToBase64(file);
+        state._fotoBase64    = base64;
+        state._fotoMediaType = mediaType;
+        const previewImg  = ge('cv2-foto-preview');
+        const previewWrap = ge('cv2-foto-preview-wrap');
+        const interpretarBtn = ge('cv2-foto-interpretar');
+        if (previewImg)  previewImg.src = dataUrl;
+        if (previewWrap) previewWrap.style.display = 'block';
+        if (interpretarBtn) interpretarBtn.style.display = '';
+      } catch (err) {
+        window.SGA_Utils.showNotification('No se pudo leer la imagen: ' + err.message, 'error');
+      }
+    });
+    ge('cv2-foto-interpretar')?.addEventListener('click', async () => {
+      if (!state._fotoBase64) return;
+      const overlay = ge('cv2-foto-overlay');
+      if (overlay) overlay.style.display = 'flex';
+      try {
+        const resultado = USE_MOCK_OCR
+          ? await mockInterpretarFactura()
+          : await interpretarFacturaReal(state._fotoBase64, state._fotoMediaType);
+        aplicarResultadoOCR(resultado);
+      } catch (err) {
+        window.SGA_Utils.showNotification('Error al interpretar la factura: ' + err.message, 'error');
+      } finally {
+        if (overlay) overlay.style.display = 'none';
+      }
+    });
+
     // ── Cabecera: Continuar al carrito ──
     ge('cv2-btn-continuar')?.addEventListener('click', () => {
       if (!state.proveedorId) {
@@ -3399,6 +3838,18 @@ const ComprasV2 = (() => {
         const btn = e.target.closest('.cv2-remove-btn');
         if (btn) { const idx = parseInt(btn.dataset.idx); if (!isNaN(idx)) removeItem(idx); }
       });
+
+      // Confirmación por escaneo (carga por foto) — filas pendientes
+      cartBody.addEventListener('keydown', e => {
+        const scanInp = e.target.closest('input.cv2-codigo-scan');
+        if (!scanInp || e.key !== 'Enter') return;
+        e.preventDefault();
+        e.stopPropagation();
+        const idx = parseInt(scanInp.dataset.idx);
+        const codigo = scanInp.value.trim();
+        if (isNaN(idx) || !codigo) return;
+        procesarEscaneoConfirmacion(idx, codigo);
+      });
     }
 
     // ── Proveedor search ──
@@ -3506,7 +3957,7 @@ const ComprasV2 = (() => {
       sessionStorage.removeItem('compras_v2_vincular_remito');
       vincularFacturaDesdeRemito(vincularRemitoId);
     } else {
-      showCabecera();
+      showMetodoCarga();
     }
   }
 
