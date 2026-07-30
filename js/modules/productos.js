@@ -1074,6 +1074,19 @@
       console.log('✅ Import confirmed:', results);
       hideImportModal();
       loadProductos();
+
+      if (results.preciosAjustados.length) {
+        console.table(results.preciosAjustados);
+        const maxLineas = 30;
+        const lineas = results.preciosAjustados.slice(0, maxLineas).map(p =>
+          `• ${p.nombre}: $${p.precio_anterior} → $${p.precio_nuevo}`
+        );
+        let msg = `⚠️ Se detectaron ${results.preciosAjustados.length} producto(s) con precio distinto al de su familia (misma madre). Se ajustaron todos al precio más alto:\n\n${lineas.join('\n')}`;
+        if (results.preciosAjustados.length > maxLineas) {
+          msg += `\n… y ${results.preciosAjustados.length - maxLineas} más (ver consola, tabla completa).`;
+        }
+        alert(msg);
+      }
     } catch (error) {
       window.SGA_DB.rollbackBatch();
       console.error('❌ Confirm error:', error);
@@ -1098,8 +1111,11 @@
       proveedoresCreados: [],
       sustitutosResueltos: 0,
       sustitutosPendientes: [],
+      preciosAjustados: [],
       errores: []
     };
+
+    const madresTocadas = new Set();
 
     const now = window.SGA_Utils.formatISODate(new Date());
 
@@ -1185,6 +1201,7 @@
           } else {
             nuevo_madre_id = null;  // mapped but blank → clear madre
           }
+          if (nuevo_madre_id) madresTocadas.add(nuevo_madre_id);
         }
 
         // Alt provider (only if column was mapped)
@@ -1275,6 +1292,18 @@
           results.importados++;
         }
 
+        // Track family for later price-conflict resolution, even if this row
+        // didn't map the madre column itself (product may already belong to one)
+        if (precio_venta !== undefined && nuevo_madre_id === undefined) {
+          const fam = window.SGA_DB.query(
+            'SELECT es_madre, producto_madre_id FROM productos WHERE id = ?', [producto_id]
+          );
+          if (fam.length) {
+            if (fam[0].producto_madre_id) madresTocadas.add(fam[0].producto_madre_id);
+            else if (fam[0].es_madre === 1 || fam[0].es_madre === '1') madresTocadas.add(producto_id);
+          }
+        }
+
         // Upsert all barcodes (first = principal)
         codigos.forEach((cod, i) => {
           const existing = window.SGA_DB.query('SELECT id FROM codigos_barras WHERE codigo = ?', [cod]);
@@ -1331,6 +1360,31 @@
         results.errores.push(`${nombre || codigo}: ${err.message}`);
       }
     }
+
+    // Resolve price conflicts within madre/hijo families touched by this import:
+    // if siblings end up with different precio_venta, adopt the highest one for all.
+    madresTocadas.forEach(madreId => {
+      const familia = window.SGA_DB.query(
+        'SELECT id, nombre, precio_venta FROM productos WHERE id = ? OR producto_madre_id = ?',
+        [madreId, madreId]
+      );
+      const conPrecio = familia.filter(p => p.precio_venta !== null && p.precio_venta !== undefined);
+      if (conPrecio.length < 2) return;
+      const maxPrecio = Math.max(...conPrecio.map(p => p.precio_venta));
+      conPrecio.forEach(p => {
+        if (p.precio_venta !== maxPrecio) {
+          window.SGA_DB.run(
+            `UPDATE productos SET precio_venta = ?, fecha_modificacion = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
+            [maxPrecio, now, now, p.id]
+          );
+          results.preciosAjustados.push({
+            nombre: p.nombre,
+            precio_anterior: p.precio_venta,
+            precio_nuevo: maxPrecio
+          });
+        }
+      });
+    });
 
     window.SGA_DB.commitBatch();
 
