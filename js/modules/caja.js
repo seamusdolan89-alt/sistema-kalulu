@@ -17,6 +17,19 @@ const Caja = (() => {
     cuenta_corriente: 'Cta. Corriente',
   };
 
+  // Label legible para un medio de pago: prioriza MEDIOS_LABEL (tipos fijos
+  // como cuenta_corriente que no son filas de medios_cobro), luego busca el
+  // nombre configurado en medios_cobro (incluye medios custom o desactivados),
+  // y como último recurso muestra el id crudo.
+  function getMedioLabel(id) {
+    if (MEDIOS_LABEL[id]) return MEDIOS_LABEL[id];
+    try {
+      const row = window.SGA_DB.query(`SELECT nombre FROM medios_cobro WHERE id = ?`, [id]);
+      if (row.length) return row[0].nombre;
+    } catch (e) {}
+    return id;
+  }
+
   function getMediosDynamic() {
     try {
       const rows = window.SGA_DB.query(
@@ -619,7 +632,7 @@ const Caja = (() => {
     const root = ge('caja-root');
     if (!root) return;
     const medio = state.activeMedio || 'efectivo';
-    const medioLabel = MEDIOS_LABEL[medio] || medio;
+    const medioLabel = getMedioLabel(medio);
     const isEfectivo = medio === 'efectivo';
 
     // Tabs: egresos/recuento only relevant for efectivo
@@ -686,7 +699,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       .filter(m => (tot.totPagos[m] || 0) > 0)
       .map(m => `
         <div class="caja-stat-row">
-          <span>${MEDIOS_LABEL[m] || m}</span>
+          <span>${esc(getMedioLabel(m))}</span>
           <span>${fmtPeso(tot.totPagos[m])}</span>
         </div>
       `).join('');
@@ -774,7 +787,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
         </div>`;
     } else {
       const medioTotal = tot.totPagos[medio] || 0;
-      const label = MEDIOS_LABEL[medio] || medio;
+      const label = esc(getMedioLabel(medio));
       const nVentas = movimientos.filter(m => m.tipo === 'venta').length;
       kpisHtml = `
         <div class="caja-stat-card highlight">
@@ -789,7 +802,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
         ${kpisHtml}
       </div>
       <div class="caja-medios-card">
-        <h4>Movimientos del día · ${MEDIOS_LABEL[medio] || medio}</h4>
+        <h4>Movimientos del día · ${esc(getMedioLabel(medio))}</h4>
         ${movsHtml}
       </div>
     `;
@@ -897,12 +910,10 @@ case 'egresos':     renderEgresosIngresos(content);   break;
           ${hist.map(s => {
             const dif = parseFloat(s.diferencia) || 0;
             const difClass = dif > 0 ? 'text-success' : dif < 0 ? 'text-danger' : '';
-            const totalVentas =
-              (parseFloat(s.total_efectivo) || 0) +
-              (parseFloat(s.total_mercadopago) || 0) +
-              (parseFloat(s.total_tarjeta) || 0) +
-              (parseFloat(s.total_transferencia) || 0) +
-              (parseFloat(s.total_cuenta_corriente) || 0);
+            const totalVentas = (window.SGA_DB.query(
+              `SELECT COALESCE(SUM(total), 0) AS t FROM ventas WHERE sesion_caja_id = ? AND estado = 'completada'`,
+              [s.id]
+            )[0] || {}).t || 0;
             return `
               <tr>
                 <td>${fmtFecha(s.fecha_apertura)}</td>
@@ -1030,7 +1041,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
         </tr>`).join('') || '<tr><td colspan="4" style="color:#999;padding:8px">Sin detalle</td></tr>';
       const pagosHtml = pagos.map(p => `
         <div class="caja-stat-row">
-          <span>${MEDIOS_LABEL[p.medio] || esc(p.medio)}</span>
+          <span>${esc(getMedioLabel(p.medio))}</span>
           <span>${fmtPeso(p.monto)}</span>
         </div>`).join('');
       const html = `
@@ -2092,7 +2103,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
 
     const pagosHtml = pagos.map(p => `
       <div class="caja-stat-row">
-        <span>${MEDIOS_LABEL[p.medio] || esc(p.medio)}</span>
+        <span>${esc(getMedioLabel(p.medio))}</span>
         <span>${fmtPeso(p.monto)}</span>
       </div>
     `).join('');

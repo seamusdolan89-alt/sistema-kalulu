@@ -306,8 +306,26 @@ export const POS = (() => {
   }
 
   /**
+   * Total real de ventas completadas de una sesión, tomado directamente de
+   * ventas.total (no depende de qué medios de pago se hayan usado, por lo
+   * que soporta cualquier medio configurado en medios_cobro sin listarlos).
+   */
+  function getTotalVentasSesion(sesionId) {
+    try {
+      const rows = window.SGA_DB.query(
+        `SELECT COALESCE(SUM(total), 0) AS t FROM ventas WHERE sesion_caja_id = ? AND estado = 'completada'`,
+        [sesionId]
+      );
+      return parseFloat((rows[0] || {}).t) || 0;
+    } catch (e) {
+      console.warn('getTotalVentasSesion:', e);
+      return 0;
+    }
+  }
+
+  /**
    * Calculate change for cash payment
-   * 
+   *
    * @param {number} total - Sale total
    * @param {number} pagoCash - Cash payment amount
    * @returns {Object} { vuelto: number, alcanza: boolean }
@@ -436,7 +454,7 @@ export const POS = (() => {
         fechaApertura: s.fecha_apertura,
         fechaCierre: now,
         saldoInicial: s.saldo_inicial,
-        totalVentas: s.total_efectivo + s.total_mercadopago + s.total_tarjeta + s.total_transferencia + s.total_cuenta_corriente,
+        totalVentas: getTotalVentasSesion(sesionId),
         totalEgresos: s.total_egresos || 0,
         saldoEsperado,
         saldoReal: saldoFinalReal,
@@ -557,13 +575,20 @@ export const POS = (() => {
     const formatCurrency = v => window.SGA_Utils.formatCurrency(v);
     const safeOn = window.SGA_Utils.safeOn;
     const formatTime = iso => new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+    const esc = s => String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-    const MEDIOS = [
-      { id: 'efectivo',      nombre: 'Efectivo',     icon: '💵' },
-      { id: 'mercadopago',   nombre: 'Mercado Pago', icon: '📱' },
-      { id: 'tarjeta',       nombre: 'Tarjeta',      icon: '💳' },
-      { id: 'transferencia', nombre: 'Transferencia', icon: '🏦' },
+    // Medios de pago habilitados — se leen de medios_cobro (configurables desde Configuración)
+    let MEDIOS = [
+      { id: 'efectivo',    nombre: 'Efectivo',     icon: '💵' },
+      { id: 'mercadopago', nombre: 'Mercado Pago',  icon: '📱' },
     ];
+    try {
+      const mediosRows = window.SGA_DB.query(
+        `SELECT id, nombre, icono FROM medios_cobro WHERE activo = 1 ORDER BY orden ASC, nombre ASC`
+      );
+      if (mediosRows.length) MEDIOS = mediosRows.map(m => ({ id: m.id, nombre: m.nombre, icon: m.icono || '' }));
+    } catch (e) { console.warn('medios_cobro:', e); }
 
     const DENOMINACIONES = window.SGA_Utils.DENOMINACIONES;
 
@@ -950,7 +975,7 @@ export const POS = (() => {
       container.style.display = '';
       container.innerHTML = MEDIOS.map(m => `
         <div class="pchip ${state.activeMedios.has(m.id) ? 'active' : ''} pc-${m.id}" data-medio="${m.id}">
-          ${m.icon} ${m.nombre}
+          ${esc(m.icon)} ${esc(m.nombre)}
         </div>
       `).join('');
       container.querySelectorAll('.pchip').forEach(chip => {
@@ -1078,20 +1103,14 @@ export const POS = (() => {
       const container = ge('payment-inputs');
       if (!container) return;
       const effTotal = getEffectiveTotal();
-      const MPAY = [
-        { id: 'efectivo',      icon: '💵', nombre: 'Efectivo' },
-        { id: 'mercadopago',   icon: '📱', nombre: 'Mercado Pago' },
-        { id: 'tarjeta',       icon: '💳', nombre: 'Tarjeta' },
-        { id: 'transferencia', icon: '🏦', nombre: 'Transferencia' },
-      ];
       let html = `<div class="mpay-total-row">
         <span>Total a cobrar</span>
         <span class="mpay-total-val">${formatCurrency(effTotal)}</span>
       </div>`;
-      for (const m of MPAY) {
+      for (const m of MEDIOS) {
         const val = state.pagosAmounts[m.id] || 0;
         html += `<div class="mpay-row">
-          <span class="mpay-icon">${m.icon} ${m.nombre}</span>
+          <span class="mpay-icon">${esc(m.icon)} ${esc(m.nombre)}</span>
           <input type="number" class="mpay-field" data-medio="${m.id}"
             value="${val > 0 ? val.toFixed(2) : ''}"
             min="0" step="0.01" placeholder="0.00" autocomplete="off">
@@ -1152,7 +1171,7 @@ export const POS = (() => {
         if (mid === 'efectivo') {
           if (isFavorCovered) state.recibeEfectivo = null; // reset when fully covered by saldo a favor
           html += `<div class="pinput-row" data-medio="efectivo">
-            <div class="pinput-label">${m.icon} ${m.nombre}</div>
+            <div class="pinput-label">${esc(m.icon)} ${esc(m.nombre)}</div>
             <div class="pinput-sub-lbl">Total a cobrar</div>
             <div class="pinput-total-ro">${formatCurrency(effTotal)}</div>
             <div class="recibe-row" style="margin-top:8px">
@@ -1168,7 +1187,7 @@ export const POS = (() => {
         } else {
           const amount = effTotal;
           html += `<div class="pinput-row">
-            <div class="pinput-label">${m.icon} ${m.nombre}</div>
+            <div class="pinput-label">${esc(m.icon)} ${esc(m.nombre)}</div>
             <div class="pinput-sub-lbl">Total a cobrar</div>
             <div class="pinput-total-ro">${formatCurrency(effTotal)}</div>
             <div class="pinput-sub-lbl">Monto recibido</div>
@@ -1642,19 +1661,50 @@ export const POS = (() => {
       updatePedidosBadge();
     };
 
+    // Labels para medios que no son filas configurables en medios_cobro
+    const MEDIO_LABEL_FALLBACK = {
+      cuenta_corriente: { nombre: 'Cta. Cte', icon: '📒' },
+      tarjeta:          { nombre: 'Tarjeta', icon: '💳' },
+      transferencia:    { nombre: 'Transferencia', icon: '🏦' },
+    };
+
     const updateSummaryBar = (sesion) => {
       const set = (id, v) => { const el = ge(id); if (el) el.textContent = formatCurrency(v); };
+      const cont = ge('pos-summary-medios');
       if (!sesion) {
-        ['sum-total','sum-efectivo','sum-mp','sum-tarjeta','sum-transf','sum-cc'].forEach(id => set(id, 0));
+        set('sum-total', 0);
+        if (cont) cont.innerHTML = '';
         return;
       }
-      const total = (sesion.total_efectivo || 0) + (sesion.total_mercadopago || 0) + (sesion.total_tarjeta || 0) + (sesion.total_transferencia || 0) + (sesion.total_cuenta_corriente || 0);
-      set('sum-total',    total);
-      set('sum-efectivo', sesion.total_efectivo || 0);
-      set('sum-mp',       sesion.total_mercadopago || 0);
-      set('sum-tarjeta',  sesion.total_tarjeta || 0);
-      set('sum-transf',   sesion.total_transferencia || 0);
-      set('sum-cc',       sesion.total_cuenta_corriente || 0);
+
+      set('sum-total', getTotalVentasSesion(sesion.id));
+
+      if (!cont) return;
+      const totPagos = {};
+      try {
+        window.SGA_DB.query(
+          `SELECT vp.medio, SUM(vp.monto) AS total
+           FROM ventas v JOIN venta_pagos vp ON vp.venta_id = v.id
+           WHERE v.sesion_caja_id = ? AND v.estado = 'completada' AND vp.medio != 'saldo_favor'
+           GROUP BY vp.medio`,
+          [sesion.id]
+        ).forEach(r => { totPagos[r.medio] = parseFloat(r.total) || 0; });
+      } catch (e) { console.warn('updateSummaryBar totales:', e); }
+
+      let labelsById = {};
+      try {
+        window.SGA_DB.query(`SELECT id, nombre, icono FROM medios_cobro`)
+          .forEach(m => { labelsById[m.id] = { nombre: m.nombre, icon: m.icono || '' }; });
+      } catch (e) {}
+
+      cont.innerHTML = Object.keys(totPagos).map(medio => {
+        const info = labelsById[medio] || MEDIO_LABEL_FALLBACK[medio] || { nombre: medio, icon: '' };
+        return `
+          <div class="sum-item">
+            <span class="sum-label">${info.icon ? esc(info.icon) + ' ' : ''}${esc(info.nombre)}</span>
+            <span class="sum-value">${formatCurrency(totPagos[medio])}</span>
+          </div>`;
+      }).join('');
     };
 
     // ── DETAIL PANEL ───────────────────────────────────────────────
@@ -1699,7 +1749,7 @@ export const POS = (() => {
           <div class="dp-section-label">Pago</div>
           ${(venta.pagos || []).map(p => {
             const m = MEDIOS.find(x => x.id === p.medio);
-            return `<div class="dp-info-row"><span>${m ? `${m.icon} ${m.nombre}` : p.medio}</span><strong>${formatCurrency(p.monto)}</strong></div>`;
+            return `<div class="dp-info-row"><span>${m ? `${esc(m.icon)} ${esc(m.nombre)}` : esc(p.medio)}</span><strong>${formatCurrency(p.monto)}</strong></div>`;
           }).join('')}
         </div>
 
@@ -1855,7 +1905,7 @@ export const POS = (() => {
         ${ticketData.descuentoTotal > 0 ? `<div class="ticket-trow"><span>Descuento</span><span>-${formatCurrency(ticketData.descuentoTotal)}</span></div>` : ''}
         <div class="ticket-trow ticket-grand"><span>TOTAL</span><span>${formatCurrency(ticketData.total)}</span></div>
         <hr class="ticket-hr">
-        ${ticketData.pagos.map(p => { const m = MEDIOS.find(x => x.id === p.medio); return `<div class="ticket-trow"><span>${m ? `${m.icon} ${m.nombre}` : p.medio}</span><span>${formatCurrency(p.monto)}</span></div>`; }).join('')}
+        ${ticketData.pagos.map(p => { const m = MEDIOS.find(x => x.id === p.medio); return `<div class="ticket-trow"><span>${m ? `${esc(m.icon)} ${esc(m.nombre)}` : esc(p.medio)}</span><span>${formatCurrency(p.monto)}</span></div>`; }).join('')}
         <hr class="ticket-hr">
         <div class="ticket-center"><small>¡Gracias por su compra!</small></div>
       `;
@@ -1912,7 +1962,7 @@ export const POS = (() => {
       ge('ctab-medios').innerHTML = `
         ${mediosActivos.map(m => {
           const v = totPagos[m.id] || 0;
-          return `<div class="ct-row"><span>${m.icon} ${m.nombre}</span><strong>${formatCurrency(v)}</strong></div>`;
+          return `<div class="ct-row"><span>${esc(m.icon)} ${esc(m.nombre)}</span><strong>${formatCurrency(v)}</strong></div>`;
         }).join('')}
         <div class="ct-row bold" style="border-top:1px solid #eee;margin-top:8px;padding-top:8px">
           <span>Total ventas</span><strong>${formatCurrency(totalVentas)}</strong>
