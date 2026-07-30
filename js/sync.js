@@ -153,7 +153,7 @@
       let pushed = 0;
       for (const source of SYNC_SOURCES) {
         if (source.posPush === false) continue;
-        try { pushed += await syncSource(source); }
+        try { pushed += await drainSource(source, syncSource); }
         catch (err) { console.warn(`Push error en ${source.table}:`, err.message); }
       }
       if (pulled > 0) console.log(`⬇️  Pull: ${pulled} registros aplicados desde admin`);
@@ -255,6 +255,21 @@
     return rows.length;
   }
 
+  // Repite syncFn sobre la misma tabla hasta vaciar la cola de pendientes.
+  // syncSource/syncAdminSource traen como mucho BATCH_LIMIT filas por llamada;
+  // sin este loop, un alta masiva (ej. importación de productos) solo empuja
+  // la primera tanda por ciclo y el resto queda pendiente indefinidamente si
+  // la app se cierra antes del próximo ciclo automático.
+  async function drainSource(source, syncFn) {
+    let total = 0;
+    let n;
+    do {
+      n = await syncFn(source);
+      total += n;
+    } while (n >= BATCH_LIMIT);
+    return total;
+  }
+
   // ─── PUSH event-driven desde POS (llamado por módulos al completar acciones) ──
 
   async function pushPending() {
@@ -262,7 +277,7 @@
     let pushed = 0;
     for (const source of SYNC_SOURCES) {
       if (source.posPush === false) continue;
-      try { pushed += await syncSource(source); }
+      try { pushed += await drainSource(source, syncSource); }
       catch (err) { console.warn(`Push error (${source.table}):`, err.message); }
     }
     if (pushed > 0) {
@@ -286,7 +301,7 @@
     const adminSources = SYNC_SOURCES.filter(s => ADMIN_PUSH_TABLES.includes(s.table));
     let total = 0;
     for (const source of adminSources) {
-      try { total += await syncAdminSource(source); }
+      try { total += await drainSource(source, syncAdminSource); }
       catch (err) { console.warn(`Push error (${source.table}):`, err.message); }
     }
     if (total > 0) console.log(`⬆️  Push manual: ${total} registros enviados a Firestore`);
@@ -300,22 +315,28 @@
 
     for (const { collection, applyFn } of PULL_SOURCES) {
       try {
-        const snap = await firestoreDb.collection(collection)
-          .where('_pulled', '==', false)
-          .limit(50)
-          .get();
+        // Repetir hasta vaciar la cola: una tanda grande desde admin (ej. importación
+        // masiva) puede superar los 50 documentos que trae cada get().
+        let batchCount;
+        do {
+          const snap = await firestoreDb.collection(collection)
+            .where('_pulled', '==', false)
+            .limit(50)
+            .get();
 
-        if (snap.empty) continue;
+          batchCount = snap.size;
+          if (batchCount === 0) break;
 
-        for (const doc of snap.docs) {
-          try {
-            applyFn(doc.data());
-            await doc.ref.update({ _pulled: true, _pulled_at: new Date().toISOString() });
-            total++;
-          } catch (err) {
-            console.warn(`Pull apply error (${collection} ${doc.id}):`, err.message);
+          for (const doc of snap.docs) {
+            try {
+              applyFn(doc.data());
+              await doc.ref.update({ _pulled: true, _pulled_at: new Date().toISOString() });
+              total++;
+            } catch (err) {
+              console.warn(`Pull apply error (${collection} ${doc.id}):`, err.message);
+            }
           }
-        }
+        } while (batchCount >= 50);
       } catch (err) {
         // Índice faltante u otro error: no interrumpir el ciclo
         if (!err.message?.includes('index')) {
@@ -849,21 +870,36 @@
 
     for (const { name, applyFn } of MONITOR_SOURCES) {
       try {
-        let q = firestoreDb.collection(name);
-        if (lastSync) {
-          q = q.where('_synced_at', '>', lastSync).limit(200);
-        } else {
+        let cursor = lastSync;
+        if (!cursor) {
           // Primera vez: últimos 90 días
           const desde = new Date();
           desde.setDate(desde.getDate() - 90);
-          q = q.where('_synced_at', '>', desde.toISOString()).limit(500);
+          cursor = desde.toISOString();
         }
 
-        const snap = await q.get();
-        for (const doc of snap.docs) {
-          try { applyFn(doc.data()); total++; }
-          catch (err) { console.warn(`Monitor apply error (${name}):`, err.message); }
-        }
+        // Paginar con cursor real (orderBy + avanzar al último _synced_at visto) en
+        // vez de un solo limit(): un lote grande (ej. importación masiva en POS)
+        // puede superar los 200/500 de una sola tanda. Si no se agota acá, al mover
+        // el cursor a "ahora" al final, lo que quedó afuera del batch se perdería
+        // para siempre (nunca vuelve a matchear un futuro '> cursor').
+        let batchSize;
+        do {
+          const snap = await firestoreDb.collection(name)
+            .where('_synced_at', '>', cursor)
+            .orderBy('_synced_at')
+            .limit(200)
+            .get();
+
+          batchSize = snap.size;
+          if (batchSize === 0) break;
+
+          for (const doc of snap.docs) {
+            try { applyFn(doc.data()); total++; }
+            catch (err) { console.warn(`Monitor apply error (${name}):`, err.message); }
+          }
+          cursor = snap.docs[snap.docs.length - 1].data()._synced_at;
+        } while (batchSize >= 200);
       } catch (err) {
         console.warn(`Monitor sync skip (${name}):`, err.message);
       }
