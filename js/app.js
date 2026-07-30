@@ -208,7 +208,7 @@
       { name: 'caja_admin', label: '💼 Caja Seamus', adminOnly: true },
       { name: 'usuarios', label: '👤 Usuarios' },
       { name: 'flujo', label: '🌊 Flujo de Fondos', adminPosOnly: true },
-      { name: 'configuracion', label: '⚙️ Configuración', adminOnly: true },
+      { name: 'configuracion', label: '⚙️ Configuración', adminOnly: true, adminPosOnly: true },
     ];
 
     const hasPendingResumen = !!localStorage.getItem('compras_resumen_pending');

@@ -17,6 +17,11 @@ const ConfiguracionModule = (() => {
         '<div class="alert alert-danger">Acceso restringido. Solo administradores.</div>';
       return;
     }
+    if (!window.ADMIN_MODE) {
+      document.getElementById('app').innerHTML =
+        '<div class="alert alert-danger">Esta sección solo está disponible desde ADMIN POS.</div>';
+      return;
+    }
     cargarTopeDeuda();
     cargarCajas();
     cargarMedios();
@@ -127,6 +132,11 @@ const ConfiguracionModule = (() => {
           <span style="font-size:12px;color:${r.activo ? '#2e7d32' : '#c62828'};">
             ${r.activo ? 'Activo' : 'Inactivo'}
           </span>
+          <button data-medit="${esc(r.id)}"
+            style="font-size:11px;padding:3px 10px;border:1px solid #ccc;
+                   background:#fff;border-radius:4px;cursor:pointer;">
+            ✏️ Editar
+          </button>
           ${!MEDIOS_DEFAULT.includes(r.id) ? `
             <button data-mid="${esc(r.id)}" data-mact="${r.activo}"
               style="font-size:11px;padding:3px 10px;border:1px solid #ccc;
@@ -139,6 +149,20 @@ const ConfiguracionModule = (() => {
     listEl.querySelectorAll('[data-mid]').forEach(btn => {
       btn.addEventListener('click', () => toggleMedio(btn.dataset.mid, btn.dataset.mact === '1'));
     });
+    listEl.querySelectorAll('[data-medit]').forEach(btn => {
+      btn.addEventListener('click', () => editarMedio(btn.dataset.medit));
+    });
+  }
+
+  function editarMedio(id) {
+    const rows = window.SGA_DB.query(`SELECT id, nombre, icono FROM medios_cobro WHERE id = ?`, [id]);
+    if (!rows.length) return;
+    ge('cfg-nuevo-medio-nombre').value = rows[0].nombre;
+    ge('cfg-nuevo-medio-icono').value  = rows[0].icono || '';
+    ge('cfg-medio-edit-id').value      = rows[0].id;
+    ge('cfg-nuevo-medio-form').style.display = 'block';
+    ge('cfg-btn-nuevo-medio').style.display  = 'none';
+    ge('cfg-nuevo-medio-nombre')?.focus();
   }
 
   function toggleMedio(id, isActive) {
@@ -151,24 +175,35 @@ const ConfiguracionModule = (() => {
   function crearMedio() {
     const nombre = (ge('cfg-nuevo-medio-nombre')?.value || '').trim();
     const icono  = (ge('cfg-nuevo-medio-icono')?.value  || '').trim();
+    const editId = (ge('cfg-medio-edit-id')?.value || '').trim();
     const msgEl  = ge('cfg-medio-form-msg');
     if (!nombre) { mostrarMsg(msgEl, 'Ingresá un nombre para el medio.', 'error'); return; }
-    const id = nombre.toLowerCase()
-      .normalize('NFD').replace(/[̀-ͯ]/g, '')
-      .replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
     try {
-      const orden = (window.SGA_DB.query(
-        `SELECT COALESCE(MAX(orden), 0) + 1 AS n FROM medios_cobro`
-      )[0] || {}).n || 10;
-      window.SGA_DB.run(
-        `INSERT OR IGNORE INTO medios_cobro (id, nombre, icono, activo, orden) VALUES (?, ?, ?, 1, ?)`,
-        [id, nombre, icono, orden]
-      );
+      if (editId) {
+        // Edición: no se toca el id (referenciado por ventas ya registradas)
+        window.SGA_DB.run(
+          `UPDATE medios_cobro SET nombre = ?, icono = ? WHERE id = ?`,
+          [nombre, icono, editId]
+        );
+      } else {
+        const id = nombre.toLowerCase()
+          .normalize('NFD').replace(/[̀-ͯ]/g, '')
+          .replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+        const orden = (window.SGA_DB.query(
+          `SELECT COALESCE(MAX(orden), 0) + 1 AS n FROM medios_cobro`
+        )[0] || {}).n || 10;
+        window.SGA_DB.run(
+          `INSERT OR IGNORE INTO medios_cobro (id, nombre, icono, activo, orden) VALUES (?, ?, ?, 1, ?)`,
+          [id, nombre, icono, orden]
+        );
+      }
       ge('cfg-nuevo-medio-nombre').value = '';
       ge('cfg-nuevo-medio-icono').value  = '';
+      ge('cfg-medio-edit-id').value      = '';
       ge('cfg-nuevo-medio-form').style.display = 'none';
+      ge('cfg-btn-nuevo-medio').style.display  = '';
       cargarMedios();
-      mostrarMsg(ge('cfg-nuevo-medio-msg'), 'Medio creado correctamente.', 'ok');
+      mostrarMsg(ge('cfg-nuevo-medio-msg'), editId ? 'Medio actualizado correctamente.' : 'Medio creado correctamente.', 'ok');
     } catch(e) {
       mostrarMsg(msgEl, 'Error: ' + e.message, 'error');
     }
@@ -216,6 +251,7 @@ const ConfiguracionModule = (() => {
     ge('cfg-btn-guardar-caja')?.addEventListener('click', crearCaja);
 
     ge('cfg-btn-nuevo-medio')?.addEventListener('click', () => {
+      ge('cfg-medio-edit-id').value = '';
       ge('cfg-nuevo-medio-form').style.display = 'block';
       ge('cfg-btn-nuevo-medio').style.display = 'none';
       ge('cfg-nuevo-medio-nombre')?.focus();
@@ -225,6 +261,7 @@ const ConfiguracionModule = (() => {
       ge('cfg-btn-nuevo-medio').style.display = '';
       ge('cfg-nuevo-medio-nombre').value = '';
       ge('cfg-nuevo-medio-icono').value  = '';
+      ge('cfg-medio-edit-id').value      = '';
     });
     ge('cfg-btn-guardar-medio')?.addEventListener('click', crearMedio);
   }
