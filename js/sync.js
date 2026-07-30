@@ -58,8 +58,11 @@
     { table: 'promociones',       collection: 'promociones',       pk: 'id',   denormalize: denormalizePromocion },
     { table: 'proveedores',       collection: 'proveedores',       pk: 'id',   denormalize: null },
     { table: 'caja_admin',        collection: 'caja_admin',        pk: 'id',   denormalize: null },
-    { table: 'medios_cobro',      collection: 'medios_cobro',      pk: 'id',   denormalize: null },
-    { table: 'sucursales',        collection: 'sucursales',        pk: 'id',   denormalize: null },
+    // posPush:false — son admin-authoritative (solo se crean/editan desde ADMIN POS,
+    // ver Configuración). El POS no debe re-pushear su copia local: si lo hiciera,
+    // una fila local vieja podría pisar en Firestore un cambio recién hecho desde admin.
+    { table: 'medios_cobro',      collection: 'medios_cobro',      pk: 'id',   denormalize: null, posPush: false },
+    { table: 'sucursales',        collection: 'sucursales',        pk: 'id',   denormalize: null, posPush: false },
   ];
 
   // ─── PULL: colecciones Firestore → SQLite ─────────────────────────────────────
@@ -149,6 +152,7 @@
       const pulled = await pullFromFirestore();
       let pushed = 0;
       for (const source of SYNC_SOURCES) {
+        if (source.posPush === false) continue;
         try { pushed += await syncSource(source); }
         catch (err) { console.warn(`Push error en ${source.table}:`, err.message); }
       }
@@ -257,6 +261,7 @@
     if (!initialized || !firestoreDb) return 0;
     let pushed = 0;
     for (const source of SYNC_SOURCES) {
+      if (source.posPush === false) continue;
       try { pushed += await syncSource(source); }
       catch (err) { console.warn(`Push error (${source.table}):`, err.message); }
     }
