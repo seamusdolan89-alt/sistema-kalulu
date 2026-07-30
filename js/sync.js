@@ -58,6 +58,8 @@
     { table: 'promociones',       collection: 'promociones',       pk: 'id',   denormalize: denormalizePromocion },
     { table: 'proveedores',       collection: 'proveedores',       pk: 'id',   denormalize: null },
     { table: 'caja_admin',        collection: 'caja_admin',        pk: 'id',   denormalize: null },
+    { table: 'medios_cobro',      collection: 'medios_cobro',      pk: 'id',   denormalize: null },
+    { table: 'sucursales',        collection: 'sucursales',        pk: 'id',   denormalize: null },
   ];
 
   // ─── PULL: colecciones Firestore → SQLite ─────────────────────────────────────
@@ -75,6 +77,8 @@
     { collection: 'proveedores',       applyFn: applyProveedorFull },
     { collection: 'clientes',          applyFn: applyClienteFull },
     { collection: 'stock',             applyFn: applyStockFull },
+    { collection: 'medios_cobro',      applyFn: applyMedioCobroFull },
+    { collection: 'sucursales',        applyFn: applySucursalFull },
   ];
 
   // ─── Inicialización ──────────────────────────────────────────────────────────
@@ -268,7 +272,8 @@
 
   const ADMIN_PUSH_TABLES = ['usuarios', 'productos', 'proveedores', 'clientes', 'compras',
                               'ordenes_compra', 'pagos_proveedores', 'gastos',
-                              'promociones', 'stock', 'cuenta_corriente', 'producto_codigo_proveedor'];
+                              'promociones', 'stock', 'cuenta_corriente', 'producto_codigo_proveedor',
+                              'medios_cobro', 'sucursales'];
 
   async function pushToPos() {
     if (!initialized || !firestoreDb) throw new Error('Firebase no conectado');
@@ -717,6 +722,24 @@
       VALUES (?,?,?,?,'synced',?)`,
       [data.producto_id, data.sucursal_id || (window.SK_SUCURSAL_FIREBASE_ID || 'sucursal-1'),
        data.cantidad || 0, data.fecha_modificacion || null, data.updated_at || null]
+    );
+  }
+
+  function applyMedioCobroFull(data) {
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO medios_cobro (id, nombre, icono, activo, orden, sync_status, updated_at)
+      VALUES (?,?,?,?,?,'synced',?)`,
+      [data.id, data.nombre || '?', data.icono || '', data.activo !== false ? 1 : 0,
+       data.orden || 0, data.updated_at || null]
+    );
+  }
+
+  function applySucursalFull(data) {
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO sucursales (id, nombre, direccion, activa, sync_status, updated_at)
+      VALUES (?,?,?,?,'synced',?)`,
+      [data.id, data.nombre || '?', data.direccion || null,
+       data.activa !== false ? 1 : 0, data.updated_at || null]
     );
   }
 

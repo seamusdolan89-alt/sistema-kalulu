@@ -167,7 +167,11 @@ const ConfiguracionModule = (() => {
 
   function toggleMedio(id, isActive) {
     try {
-      window.SGA_DB.run(`UPDATE medios_cobro SET activo = ? WHERE id = ?`, [isActive ? 0 : 1, id]);
+      const now = window.SGA_Utils.formatISODate(new Date());
+      window.SGA_DB.run(
+        `UPDATE medios_cobro SET activo = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
+        [isActive ? 0 : 1, now, id]
+      );
       cargarMedios();
     } catch(e) { alert('Error: ' + e.message); }
   }
@@ -179,11 +183,12 @@ const ConfiguracionModule = (() => {
     const msgEl  = ge('cfg-medio-form-msg');
     if (!nombre) { mostrarMsg(msgEl, 'Ingresá un nombre para el medio.', 'error'); return; }
     try {
+      const now = window.SGA_Utils.formatISODate(new Date());
       if (editId) {
         // Edición: no se toca el id (referenciado por ventas ya registradas)
         window.SGA_DB.run(
-          `UPDATE medios_cobro SET nombre = ?, icono = ? WHERE id = ?`,
-          [nombre, icono, editId]
+          `UPDATE medios_cobro SET nombre = ?, icono = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
+          [nombre, icono, now, editId]
         );
       } else {
         const id = nombre.toLowerCase()
@@ -193,8 +198,8 @@ const ConfiguracionModule = (() => {
           `SELECT COALESCE(MAX(orden), 0) + 1 AS n FROM medios_cobro`
         )[0] || {}).n || 10;
         window.SGA_DB.run(
-          `INSERT OR IGNORE INTO medios_cobro (id, nombre, icono, activo, orden) VALUES (?, ?, ?, 1, ?)`,
-          [id, nombre, icono, orden]
+          `INSERT OR IGNORE INTO medios_cobro (id, nombre, icono, activo, orden, sync_status, updated_at) VALUES (?, ?, ?, 1, ?, 'pending', ?)`,
+          [id, nombre, icono, orden, now]
         );
       }
       ge('cfg-nuevo-medio-nombre').value = '';

@@ -738,6 +738,9 @@
       "ALTER TABLE compra_items ADD COLUMN iva TEXT",
       // Carga por foto (OCR con Claude Vision): de dónde vino la compra
       "ALTER TABLE compras ADD COLUMN origen_carga TEXT DEFAULT 'tradicional'",
+      // medios_cobro: faltaban columnas de sincronización entre POS y ADMIN POS
+      "ALTER TABLE medios_cobro ADD COLUMN sync_status TEXT DEFAULT 'pending'",
+      "ALTER TABLE medios_cobro ADD COLUMN updated_at TEXT",
     ];
     for (const sql of columnAlterations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }
@@ -1068,7 +1071,9 @@
           nombre TEXT NOT NULL,
           icono TEXT DEFAULT '',
           activo INTEGER DEFAULT 1,
-          orden INTEGER DEFAULT 0
+          orden INTEGER DEFAULT 0,
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
         )
       `);
       database.run(`INSERT OR IGNORE INTO medios_cobro (id, nombre, icono, activo, orden) VALUES ('efectivo', 'Efectivo', '💵', 1, 0)`);
