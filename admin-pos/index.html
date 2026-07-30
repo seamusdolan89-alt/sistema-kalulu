@@ -147,7 +147,15 @@
           pullBtn.textContent = '⏳ Actualizando...';
           try {
             const count = await window.SGA_Sync.syncNow();
-            pullBtn.textContent = count > 0 ? `✓ ${count} nuevo${count !== 1 ? 's' : ''}` : '✓ Al día';
+            if (count > 0) {
+              // Las vistas cargan su propio state al abrirse y no escuchan cambios
+              // en la base local — sin este reload, lo recién traído por Pull no
+              // se ve hasta que el usuario navega o refresca manualmente.
+              pullBtn.textContent = `✓ ${count} nuevo${count !== 1 ? 's' : ''}`;
+              setTimeout(() => window.location.reload(), 600);
+              return;
+            }
+            pullBtn.textContent = '✓ Al día';
           } catch (err) {
             console.error('Pull error:', err.message);
             pullBtn.textContent = '❌ Error';
