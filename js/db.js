@@ -14,6 +14,8 @@
   let SQL = null; // sql.js module
   let database = null; // SQLite database instance
   let fileHandle = null; // OPFS file handle
+  let saveInProgress = null; // Promise of the save currently writing to disk
+  let savePending = false;   // true if another save was requested mid-write
 
   const db = {
     isInitialized: false,
@@ -113,25 +115,49 @@
   }
 
   /**
-   * Save database to storage
+   * Save database to storage.
+   *
+   * OPFS only allows one writable stream per file at a time. Callers of
+   * run() don't await saveDatabase(), so bulk operations (ej. aplicar
+   * cientos/miles de filas de un pull) pueden disparar muchas llamadas
+   * casi simultáneas — sin coordinación, todas menos la primera fallan
+   * con "Failed to create swap file" y esos cambios nunca llegan a disco
+   * (quedan solo en memoria, se pierden al recargar). Acá se serializan:
+   * si ya hay una escritura en curso, esta llamada solo marca que hace
+   * falta una escritura más al terminar (coalesce), en vez de competir
+   * por el mismo archivo.
    */
   async function saveDatabase() {
     if (!database) return;
 
-    try {
-      const data = database.export();
-      const bytes = Array.from(data);
-
-      if (db.usingOPFS && fileHandle) {
-        const writable = await fileHandle.createWritable();
-        await writable.write(new Uint8Array(bytes));
-        await writable.close();
-      } else {
-        localStorage.setItem('sga_db', JSON.stringify(bytes));
-      }
-    } catch (error) {
-      console.error('Failed to save database:', error);
+    if (saveInProgress) {
+      savePending = true;
+      return saveInProgress;
     }
+
+    saveInProgress = (async () => {
+      try {
+        const data = database.export();
+
+        if (db.usingOPFS && fileHandle) {
+          const writable = await fileHandle.createWritable();
+          await writable.write(data);
+          await writable.close();
+        } else {
+          localStorage.setItem('sga_db', JSON.stringify(Array.from(data)));
+        }
+      } catch (error) {
+        console.error('Failed to save database:', error);
+      } finally {
+        saveInProgress = null;
+        if (savePending) {
+          savePending = false;
+          saveDatabase();
+        }
+      }
+    })();
+
+    return saveInProgress;
   }
 
   /**
