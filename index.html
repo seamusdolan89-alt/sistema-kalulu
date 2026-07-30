@@ -81,10 +81,10 @@
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
   <!-- Application Scripts -->
-  <script src="./js/utils.js?v=7"></script>
-  <script src="./js/db.js?v=7"></script>
-  <script src="./js/auth.js?v=7"></script>
-  <script src="./js/sync.js?v=7"></script>
+  <script src="./js/utils.js?v=8"></script>
+  <script src="./js/db.js?v=8"></script>
+  <script src="./js/auth.js?v=8"></script>
+  <script src="./js/sync.js?v=8"></script>
   <script src="./js/print.js"></script>
   <script src="./js/seed.js" type="module"></script>
   <script type="module">
@@ -111,7 +111,13 @@
         btn.disabled = true;
         btn.textContent = '⏳ Sync...';
         try {
-          await window.SGA_Sync.syncNow();
+          const pulled = await window.SGA_Sync.syncNow();
+          // No recargar si hay una venta en curso (carrito sin confirmar): se perdería.
+          if (pulled > 0 && !window.SGA_POS_ACTIVE_SALE) {
+            btn.textContent = `✓ ${pulled} nuevo${pulled !== 1 ? 's' : ''}`;
+            setTimeout(() => window.location.reload(), 600);
+            return;
+          }
           btn.textContent = '✓ Listo';
         } catch (err) {
           btn.textContent = '❌ Error';

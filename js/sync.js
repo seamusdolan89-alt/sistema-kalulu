@@ -158,10 +158,11 @@
       }
       if (pulled > 0) console.log(`⬇️  Pull: ${pulled} registros aplicados desde admin`);
       if (pushed > 0) console.log(`⬆️  Push: ${pushed} registros enviados a Firestore`);
-    }
 
-    lastSyncAt = new Date();
-    updateSyncBadge('ok');
+      lastSyncAt = new Date();
+      updateSyncBadge('ok');
+      return pulled;
+    }
   }
 
   // ─── PUSH ────────────────────────────────────────────────────────────────────
