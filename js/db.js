@@ -767,6 +767,10 @@
       // medios_cobro: faltaban columnas de sincronización entre POS y ADMIN POS
       "ALTER TABLE medios_cobro ADD COLUMN sync_status TEXT DEFAULT 'pending'",
       "ALTER TABLE medios_cobro ADD COLUMN updated_at TEXT",
+      // consumo_interno: distinguir quién retira (usuario_id) de quién registra
+      // (registrado_por_usuario_id), y guardar precio de venta del momento para informes
+      "ALTER TABLE consumo_interno ADD COLUMN registrado_por_usuario_id TEXT",
+      "ALTER TABLE consumo_interno ADD COLUMN precio_venta_unitario REAL DEFAULT 0",
     ];
     for (const sql of columnAlterations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }
@@ -989,8 +993,10 @@
           producto_id TEXT NOT NULL REFERENCES productos(id),
           sucursal_id TEXT REFERENCES sucursales(id),
           usuario_id TEXT NOT NULL REFERENCES usuarios(id),
+          registrado_por_usuario_id TEXT REFERENCES usuarios(id),
           cantidad REAL NOT NULL,
           costo_unitario REAL DEFAULT 0,
+          precio_venta_unitario REAL DEFAULT 0,
           motivo TEXT,
           observaciones TEXT,
           fecha TEXT NOT NULL,

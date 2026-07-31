@@ -6,17 +6,18 @@ const ConsumoInterno = (() => {
   const db  = () => window.SGA_DB;
   const fmt$ = n => window.SGA_Utils.formatCurrency(n);
 
-  let cart             = [];   // [{ productoId, nombre, codigo, stock, costo, cantidad }]
+  let cart             = [];   // [{ productoId, nombre, codigo, stock, costo, precioVenta, cantidad }]
   let lastResults      = [];   // últimos resultados de búsqueda
   let searchHlIdx      = -1;   // índice resaltado en el dropdown (-1 = ninguno)
   let searchTimer      = null;
   let sucursalId       = '1';
+  let usuarios         = [];   // usuarios activos, para el selector "Consumo de"
 
   // ── Búsqueda ──────────────────────────────────────────────────────────────
 
   function searchProductos(q) {
     return db().query(`
-      SELECT p.id, p.nombre, p.costo, p.unidad_venta,
+      SELECT p.id, p.nombre, p.costo, p.precio_venta, p.unidad_venta,
              cb.codigo,
              COALESCE(s.cantidad, 0) AS stock
       FROM productos p
@@ -31,7 +32,7 @@ const ConsumoInterno = (() => {
 
   function getProductoByBarcode(q) {
     const rows = db().query(`
-      SELECT p.id, p.nombre, p.costo, p.unidad_venta,
+      SELECT p.id, p.nombre, p.costo, p.precio_venta, p.unidad_venta,
              cb.codigo,
              COALESCE(s.cantidad, 0) AS stock
       FROM productos p
@@ -83,6 +84,7 @@ const ConsumoInterno = (() => {
         codigo:     p.codigo || '',
         stock:      p.stock,
         costo:      p.costo || 0,
+        precioVenta: p.precio_venta || 0,
         unidad:     p.unidad_venta || '',
         cantidad:   1,
       });
@@ -177,18 +179,67 @@ const ConsumoInterno = (() => {
     });
   }
 
+  // ── Selector "Consumo de" + confirmación con contraseña ─────────────────────
+
+  function cargarUsuarios() {
+    usuarios = db().query(`SELECT id, nombre FROM usuarios WHERE activo = 1 ORDER BY nombre`);
+  }
+
+  function renderAtribuidoSelect() {
+    const sel  = ge('ci-atribuido');
+    const user = window.SGA_Auth.getCurrentUser();
+    sel.innerHTML = usuarios.map(u => `
+      <option value="${u.id}" ${u.id === user.id ? 'selected' : ''}>
+        ${u.nombre}${u.id === user.id ? ' (vos)' : ''}
+      </option>
+    `).join('');
+    togglePasswordField();
+  }
+
+  function togglePasswordField() {
+    const user    = window.SGA_Auth.getCurrentUser();
+    const isOtro  = ge('ci-atribuido').value !== user.id;
+    ge('ci-password-wrap').style.display = isOtro ? '' : 'none';
+    if (!isOtro) {
+      ge('ci-password').value = '';
+      ge('ci-password-error').style.display = 'none';
+    }
+  }
+
   // ── Confirmar ─────────────────────────────────────────────────────────────
 
   async function confirmar() {
-    const motivo = ge('ci-motivo').value;
-    const obs    = ge('ci-obs').value.trim();
+    const motivo      = ge('ci-motivo').value;
+    const obs         = ge('ci-obs').value.trim();
+    const atribuidoId = ge('ci-atribuido').value;
+    const user        = window.SGA_Auth.getCurrentUser();
 
     if (!cart.length)  return mostrarError('Agregá al menos un producto.');
     if (!motivo)       return mostrarError('Seleccioná un motivo.');
+    if (!atribuidoId)  return mostrarError('Seleccioná a nombre de quién es el consumo.');
 
     for (const item of cart) {
       if (item.cantidad <= 0)       return mostrarError(`Cantidad inválida: "${item.nombre}".`);
       if (item.cantidad > item.stock) return mostrarError(`Stock insuficiente para "${item.nombre}". Disponible: ${item.stock}`);
+    }
+
+    // Si se atribuye a otra persona, esa persona confirma con su propia contraseña
+    // (sin desloguear a quien está operando la caja).
+    if (atribuidoId !== user.id) {
+      const password = ge('ci-password').value;
+      const errEl = ge('ci-password-error');
+      if (!password) {
+        errEl.textContent = 'Ingresá la contraseña para confirmar.';
+        errEl.style.display = '';
+        return;
+      }
+      const ok = await window.SGA_Auth.verificarPassword(atribuidoId, password);
+      if (!ok) {
+        errEl.textContent = 'Contraseña incorrecta.';
+        errEl.style.display = '';
+        return;
+      }
+      errEl.style.display = 'none';
     }
 
     const btn = ge('ci-confirm');
@@ -196,7 +247,6 @@ const ConsumoInterno = (() => {
     btn.textContent = 'Guardando...';
 
     try {
-      const user = window.SGA_Auth.getCurrentUser();
       const now  = new Date().toISOString();
 
       db().beginBatch();
@@ -204,10 +254,11 @@ const ConsumoInterno = (() => {
       for (const item of cart) {
         db().run(
           `INSERT INTO consumo_interno
-             (id, producto_id, sucursal_id, usuario_id, cantidad, costo_unitario, motivo, observaciones, fecha, sync_status, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+             (id, producto_id, sucursal_id, usuario_id, registrado_por_usuario_id,
+              cantidad, costo_unitario, precio_venta_unitario, motivo, observaciones, fecha, sync_status, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
           [window.SGA_Utils.generateUUID(), item.productoId, sucursalId,
-           user.id, item.cantidad, item.costo, motivo, obs, now, now]
+           atribuidoId, user.id, item.cantidad, item.costo, item.precioVenta, motivo, obs, now, now]
         );
 
         db().run(
@@ -221,7 +272,7 @@ const ConsumoInterno = (() => {
              (id, producto_id, sucursal_id, tipo, cantidad, motivo, usuario_id, fecha, estado, sync_status, updated_at)
            VALUES (?, ?, ?, 'consumo_interno', ?, ?, ?, ?, 'aprobado', 'pending', ?)`,
           [window.SGA_Utils.generateUUID(), item.productoId, sucursalId,
-           item.cantidad, motivo + (obs ? ': ' + obs : ''), user.id, now, now]
+           item.cantidad, motivo + (obs ? ': ' + obs : ''), atribuidoId, now, now]
         );
       }
 
@@ -261,6 +312,10 @@ const ConsumoInterno = (() => {
     lastResults = [];
     searchHlIdx = -1;
     sucursalId  = window.SGA_Auth.getCurrentUser()?.sucursal_id || '1';
+
+    cargarUsuarios();
+    renderAtribuidoSelect();
+    ge('ci-atribuido').addEventListener('change', togglePasswordField);
 
     ge('ci-back').addEventListener('click', () => {
       window.location.hash = '#operaciones_stock';

@@ -171,6 +171,21 @@
     return currentUser !== null;
   }
 
+  /**
+   * Valida la contraseña de un usuario puntual SIN tocar la sesión activa.
+   * Uso: confirmar que una acción (ej. atribuir un consumo interno a otro
+   * usuario) la autoriza esa persona, sin desloguear a quien está operando.
+   */
+  async function verificarPassword(usuarioId, password) {
+    if (!usuarioId || !password) return false;
+    const hash = await hashPassword(password);
+    const rows = window.SGA_DB.query(
+      `SELECT id FROM usuarios WHERE id = ? AND password_hash = ? AND activo = 1`,
+      [usuarioId, hash]
+    );
+    return rows.length > 0;
+  }
+
   window.SGA_Auth = {
     initialize,
     login,
@@ -180,5 +195,6 @@
     canDo,
     isAuthenticated,
     hashPassword,
+    verificarPassword,
   };
 })();

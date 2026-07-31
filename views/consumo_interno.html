@@ -267,6 +267,18 @@ main#app { overflow: hidden; }
     <div class="ci-right">
       <div class="ci-right-scroll">
         <div>
+          <div class="ci-sec-title">Consumo de *</div>
+          <select id="ci-atribuido" class="ci-select"></select>
+        </div>
+
+        <div id="ci-password-wrap" style="display:none;">
+          <div class="ci-sec-title">Contraseña de esa persona (para confirmar)</div>
+          <input type="password" id="ci-password" class="ci-select" autocomplete="off"
+                 placeholder="Contraseña">
+          <div id="ci-password-error" style="display:none;color:#c62828;font-size:0.85em;margin-top:4px;"></div>
+        </div>
+
+        <div>
           <div class="ci-sec-title">Motivo *</div>
           <select id="ci-motivo" class="ci-select">
             <option value="">— Seleccionar —</option>

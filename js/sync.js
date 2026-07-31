@@ -58,6 +58,7 @@
     { table: 'promociones',       collection: 'promociones',       pk: 'id',   denormalize: denormalizePromocion },
     { table: 'proveedores',       collection: 'proveedores',       pk: 'id',   denormalize: null },
     { table: 'caja_admin',        collection: 'caja_admin',        pk: 'id',   denormalize: null },
+    { table: 'consumo_interno',   collection: 'consumo_interno',   pk: 'id',   denormalize: null },
     // posPush:false — son admin-authoritative (solo se crean/editan desde ADMIN POS,
     // ver Configuración). El POS no debe re-pushear su copia local: si lo hiciera,
     // una fila local vieja podría pisar en Firestore un cambio recién hecho desde admin.
@@ -477,6 +478,22 @@
     );
   }
 
+  function applyConsumoInternoFull(data) {
+    const now = new Date().toISOString();
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO consumo_interno
+        (id, producto_id, sucursal_id, usuario_id, registrado_por_usuario_id,
+         cantidad, costo_unitario, precio_venta_unitario, motivo, observaciones, fecha,
+         sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+      [data.id, data.producto_id, data.sucursal_id, data.usuario_id,
+       data.registrado_por_usuario_id || data.usuario_id,
+       data.cantidad, data.costo_unitario || 0, data.precio_venta_unitario || 0,
+       data.motivo || null, data.observaciones || null, data.fecha,
+       data.updated_at || now]
+    );
+  }
+
   function applyCajaAdmin(data) {
     const now = new Date().toISOString();
     window.SGA_DB.run(`
@@ -864,6 +881,7 @@
       { name: 'stock',             applyFn: applyStockFull },
       { name: 'promociones',       applyFn: applyPromocion },
       { name: 'caja_admin',        applyFn: applyCajaAdmin },
+      { name: 'consumo_interno',   applyFn: applyConsumoInternoFull },
     ];
 
     const lastSync = localStorage.getItem('admin_monitor_sync_at');
@@ -985,6 +1003,7 @@
       { name: 'promociones',       applyFn: applyPromocion,        label: 'Promociones' },
       { name: 'pagos_proveedores', applyFn: applyPagoProveedor,    label: 'Pagos proveedores' },
       { name: 'caja_admin',        applyFn: applyCajaAdmin,        label: 'Caja Seamus' },
+      { name: 'consumo_interno',   applyFn: applyConsumoInternoFull, label: 'Consumo interno' },
     ];
 
     for (const { name, applyFn, label } of COLLECTIONS) {
