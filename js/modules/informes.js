@@ -14,7 +14,14 @@ const Informes = (() => {
     { id: 'aging_cc',           label: 'Aging Cuenta Corriente' },
     { id: 'resumen_diario',     label: 'Resumen Diario de Caja' },
     { id: 'stock_muerto',       label: 'Stock sin Movimiento' },
+    { id: 'salidas_stock',      label: 'Salidas de Stock (no venta)' },
   ];
+
+  const TIPO_SALIDA_LABEL = {
+    consumo:     'Consumo Interno',
+    rotura:      'Rotura',
+    vencimiento: 'Vencimiento',
+  };
 
   const MEDIO_LABEL = {
     efectivo: 'Efectivo', mercadopago: 'MP', tarjeta: 'Tarjeta',
@@ -29,6 +36,7 @@ const Informes = (() => {
     user: null,
     data: null,
     diasSinMovimiento: 90,
+    tipoSalida: 'todos', // 'todos' | 'consumo' | 'rotura' | 'vencimiento'
   };
 
   const ge  = (id) => document.getElementById(id);
@@ -329,6 +337,37 @@ const Informes = (() => {
     `, [sid, sid, cutoffISO]);
   }
 
+  function querySalidasStock() {
+    const desde = toUTC(state.desde);
+    const hasta = toUTC(addOneDay(state.hasta));
+    const sid   = state.sucursalId;
+
+    let tipoFilter = '';
+    if (state.tipoSalida === 'consumo')     tipoFilter = `AND ci.motivo NOT IN ('rotura','vencimiento')`;
+    else if (state.tipoSalida === 'rotura')      tipoFilter = `AND ci.motivo = 'rotura'`;
+    else if (state.tipoSalida === 'vencimiento') tipoFilter = `AND ci.motivo = 'vencimiento'`;
+
+    return window.SGA_DB.query(`
+      SELECT
+        u.id AS usuario_id,
+        u.nombre AS usuario,
+        COUNT(*) AS num_movimientos,
+        SUM(ci.cantidad) AS cantidad_total,
+        SUM(ci.cantidad * ci.costo_unitario) AS costo_total,
+        SUM(ci.cantidad * ci.precio_venta_unitario) AS venta_total,
+        SUM(CASE WHEN ci.motivo NOT IN ('rotura','vencimiento') THEN ci.cantidad ELSE 0 END) AS cant_consumo,
+        SUM(CASE WHEN ci.motivo = 'rotura' THEN ci.cantidad ELSE 0 END) AS cant_rotura,
+        SUM(CASE WHEN ci.motivo = 'vencimiento' THEN ci.cantidad ELSE 0 END) AS cant_vencimiento
+      FROM consumo_interno ci
+      JOIN usuarios u ON u.id = ci.usuario_id
+      WHERE ci.sucursal_id = ?
+        AND ci.fecha >= ? AND ci.fecha < ?
+        ${tipoFilter}
+      GROUP BY u.id
+      ORDER BY costo_total DESC
+    `, [sid, desde, hasta]);
+  }
+
   // ── INIT ──────────────────────────────────────────────────────────────────────
 
   function init() {
@@ -398,6 +437,21 @@ const Informes = (() => {
       `;
       ge('inf-dias-sin-mov')?.addEventListener('change', e => {
         state.diasSinMovimiento = Number(e.target.value);
+      });
+    } else if (state.reporte === 'salidas_stock') {
+      bar.innerHTML = `
+        <div class="inf-extra-bar-inner">
+          <label>Tipo de salida</label>
+          <select id="inf-tipo-salida" class="inf-select" style="min-width:160px">
+            <option value="todos"${state.tipoSalida === 'todos' ? ' selected' : ''}>Todos</option>
+            <option value="consumo"${state.tipoSalida === 'consumo' ? ' selected' : ''}>Consumo Interno</option>
+            <option value="rotura"${state.tipoSalida === 'rotura' ? ' selected' : ''}>Rotura</option>
+            <option value="vencimiento"${state.tipoSalida === 'vencimiento' ? ' selected' : ''}>Vencimiento</option>
+          </select>
+        </div>
+      `;
+      ge('inf-tipo-salida')?.addEventListener('change', e => {
+        state.tipoSalida = e.target.value;
       });
     } else if (state.reporte === 'aging_cc') {
       bar.innerHTML = `
@@ -501,6 +555,10 @@ const Informes = (() => {
           case 'stock_muerto':
             state.data = queryStockMuerto();
             resultsEl.innerHTML = renderStockMuerto(state.data);
+            break;
+          case 'salidas_stock':
+            state.data = querySalidasStock();
+            resultsEl.innerHTML = renderSalidasStock(state.data);
             break;
           default:
             resultsEl.innerHTML = `<div class="inf-error">Reporte no reconocido.</div>`;
@@ -1068,6 +1126,73 @@ const Informes = (() => {
     `;
   }
 
+  // ── REPORT 9: Salidas de Stock (no venta) ─────────────────────────────────────
+
+  function renderSalidasStock(rows) {
+    const totCant   = rows.reduce((s, r) => s + (r.cantidad_total || 0), 0);
+    const totCosto  = rows.reduce((s, r) => s + (r.costo_total || 0), 0);
+    const totVenta  = rows.reduce((s, r) => s + (r.venta_total || 0), 0);
+    const totMovs   = rows.reduce((s, r) => s + (r.num_movimientos || 0), 0);
+    const filtroLabel = TIPO_SALIDA_LABEL[state.tipoSalida] || 'Todos los tipos';
+    return `
+      <div class="inf-report-header">
+        <div class="inf-report-title">
+          <h3>Salidas de Stock (no venta)</h3>
+          <span class="inf-periodo">Período: ${esc(fmtPeriodo())} · ${esc(filtroLabel)}</span>
+        </div>
+        <div class="inf-export-btns">
+          <button id="inf-btn-excel" class="btn btn-sm inf-btn-excel">↓ Excel</button>
+          <button id="inf-btn-csv"   class="btn btn-sm">↓ CSV</button>
+        </div>
+      </div>
+      <div class="inf-kpi-row">
+        <div class="inf-kpi"><div class="inf-kpi-label">Personas</div><div class="inf-kpi-value">${rows.length}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Movimientos</div><div class="inf-kpi-value">${fmtNum(totMovs)}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Unidades</div><div class="inf-kpi-value">${fmtNum(totCant)}</div></div>
+        <div class="inf-kpi highlight"><div class="inf-kpi-label">Valor a costo</div><div class="inf-kpi-value">${fmtPeso(totCosto)}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Valor a precio de venta</div><div class="inf-kpi-value">${fmtPeso(totVenta)}</div></div>
+      </div>
+      ${rows.length === 0 ? `<div class="inf-empty">No hay salidas de stock (no venta) en el período seleccionado.</div>` : `
+        <div class="inf-table-wrap">
+          <table class="inf-table">
+            <thead><tr>
+              <th>Persona</th>
+              <th class="num">Movimientos</th>
+              <th class="num">Unidades</th>
+              <th class="num">Consumo</th>
+              <th class="num">Rotura</th>
+              <th class="num">Vencimiento</th>
+              <th class="num">Valor a costo</th>
+              <th class="num">Valor a precio de venta</th>
+            </tr></thead>
+            <tbody>
+              ${rows.map(r => `
+                <tr>
+                  <td><strong>${esc(r.usuario)}</strong></td>
+                  <td class="num">${fmtNum(r.num_movimientos)}</td>
+                  <td class="num">${fmtNum(r.cantidad_total, 2)}</td>
+                  <td class="num">${r.cant_consumo > 0 ? fmtNum(r.cant_consumo, 2) : '—'}</td>
+                  <td class="num ${r.cant_rotura > 0 ? 'text-danger' : ''}">${r.cant_rotura > 0 ? fmtNum(r.cant_rotura, 2) : '—'}</td>
+                  <td class="num ${r.cant_vencimiento > 0 ? 'text-danger' : ''}">${r.cant_vencimiento > 0 ? fmtNum(r.cant_vencimiento, 2) : '—'}</td>
+                  <td class="num bold">${fmtPeso(r.costo_total)}</td>
+                  <td class="num">${fmtPeso(r.venta_total)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+            <tfoot><tr>
+              <td>TOTAL</td>
+              <td class="num">${fmtNum(totMovs)}</td>
+              <td class="num">${fmtNum(totCant, 2)}</td>
+              <td colspan="3"></td>
+              <td class="num bold">${fmtPeso(totCosto)}</td>
+              <td class="num">${fmtPeso(totVenta)}</td>
+            </tr></tfoot>
+          </table>
+        </div>
+      `}
+    `;
+  }
+
   // ── EXPORT ────────────────────────────────────────────────────────────────────
 
   function attachExportListeners() {
@@ -1081,6 +1206,7 @@ const Informes = (() => {
     const title   = REPORTES.find(r => r.id === rep)?.label || rep;
     const periodo = rep === 'aging_cc'    ? `Estado al ${new Date().toLocaleDateString('es-AR')}` :
                     rep === 'stock_muerto' ? `Sin ventas en los últimos ${state.diasSinMovimiento} días` :
+                    rep === 'salidas_stock' ? `Período: ${fmtPeriodo()} · ${TIPO_SALIDA_LABEL[state.tipoSalida] || 'Todos los tipos'}` :
                     `Período: ${fmtPeriodo()}`;
 
     if (rep === 'ventas_producto' || rep === 'analitica_producto') {
@@ -1132,6 +1258,12 @@ const Informes = (() => {
       const data = rows.map(r => [fmtFechaCorta(r.dia), r.num_ventas,
         r.efectivo, r.mercadopago, r.tarjeta, r.transferencia,
         r.cuenta_corriente, r.total_cobrado, r.egresos, r.neto]);
+      return { title, periodo, headers, data };
+    }
+    if (rep === 'salidas_stock') {
+      const headers = ['Persona','Movimientos','Unidades','Consumo','Rotura','Vencimiento','Valor a costo','Valor a precio de venta'];
+      const data = rows.map(r => [r.usuario, r.num_movimientos, r.cantidad_total,
+        r.cant_consumo, r.cant_rotura, r.cant_vencimiento, r.costo_total, r.venta_total]);
       return { title, periodo, headers, data };
     }
     if (rep === 'stock_muerto') {

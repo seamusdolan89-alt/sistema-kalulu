@@ -16,7 +16,7 @@ const Vencimientos = (() => {
 
   function searchProductos(q) {
     return db().query(`
-      SELECT p.id, p.nombre, p.costo, p.unidad_venta,
+      SELECT p.id, p.nombre, p.costo, p.precio_venta, p.unidad_venta,
              cb.codigo,
              COALESCE(s.cantidad, 0) AS stock
       FROM productos p
@@ -31,7 +31,7 @@ const Vencimientos = (() => {
 
   function getProductoByBarcode(q) {
     const rows = db().query(`
-      SELECT p.id, p.nombre, p.costo, p.unidad_venta,
+      SELECT p.id, p.nombre, p.costo, p.precio_venta, p.unidad_venta,
              cb.codigo,
              COALESCE(s.cantidad, 0) AS stock
       FROM productos p
@@ -83,6 +83,7 @@ const Vencimientos = (() => {
         codigo:     p.codigo || '',
         stock:      p.stock,
         costo:      p.costo || 0,
+        precioVenta: p.precio_venta || 0,
         unidad:     p.unidad_venta || '',
         cantidad:   1,
       });
@@ -203,10 +204,11 @@ const Vencimientos = (() => {
       for (const item of cart) {
         db().run(
           `INSERT INTO consumo_interno
-             (id, producto_id, sucursal_id, usuario_id, cantidad, costo_unitario, motivo, observaciones, fecha, sync_status, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+             (id, producto_id, sucursal_id, usuario_id, registrado_por_usuario_id,
+              cantidad, costo_unitario, precio_venta_unitario, motivo, observaciones, fecha, sync_status, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
           [window.SGA_Utils.generateUUID(), item.productoId, sucursalId,
-           user.id, item.cantidad, item.costo, motivo, obs, now, now]
+           user.id, user.id, item.cantidad, item.costo, item.precioVenta, motivo, obs, now, now]
         );
 
         db().run(

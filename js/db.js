@@ -541,6 +541,41 @@
       try { database.run(sql); } catch(e) { /* column already exists */ }
     }
 
+    // Migrate stock_ajustes: agregar 'vencimiento' al CHECK de tipo — vencimientos.js
+    // insertaba ese valor desde siempre, pero fallaba en silencio por el CHECK viejo
+    // (run() traga el error y no lo propaga, así que nunca se notó).
+    try {
+      const saStmt = database.prepare(
+        `SELECT sql FROM sqlite_master WHERE type='table' AND name='stock_ajustes'`
+      );
+      let saRow = null;
+      if (saStmt.step()) saRow = saStmt.getAsObject();
+      saStmt.free();
+      if (saRow && saRow.sql && !saRow.sql.includes('vencimiento')) {
+        database.run(`ALTER TABLE stock_ajustes RENAME TO stock_ajustes_bak`);
+        database.run(`CREATE TABLE stock_ajustes (
+          id TEXT PRIMARY KEY,
+          producto_id TEXT REFERENCES productos(id),
+          sucursal_id TEXT REFERENCES sucursales(id),
+          tipo TEXT CHECK(tipo IN ('ajuste_positivo','ajuste_negativo','consumo_interno','rotura','vencimiento')),
+          cantidad REAL,
+          motivo TEXT,
+          usuario_id TEXT,
+          fecha TEXT,
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT,
+          estado TEXT DEFAULT 'aprobado',
+          aprobado_por TEXT,
+          fecha_aprobacion TEXT
+        )`);
+        database.run(`INSERT INTO stock_ajustes
+          (id, producto_id, sucursal_id, tipo, cantidad, motivo, usuario_id, fecha, sync_status, updated_at, estado, aprobado_por, fecha_aprobacion)
+          SELECT id, producto_id, sucursal_id, tipo, cantidad, motivo, usuario_id, fecha, sync_status, updated_at, estado, aprobado_por, fecha_aprobacion
+          FROM stock_ajustes_bak`);
+        database.run(`DROP TABLE stock_ajustes_bak`);
+      }
+    } catch(e) { console.warn('stock_ajustes vencimiento migration:', e.message); }
+
     // devoluciones — add reintegro_tipo column
     try {
       database.run(`ALTER TABLE devoluciones ADD COLUMN reintegro_tipo TEXT`);
