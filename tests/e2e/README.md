@@ -91,6 +91,7 @@ sale "vacío" inesperadamente.
 | `test_clientes_cuenta_corriente.py` | Clientes: saldo deudor correcto en la lista y en la ficha; registrar un pago desde la ficha descuenta el saldo y queda en el historial de movimientos |
 | `test_promociones.py` | Crear una promoción (10% sobre un producto) y verificar que se aplica automáticamente al agregarlo al carrito en el POS |
 | `test_consumo_interno.py` | Consumo interno atribuido a otro usuario: pide contraseña, rechaza vacía/incorrecta, guarda con la correcta; el registro queda `usuario_id`=atribuido / `registrado_por_usuario_id`=quien operaba; stock se descuenta |
+| `test_operaciones_stock_salidas.py` | Rotura + Vencimiento + Consumo Interno, y el informe "Salidas de Stock (no venta)" (commit 7dd1082) agrupando por persona con valuación a costo/venta y filtro por tipo |
 
 Nota: toda compra en este sistema queda "Cta. Cte." — la condición de pago
 está fija en `compras_v2.js` (`state.condicionPago = 'pendiente'`, sin
@@ -99,9 +100,8 @@ saldo de prueba en Cuentas Corrientes.
 
 ## Próximos módulos a cubrir
 
-- Operaciones de stock (más allá de lo ya cubierto vía compras/consumo
-  interno), usuarios, informes, etiquetas — se van agregando como
-  `test_<modulo>.py` reusando `helpers.py`.
+- Usuarios y permisos granulares, etiquetas, órdenes de compra — se van
+  agregando como `test_<modulo>.py` reusando `helpers.py`.
 - El modal de herencia de familias en Compras (`showHerenciaModal`) ya fue
   validado manualmente por el usuario — no hace falta cubrirlo con e2e por
   ahora (ver memoria `project_compras_v2_pendiente.md`).
