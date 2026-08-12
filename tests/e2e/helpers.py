@@ -141,6 +141,22 @@ def login_via_seed(page, wait_target=None, admin_pos=False):
     page.wait_for_timeout(300)  # margen para que el router pinte la vista
 
 
+def abrir_caja_si_hace_falta(page, saldo_inicial=0):
+    """El POS pide abrir una sesión de caja (modal 'Apertura de Caja') si no
+    hay una activa para hoy. Puede tardar un instante en aparecer (se decide
+    de forma async al montar el módulo pos.js), así que hay que esperarlo
+    explícitamente en vez de asumir un estado fijo apenas se llega a #pos."""
+    modal = page.locator("text=Apertura de Caja")
+    try:
+        modal.wait_for(state="visible", timeout=3000)
+    except Exception:
+        return  # ya había una sesión de caja abierta
+    if saldo_inicial:
+        page.fill("input[type='number']", str(saldo_inicial))
+    page.get_by_text("Abrir Caja", exact=True).click()
+    page.wait_for_timeout(300)
+
+
 def login_direct(page, username=DEV_ADMIN_USER, password=DEV_ADMIN_PASS, wait_target=None, admin_pos=False):
     """Login sin seed (usuario/DB ya existentes). Útil para reusar sesión/DB
     entre pasos de un mismo test sin volver a cargar datos demo."""

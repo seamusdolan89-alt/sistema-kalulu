@@ -1120,7 +1120,7 @@ export const POS = (() => {
       container.innerHTML = html;
 
       const updateMpayStatus = () => {
-        const asig  = MPAY.reduce((s, m) => s + (state.pagosAmounts[m.id] || 0), 0);
+        const asig  = MEDIOS.reduce((s, m) => s + (state.pagosAmounts[m.id] || 0), 0);
         const falta = Math.max(0, effTotal - asig);
         const el = ge('mpay-status');
         const debtRow = ge('debt-toggle-row');

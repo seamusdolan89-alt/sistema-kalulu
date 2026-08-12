@@ -87,6 +87,10 @@ sale "vacío" inesperadamente.
 | `test_pos_smoke.py` | Login → POS carga → sidebar completo → modal Apertura de Caja |
 | `test_compras_carrito_revision.py` | Compras (admin-pos): columna IVA en Factura A, subtotal con descuento en Carrito, y que coincida con Revisión (regresión del fix `compras-v2-descuento-iva`) |
 | `test_cuenta_corriente_proveedores.py` | Compras (admin-pos): completar una compra a crédito genera el saldo correcto en Cuentas Corrientes; registrar un pago parcial lo imputa automáticamente por antigüedad y descuenta el saldo |
+| `test_pos_multiples_medios_pago.py` | POS: venta con Cobro múltiple (split Efectivo + resto a Cta. Cte. del cliente) — regresión del bug `MPAY is not defined` que dejaba el botón Confirmar Venta permanentemente deshabilitado |
+| `test_clientes_cuenta_corriente.py` | Clientes: saldo deudor correcto en la lista y en la ficha; registrar un pago desde la ficha descuenta el saldo y queda en el historial de movimientos |
+| `test_promociones.py` | Crear una promoción (10% sobre un producto) y verificar que se aplica automáticamente al agregarlo al carrito en el POS |
+| `test_consumo_interno.py` | Consumo interno atribuido a otro usuario: pide contraseña, rechaza vacía/incorrecta, guarda con la correcta; el registro queda `usuario_id`=atribuido / `registrado_por_usuario_id`=quien operaba; stock se descuenta |
 
 Nota: toda compra en este sistema queda "Cta. Cte." — la condición de pago
 está fija en `compras_v2.js` (`state.condicionPago = 'pendiente'`, sin
@@ -95,8 +99,21 @@ saldo de prueba en Cuentas Corrientes.
 
 ## Próximos módulos a cubrir
 
-- Operaciones de stock, consumo interno, usuarios, informes — se van
-  agregando como `test_<modulo>.py` reusando `helpers.py`.
+- Operaciones de stock (más allá de lo ya cubierto vía compras/consumo
+  interno), usuarios, informes, etiquetas — se van agregando como
+  `test_<modulo>.py` reusando `helpers.py`.
 - El modal de herencia de familias en Compras (`showHerenciaModal`) ya fue
   validado manualmente por el usuario — no hace falta cubrirlo con e2e por
   ahora (ver memoria `project_compras_v2_pendiente.md`).
+
+## Hallazgo abierto (no bloqueante)
+
+`test_consumo_interno.py` tolera explícitamente un error de consola
+reproducible ("Failed to set the 'innerHTML' property... node no longer a
+child of this node") que aparece justo al confirmar con contraseña →
+hashchange a `#operaciones_stock`. No afecta el resultado (datos guardados
+bien), pero no se identificó la causa exacta — no hay listener de `blur`
+en `consumo_interno.js`/`operaciones_stock.js`/`app.js`, así que parece un
+race entre el router reemplazando `#app` y algún nodo que todavía se
+está actualizando. Si se investiga, sacar el allowlist `KNOWN_HARMLESS_ERRORS`
+del test.
