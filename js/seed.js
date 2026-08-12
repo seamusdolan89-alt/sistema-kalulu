@@ -1,8 +1,11 @@
 /**
  * seed.js — Development Seed Data
- * 
+ *
  * Populates the database with demo data for development and testing.
- * Only runs if the sucursales table is empty.
+ * Only runs if the productos table is empty (la sucursal y el admin por
+ * defecto ya los crea db.js en la primera inicialización, así que no los
+ * usamos como guard para no saltear el seed de categorías/proveedores/
+ * productos en cada DB nueva).
  */
 
 export default async function seed() {
@@ -11,34 +14,41 @@ export default async function seed() {
   console.log('🌱 Seeding database with demo data...');
 
   // Check if already seeded
-  const existing_sucursales = window.SGA_DB.query('SELECT COUNT(*) as count FROM sucursales');
-  if (existing_sucursales[0]?.count > 0) {
+  const existing_productos = window.SGA_DB.query('SELECT COUNT(*) as count FROM productos');
+  if (existing_productos[0]?.count > 0) {
     console.log('⚠️ Database already seeded, skipping');
     return;
   }
 
   const now = new Date().toISOString();
 
-  // 1. Insert sucursal (use fixed id='1' for dev user)
+  // 1. Sucursal (db.js ya crea la sucursal id='1' en la primera instalación;
+  // usamos INSERT OR IGNORE por si este seed corre antes de que exista)
   const sucursal_id = '1';
   window.SGA_DB.run(
-    `INSERT INTO sucursales (id, nombre, direccion, activa, sync_status, updated_at)
+    `INSERT OR IGNORE INTO sucursales (id, nombre, direccion, activa, sync_status, updated_at)
      VALUES (?, ?, ?, 1, 'pending', ?)`,
     [sucursal_id, 'Kalulu Central', 'Av. Principal 123, CABA', now]
   );
-  console.log('✅ Sucursal created (id=1)');
+  console.log('✅ Sucursal lista (id=1)');
 
-  // 2. Insert admin user (username: admin, password: admin123)
-  const admin_id = window.SGA_Utils.generateUUID();
-  // Hash SHA-256 de 'admin123'
-  const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('admin123'));
-  const adminHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-  window.SGA_DB.run(
-    `INSERT INTO usuarios (id, firebase_uid, nombre, username, password_hash, rol, sucursal_id, activo, sync_status, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'pending', ?)`,
-    [admin_id, 'dev-admin', 'Admin Demo', 'admin', adminHash, 'admin', sucursal_id, now]
-  );
-  console.log('✅ Admin user created (usuario: admin / contraseña: admin123)');
+  // 2. Admin user — db.js ya crea 'admin' / 'kalulu123' en la primera
+  // instalación; no lo duplicamos, solo lo creamos si por algún motivo
+  // no existe ningún usuario todavía.
+  const existing_admin = window.SGA_DB.query(`SELECT id FROM usuarios WHERE username = 'admin'`);
+  if (existing_admin.length === 0) {
+    const admin_id = window.SGA_Utils.generateUUID();
+    const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('kalulu123'));
+    const adminHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+    window.SGA_DB.run(
+      `INSERT INTO usuarios (id, firebase_uid, nombre, username, password_hash, rol, sucursal_id, activo, sync_status, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'pending', ?)`,
+      [admin_id, 'dev-admin', 'Admin Demo', 'admin', adminHash, 'admin', sucursal_id, now]
+    );
+    console.log('✅ Admin user created (usuario: admin / contraseña: kalulu123)');
+  } else {
+    console.log('✅ Admin user ya existía (usuario: admin / contraseña: kalulu123)');
+  }
 
   // 3. Insert sample categories
   const categories = [
@@ -144,6 +154,6 @@ export default async function seed() {
 
   console.log('✅ Demo data seeded successfully!');
   console.log('📝 Test credentials:');
-  console.log('   Email: admin@demo.com');
-  console.log('   Password: admin123');
+  console.log('   Usuario: admin');
+  console.log('   Password: kalulu123');
 }

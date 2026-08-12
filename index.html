@@ -115,7 +115,11 @@
           // No recargar si hay una venta en curso (carrito sin confirmar): se perdería.
           if (pulled > 0 && !window.SGA_POS_ACTIVE_SALE) {
             btn.textContent = `✓ ${pulled} nuevo${pulled !== 1 ? 's' : ''}`;
-            setTimeout(() => window.location.reload(), 600);
+            // Esperar a que lo recién sincronizado quede escrito en OPFS antes
+            // de recargar — si no, la recarga puede cortar el guardado a mitad
+            // de camino y esos datos se pierden (quedan solo en memoria).
+            await window.SGA_DB.flush().catch(() => {});
+            setTimeout(() => window.location.reload(), 400);
             return;
           }
           btn.textContent = '✓ Listo';

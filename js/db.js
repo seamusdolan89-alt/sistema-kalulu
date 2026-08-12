@@ -161,6 +161,23 @@
   }
 
   /**
+   * Espera a que termine cualquier guardado a OPFS/localStorage en curso,
+   * incluyendo los que queden encolados por el patrón coalesce de arriba
+   * (savePending). run() dispara saveDatabase() sin esperarlo ("fire and
+   * forget"), así que cualquier código que haga una escritura y DESPUÉS
+   * navegue de forma dura (location.href=, location.reload()) debe hacer
+   * `await window.SGA_DB.flush()` antes de navegar — si no, la página se
+   * puede destruir a mitad del guardado y esos datos nunca llegan a disco
+   * (quedan solo en memoria, se pierden). Ver ⬇ Pull / Sync en index.html
+   * y admin-pos/index.html para el caso de uso real.
+   */
+  async function flush() {
+    while (saveInProgress) {
+      try { await saveInProgress; } catch (_) { /* ya logueado en saveDatabase */ }
+    }
+  }
+
+  /**
    * Initialize database connection and create tables
    * 
    * @returns {Promise<void>}
@@ -1359,5 +1376,6 @@
     calcularDiasSinStock6m,
     exportarBackup,
     importarBackup,
+    flush,
   };
 })();
