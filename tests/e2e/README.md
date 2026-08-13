@@ -92,6 +92,7 @@ sale "vacío" inesperadamente.
 | `test_promociones.py` | Crear una promoción (10% sobre un producto) y verificar que se aplica automáticamente al agregarlo al carrito en el POS |
 | `test_consumo_interno.py` | Consumo interno atribuido a otro usuario: pide contraseña, rechaza vacía/incorrecta, guarda con la correcta; el registro queda `usuario_id`=atribuido / `registrado_por_usuario_id`=quien operaba; stock se descuenta |
 | `test_operaciones_stock_salidas.py` | Rotura + Vencimiento + Consumo Interno, y el informe "Salidas de Stock (no venta)" (commit 7dd1082) agrupando por persona con valuación a costo/venta y filtro por tipo |
+| `test_usuarios_permisos.py` | Regresión del guard de rutas (`isRouteAllowed` en app.js): un usuario sin permiso queda bloqueado accediendo por URL directa (no solo oculto del menú); admin en POS local y admin-pos no pierden nada |
 
 Nota: toda compra en este sistema queda "Cta. Cte." — la condición de pago
 está fija en `compras_v2.js` (`state.condicionPago = 'pendiente'`, sin
@@ -100,8 +101,8 @@ saldo de prueba en Cuentas Corrientes.
 
 ## Próximos módulos a cubrir
 
-- Usuarios y permisos granulares, etiquetas, órdenes de compra — se van
-  agregando como `test_<modulo>.py` reusando `helpers.py`.
+- Etiquetas, órdenes de compra — se van agregando como `test_<modulo>.py`
+  reusando `helpers.py`.
 - El modal de herencia de familias en Compras (`showHerenciaModal`) ya fue
   validado manualmente por el usuario — no hace falta cubrirlo con e2e por
   ahora (ver memoria `project_compras_v2_pendiente.md`).
