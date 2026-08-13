@@ -705,7 +705,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       `).join('');
 
     openModal(`
-      <button class="caja-modal-close" id="btn-close-medios">✕</button>
+      <button class="caja-modal-close" id="btn-close-medios" aria-label="Cerrar" title="Cerrar">✕</button>
       <h3>Cobranzas por medio de pago</h3>
       ${mediosRows
         ? mediosRows + `
@@ -984,7 +984,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     sidebar.innerHTML = `
       <div class="caja-sidebar-header">
         <h3 id="sidebar-title" style="margin:0;font-size:1rem"></h3>
-        <button class="btn-sidebar-close" id="btn-sidebar-close">✕</button>
+        <button class="btn-sidebar-close" id="btn-sidebar-close" aria-label="Cerrar" title="Cerrar">✕</button>
       </div>
       <div class="caja-sidebar-body" id="sidebar-body"></div>
     `;
@@ -1140,7 +1140,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
 
   function openEgresoModal() {
     openModal(`
-      <button class="caja-modal-close" id="btn-close-egreso">✕</button>
+      <button class="caja-modal-close" id="btn-close-egreso" aria-label="Cerrar" title="Cerrar">✕</button>
       <h3>Registrar Egreso</h3>
       <div class="caja-form">
         <label>Tipo</label>
@@ -1206,7 +1206,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     ).join('');
 
     openModal(`
-      <button class="caja-modal-close" id="btn-close-pagoprov">✕</button>
+      <button class="caja-modal-close" id="btn-close-pagoprov" aria-label="Cerrar" title="Cerrar">✕</button>
       <h3>💳 Pago a Proveedor</h3>
       <div class="caja-form">
         <label>Proveedor <span style="color:var(--color-danger)">*</span></label>
@@ -1319,7 +1319,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
 
   function openIngresoModal() {
     openModal(`
-      <button class="caja-modal-close" id="btn-close-ingreso">✕</button>
+      <button class="caja-modal-close" id="btn-close-ingreso" aria-label="Cerrar" title="Cerrar">✕</button>
       <h3>Registrar Ingreso extra</h3>
       <div class="caja-form">
         <label>Monto</label>
@@ -1504,7 +1504,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
           <span style="flex:1;font-weight:500">${fmtPeso(d)}</span>
           <button class="btn btn-xs btn-outline denom-up" data-idx="${i}" ${i === 0 ? 'disabled' : ''}>↑</button>
           <button class="btn btn-xs btn-outline denom-down" data-idx="${i}" ${i === denoms.length - 1 ? 'disabled' : ''}>↓</button>
-          <button class="btn btn-xs btn-danger denom-remove" data-idx="${i}">✕</button>
+          <button class="btn btn-xs btn-danger denom-remove" data-idx="${i}" aria-label="Quitar denominación" title="Quitar">✕</button>
         </div>
       `).join('');
 
@@ -1529,7 +1529,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     };
 
     openModal(`
-      <button class="caja-modal-close" id="btn-close-denoms">✕</button>
+      <button class="caja-modal-close" id="btn-close-denoms" aria-label="Cerrar" title="Cerrar">✕</button>
       <h3>Editar denominaciones</h3>
       <div id="denom-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px"></div>
       <div style="display:flex;gap:8px;align-items:center">
@@ -1660,7 +1660,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     }).join('');
 
     openModal(`
-      <button class="caja-modal-close" id="btn-close-cierre">✕</button>
+      <button class="caja-modal-close" id="btn-close-cierre" aria-label="Cerrar" title="Cerrar">✕</button>
       <h3>Cierre de Caja</h3>
 
       <h4 class="cierre-section-title">Verificación por medio de pago</h4>
@@ -1782,7 +1782,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
             placeholder="Motivo" value="${esc(r.motivo || '')}"
             style="flex:1;border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:4px 8px;font-size:13px">
           <button class="btn btn-xs btn-danger expl-remove"
-            data-medio="${esc(medioId)}" data-idx="${i}">✕</button>
+            data-medio="${esc(medioId)}" data-idx="${i}" aria-label="Quitar explicación" title="Quitar">✕</button>
         </div>
       `).join('');
 
@@ -2047,7 +2047,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     const difClass = dif > 0 ? 'text-success' : dif < 0 ? 'text-danger' : '';
 
     openModal(`
-      <button class="caja-modal-close" id="btn-close-sesion">✕</button>
+      <button class="caja-modal-close" id="btn-close-sesion" aria-label="Cerrar" title="Cerrar">✕</button>
       <h3>Detalle de Sesión</h3>
       <div class="caja-stat-row"><span>Apertura</span><span>${fmtFecha(s.fecha_apertura)}</span></div>
       <div class="caja-stat-row"><span>Cierre</span><span>${fmtFecha(s.fecha_cierre)}</span></div>
@@ -2109,7 +2109,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     `).join('');
 
     openModal(`
-      <button class="caja-modal-close" id="btn-close-venta">✕</button>
+      <button class="caja-modal-close" id="btn-close-venta" aria-label="Cerrar" title="Cerrar">✕</button>
       <h3>Venta <span style="font-family:monospace;font-size:.9em">${ventaId.slice(0, 8)}…</span></h3>
       <div class="caja-stat-row"><span>Fecha</span><span>${fmtFecha(v.fecha)}</span></div>
       <div class="caja-stat-row"><span>Cliente</span><span>${esc(v.cliente || 'Consumidor final')}</span></div>

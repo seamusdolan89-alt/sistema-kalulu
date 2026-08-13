@@ -477,7 +477,7 @@ const CuentaCorrienteProveedores = (() => {
             <div class="ccprov-remitos-hdr-title">📋 Remitos Pendientes — ${esc(proveedorNombre)}</div>
             <div class="ccprov-remitos-hdr-sub">Seleccioná el remito para vincularle la factura</div>
           </div>
-          <button class="ccprov-remitos-close" id="ccprov-remitos-close-btn">✕</button>
+          <button class="ccprov-remitos-close" id="ccprov-remitos-close-btn" aria-label="Cerrar" title="Cerrar">✕</button>
         </div>
         <div class="ccprov-remitos-body">${rowsHtml}</div>
       </div>
@@ -902,7 +902,7 @@ const CuentaCorrienteProveedores = (() => {
       <div class="ccprov-modal">
         <div class="ccprov-modal-hdr">
           <span>💳 Registrar Pago a Proveedor</span>
-          <button class="ccprov-modal-close" id="btn-modal-close">✕</button>
+          <button class="ccprov-modal-close" id="btn-modal-close" aria-label="Cerrar" title="Cerrar">✕</button>
         </div>
         <div class="ccprov-modal-body">
 

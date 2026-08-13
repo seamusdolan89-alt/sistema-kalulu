@@ -570,7 +570,7 @@ const Ordenes = (() => {
           <td class="${diasCls}">${dias}</td>
           <td><input class="ord-cell-input ord-cell-input-text" type="text"
             value="${esc(it.notas || '')}" placeholder="—"></td>
-          <td><button class="ord-btn-del" data-del="${esc(it.id)}" title="Eliminar">×</button></td>
+          <td><button class="ord-btn-del" data-del="${esc(it.id)}" aria-label="Eliminar" title="Eliminar">×</button></td>
         </tr>`;
       } else {
         return `<tr>

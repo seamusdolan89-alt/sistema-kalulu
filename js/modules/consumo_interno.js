@@ -141,7 +141,7 @@ const ConsumoInterno = (() => {
         </td>
         <td class="c-costo">${fmt$(item.costo)}</td>
         <td class="c-total">${fmt$(subtotal)}</td>
-        <td class="c-del"><button class="ci-del-btn" data-del="${idx}">✕</button></td>
+        <td class="c-del"><button class="ci-del-btn" data-del="${idx}" aria-label="Quitar producto" title="Quitar">✕</button></td>
       </tr>`;
     }).join('');
 

@@ -16,15 +16,38 @@
   
   --color-text: #333333;
   --color-text-secondary: #666666;
-  --color-text-light: #999999;
-  
+  /* Antes #999999 (~2.85:1 sobre blanco, no pasa WCAG AA 4.5:1). #757575 es el
+     gris "secondary text" de Material Design, da ~4.6:1 — mismo tono visual,
+     legible. Ver memoria project_ux_pass_ui_ux_pro_max.md. */
+  --color-text-light: #757575;
+
   --color-border: #dddddd;
   --color-border-dark: #cccccc;
-  
+
   --color-success: #28a745;
   --color-warning: #ffc107;
   --color-danger: #dc3545;
   --color-info: #17a2b8;
+
+  /* Variantes claras/oscuras — para paneles de alerta suaves (fondo pastel +
+     borde + texto oscuro del mismo color). Formalizan combinaciones que ya
+     se repetían hardcodeadas (hex sueltos) en varios módulos: caja.js,
+     usuarios.js, cuenta_corriente_proveedores.js, etc. */
+  --color-success-bg:     #e8f5e9;
+  --color-success-border: #a5d6a7;
+  --color-success-text:   #1b5e20;
+
+  --color-warning-bg:     #fff3e0;
+  --color-warning-border: #ffcc80;
+  --color-warning-text:   #e65100;
+
+  --color-danger-bg:      #fdecea;
+  --color-danger-border:  #e57373;
+  --color-danger-text:    #c62828;
+
+  --color-info-bg:        #e3f2fd;
+  --color-info-border:    #90caf9;
+  --color-info-text:      #1565c0;
   
   /* Typography */
   --font-family-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;

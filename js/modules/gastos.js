@@ -548,7 +548,7 @@ const Gastos = (() => {
         <input type="number" class="gc-input gc-pago-monto" min="0" step="0.01"
           placeholder="0,00" value="${r.monto}" title="Monto a abonar">
         ${rows.length > 1
-          ? `<button class="gc-btn-del-pago" data-idx="${i}" title="Quitar">✕</button>`
+          ? `<button class="gc-btn-del-pago" data-idx="${i}" aria-label="Quitar" title="Quitar">✕</button>`
           : `<div></div>`}
       </div>
     `).join('');

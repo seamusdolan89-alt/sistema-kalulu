@@ -268,7 +268,7 @@ const Proveedores = (() => {
       <div class="prov-modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
         <div class="prov-modal-hdr">
           <span>${esc(title)}</span>
-          <button id="btn-prov-close" class="prov-modal-close" title="Cerrar (Esc)">✕</button>
+          <button id="btn-prov-close" class="prov-modal-close" aria-label="Cerrar" title="Cerrar (Esc)">✕</button>
         </div>
         <div class="prov-modal-body">
 
@@ -572,7 +572,7 @@ const Proveedores = (() => {
       <div class="prov-modal" role="dialog" aria-modal="true" aria-label="Importar Proveedores">
         <div class="prov-modal-hdr">
           <span>Importar Proveedores desde Excel</span>
-          <button id="btn-prov-imp-close" class="prov-modal-close" title="Cerrar">✕</button>
+          <button id="btn-prov-imp-close" class="prov-modal-close" aria-label="Cerrar" title="Cerrar">✕</button>
         </div>
         <div class="prov-modal-body">
           <div id="prov-imp-step1">

@@ -150,7 +150,7 @@ const mod = {
                  value="${it.cantidad}" min="1" max="999">
           <button class="etiq-qty-inc" data-idx="${idx}">+</button>
         </div>
-        <button class="etiq-item-remove" data-idx="${idx}" title="Quitar">✕</button>
+        <button class="etiq-item-remove" data-idx="${idx}" aria-label="Quitar" title="Quitar">✕</button>
       </div>
     `;
   },

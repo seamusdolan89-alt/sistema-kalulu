@@ -156,7 +156,7 @@ export default {
         <div class="pd-panel">
           <div class="pd-header">
             <h3 id="pd-title">Detalle de promoción</h3>
-            <button id="pd-close" style="background:none;border:none;font-size:1.3em;color:#bbb;cursor:pointer;padding:2px 6px;border-radius:4px">✕</button>
+            <button id="pd-close" aria-label="Cerrar" title="Cerrar" style="background:none;border:none;font-size:1.3em;color:#bbb;cursor:pointer;padding:2px 6px;border-radius:4px">✕</button>
           </div>
           <div class="pd-body" id="pd-body"></div>
         </div>`;
@@ -559,7 +559,7 @@ export default {
             <span class="combo-item-qty-label">×</span>
             <input type="number" class="combo-item-qty" value="${item.cantidad}" min="1" step="1" data-idx="${idx}">
           </div>
-          <button class="btn-combo-remove" data-idx="${idx}" title="Quitar">✕</button>
+          <button class="btn-combo-remove" data-idx="${idx}" aria-label="Quitar" title="Quitar">✕</button>
         </div>
       `).join('');
 
