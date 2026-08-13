@@ -98,6 +98,7 @@ sale "vacío" inesperadamente.
 | `test_caja_pago_proveedor.py` | "💳 Pago a Proveedor" desde Caja: un pago descuenta la caja (egreso) Y la cuenta corriente del proveedor a la vez |
 | `test_gastos_generales.py` | Buscar un proveedor de servicios (`tipo_proveedor='servicios'`) y cargar un gasto |
 | `test_adelanto_pago.py` | Adelanto de Pago a proveedor (admin-only): se registra como crédito huérfano (`pagos_proveedores`), sin imputar todavía, listo para aplicarse a la próxima compra |
+| `test_informes.py` | Los 8 reportes de Informes (Ventas por Producto, Análisis de Productos, Ventas por Transacción, Quiebres de Stock, Ventas por Vendedor, Aging CC, Resumen Diario de Caja, Stock sin Movimiento) — verifica los números exactos, no solo que rendericen |
 
 Nota: toda compra en este sistema queda "Cta. Cte." — la condición de pago
 está fija en `compras_v2.js` (`state.condicionPago = 'pendiente'`, sin
@@ -106,9 +107,6 @@ saldo de prueba en Cuentas Corrientes.
 
 ## Próximos módulos a cubrir
 
-- Informes (7 de 8 reportes sin probar: Ventas por Producto, Análisis de
-  Productos, Ventas por Transacción, Quiebres de Stock, Ventas por
-  Vendedor, Aging Cuenta Corriente, Resumen Diario de Caja).
 - Proveedores (CRUD completo), Órdenes de Compra, Editor de Producto
   (página completa), Etiquetas, Devoluciones/Pedido Abierto (dentro de
   POS) — se van agregando como `test_<modulo>.py` reusando `helpers.py`.
