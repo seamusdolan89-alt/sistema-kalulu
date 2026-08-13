@@ -152,7 +152,11 @@
               // en la base local — sin este reload, lo recién traído por Pull no
               // se ve hasta que el usuario navega o refresca manualmente.
               pullBtn.textContent = `✓ ${count} nuevo${count !== 1 ? 's' : ''}`;
-              setTimeout(() => window.location.reload(), 600);
+              // Esperar a que lo recién sincronizado quede escrito en OPFS antes
+              // de recargar — si no, la recarga puede cortar el guardado a mitad
+              // de camino y esos datos se pierden (quedan solo en memoria).
+              await window.SGA_DB.flush().catch(() => {});
+              setTimeout(() => window.location.reload(), 400);
               return;
             }
             pullBtn.textContent = '✓ Al día';

@@ -331,8 +331,13 @@
           seedBtn.disabled = true;
           seedBtn.textContent = 'Cargando datos...';
           await import('../js/seed.js').then(m => m.default());
-          // En dev mode, login automático
-          await window.SGA_Auth.login('admin', 'admin123');
+          // Esperar a que el seed quede escrito en OPFS antes de navegar —
+          // si no, la navegación dura de abajo puede cortar el guardado a
+          // mitad de camino y los datos demo se pierden (quedan solo en
+          // memoria de esta página, que está por destruirse).
+          await window.SGA_DB.flush().catch(() => {});
+          // En dev mode, login automático (db.js crea admin/kalulu123 en la primera instalación)
+          await window.SGA_Auth.login('admin', 'kalulu123');
           window.location.href = returnTo;
         } catch (error) {
           alert('Error: ' + error.message);

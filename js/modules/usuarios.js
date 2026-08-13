@@ -23,20 +23,24 @@ const UsuariosModule = (() => {
 
   function renderTabla() {
     const rows = window.SGA_DB.query(
-      `SELECT id, nombre, username, rol, activo FROM usuarios ORDER BY nombre`
+      `SELECT id, nombre, username, rol, activo, permisos_json FROM usuarios ORDER BY nombre`
     );
 
     const tbody = document.getElementById('tbody-usuarios');
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--color-text-secondary);">Sin usuarios registrados.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--color-text-secondary);">Sin usuarios registrados.</td></tr>';
       return;
     }
 
-    tbody.innerHTML = rows.map(u => `
+    tbody.innerHTML = rows.map(u => {
+      let permisos = {};
+      if (u.permisos_json) { try { permisos = JSON.parse(u.permisos_json); } catch {} }
+      return `
       <tr class="${!u.activo ? 'row-inactivo' : ''}">
         <td>${esc(u.nombre)}</td>
         <td><code>${esc(u.username || '—')}</code></td>
         <td>${u.rol === 'admin' ? '<span class="badge badge-primary">Administrador</span>' : '<span class="badge badge-secondary">Colaborador</span>'}</td>
+        <td>${resumenPermisos(permisos, u.rol)}</td>
         <td>
           <span class="badge ${u.activo ? 'badge-success' : 'badge-secondary'}">
             ${u.activo ? 'Activo' : 'Inactivo'}
@@ -46,7 +50,8 @@ const UsuariosModule = (() => {
           <button class="btn btn-sm btn-secondary btn-editar-usuario" data-id="${u.id}">Editar</button>
         </td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
 
     document.querySelectorAll('.btn-editar-usuario').forEach(btn => {
       btn.addEventListener('click', () => abrirModalEditar(btn.dataset.id));
@@ -55,7 +60,32 @@ const UsuariosModule = (() => {
 
   const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
+  // ─── Resumen de permisos (columna de la tabla) ──────────────────────────────
+
+  function resumenPermisos(permisos, rol) {
+    if (rol === 'admin') return '<span class="badge badge-primary">Acceso total</span>';
+
+    const def = (window.SGA_PERMISOS_DEF || []).filter(p => p.tipo === 'bool');
+    const activos = def.filter(p => permisos[p.key]);
+    if (!activos.length) return '<span style="color:#999;font-size:12px">Sin permisos</span>';
+
+    const altos = activos.filter(p => p.riesgo === 'alto').length;
+    const riesgoTag = altos > 0
+      ? `<span title="${altos} permiso(s) de alto riesgo (manejo de dinero)" style="color:#c62828;font-weight:700;margin-left:5px;font-size:12px">🔴 ${altos}</span>`
+      : '';
+    return `<span style="font-size:12px;color:#555">${activos.length}/${def.length} permisos</span>${riesgoTag}`;
+  }
+
   // ─── Panel de permisos ───────────────────────────────────────────────────
+
+  // Colores por nivel de riesgo — solo estética, no cambian el enforcement
+  // (eso lo hace cada módulo/el router, ver ROUTE_PERMISSION en app.js).
+  const RIESGO_COLOR = {
+    alto:  { borde: '#e57373', texto: '#c62828', bg: '#fdecea', dot: '🔴' },
+    medio: { borde: '#ffb74d', texto: '#e65100', bg: '#fff6e8', dot: '🟡' },
+    bajo:  { borde: '#81c784', texto: '#2e7d32', bg: '#eef8ef', dot: '🟢' },
+  };
+  const RIESGO_ORDEN = { alto: 3, medio: 2, bajo: 1 };
 
   function renderPermisosSection(permisos, isAdmin) {
     const section = document.getElementById('permisos-section');
@@ -70,17 +100,24 @@ const UsuariosModule = (() => {
       return;
     }
 
-    // Agrupar por grupo
     const def = window.SGA_PERMISOS_DEF || [];
+    const presets = window.SGA_PERMISOS_PRESETS || [];
     const grupos = [...new Set(def.map(p => p.grupo))];
 
     const gruposHtml = grupos.map(grupo => {
       const items = def.filter(p => p.grupo === grupo);
+      // El grupo se colorea con el riesgo más alto que contenga
+      const riesgoGrupo = items.reduce((max, p) => RIESGO_ORDEN[p.riesgo] > RIESGO_ORDEN[max] ? p.riesgo : max, 'bajo');
+      const color = RIESGO_COLOR[riesgoGrupo];
+
       const itemsHtml = items.map(p => {
+        const dot = p.riesgo !== 'bajo' ? `<span title="Riesgo ${p.riesgo}" style="font-size:9px;margin-right:4px">${RIESGO_COLOR[p.riesgo].dot}</span>` : '<span style="display:inline-block;width:13px"></span>';
+        const indent = p.requiere ? 'padding-left:20px;' : '';
         if (p.tipo === 'number') {
           const val = permisos[p.key] !== undefined ? permisos[p.key] : p.default;
           return `
-            <div class="permiso-row" style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f0f0f0;">
+            <div class="permiso-row" style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f0f0f0;${indent}">
+              ${dot}
               <label style="flex:1;font-size:14px;color:var(--color-text);">${esc(p.label)}</label>
               <input type="number" class="permiso-input" data-key="${p.key}"
                 min="${p.min ?? 0}" max="${p.max ?? 100}" value="${val}"
@@ -90,21 +127,36 @@ const UsuariosModule = (() => {
         }
         const checked = permisos[p.key] !== undefined ? permisos[p.key] : p.default;
         return `
-          <div class="permiso-row" style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f0f0f0;">
-            <input type="checkbox" class="permiso-check" data-key="${p.key}" id="perm-${p.key}" ${checked ? 'checked' : ''}
+          <div class="permiso-row" style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f0f0f0;${indent}">
+            ${dot}
+            <input type="checkbox" class="permiso-check" data-key="${p.key}" ${p.requiere ? `data-requiere="${p.requiere}"` : ''} id="perm-${p.key}" ${checked ? 'checked' : ''}
               style="width:17px;height:17px;cursor:pointer;accent-color:var(--color-primary);">
             <label for="perm-${p.key}" style="flex:1;font-size:14px;color:var(--color-text);cursor:pointer;">${esc(p.label)}</label>
           </div>`;
       }).join('');
 
       return `
-        <div style="margin-bottom:4px;">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#888;margin:12px 0 4px;">${esc(grupo)}</div>
+        <div style="margin-bottom:4px;border-left:3px solid ${color.borde};padding-left:10px;">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:${color.texto};margin:12px 0 4px;">${esc(grupo)}</div>
           ${itemsHtml}
         </div>`;
     }).join('');
 
+    const presetsOptions = presets.map(pr => `<option value="${pr.id}">${esc(pr.nombre)}</option>`).join('');
+
     section.innerHTML = `
+      <div style="background:#f5f5fa;border:1.5px solid #e0e0f0;border-radius:8px;padding:10px 12px;margin-bottom:14px;">
+        <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:6px;">⚡ Aplicar plantilla de rol</label>
+        <div style="display:flex;gap:8px;">
+          <select id="permiso-preset" style="flex:1;padding:5px 8px;border:1.5px solid #ccc;border-radius:6px;font-size:13px;">
+            <option value="">— Elegir plantilla —</option>
+            ${presetsOptions}
+          </select>
+          <button type="button" id="btn-aplicar-preset" class="btn btn-sm btn-primary" style="font-size:12px;padding:3px 12px;" disabled>Aplicar</button>
+        </div>
+        <p id="preset-descripcion" style="font-size:12px;color:#777;margin:6px 0 0;"></p>
+      </div>
+
       <div style="display:flex;gap:8px;margin-bottom:10px;">
         <button type="button" id="btn-check-all" class="btn btn-sm" style="font-size:12px;padding:3px 10px;">Marcar todo</button>
         <button type="button" id="btn-uncheck-all" class="btn btn-sm btn-secondary" style="font-size:12px;padding:3px 10px;">Desmarcar todo</button>
@@ -112,14 +164,52 @@ const UsuariosModule = (() => {
       <div style="border:1.5px solid #e0e0e0;border-radius:8px;padding:8px 14px;">
         ${gruposHtml}
       </div>
-      <p style="font-size:12px;color:#999;margin:8px 0 0;">Los cambios aplican al próximo inicio de sesión del usuario.</p>`;
+      <p style="font-size:12px;color:#999;margin:8px 0 0;">
+        <span title="Riesgo alto: manejo directo de dinero">🔴 alto</span> ·
+        <span title="Riesgo medio: acciones sensibles no monetarias">🟡 medio</span> ·
+        Los cambios aplican al próximo inicio de sesión del usuario.
+      </p>`;
+
+    // ── Dependencias blandas (requiere): tildar el dependiente tilda y
+    // bloquea destildar el permiso base. Solo UI — el enforcement real está
+    // en cada módulo / en el router (isRouteAllowed en app.js).
+    const aplicarDependencias = () => {
+      section.querySelectorAll('.permiso-check[data-requiere]').forEach(cb => {
+        const base = section.querySelector(`.permiso-check[data-key="${cb.dataset.requiere}"]`);
+        if (!base) return;
+        if (cb.checked) { base.checked = true; base.disabled = true; }
+        else if (base.disabled) { base.disabled = false; }
+      });
+    };
+    aplicarDependencias();
+    section.querySelectorAll('.permiso-check[data-requiere]').forEach(cb => {
+      cb.addEventListener('change', aplicarDependencias);
+    });
+
+    // ── Plantillas de rol ──────────────────────────────────────────────────
+    const presetSelect = document.getElementById('permiso-preset');
+    const presetBtn    = document.getElementById('btn-aplicar-preset');
+    const presetDesc   = document.getElementById('preset-descripcion');
+    presetSelect?.addEventListener('change', () => {
+      const preset = presets.find(pr => pr.id === presetSelect.value);
+      presetBtn.disabled = !preset;
+      presetDesc.textContent = preset ? preset.descripcion : '';
+    });
+    presetBtn?.addEventListener('click', () => {
+      const preset = presets.find(pr => pr.id === presetSelect.value);
+      if (!preset) return;
+      if (!confirm(`Aplicar "${preset.nombre}" reemplaza los permisos tildados actualmente. ¿Continuar?`)) return;
+      section.querySelectorAll('.permiso-check').forEach(cb => { cb.checked = !!preset.permisos[cb.dataset.key]; cb.disabled = false; });
+      section.querySelectorAll('.permiso-input').forEach(inp => { inp.value = preset.permisos[inp.dataset.key] ?? 0; });
+      aplicarDependencias();
+    });
 
     document.getElementById('btn-check-all')?.addEventListener('click', () => {
-      section.querySelectorAll('.permiso-check').forEach(cb => { cb.checked = true; });
+      section.querySelectorAll('.permiso-check').forEach(cb => { cb.checked = true; cb.disabled = false; });
       section.querySelectorAll('.permiso-input').forEach(inp => { inp.value = inp.max || 100; });
     });
     document.getElementById('btn-uncheck-all')?.addEventListener('click', () => {
-      section.querySelectorAll('.permiso-check').forEach(cb => { cb.checked = false; });
+      section.querySelectorAll('.permiso-check').forEach(cb => { cb.checked = false; cb.disabled = false; });
       section.querySelectorAll('.permiso-input').forEach(inp => { inp.value = 0; });
     });
   }

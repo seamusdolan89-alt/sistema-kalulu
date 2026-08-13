@@ -115,6 +115,15 @@
    * Load view HTML and initialize corresponding module
    */
   async function loadView(moduleName, params) {
+    if (!isRouteAllowed(moduleName)) {
+      console.warn(`🔒 Acceso bloqueado a "${moduleName}" — el usuario no tiene el permiso requerido.`);
+      document.getElementById('app').innerHTML = `
+        <div class="alert alert-danger">
+          <strong>Acceso restringido.</strong> No tenés permiso para ver esta sección.
+        </div>
+      `;
+      return;
+    }
     try {
       const appContainer = document.getElementById('app');
       const v = Date.now();
@@ -159,11 +168,12 @@
     // Colaboradores: según permisos individuales
     const P = window.SGA_Permisos;
     const allowed = ['pos', 'cajas']; // siempre visibles
-    if (P.can('can_productos'))         allowed.push('productos');
+    if (P.can('can_ver_productos'))     allowed.push('productos');
     if (P.can('can_clientes'))          allowed.push('clientes');
     if (P.can('can_compras'))           allowed.push('compras_v2');
     if (P.can('can_ordenes'))           allowed.push('ordenes');
-    if (P.can('can_proveedores'))       allowed.push('proveedores', 'cuenta_corriente_proveedores');
+    if (P.can('can_proveedores'))       allowed.push('proveedores');
+    if (P.can('can_cta_cte_proveedores')) allowed.push('cuenta_corriente_proveedores');
     if (P.can('can_operaciones_stock')) allowed.push('operaciones_stock');
     if (P.can('can_consumo_interno'))   allowed.push('consumo_interno');
     if (P.can('can_promociones'))       allowed.push('promociones');
@@ -171,6 +181,60 @@
     if (P.can('can_gastos'))            allowed.push('gastos');
     if (P.can('can_etiquetas'))         allowed.push('etiquetas');
     return allowed;
+  }
+
+  // ── Guard de rutas ───────────────────────────────────────────────────────────
+  // initNav() (abajo) ya filtra qué links aparecen en el menú — pero antes de
+  // este guard, el router cargaba CUALQUIER hash sin volver a chequear nada,
+  // así que un usuario sin el permiso podía acceder igual escribiendo la URL a
+  // mano (ej. #productos, #compras_v2, #proveedores, #gastos). isRouteAllowed()
+  // se llama en loadView() antes de renderizar cualquier vista, para que el
+  // acceso directo por hash respete los mismos permisos que ya decidían qué se
+  // ve en el menú.
+  //
+  // Rutas admin-pos-only: solo alcanzables desde admin-pos/ (nunca desde el
+  // POS local), más allá del rol de quien esté logueado ahí.
+  const ROUTE_ADMIN_POS_ONLY = ['configuracion', 'flujo'];
+  // Rutas que ya se autoprotegen con su propio chequeo de rol==='admin'
+  // adentro del módulo (usuarios.js, configuracion.js, caja_admin.js,
+  // adelanto_pago.js) — se listan igual acá para blindaje centralizado.
+  const ROUTE_ADMIN_ONLY = ['usuarios', 'caja_admin', 'configuracion', 'adelanto_pago'];
+  // Ruta -> permiso granular (SGA_PERMISOS_DEF en auth.js) que hace falta para
+  // entrar. Rutas ausentes de este mapa (pos, caja, y cualquier módulo nuevo
+  // que se agregue sin actualizar esta lista) quedan sin restricción
+  // específica una vez logueado — agregar acá cualquier módulo que necesite
+  // permiso propio.
+  const ROUTE_PERMISSION = {
+    productos:                     'can_ver_productos',
+    'editor-producto':             'can_editar_productos',
+    clientes:                      'can_clientes',
+    compras_v2:                    'can_compras',
+    ordenes:                       'can_ordenes',
+    proveedores:                   'can_proveedores',
+    cuenta_corriente_proveedores:  'can_cta_cte_proveedores',
+    operaciones_stock:             'can_operaciones_stock',
+    roturas:                       'can_roturas_vencimientos',
+    vencimientos:                  'can_roturas_vencimientos',
+    consumo_interno:               'can_consumo_interno',
+    promociones:                   'can_promociones',
+    informes:                      'can_informes',
+    gastos:                        'can_gastos',
+    etiquetas:                     'can_etiquetas',
+  };
+
+  function isRouteAllowed(route) {
+    if (ROUTE_ADMIN_POS_ONLY.includes(route) && !window.ADMIN_MODE) return false;
+    if (window.ADMIN_MODE) return true; // admin-pos: acceso total, igual que ADMIN_POS_MODULES
+
+    const user = window.SGA_Auth.getCurrentUser();
+    if (!user) return false;
+    if (user.rol === 'admin') return true; // admin en POS local: acceso total
+
+    if (ROUTE_ADMIN_ONLY.includes(route)) return false;
+
+    const key = ROUTE_PERMISSION[route];
+    if (!key) return true; // sin restricción específica (pos, caja, etc.)
+    return window.SGA_Permisos.can(key);
   }
 
   /**
