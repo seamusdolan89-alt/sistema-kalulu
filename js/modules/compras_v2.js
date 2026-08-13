@@ -449,7 +449,7 @@ const ComprasV2 = (() => {
           </td>
           <td class="cv2-subtotal cv2-td-right cv2-td-subtotal">${fmt$(sub)}</td>
           <td class="cv2-td-center">
-            <button class="cv2-remove-btn" data-idx="${i}" title="Quitar"
+            <button class="cv2-remove-btn" data-idx="${i}" aria-label="Quitar" title="Quitar"
                     ${state.vinculandoRemitoId ? 'style="visibility:hidden"' : ''}>×</button>
           </td>
         </tr>
@@ -1025,7 +1025,7 @@ const ComprasV2 = (() => {
     container.innerHTML = `
       <div class="cv2-new-prod-header">
         <span>⚠️ El código no coincide con lo esperado</span>
-        <button class="cv2-new-prod-close" id="cv2-esc-close">×</button>
+        <button class="cv2-new-prod-close" id="cv2-esc-close" aria-label="Cerrar" title="Cerrar">×</button>
       </div>
       <div class="cv2-new-prod-body">
         <p style="margin:0 0 6px;font-size:13px;color:#607080">Esperábamos (según la factura): <strong style="color:#1a2744">${esc(esperado?.nombre || it.nombre)}</strong></p>
@@ -1054,7 +1054,7 @@ const ComprasV2 = (() => {
     container.innerHTML = `
       <div class="cv2-new-prod-header">
         <span>Código no encontrado: ${esc(codigo)}</span>
-        <button class="cv2-new-prod-close" id="cv2-nc-close">×</button>
+        <button class="cv2-new-prod-close" id="cv2-nc-close" aria-label="Cerrar" title="Cerrar">×</button>
       </div>
       <div class="cv2-new-prod-body">
         <p style="margin:0 0 12px;font-size:13px;color:#607080">No hay ningún producto con ese código de barras. ¿Qué querés hacer?</p>
@@ -1126,7 +1126,7 @@ const ComprasV2 = (() => {
     container.innerHTML = `
       <div class="cv2-new-prod-header">
         <span>Nuevo producto</span>
-        <button class="cv2-new-prod-close" id="cv2-np-close">×</button>
+        <button class="cv2-new-prod-close" id="cv2-np-close" aria-label="Cerrar" title="Cerrar">×</button>
       </div>
       <div class="cv2-new-prod-body">
         <div class="cv2-field-row">
@@ -1242,7 +1242,7 @@ const ComprasV2 = (() => {
       <div class="cv2-prov-modal">
         <div class="cv2-prov-modal-hdr">
           <span>Nuevo Proveedor</span>
-          <button id="cv2-pm-close" class="cv2-prov-modal-close">✕</button>
+          <button id="cv2-pm-close" class="cv2-prov-modal-close" aria-label="Cerrar" title="Cerrar">✕</button>
         </div>
         <div class="cv2-prov-modal-body">
           <div class="cv2-pm-field">
@@ -1340,7 +1340,7 @@ const ComprasV2 = (() => {
     container.innerHTML = `
       <div class="cv2-new-prod-header">
         <span>🔗 Vincular código a producto existente</span>
-        <button class="cv2-new-prod-close" id="cv2-lp-close">×</button>
+        <button class="cv2-new-prod-close" id="cv2-lp-close" aria-label="Cerrar" title="Cerrar">×</button>
       </div>
       <div class="cv2-new-prod-body">
         <div class="cv2-field-row">

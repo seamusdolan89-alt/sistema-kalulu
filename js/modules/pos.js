@@ -894,7 +894,7 @@ export const POS = (() => {
           <td class="c-price">${formatCurrency(item.precioUnitario)}</td>
           <td class="c-disc"><button class="disc-btn ${hasDisc ? 'active' : ''}" data-idx="${idx}">${hasDisc ? formatCurrency(item.descuentoItem) : '—'}</button></td>
           <td class="c-sub">${formatCurrency(sub)}</td>
-          <td class="c-del"><button class="del-btn" data-idx="${idx}" title="Quitar">✕</button></td>
+          <td class="c-del"><button class="del-btn" data-idx="${idx}" aria-label="Quitar" title="Quitar">✕</button></td>
         </tr>`;
       }).join('');
 

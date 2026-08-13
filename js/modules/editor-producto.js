@@ -546,7 +546,7 @@ const EditorProducto = (() => {
         <input type="number" id="ed-promo-qty" class="input-full" value="1" min="1" step="1"
                style="width:70px;flex:none" title="Cantidad requerida">
         <button class="btn btn-primary btn-sm" id="ed-btn-promo-confirmar">Agregar</button>
-        <button class="btn btn-secondary btn-sm" id="ed-btn-promo-cancelar">✕</button>
+        <button class="btn btn-secondary btn-sm" id="ed-btn-promo-cancelar" aria-label="Cancelar" title="Cancelar">✕</button>
       </div>
     </div>
     <button class="btn btn-secondary" id="ed-btn-agregar-promo">+ Agregar a promoción</button>
@@ -840,7 +840,7 @@ const EditorProducto = (() => {
     list.innerHTML = state.barcodes.map(bc => `
       <span class="ed-barcode-tag ${bc.es_principal ? 'principal' : ''}" data-id="${escapeHtml(bc.id)}">
         ${escapeHtml(bc.codigo)}${bc.es_principal ? ' ★' : ''}
-        <button class="ed-remove-barcode" data-id="${escapeHtml(bc.id)}" title="Eliminar">×</button>
+        <button class="ed-remove-barcode" data-id="${escapeHtml(bc.id)}" aria-label="Eliminar código de barras" title="Eliminar">×</button>
       </span>
     `).join('');
 
