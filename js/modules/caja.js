@@ -87,10 +87,10 @@ const Caja = (() => {
   function getDenominaciones() {
     try {
       const rows = window.SGA_DB.query(
-        `SELECT valor FROM system_config WHERE clave = 'denominaciones' LIMIT 1`
+        `SELECT value FROM system_config WHERE key = 'denominaciones' LIMIT 1`
       );
-      if (rows.length && rows[0].valor) {
-        const arr = JSON.parse(rows[0].valor);
+      if (rows.length && rows[0].value) {
+        const arr = JSON.parse(rows[0].value);
         if (Array.isArray(arr) && arr.length) return arr;
       }
     } catch (e) { /* fallback */ }
@@ -1566,7 +1566,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       if (!denoms.length) { showToast('Debe haber al menos una denominación', 'warn'); return; }
       try {
         window.SGA_DB.run(
-          `INSERT OR REPLACE INTO system_config (clave, valor, updated_at) VALUES ('denominaciones', ?, datetime('now'))`,
+          `INSERT OR REPLACE INTO system_config (key, value, updated_at) VALUES ('denominaciones', ?, datetime('now'))`,
           [JSON.stringify(denoms)]
         );
         // Update in-memory fallback and reset stale bill quantities
