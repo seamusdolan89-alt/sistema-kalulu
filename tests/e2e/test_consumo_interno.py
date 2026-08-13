@@ -6,14 +6,17 @@ atribuir a otro usuario (requiere password: vacia -> error, incorrecta ->
 error, correcta -> se guarda), y que el registro quede con
 usuario_id=atribuido / registrado_por_usuario_id=quien realmente operaba.
 
-NOTA: al confirmar con password correcta aparece un error de consola no
-bloqueante ("Failed to set the 'innerHTML' property... node no longer a
-child of this node") coincidiendo con el hashchange a #operaciones_stock.
-No afecta el resultado (el consumo se guarda bien, stock se descuenta
-correcto) — reproducible pero de causa no identificada aun; lo aceptamos
-explicitamente en este test en vez of fallar por el resto de la
-regresion. Si en el futuro se identifica la causa real, sacar el
-allowlist de abajo.
+CORRECCIÓN (sesión previa): una versión anterior de este test disparaba un
+"NotFoundError: node no longer a child of this node" al cambiar la
+cantidad via `input.dispatch_event("change")` — parecía un bug de la app,
+pero se confirmó que era un artefacto del test: `dispatch_event("change")`
+dispara el evento de forma sintética mientras el input aún se considera
+"foco actual" para Playwright, algo que un usuario real nunca hace.
+Reproducido con una interacción real (escribir + click en otro campo,
+blur genuino) y el mismo cambio de cantidad funciona sin error — el
+`renderCart()` en `consumo_interno.js` reconstruye el `<tbody>` sin
+problema cuando el 'change' llega por el camino normal (blur nativo). Este
+test ahora usa esa interacción realista.
 
 Correr (server ya levantado en :8765, ver README.md):
 
@@ -28,10 +31,6 @@ from playwright.sync_api import sync_playwright
 from helpers import block_firebase, enable_dev_mode, login_via_seed
 
 SCREENSHOT_DIR = os.path.join(os.path.dirname(__file__), "screenshots")
-
-# Ver nota arriba - error de consola conocido, no bloqueante, sin causa
-# identificada todavia.
-KNOWN_HARMLESS_ERRORS = ("is no longer a child of this node",)
 
 
 def main():
@@ -76,9 +75,11 @@ def main():
         page.wait_for_timeout(400)
         page.locator("#ci-search-dropdown .sri").click()
         page.wait_for_timeout(300)
+        # Interaccion realista: escribir la cantidad y hacer click en otro
+        # campo (blur genuino) en vez de dispatch_event("change") sintetico
+        # — ver nota en el docstring.
         page.fill("input[data-qty='0']", "2")
-        page.locator("input[data-qty='0']").dispatch_event("change")
-        page.wait_for_timeout(300)
+        page.locator("#ci-motivo").click()
         page.select_option("#ci-motivo", "uso_interno")
 
         print("--- Atribuir a otro usuario (Cajera Uno) -> debe pedir password ---")
@@ -130,12 +131,9 @@ def main():
         """)
         assert abs(stock[0]["cantidad"] - 18) < 0.01, f"Stock esperado 18 (20-2), obtenido: {stock}"
 
-        unexpected = [e for e in errors if not any(k in e for k in KNOWN_HARMLESS_ERRORS)]
-        assert not unexpected, f"Errores JS no capturados en pagina: {unexpected}"
+        assert not errors, f"Errores JS no capturados en pagina: {errors}"
 
         print("OK - Consumo interno: atribucion a otro usuario con confirmacion por password funciona correctamente.")
-        if errors:
-            print(f"(Nota: {len(errors)} error(es) de consola conocidos/no bloqueantes, ver docstring del test)")
         print(f"Screenshots: {SCREENSHOT_DIR}")
 
         browser.close()

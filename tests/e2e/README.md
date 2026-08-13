@@ -106,14 +106,18 @@ saldo de prueba en Cuentas Corrientes.
   validado manualmente por el usuario — no hace falta cubrirlo con e2e por
   ahora (ver memoria `project_compras_v2_pendiente.md`).
 
-## Hallazgo abierto (no bloqueante)
+## Hallazgo cerrado — no era un bug
 
-`test_consumo_interno.py` tolera explícitamente un error de consola
-reproducible ("Failed to set the 'innerHTML' property... node no longer a
-child of this node") que aparece justo al confirmar con contraseña →
-hashchange a `#operaciones_stock`. No afecta el resultado (datos guardados
-bien), pero no se identificó la causa exacta — no hay listener de `blur`
-en `consumo_interno.js`/`operaciones_stock.js`/`app.js`, así que parece un
-race entre el router reemplazando `#app` y algún nodo que todavía se
-está actualizando. Si se investiga, sacar el allowlist `KNOWN_HARMLESS_ERRORS`
-del test.
+Una versión anterior de `test_consumo_interno.py` reportaba un error de
+consola reproducible ("NotFoundError: node no longer a child of this
+node") al cambiar la cantidad en el carrito vía
+`input.dispatch_event("change")`. Se investigó con el stack trace completo
+(`exc.stack` del `pageerror`) y apuntaba a `renderCart()` en
+`consumo_interno.js` — pero al reproducir el mismo cambio de cantidad con
+una interacción **real** (escribir + click en otro campo, blur genuino en
+vez de `dispatch_event` sintético), el mismo flujo funciona sin ningún
+error. Conclusión: era un artefacto del test, no un bug de la app. Moraleja
+para escribir tests nuevos — **preferir interacciones reales
+(`.click()`, `.fill()` + click en otro elemento) a `dispatch_event()`
+sintético** cuando el código de la app depende de eventos `change`/`blur`
+nativos en inputs.
