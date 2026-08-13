@@ -94,6 +94,10 @@ sale "vacío" inesperadamente.
 | `test_operaciones_stock_salidas.py` | Rotura + Vencimiento + Consumo Interno, y el informe "Salidas de Stock (no venta)" (commit 7dd1082) agrupando por persona con valuación a costo/venta y filtro por tipo |
 | `test_usuarios_permisos.py` | Regresión del guard de rutas (`isRouteAllowed` en app.js): un usuario sin permiso queda bloqueado accediendo por URL directa (no solo oculto del menú); admin en POS local y admin-pos no pierden nada |
 | `test_usuarios_rediseno_permisos.py` | Rediseño de Usuarios: plantilla de rol aplicada desde la UI, dependencia blanda (editar productos auto-tilda y bloquea "ver productos"), guardar, loguearse como ese usuario y verificar que el enforcement real (productos.js, operaciones_stock.js, router) coincide con la plantilla |
+| `test_caja_movimientos.py` | Caja: egreso/ingreso calculan bien el saldo esperado; cierre de caja concilia en cero; regresión del bug real `clave`/`valor` vs `key`/`value` en "Editar denominaciones" (guardaba "✓ Guardado" pero nunca persistía) |
+| `test_caja_pago_proveedor.py` | "💳 Pago a Proveedor" desde Caja: un pago descuenta la caja (egreso) Y la cuenta corriente del proveedor a la vez |
+| `test_gastos_generales.py` | Buscar un proveedor de servicios (`tipo_proveedor='servicios'`) y cargar un gasto |
+| `test_adelanto_pago.py` | Adelanto de Pago a proveedor (admin-only): se registra como crédito huérfano (`pagos_proveedores`), sin imputar todavía, listo para aplicarse a la próxima compra |
 
 Nota: toda compra en este sistema queda "Cta. Cte." — la condición de pago
 está fija en `compras_v2.js` (`state.condicionPago = 'pendiente'`, sin
@@ -102,8 +106,12 @@ saldo de prueba en Cuentas Corrientes.
 
 ## Próximos módulos a cubrir
 
-- Etiquetas, órdenes de compra — se van agregando como `test_<modulo>.py`
-  reusando `helpers.py`.
+- Informes (7 de 8 reportes sin probar: Ventas por Producto, Análisis de
+  Productos, Ventas por Transacción, Quiebres de Stock, Ventas por
+  Vendedor, Aging Cuenta Corriente, Resumen Diario de Caja).
+- Proveedores (CRUD completo), Órdenes de Compra, Editor de Producto
+  (página completa), Etiquetas, Devoluciones/Pedido Abierto (dentro de
+  POS) — se van agregando como `test_<modulo>.py` reusando `helpers.py`.
 - El modal de herencia de familias en Compras (`showHerenciaModal`) ya fue
   validado manualmente por el usuario — no hace falta cubrirlo con e2e por
   ahora (ver memoria `project_compras_v2_pendiente.md`).
