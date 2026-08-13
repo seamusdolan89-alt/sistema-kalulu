@@ -12,7 +12,7 @@ Cubre:
 1. Cajero SIN permisos: bloqueado en rutas con permiso granular
    (productos, compras_v2, proveedores, gastos) y en rutas admin-only
    (usuarios, caja_admin, configuracion).
-2. Cajero CON un permiso puntual (can_productos): accede a esa ruta.
+2. Cajero CON un permiso puntual (can_ver_productos): accede a esa ruta.
 3. Admin en POS local: sigue con acceso total a los módulos que ya usaba
    sin necesitar permiso explícito (compras_v2, consumo_interno, roturas,
    vencimientos, operaciones_stock) — NO debe haber regresión acá.
@@ -80,8 +80,8 @@ def main():
         print("--- Crear cajero SIN ningun permiso ---")
         crear_usuario(page, "user-sinperm", "sinpermisos", "pass123", "{}")
 
-        print("--- Crear cajero CON can_productos=true ---")
-        crear_usuario(page, "user-conperm", "conpermisos", "pass123", '{"can_productos": true}')
+        print("--- Crear cajero CON can_ver_productos=true ---")
+        crear_usuario(page, "user-conperm", "conpermisos", "pass123", '{"can_ver_productos": true}')
 
         print("=== Cajero SIN permisos: rutas con permiso granular deben bloquearse ===")
         page.evaluate("() => sessionStorage.removeItem('sga_user')")
@@ -101,12 +101,12 @@ def main():
             text = ir_a(page, ruta)
             assert RESTRINGIDO in text, f"#{ruta} deberia estar bloqueado (admin-only): {text[:150]!r}"
 
-        print("=== Cajero CON can_productos=true: debe entrar a #productos ===")
+        print("=== Cajero CON can_ver_productos=true: debe entrar a #productos ===")
         page.evaluate("() => sessionStorage.removeItem('sga_user')")
         login_direct(page, username="conpermisos", password="pass123")
         page.wait_for_timeout(300)
         text = ir_a(page, "productos")
-        assert RESTRINGIDO not in text, f"#productos deberia ser accesible con can_productos=true: {text[:150]!r}"
+        assert RESTRINGIDO not in text, f"#productos deberia ser accesible con can_ver_productos=true: {text[:150]!r}"
         assert "Coca-Cola" in text, f"No se ve el listado de productos esperado: {text[:150]!r}"
 
         # Pero otras rutas sin permiso siguen bloqueadas para el mismo usuario

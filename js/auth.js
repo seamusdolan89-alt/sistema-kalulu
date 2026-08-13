@@ -8,32 +8,95 @@
   let currentUser = null;
 
   // ─── Definición de permisos disponibles ────────────────────────────────────
-  // Cada entrada: { key, label, grupo, tipo ('bool'|'number'), default, min?, max? }
+  // Cada entrada: { key, label, grupo, riesgo ('alto'|'medio'|'bajo'), tipo
+  // ('bool'|'number'), default, min?, max?, requiere? }.
+  // `riesgo` es solo para la UI (colorea el grupo en usuarios.js) — no cambia
+  // el enforcement. `requiere` es una dependencia blanda: si se tilda este
+  // permiso, usuarios.js auto-tilda (y no deja destildar) el permiso base del
+  // que depende — tampoco es enforcement real, eso lo hace cada módulo/el
+  // router (ver ROUTE_PERMISSION en app.js e isRouteAllowed()).
   // Los admins siempre tienen todos los permisos. Estos checkboxes aplican solo a no-admins.
+  //
+  // NOTA: can_ver_productos/can_editar_productos/can_ver_costos,
+  // can_cta_cte_proveedores y can_roturas_vencimientos son permisos NUEVOS
+  // (antes eran can_productos, can_proveedores y can_operaciones_stock sin
+  // separar ver/editar). Ver migración de permisos legacy en js/db.js —
+  // usuarios ya creados con los permisos viejos se expanden automáticamente
+  // para no perder acceso al actualizar.
 
   window.SGA_PERMISOS_DEF = [
-    // VENTAS
-    { key: 'can_anular_venta',       label: 'Anular ventas',                         grupo: 'Ventas',   tipo: 'bool',   default: false },
-    { key: 'can_editar_venta',       label: 'Editar ventas pasadas',                  grupo: 'Ventas',   tipo: 'bool',   default: false },
-    { key: 'max_descuento_pct',      label: 'Descuento máximo permitido (%)',         grupo: 'Ventas',   tipo: 'number', default: 0, min: 0, max: 100 },
-    { key: 'can_sobrepasar_tope_cc', label: 'Sobrepasar tope de crédito de clientes', grupo: 'Ventas',  tipo: 'bool',   default: false },
-    // CAJA
-    { key: 'can_cerrar_caja',        label: 'Cerrar caja',                            grupo: 'Caja',    tipo: 'bool',   default: false },
-    { key: 'can_registrar_egreso',   label: 'Registrar egresos',                      grupo: 'Caja',    tipo: 'bool',   default: false },
-    { key: 'can_registrar_ingreso',  label: 'Registrar ingresos extra',               grupo: 'Caja',    tipo: 'bool',   default: false },
-    { key: 'can_pago_proveedor',     label: 'Hacer pagos a proveedores desde caja',   grupo: 'Caja',    tipo: 'bool',   default: true  },
-    // MÓDULOS (controlan visibilidad en el menú lateral)
-    { key: 'can_productos',          label: 'Gestionar productos',                    grupo: 'Módulos', tipo: 'bool',   default: false },
-    { key: 'can_clientes',           label: 'Gestionar clientes',                     grupo: 'Módulos', tipo: 'bool',   default: false },
-    { key: 'can_compras',            label: 'Gestionar compras',                      grupo: 'Módulos', tipo: 'bool',   default: false },
-    { key: 'can_ordenes',            label: 'Órdenes de compra',                      grupo: 'Módulos', tipo: 'bool',   default: false },
-    { key: 'can_proveedores',        label: 'Ver proveedores y cuentas corrientes',   grupo: 'Módulos', tipo: 'bool',   default: false },
-    { key: 'can_operaciones_stock',  label: 'Operaciones de stock',                   grupo: 'Módulos', tipo: 'bool',   default: false },
-    { key: 'can_consumo_interno',    label: 'Registrar consumo interno',              grupo: 'Módulos', tipo: 'bool',   default: false },
-    { key: 'can_promociones',        label: 'Gestionar promociones',                  grupo: 'Módulos', tipo: 'bool',   default: false },
-    { key: 'can_informes',           label: 'Ver informes',                           grupo: 'Módulos', tipo: 'bool',   default: false },
-    { key: 'can_gastos',             label: 'Ver gastos generales',                   grupo: 'Módulos', tipo: 'bool',   default: false },
-    { key: 'can_etiquetas',          label: 'Imprimir etiquetas',                     grupo: 'Módulos', tipo: 'bool',   default: false },
+    // ── FINANZAS Y CAJA (🔴 alto riesgo — tocan plata directamente) ──────────
+    { key: 'can_cerrar_caja',        label: 'Cerrar caja',                             grupo: 'Finanzas y Caja', riesgo: 'alto', tipo: 'bool',   default: false },
+    { key: 'can_registrar_egreso',   label: 'Registrar egresos',                       grupo: 'Finanzas y Caja', riesgo: 'alto', tipo: 'bool',   default: false },
+    { key: 'can_registrar_ingreso',  label: 'Registrar ingresos extra',                grupo: 'Finanzas y Caja', riesgo: 'alto', tipo: 'bool',   default: false },
+    { key: 'can_pago_proveedor',     label: 'Pagos a proveedores desde caja',          grupo: 'Finanzas y Caja', riesgo: 'alto', tipo: 'bool',   default: true  },
+    { key: 'can_gastos',             label: 'Ver y cargar Gastos Generales',           grupo: 'Finanzas y Caja', riesgo: 'alto', tipo: 'bool',   default: false },
+    { key: 'max_descuento_pct',      label: 'Descuento máximo permitido (%)',          grupo: 'Finanzas y Caja', riesgo: 'alto', tipo: 'number', default: 0, min: 0, max: 100 },
+
+    // ── VENTAS (🟡 medio — tocan ventas ya cerradas o límites de crédito) ────
+    { key: 'can_anular_venta',       label: 'Anular ventas',                           grupo: 'Ventas', riesgo: 'medio', tipo: 'bool', default: false },
+    { key: 'can_editar_venta',       label: 'Editar ventas pasadas',                   grupo: 'Ventas', riesgo: 'medio', tipo: 'bool', default: false },
+    { key: 'can_sobrepasar_tope_cc', label: 'Sobrepasar tope de crédito de clientes',  grupo: 'Ventas', riesgo: 'medio', tipo: 'bool', default: false },
+
+    // ── PRODUCTOS ─────────────────────────────────────────────────────────
+    { key: 'can_ver_productos',      label: 'Ver productos (buscar, stock, precio)',   grupo: 'Productos', riesgo: 'bajo',  tipo: 'bool', default: false },
+    { key: 'can_editar_productos',   label: 'Crear, modificar y borrar productos',     grupo: 'Productos', riesgo: 'medio', tipo: 'bool', default: false, requiere: 'can_ver_productos' },
+    { key: 'can_ver_costos',         label: 'Ver costos y márgenes',                   grupo: 'Productos', riesgo: 'medio', tipo: 'bool', default: false, requiere: 'can_ver_productos' },
+
+    // ── COMPRAS Y PROVEEDORES ────────────────────────────────────────────
+    { key: 'can_compras',             label: 'Gestionar compras',                        grupo: 'Compras y Proveedores', riesgo: 'medio', tipo: 'bool', default: false },
+    { key: 'can_ordenes',             label: 'Órdenes de compra',                        grupo: 'Compras y Proveedores', riesgo: 'bajo',  tipo: 'bool', default: false },
+    { key: 'can_proveedores',         label: 'Ver proveedores',                          grupo: 'Compras y Proveedores', riesgo: 'bajo',  tipo: 'bool', default: false },
+    { key: 'can_cta_cte_proveedores', label: 'Cuenta corriente de proveedores (pagos)',  grupo: 'Compras y Proveedores', riesgo: 'alto',  tipo: 'bool', default: false, requiere: 'can_proveedores' },
+
+    // ── STOCK ─────────────────────────────────────────────────────────────
+    { key: 'can_operaciones_stock',    label: 'Operaciones de stock (recuentos, ajustes)', grupo: 'Stock', riesgo: 'bajo',  tipo: 'bool', default: false },
+    { key: 'can_roturas_vencimientos', label: 'Dar de baja por rotura o vencimiento',      grupo: 'Stock', riesgo: 'medio', tipo: 'bool', default: false },
+    { key: 'can_consumo_interno',      label: 'Registrar consumo interno',                 grupo: 'Stock', riesgo: 'medio', tipo: 'bool', default: false },
+
+    // ── OTROS ─────────────────────────────────────────────────────────────
+    { key: 'can_clientes',     label: 'Gestionar clientes',    grupo: 'Otros', riesgo: 'bajo',  tipo: 'bool', default: false },
+    { key: 'can_promociones',  label: 'Gestionar promociones', grupo: 'Otros', riesgo: 'bajo',  tipo: 'bool', default: false },
+    { key: 'can_informes',     label: 'Ver informes',          grupo: 'Otros', riesgo: 'medio', tipo: 'bool', default: false },
+    { key: 'can_etiquetas',    label: 'Imprimir etiquetas',    grupo: 'Otros', riesgo: 'bajo',  tipo: 'bool', default: false },
+  ];
+
+  // ─── Plantillas de rol ──────────────────────────────────────────────────────
+  // Atajos para no tildar los ~23 permisos a mano en cada alta. Al aplicar una
+  // plantilla se pisan los checkboxes visibles en el form — el admin puede
+  // seguir ajustando antes de guardar, no queda "bloqueado" a la plantilla.
+
+  window.SGA_PERMISOS_PRESETS = [
+    {
+      id: 'cajera_basica',
+      nombre: 'Cajera básica',
+      descripcion: 'Vender en el POS: buscar productos y atender clientes. Sin descuentos, sin tocar precios ni caja.',
+      permisos: { can_ver_productos: true, can_clientes: true },
+    },
+    {
+      id: 'encargado_stock',
+      nombre: 'Encargado de Stock',
+      descripcion: 'Gestiona mercadería: productos, costos, recuentos, bajas por rotura/vencimiento y consumo interno.',
+      permisos: {
+        can_ver_productos: true, can_editar_productos: true, can_ver_costos: true,
+        can_operaciones_stock: true, can_roturas_vencimientos: true, can_consumo_interno: true,
+        can_proveedores: true,
+      },
+    },
+    {
+      id: 'colaborador_confianza',
+      nombre: 'Colaborador de confianza',
+      descripcion: 'Casi acceso total — todo excepto pagos a proveedores desde caja y Gastos Generales.',
+      permisos: {
+        can_cerrar_caja: true, can_registrar_egreso: true, can_registrar_ingreso: true,
+        max_descuento_pct: 20,
+        can_anular_venta: true, can_editar_venta: true, can_sobrepasar_tope_cc: true,
+        can_ver_productos: true, can_editar_productos: true, can_ver_costos: true,
+        can_compras: true, can_ordenes: true, can_proveedores: true,
+        can_operaciones_stock: true, can_roturas_vencimientos: true, can_consumo_interno: true,
+        can_clientes: true, can_promociones: true, can_informes: true, can_etiquetas: true,
+      },
+    },
   ];
 
   // ─── Motor de permisos ──────────────────────────────────────────────────────

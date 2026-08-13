@@ -3,6 +3,10 @@
 
 
   const state = {
+    // Permisos del usuario actual (se resuelven en init(), ver auth.js:
+    // can_editar_productos / can_ver_costos). Admin y admin-pos: acceso total.
+    puedeEditar: false,
+    puedeVerCostos: false,
     productos: [],
     categorias: [],
     proveedores: [],
@@ -316,22 +320,32 @@
       const estadoLabel  = producto.activo == 1 ? '<span style="color:#388E3C">Activo</span>' : '<span style="color:#d32f2f">Inactivo</span>';
       const ofertaBadge  = producto.es_oferta ? '<span style="display:inline-block;background:#e53935;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle">OFERTA</span>' : '';
 
+      // Costo y margen revelan el margen de ganancia — solo se muestran con
+      // el permiso can_ver_costos (ver auth.js). El precio de venta sigue
+      // visible siempre: hace falta para atender en el mostrador.
+      const costoCell  = state.puedeVerCostos ? formatCurrency(producto.costo || 0) : '<span title="Sin permiso para ver costos" style="color:#bbb">🔒</span>';
+      const margenCell = state.puedeVerCostos ? `${margen}%` : '<span style="color:#bbb">—</span>';
+
+      const accionesCell = state.puedeEditar ? `
+            <button data-id="${producto.id}" class="btn btn-small btn-secondary btn-edit-product" title="Editar">✏️</button>
+            <button data-id="${producto.id}" class="btn btn-small btn-danger btn-delete-product" title="Eliminar">🗑️</button>
+            <button data-id="${producto.id}" class="btn btn-small btn-secondary btn-assign-madre" title="Asignar producto madre">👨‍👩‍👧</button>
+          ` : '<span style="color:#bbb;font-size:12px">Solo lectura</span>';
+
       return `
         <tr data-id="${producto.id}">
           <td>${producto.codigo_barras || ''}</td>
           <td>${producto.nombre || ''}${ofertaBadge}</td>
           <td>${categoria}</td>
-          <td>${formatCurrency(producto.costo || 0)}</td>
+          <td>${costoCell}</td>
           <td>${formatCurrency(producto.precio_venta || 0)}</td>
-          <td>${margen}%</td>
+          <td>${margenCell}</td>
           <td>${stock}</td>
           <td>${producto.stock_minimo || 0}</td>
           <td style="${madreStyle}">${madreDisplay}</td>
           <td>${estadoLabel}</td>
           <td>
-            <button data-id="${producto.id}" class="btn btn-small btn-secondary btn-edit-product" title="Editar">✏️</button>
-            <button data-id="${producto.id}" class="btn btn-small btn-danger btn-delete-product" title="Eliminar">🗑️</button>
-            <button data-id="${producto.id}" class="btn btn-small btn-secondary btn-assign-madre" title="Asignar producto madre">👨‍👩‍👧</button>
+            ${accionesCell}
           </td>
         </tr>
       `;
@@ -1937,6 +1951,7 @@
 
     // Row click → open edit (ignore clicks on action buttons)
     getElement('productos-tbody')?.addEventListener('click', (e) => {
+      if (!state.puedeEditar) return; // solo lectura: sin permiso, el click no navega al editor
       if (e.target.closest('button')) return;
       const row = e.target.closest('tr[data-id]');
       if (row) openEditModal(row.dataset.id);
@@ -1955,6 +1970,13 @@
     getElement('btn-close-edit')?.addEventListener('click', closeEditModal);
     getElement('btn-edit-cancel')?.addEventListener('click', closeEditModal);
     getElement('btn-edit-save')?.addEventListener('click', saveEditModal);
+
+    // Sin permiso de edición: ocultar altas/importación masiva (solo lectura)
+    if (!state.puedeEditar) {
+      getElement('btn-nuevo-producto')?.classList.add('hidden');
+      getElement('btn-importar-excel')?.classList.add('hidden');
+      getElement('btn-descargar-plantilla')?.classList.add('hidden');
+    }
 
     getElement('btn-descargar-plantilla')?.addEventListener('click', downloadTemplate);
     getElement('btn-nuevo-producto')?.addEventListener('click', () => { window.location.hash = '#editor-producto/new'; });
@@ -2256,6 +2278,13 @@
     state.editingProduct = null;
     const detailPanel = getElement('detail-panel');
     if (detailPanel) detailPanel.classList.add('hidden');
+
+    // Permisos — ver auth.js (can_editar_productos / can_ver_costos).
+    // admin-pos siempre tiene acceso total, igual que decide isRouteAllowed()
+    // en app.js para la ruta en sí.
+    const perm = window.SGA_Permisos;
+    state.puedeEditar    = !!(window.ADMIN_MODE || perm.can('can_editar_productos'));
+    state.puedeVerCostos = !!(window.ADMIN_MODE || perm.can('can_ver_costos'));
 
     runMigrations();
     setUpEvents();

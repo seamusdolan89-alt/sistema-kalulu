@@ -165,9 +165,31 @@ const OperacionesStock = (() => {
     overlay.style.display = 'flex';
   }
 
+  // Botones de esta pantalla que llevan a otro módulo con su propio permiso
+  // (ver auth.js / ROUTE_PERMISSION en app.js) — el router ya bloquea el
+  // acceso directo por hash, pero ocultar el botón evita el viaje en falso
+  // a "Acceso restringido".
+  const BOTONES_CON_PERMISO = {
+    compras:          'can_compras',
+    consumo_interno:  'can_consumo_interno',
+    vencimientos:     'can_roturas_vencimientos',
+    roturas:          'can_roturas_vencimientos',
+  };
+
+  function ocultarBotonesSinPermiso(root) {
+    const perm = window.SGA_Permisos;
+    if (window.ADMIN_MODE) return; // admin-pos: siempre acceso total, no ocultar nada
+    for (const [action, key] of Object.entries(BOTONES_CON_PERMISO)) {
+      if (perm.can(key)) continue;
+      root.querySelectorAll(`[data-action="${action}"]`).forEach(btn => { btn.style.display = 'none'; });
+    }
+  }
+
   function init() {
     const root = document.getElementById('ops-root');
     if (!root) return;
+
+    ocultarBotonesSinPermiso(root);
 
     // Mostrar/ocultar card de ajuste pendiente
     const pendingCard = document.getElementById('ops-pending-card');

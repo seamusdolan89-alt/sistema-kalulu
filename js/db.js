@@ -1037,6 +1037,52 @@
       }
     } catch(e) { console.warn('password_hash migration:', e.message); }
 
+    // Migración: expandir permisos legacy (can_productos, can_proveedores,
+    // can_operaciones_stock) a los permisos nuevos y más granulares
+    // (can_ver_productos/can_editar_productos/can_ver_costos,
+    // can_cta_cte_proveedores, can_roturas_vencimientos — ver auth.js).
+    // Preserva el acceso que el usuario ya tenía (si podía gestionar
+    // productos antes, ahora puede ver+editar+ver costos; nunca se le saca
+    // acceso al actualizar). Idempotente: solo toca usuarios que todavía no
+    // tienen la clave nueva seteada.
+    try {
+      const stmtPerm = database.prepare(
+        `SELECT id, permisos_json FROM usuarios WHERE permisos_json IS NOT NULL AND permisos_json != ''`
+      );
+      const conPermisos = [];
+      while (stmtPerm.step()) conPermisos.push(stmtPerm.getAsObject());
+      stmtPerm.free();
+
+      let migrados = 0;
+      for (const u of conPermisos) {
+        let permisos;
+        try { permisos = JSON.parse(u.permisos_json); } catch { continue; }
+        if (!permisos || typeof permisos !== 'object') continue;
+
+        let cambio = false;
+        if (permisos.can_productos !== undefined && permisos.can_ver_productos === undefined) {
+          permisos.can_ver_productos    = !!permisos.can_productos;
+          permisos.can_editar_productos = !!permisos.can_productos;
+          permisos.can_ver_costos       = !!permisos.can_productos;
+          cambio = true;
+        }
+        if (permisos.can_proveedores !== undefined && permisos.can_cta_cte_proveedores === undefined) {
+          permisos.can_cta_cte_proveedores = !!permisos.can_proveedores;
+          cambio = true;
+        }
+        if (permisos.can_operaciones_stock !== undefined && permisos.can_roturas_vencimientos === undefined) {
+          permisos.can_roturas_vencimientos = !!permisos.can_operaciones_stock;
+          cambio = true;
+        }
+
+        if (cambio) {
+          database.run(`UPDATE usuarios SET permisos_json = ? WHERE id = ?`, [JSON.stringify(permisos), u.id]);
+          migrados++;
+        }
+      }
+      if (migrados > 0) console.log(`🔐 ${migrados} usuario(s) migrados a los permisos granulares nuevos`);
+    } catch(e) { console.warn('permisos_json migration:', e.message); }
+
     // ── Consumo Interno — tabla dedicada para mayor trazabilidad ──────────────
     try {
       database.run(`

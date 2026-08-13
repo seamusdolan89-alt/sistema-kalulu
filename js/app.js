@@ -168,11 +168,12 @@
     // Colaboradores: según permisos individuales
     const P = window.SGA_Permisos;
     const allowed = ['pos', 'cajas']; // siempre visibles
-    if (P.can('can_productos'))         allowed.push('productos');
+    if (P.can('can_ver_productos'))     allowed.push('productos');
     if (P.can('can_clientes'))          allowed.push('clientes');
     if (P.can('can_compras'))           allowed.push('compras_v2');
     if (P.can('can_ordenes'))           allowed.push('ordenes');
-    if (P.can('can_proveedores'))       allowed.push('proveedores', 'cuenta_corriente_proveedores');
+    if (P.can('can_proveedores'))       allowed.push('proveedores');
+    if (P.can('can_cta_cte_proveedores')) allowed.push('cuenta_corriente_proveedores');
     if (P.can('can_operaciones_stock')) allowed.push('operaciones_stock');
     if (P.can('can_consumo_interno'))   allowed.push('consumo_interno');
     if (P.can('can_promociones'))       allowed.push('promociones');
@@ -204,16 +205,16 @@
   // específica una vez logueado — agregar acá cualquier módulo que necesite
   // permiso propio.
   const ROUTE_PERMISSION = {
-    productos:                     'can_productos',
-    'editor-producto':             'can_productos',
+    productos:                     'can_ver_productos',
+    'editor-producto':             'can_editar_productos',
     clientes:                      'can_clientes',
     compras_v2:                    'can_compras',
     ordenes:                       'can_ordenes',
     proveedores:                   'can_proveedores',
-    cuenta_corriente_proveedores:  'can_proveedores',
+    cuenta_corriente_proveedores:  'can_cta_cte_proveedores',
     operaciones_stock:             'can_operaciones_stock',
-    roturas:                       'can_operaciones_stock',
-    vencimientos:                  'can_operaciones_stock',
+    roturas:                       'can_roturas_vencimientos',
+    vencimientos:                  'can_roturas_vencimientos',
     consumo_interno:               'can_consumo_interno',
     promociones:                   'can_promociones',
     informes:                      'can_informes',

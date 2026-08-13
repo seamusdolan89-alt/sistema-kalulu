@@ -93,6 +93,7 @@ sale "vacío" inesperadamente.
 | `test_consumo_interno.py` | Consumo interno atribuido a otro usuario: pide contraseña, rechaza vacía/incorrecta, guarda con la correcta; el registro queda `usuario_id`=atribuido / `registrado_por_usuario_id`=quien operaba; stock se descuenta |
 | `test_operaciones_stock_salidas.py` | Rotura + Vencimiento + Consumo Interno, y el informe "Salidas de Stock (no venta)" (commit 7dd1082) agrupando por persona con valuación a costo/venta y filtro por tipo |
 | `test_usuarios_permisos.py` | Regresión del guard de rutas (`isRouteAllowed` en app.js): un usuario sin permiso queda bloqueado accediendo por URL directa (no solo oculto del menú); admin en POS local y admin-pos no pierden nada |
+| `test_usuarios_rediseno_permisos.py` | Rediseño de Usuarios: plantilla de rol aplicada desde la UI, dependencia blanda (editar productos auto-tilda y bloquea "ver productos"), guardar, loguearse como ese usuario y verificar que el enforcement real (productos.js, operaciones_stock.js, router) coincide con la plantilla |
 
 Nota: toda compra en este sistema queda "Cta. Cte." — la condición de pago
 está fija en `compras_v2.js` (`state.condicionPago = 'pendiente'`, sin
