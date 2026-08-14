@@ -25,8 +25,67 @@
     display: flex;
     flex-direction: column;
     gap: 28px;
-    max-width: 720px;
+    max-width: 860px;
   }
+
+  /* KPI row */
+  .ops-kpis {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .ops-kpi {
+    background: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-left: 4px solid var(--color-border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    cursor: pointer;
+    transition: box-shadow 0.15s, transform 0.15s;
+  }
+  .ops-kpi:hover { box-shadow: 0 3px 10px rgba(0,0,0,0.12); transform: translateY(-1px); }
+  .ops-kpi .ops-kpi-num { font-size: 1.6rem; font-weight: 800; line-height: 1.1; color: var(--color-text); }
+  .ops-kpi .ops-kpi-label { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; }
+  .ops-kpi.warn   { border-left-color: var(--color-warning-border); }
+  .ops-kpi.warn   .ops-kpi-num { color: var(--color-warning-text); }
+  .ops-kpi.danger { border-left-color: var(--color-danger-border); }
+  .ops-kpi.danger .ops-kpi-num { color: var(--color-danger-text); }
+  .ops-kpi.info   { border-left-color: var(--color-info-border); }
+  .ops-kpi.info   .ops-kpi-num { color: var(--color-info-text); }
+  @media (max-width: 680px) { .ops-kpis { grid-template-columns: repeat(2, 1fr); } }
+
+  /* Actividad reciente */
+  .ops-activity-header {
+    font-size: 13px; font-weight: 700; color: var(--color-text-secondary);
+    text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px;
+  }
+  .ops-activity {
+    background: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  }
+  .ops-activity-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px; font-size: 13px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .ops-activity-row:last-child { border-bottom: none; }
+  .ops-activity-tag {
+    flex-shrink: 0; width: 108px; text-align: center; white-space: nowrap;
+    font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 20px;
+  }
+  .ops-activity-tag.rotura         { background: var(--color-danger-bg);  color: var(--color-danger-text); }
+  .ops-activity-tag.vencimiento    { background: var(--color-warning-bg); color: var(--color-warning-text); }
+  .ops-activity-tag.consumo_interno{ background: var(--color-info-bg);    color: var(--color-info-text); }
+  .ops-activity-tag.ajuste_positivo{ background: var(--color-success-bg); color: var(--color-success-text); }
+  .ops-activity-tag.ajuste_negativo{ background: var(--color-danger-bg);  color: var(--color-danger-text); }
+  .ops-activity-prod { flex: 1; font-weight: 600; color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ops-activity-cant { flex-shrink: 0; color: var(--color-text-secondary); }
+  .ops-activity-fecha { flex-shrink: 0; color: var(--color-text-light); font-size: 12px; width: 78px; text-align: right; }
+  .ops-activity-empty { padding: 28px 16px; text-align: center; color: var(--color-text-light); font-size: 13px; }
 
   /* Group card */
   .ops-group {
@@ -152,6 +211,26 @@
 
   <div class="ops-body">
 
+    <!-- KPIs -->
+    <div class="ops-kpis" id="ops-kpis">
+      <div class="ops-kpi warn" data-action="productos">
+        <div class="ops-kpi-num" id="ops-kpi-bajominimo">—</div>
+        <div class="ops-kpi-label">Bajo mínimo</div>
+      </div>
+      <div class="ops-kpi danger" data-action="roturas">
+        <div class="ops-kpi-num" id="ops-kpi-roturas">—</div>
+        <div class="ops-kpi-label">Roturas (mes)</div>
+      </div>
+      <div class="ops-kpi warn" data-action="vencimientos">
+        <div class="ops-kpi-num" id="ops-kpi-vencimientos">—</div>
+        <div class="ops-kpi-label">Vencimientos (mes)</div>
+      </div>
+      <div class="ops-kpi info" data-action="consumo_interno">
+        <div class="ops-kpi-num" id="ops-kpi-consumo">—</div>
+        <div class="ops-kpi-label">Consumo interno (mes)</div>
+      </div>
+    </div>
+
     <!-- Ajuste de precios pendiente (se muestra dinámicamente) -->
     <div class="ops-pending-card" id="ops-pending-card" style="display:none">
       <div class="ops-pending-header">⏸ Ajuste de precios pendiente</div>
@@ -172,8 +251,8 @@
         <button class="ops-btn ops-btn-active" data-action="compras">🛒 Compras</button>
         <button class="ops-btn ops-btn-active" data-action="historial_compras">📋 Historial de compras</button>
         <button class="ops-btn ops-btn-active" data-action="devolucion">↩ Devolución</button>
-        <button class="ops-btn ops-btn-disabled" data-action="traspaso_ingreso">🔄 Traspaso entre tiendas</button>
-        <button class="ops-btn ops-btn-disabled" data-action="consignacion">📋 Consignación</button>
+        <button class="ops-btn ops-btn-disabled" data-action="traspaso_ingreso" title="Próximamente">🔄 Traspaso entre tiendas</button>
+        <button class="ops-btn ops-btn-disabled" data-action="consignacion" title="Próximamente">📋 Consignación</button>
       </div>
     </div>
 
@@ -181,12 +260,23 @@
     <div class="ops-group">
       <div class="ops-group-header egreso">− Egreso de mercadería</div>
       <div class="ops-group-body">
-        <button class="ops-btn ops-btn-active egreso" data-action="ajuste_stock">📉 Ajuste de stock</button>
+        <!-- Ajuste de stock: sin implementar todavía (igual que los traspasos/
+             consignación) — antes se veía "activo" (ops-btn-active) pese a no
+             hacer nada más que un toast "próximamente", lo cual confundía más
+             que ayudaba. Ahora comparte el mismo estilo atenuado + tooltip
+             que el resto de lo no implementado, honestamente. -->
+        <button class="ops-btn ops-btn-disabled egreso" data-action="ajuste_stock" title="Próximamente">📉 Ajuste de stock</button>
         <button class="ops-btn ops-btn-active egreso" data-action="consumo_interno">🏠 Consumo interno</button>
         <button class="ops-btn ops-btn-active egreso" data-action="vencimientos">⏰ Vencimientos</button>
         <button class="ops-btn ops-btn-active egreso" data-action="roturas">💔 Roturas / producto defectuoso</button>
-        <button class="ops-btn ops-btn-disabled egreso" data-action="traspaso_egreso">🔄 Traspaso entre tiendas</button>
+        <button class="ops-btn ops-btn-disabled egreso" data-action="traspaso_egreso" title="Próximamente">🔄 Traspaso entre tiendas</button>
       </div>
+    </div>
+
+    <!-- Actividad reciente -->
+    <div>
+      <div class="ops-activity-header">Actividad reciente</div>
+      <div class="ops-activity" id="ops-activity" style="margin-top:8px"></div>
     </div>
 
   </div>
