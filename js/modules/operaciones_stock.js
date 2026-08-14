@@ -165,6 +165,85 @@ const OperacionesStock = (() => {
     overlay.style.display = 'flex';
   }
 
+  // ── KPIs Y ACTIVIDAD RECIENTE ──────────────────────────────────────────────
+  // Antes esta pantalla era solo dos filas de botones sin ningún dato — no
+  // había forma de saber si algo estaba pasando sin entrar a cada submódulo.
+  // (hallazgo del recorrido UX, ver memoria project_ux_pass_ui_ux_pro_max.md)
+
+  const TIPO_LABEL = {
+    rotura: 'Rotura', vencimiento: 'Vencimiento', consumo_interno: 'Consumo interno',
+    ajuste_positivo: 'Ajuste (+)', ajuste_negativo: 'Ajuste (−)',
+  };
+
+  function renderKpis() {
+    const user = window.SGA_Auth.getCurrentUser();
+    const sucursalId = user?.sucursal_id || '1';
+    const inicioMes = new Date();
+    inicioMes.setDate(1);
+    const desde = inicioMes.toISOString().slice(0, 10);
+
+    let bajoMinimo = 0;
+    try {
+      bajoMinimo = db().query(`
+        SELECT COUNT(*) AS n
+        FROM productos p
+        LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?
+        WHERE p.activo = 1 AND COALESCE(s.cantidad, 0) < p.stock_minimo
+      `, [sucursalId])[0]?.n || 0;
+    } catch (e) { console.warn('KPI bajo mínimo:', e.message); }
+
+    let porTipo = {};
+    try {
+      db().query(`
+        SELECT tipo, COUNT(*) AS n
+        FROM stock_ajustes
+        WHERE sucursal_id = ? AND fecha >= ? AND tipo IN ('rotura','vencimiento','consumo_interno')
+        GROUP BY tipo
+      `, [sucursalId, desde]).forEach(r => { porTipo[r.tipo] = r.n; });
+    } catch (e) { console.warn('KPI movimientos del mes:', e.message); }
+
+    if (ge('ops-kpi-bajominimo'))    ge('ops-kpi-bajominimo').textContent    = bajoMinimo;
+    if (ge('ops-kpi-roturas'))       ge('ops-kpi-roturas').textContent       = porTipo.rotura || 0;
+    if (ge('ops-kpi-vencimientos'))  ge('ops-kpi-vencimientos').textContent  = porTipo.vencimiento || 0;
+    if (ge('ops-kpi-consumo'))       ge('ops-kpi-consumo').textContent       = porTipo.consumo_interno || 0;
+  }
+
+  function renderActividadReciente() {
+    const cont = ge('ops-activity');
+    if (!cont) return;
+    const user = window.SGA_Auth.getCurrentUser();
+    const sucursalId = user?.sucursal_id || '1';
+
+    let rows = [];
+    try {
+      rows = db().query(`
+        SELECT sa.tipo, sa.cantidad, sa.fecha, p.nombre AS producto_nombre
+        FROM stock_ajustes sa
+        LEFT JOIN productos p ON p.id = sa.producto_id
+        WHERE sa.sucursal_id = ?
+        ORDER BY sa.fecha DESC
+        LIMIT 8
+      `, [sucursalId]);
+    } catch (e) { console.warn('Actividad reciente:', e.message); }
+
+    if (!rows.length) {
+      cont.innerHTML = '<div class="ops-activity-empty">Sin movimientos registrados todavía.</div>';
+      return;
+    }
+
+    cont.innerHTML = rows.map(r => {
+      const fecha = r.fecha ? r.fecha.slice(0, 10) : '—';
+      const tag = TIPO_LABEL[r.tipo] || r.tipo || '—';
+      return `
+        <div class="ops-activity-row">
+          <span class="ops-activity-tag ${esc(r.tipo || '')}">${esc(tag)}</span>
+          <span class="ops-activity-prod">${esc(r.producto_nombre || '—')}</span>
+          <span class="ops-activity-cant">${r.cantidad ?? '—'}</span>
+          <span class="ops-activity-fecha">${esc(fecha)}</span>
+        </div>`;
+    }).join('');
+  }
+
   // Botones de esta pantalla que llevan a otro módulo con su propio permiso
   // (ver auth.js / ROUTE_PERMISSION en app.js) — el router ya bloquea el
   // acceso directo por hash, pero ocultar el botón evita el viaje en falso
@@ -190,6 +269,8 @@ const OperacionesStock = (() => {
     if (!root) return;
 
     ocultarBotonesSinPermiso(root);
+    renderKpis();
+    renderActividadReciente();
 
     // Mostrar/ocultar card de ajuste pendiente
     const pendingCard = document.getElementById('ops-pending-card');
@@ -224,11 +305,23 @@ const OperacionesStock = (() => {
 
     root.addEventListener('click', e => {
       const btn = e.target.closest('[data-action]');
-      if (!btn || btn.classList.contains('ops-btn-disabled')) return;
+      if (!btn) return;
 
       const action = btn.dataset.action;
 
+      // Todo lo marcado como "ops-btn-disabled" es una función real pero sin
+      // implementar todavía — antes clickearlo no hacía nada en absoluto
+      // (silencioso, se sentía roto). Ahora avisa igual que "Ajuste de
+      // stock" ya venía avisando.
+      if (btn.classList.contains('ops-btn-disabled')) {
+        window.SGA_Utils.showNotification(`${btn.textContent.trim()} — próximamente`, 'info');
+        return;
+      }
+
       switch (action) {
+        case 'productos':
+          window.location.hash = '#productos';
+          break;
         case 'retomar':
           sessionStorage.setItem('compras_v2_retomar', '1');
           window.location.hash = '#compras';
@@ -250,9 +343,6 @@ const OperacionesStock = (() => {
           break;
         case 'devolucion':
           window.location.hash = '#pos/devolucion';
-          break;
-        case 'ajuste_stock':
-          window.SGA_Utils.showNotification('Ajuste de stock — próximamente', 'info');
           break;
         case 'consumo_interno':
           window.location.hash = '#consumo_interno';
