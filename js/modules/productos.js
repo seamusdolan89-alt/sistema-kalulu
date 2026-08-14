@@ -326,9 +326,12 @@
       const costoCell  = state.puedeVerCostos ? formatCurrency(producto.costo || 0) : '<span title="Sin permiso para ver costos" style="color:#bbb">🔒</span>';
       const margenCell = state.puedeVerCostos ? `${margen}%` : '<span style="color:#bbb">—</span>';
 
+      const deleteBtn = state.puedeEliminar
+        ? `<button data-id="${producto.id}" class="btn btn-small btn-danger btn-delete-product" title="Eliminar">🗑️</button>`
+        : '';
       const accionesCell = state.puedeEditar ? `
             <button data-id="${producto.id}" class="btn btn-small btn-secondary btn-edit-product" title="Editar">✏️</button>
-            <button data-id="${producto.id}" class="btn btn-small btn-danger btn-delete-product" title="Eliminar">🗑️</button>
+            ${deleteBtn}
             <button data-id="${producto.id}" class="btn btn-small btn-secondary btn-assign-madre" title="Asignar producto madre">👨‍👩‍👧</button>
           ` : '<span style="color:#bbb;font-size:12px">Solo lectura</span>';
 
@@ -372,6 +375,7 @@
     document.querySelectorAll('.btn-delete-product').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
+        if (!state.puedeEliminar) return; // solo Admin-POS, ver init()
         const id = btn.dataset.id;
         if (!confirm('¿Seguro que desea eliminar este producto?')) return;
         try {
@@ -2285,6 +2289,11 @@
     const perm = window.SGA_Permisos;
     state.puedeEditar    = !!(window.ADMIN_MODE || perm.can('can_editar_productos'));
     state.puedeVerCostos = !!(window.ADMIN_MODE || perm.can('can_ver_costos'));
+    // Eliminar producto: a diferencia de editar, NO es delegable por permiso
+    // granular — es una acción destructiva que el dueño pidió reservar
+    // exclusivamente a Admin-POS, sin excepción, para que ningún cajero la
+    // tenga "a mano" aunque tenga can_editar_productos habilitado.
+    state.puedeEliminar  = !!window.ADMIN_MODE;
 
     runMigrations();
     setUpEvents();
