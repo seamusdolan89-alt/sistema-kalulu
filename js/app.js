@@ -242,12 +242,19 @@
    */
   function initNav() {
     const navContainer = document.querySelector('aside nav ul');
+    // icon: nombre en SGA_Icons (js/icons.js) — sidebar migrada de emoji a
+    // SVG de línea en el recorrido UX (ver project_ux_pass_ui_ux_pro_max.md).
+    // Los sub-items de "Cajas" siguen mostrando el emoji que el usuario
+    // carga por medio de cobro (medios_cobro.icono) — eso es contenido
+    // configurable, no un ícono de navegación fijo, y queda fuera de esta
+    // pasada a propósito.
+    const ic = (name) => window.SGA_Icons ? window.SGA_Icons.get(name, { class: 'nav-icon' }) : '';
     const moduleList = [
-      { name: 'pos', label: '💳 Punto de Venta' },
-      { name: 'productos', label: '📦 Productos' },
-      { name: 'clientes', label: '👥 Clientes' },
+      { name: 'pos', icon: 'pos', text: 'Punto de Venta' },
+      { name: 'productos', icon: 'productos', text: 'Productos' },
+      { name: 'clientes', icon: 'clientes', text: 'Clientes' },
       {
-        type: 'group', group: 'cajas', label: '💰 Cajas',
+        type: 'group', group: 'cajas', icon: 'cajas', text: 'Cajas',
         items: (() => {
           try {
             const medios = window.SGA_DB.query(
@@ -263,16 +270,16 @@
           ];
         })(),
       },
-      { name: 'operaciones_stock', label: '📦 Operaciones de Stock' },
-      { name: 'proveedores', label: '🏢 Proveedores' },
-      { name: 'promociones', label: '🏷️ Promociones' },
-      { name: 'etiquetas', label: '🏷️ Etiquetas' },
-      { name: 'informes', label: '📊 Informes' },
-      { name: 'gastos', label: '💸 Gastos Generales' },
-      { name: 'caja_admin', label: '💼 Caja Seamus', adminOnly: true },
-      { name: 'usuarios', label: '👤 Usuarios' },
-      { name: 'flujo', label: '🌊 Flujo de Fondos', adminPosOnly: true },
-      { name: 'configuracion', label: '⚙️ Configuración', adminOnly: true, adminPosOnly: true },
+      { name: 'operaciones_stock', icon: 'operaciones_stock', text: 'Operaciones de Stock' },
+      { name: 'proveedores', icon: 'proveedores', text: 'Proveedores' },
+      { name: 'promociones', icon: 'tag', text: 'Promociones' },
+      { name: 'etiquetas', icon: 'tag', text: 'Etiquetas' },
+      { name: 'informes', icon: 'informes', text: 'Informes' },
+      { name: 'gastos', icon: 'gastos', text: 'Gastos Generales' },
+      { name: 'caja_admin', icon: 'briefcase', text: 'Caja Seamus', adminOnly: true },
+      { name: 'usuarios', icon: 'usuarios', text: 'Usuarios' },
+      { name: 'flujo', icon: 'flujo', text: 'Flujo de Fondos', adminPosOnly: true },
+      { name: 'configuracion', icon: 'configuracion', text: 'Configuración', adminOnly: true, adminPosOnly: true },
     ];
 
     const hasPendingResumen = !!localStorage.getItem('compras_resumen_pending');
@@ -305,7 +312,7 @@
           return `
             <li>
               <div class="nav-group-toggle${toggleClasses ? ' ' + toggleClasses : ''}" data-group="${item.group}" data-href="#${item.items[0]?.name || 'caja'}">
-                <a href="#caja" class="nav-group-label${groupActive}" data-module="caja">${item.label}</a>
+                <a href="#caja" class="nav-group-label${groupActive}" data-module="caja">${ic(item.icon)}${item.text}</a>
                 <span class="nav-group-arrow">▶</span>
               </div>
               <ul class="nav-subitems${isOpen ? ' open' : ''}" id="nav-subitems-${item.group}">
@@ -313,11 +320,11 @@
               </ul>
             </li>`;
         }
-        const { name, label } = item;
+        const { name, icon, text } = item;
         const badge = (name === 'operaciones_stock' && hasPendingResumen)
           ? ' <span style="display:inline-block;background:#ff8f00;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;vertical-align:middle;margin-left:4px;white-space:nowrap;">● Ajuste pendiente</span>'
           : '';
-        return `<li><a href="#${name}" data-module="${name}" class="nav-link">${label}${badge}</a></li>`;
+        return `<li><a href="#${name}" data-module="${name}" class="nav-link">${ic(icon)}${text}${badge}</a></li>`;
       }).join('');
 
     // Arrow-only click: toggle expand/collapse without navigating
