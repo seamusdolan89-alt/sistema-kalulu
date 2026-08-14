@@ -156,7 +156,10 @@ main#app {
   grid-row: 2;
   grid-column: 2;
   padding: var(--spacing-xl);
-  background-color: var(--color-background);
+  /* Antes var(--color-background) (blanco puro) — sin ninguna superficie que
+     separe "lienzo" de "tarjeta", toda la app se sentía plana y muy blanca
+     en turnos largos. Ver memoria project_ux_pass_ui_ux_pro_max.md. */
+  background-color: var(--color-background-secondary);
   overflow-y: auto;
 }
 
