@@ -75,8 +75,12 @@ const LimpiezaPrueba = (() => {
         db().run(`DELETE FROM ${t}`);
       }
       db().commitBatch();
+      // Esperar a que el guardado quede escrito en disco (OPFS) antes de
+      // recargar — si no, con miles de filas borradas la recarga puede
+      // cortar el guardado a mitad de camino y vuelve a aparecer todo.
+      await db().flush().catch(() => {});
       showMsg(msgEl, `Listo. Se vaciaron ${tables.length} tablas locales. Recargando...`, 'ok');
-      setTimeout(() => location.reload(), 1500);
+      setTimeout(() => location.reload(), 400);
     } catch (e) {
       db().rollbackBatch();
       showMsg(msgEl, 'Error: ' + e.message, 'error');
