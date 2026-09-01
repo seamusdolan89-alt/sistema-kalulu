@@ -227,7 +227,8 @@ const ConfiguracionModule = (() => {
     try {
       if (navigator.storage && navigator.storage.getDirectory) {
         const root = await navigator.storage.getDirectory();
-        await root.removeEntry('sga.db').catch(() => {});
+        const dbFileName = window.ADMIN_MODE ? 'sga-admin.db' : 'sga.db';
+        await root.removeEntry(dbFileName).catch(() => {});
       }
       localStorage.removeItem('sga_db');
       alert('Base de datos borrada. La aplicación se va a recargar.');

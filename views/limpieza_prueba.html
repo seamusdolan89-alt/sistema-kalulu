@@ -1,0 +1,58 @@
+<!-- views/limpieza_prueba.html — Utilidad de una sola vez: limpieza previa a la migración real.
+     Sin entrada en el menú a propósito (ver js/app.js, ROUTE_ADMIN_ONLY). -->
+<div class="page-header">
+  <h2>🧹 Limpieza pre-migración</h2>
+</div>
+
+<div style="max-width:700px;">
+
+  <div class="card" style="margin-top:var(--spacing-lg);padding:20px 24px;border:2px solid #ffb300;">
+    <h3 style="margin:0 0 10px;font-size:1rem;color:#e65100;">⚠️ Leé esto antes de tocar cualquier botón</h3>
+    <p style="margin:0 0 8px;font-size:13px;color:var(--color-text-secondary);line-height:1.5;">
+      Esta pantalla borra los datos de prueba cargados hasta ahora, para arrancar limpio antes de migrar
+      el catálogo real. <strong>No se puede deshacer.</strong>
+    </p>
+    <p style="margin:0;font-size:13px;color:var(--color-text-secondary);line-height:1.5;">
+      Se van a <strong>conservar</strong>: usuarios, cajas y medios de pago (siempre) — y proveedores
+      (se mantienen, pero sus cuentas corrientes quedan en $0).
+      Todo lo demás se borra: productos, stock, ventas, consumo interno, compras, clientes, categorías, etc.
+    </p>
+  </div>
+
+  <!-- Paso 1: limpieza local -->
+  <div class="card" style="margin-top:var(--spacing-lg);padding:20px 24px;">
+    <h3 style="margin:0 0 6px;font-size:1rem;color:var(--color-text);">1️⃣ Borrar datos de prueba de este dispositivo</h3>
+    <p style="margin:0 0 14px;font-size:13px;color:var(--color-text-secondary);">
+      Actúa solo sobre la base local de <strong>este</strong> navegador/dispositivo. Hay que repetirlo en
+      cada dispositivo por separado (esta compu, la del local, etc.) — no se propaga solo.
+    </p>
+    <div id="lp-conteo" style="font-size:13px;color:var(--color-text-secondary);margin-bottom:14px;">
+      Cargando conteo actual...
+    </div>
+    <button class="btn" id="lp-btn-local"
+      style="background:#e53935;color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:14px;cursor:pointer;font-weight:600;">
+      Borrar datos de prueba (este dispositivo)
+    </button>
+    <div id="lp-msg-local" style="font-size:13px;margin-top:10px;display:none;"></div>
+  </div>
+
+  <!-- Paso 2: limpieza en Firestore -->
+  <div class="card" style="margin-top:var(--spacing-lg);padding:20px 24px;border:2px solid #e53935;">
+    <h3 style="margin:0 0 6px;font-size:1rem;color:#c62828;">2️⃣ Borrar también en la nube (Firestore)</h3>
+    <p style="margin:0 0 14px;font-size:13px;color:var(--color-text-secondary);">
+      Afecta a <strong>todos</strong> los dispositivos a la vez. Ejecutalo <strong>una sola vez</strong>
+      (desde cualquier dispositivo conectado), después de haber limpiado localmente el que estás usando.
+      Si no limpiás cada dispositivo por separado además de esto, sus datos locales van a seguir ahí.
+    </p>
+    <button class="btn" id="lp-btn-cloud"
+      style="background:#c62828;color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:14px;cursor:pointer;font-weight:600;">
+      Borrar también en Firestore
+    </button>
+    <div id="lp-msg-cloud" style="font-size:13px;margin-top:10px;display:none;"></div>
+  </div>
+
+  <p style="margin:20px 0 0;font-size:12px;color:#999;">
+    <a href="#productos" style="color:#999;">← Volver</a>
+  </p>
+
+</div>

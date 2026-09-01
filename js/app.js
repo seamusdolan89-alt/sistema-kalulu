@@ -47,6 +47,10 @@
     'adelanto_pago':   () => import('./modules/adelanto_pago.js').then(m => m.default),
     'configuracion':   () => import('./modules/configuracion.js').then(m => m.default),
     'flujo':           () => import('./modules/flujo.js').then(m => m.default),
+    // Sin entrada en el menú a propósito — utilidad de una sola vez para la
+    // limpieza previa a la migración real. Se accede escribiendo el hash a
+    // mano (#limpieza_prueba); igual queda blindada por ROUTE_ADMIN_ONLY.
+    'limpieza_prueba': () => import('./modules/limpieza_prueba.js').then(m => m.default),
   };
 
   /**
@@ -198,7 +202,7 @@
   // Rutas que ya se autoprotegen con su propio chequeo de rol==='admin'
   // adentro del módulo (usuarios.js, configuracion.js, caja_admin.js,
   // adelanto_pago.js) — se listan igual acá para blindaje centralizado.
-  const ROUTE_ADMIN_ONLY = ['usuarios', 'caja_admin', 'configuracion', 'adelanto_pago'];
+  const ROUTE_ADMIN_ONLY = ['usuarios', 'caja_admin', 'configuracion', 'adelanto_pago', 'limpieza_prueba'];
   // Ruta -> permiso granular (SGA_PERMISOS_DEF en auth.js) que hace falta para
   // entrar. Rutas ausentes de este mapa (pos, caja, y cualquier módulo nuevo
   // que se agregue sin actualizar esta lista) quedan sin restricción

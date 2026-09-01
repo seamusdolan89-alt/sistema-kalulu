@@ -1065,6 +1065,36 @@
     badge.title = s.title;
   }
 
+  // ─── Borrado remoto (herramienta de limpieza pre-migración) ───────────────────
+  // No existía ningún borrado en Firestore hasta acá — solo lectura (pull) y
+  // escritura (push/merge). Se usa una única vez para vaciar la nube de datos
+  // de prueba antes de migrar el catálogo real. Excluye las colecciones que
+  // deben conservarse (usuarios, cajas, medios de pago, proveedores).
+  const WIPE_PRESERVE_COLLECTIONS = ['usuarios', 'sucursales', 'medios_cobro', 'proveedores'];
+
+  async function wipeFirestoreCollections(onProgress) {
+    if (!initialized || !firestoreDb) throw new Error('Firebase no conectado');
+
+    const collections = [...new Set(SYNC_SOURCES.map(s => s.collection))]
+      .filter(c => !WIPE_PRESERVE_COLLECTIONS.includes(c));
+
+    let total = 0;
+    for (const name of collections) {
+      let batchSize;
+      do {
+        const snap = await firestoreDb.collection(name).limit(400).get();
+        batchSize = snap.size;
+        if (batchSize === 0) break;
+        const batch = firestoreDb.batch();
+        snap.docs.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+        total += batchSize;
+        onProgress?.(name, total);
+      } while (batchSize >= 400);
+    }
+    return total;
+  }
+
   // ─── API pública ─────────────────────────────────────────────────────────────
 
   window.SGA_Sync = {
@@ -1074,6 +1104,7 @@
     pushToPos,
     initialSyncFromFirestore,
     syncMonitoringData,
+    wipeFirestoreCollections,
     getFirestore: () => firestoreDb,
     isInitialized: () => initialized,
     getStatus: () => ({ initialized, lastSyncAt }),
