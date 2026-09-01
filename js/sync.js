@@ -83,6 +83,7 @@
     { collection: 'stock',             applyFn: applyStockFull },
     { collection: 'medios_cobro',      applyFn: applyMedioCobroFull },
     { collection: 'sucursales',        applyFn: applySucursalFull },
+    { collection: 'cuenta_corriente',  applyFn: applyCuentaCorriente },
   ];
 
   // ─── Inicialización ──────────────────────────────────────────────────────────
@@ -460,6 +461,30 @@
         [imp.id, data.id, imp.compra_id, imp.monto_imputado, imp.fecha || data.fecha]
       );
     }
+  }
+
+  function applyIngresoCaja(data) {
+    const now = new Date().toISOString();
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO ingresos_caja
+        (id, sesion_caja_id, monto, descripcion, fecha, usuario_id, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,'synced',?)`,
+      [data.id, data.sesion_caja_id || null, data.monto || 0,
+       data.descripcion || null, data.fecha || null, data.usuario_id || null,
+       data.updated_at || now]
+    );
+  }
+
+  function applyCuentaCorriente(data) {
+    const now = new Date().toISOString();
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO cuenta_corriente
+        (id, cliente_id, sucursal_id, tipo, monto, venta_id, descripcion, fecha, usuario_id, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,'synced',?)`,
+      [data.id, data.cliente_id, data.sucursal_id || null, data.tipo,
+       data.monto, data.venta_id || null, data.descripcion || null,
+       data.fecha, data.usuario_id || null, data.updated_at || now]
+    );
   }
 
   function applyGasto(data) {
@@ -882,6 +907,8 @@
       { name: 'promociones',       applyFn: applyPromocion },
       { name: 'caja_admin',        applyFn: applyCajaAdmin },
       { name: 'consumo_interno',   applyFn: applyConsumoInternoFull },
+      { name: 'ingresos_caja',     applyFn: applyIngresoCaja },
+      { name: 'cuenta_corriente',  applyFn: applyCuentaCorriente },
     ];
 
     const lastSync = localStorage.getItem('admin_monitor_sync_at');
@@ -1004,6 +1031,10 @@
       { name: 'pagos_proveedores', applyFn: applyPagoProveedor,    label: 'Pagos proveedores' },
       { name: 'caja_admin',        applyFn: applyCajaAdmin,        label: 'Caja Seamus' },
       { name: 'consumo_interno',   applyFn: applyConsumoInternoFull, label: 'Consumo interno' },
+      { name: 'ingresos_caja',     applyFn: applyIngresoCaja,      label: 'Ingresos de caja' },
+      { name: 'cuenta_corriente',  applyFn: applyCuentaCorriente,  label: 'Cuenta corriente' },
+      { name: 'medios_cobro',      applyFn: applyMedioCobroFull,   label: 'Medios de pago' },
+      { name: 'sucursales',        applyFn: applySucursalFull,     label: 'Cajas' },
     ];
 
     for (const { name, applyFn, label } of COLLECTIONS) {
