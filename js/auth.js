@@ -135,10 +135,42 @@
       .join('');
   }
 
+  // ─── Cierre de sesión automático por cambio de jornada ─────────────────────
+  // Problema real: sessionStorage no se borra solo al apagar la compu (depende
+  // del navegador/SO — a veces restaura la pestaña tal cual estaba). Sin esto,
+  // una cajera podía quedar logueada de un turno anterior y la siguiente
+  // persona operar sin querer con esa sesión. Se define un corte de "jornada"
+  // a una hora fija (7am por defecto, no medianoche, para no cortar turnos
+  // nocturnos a mitad de camino): toda sesión iniciada antes del último corte
+  // se considera vencida una vez que ese corte ya pasó.
+
+  const SESSION_CUTOFF_HOUR = 7;
+  const SESSION_EXPIRY_CHECK_MS = 5 * 60 * 1000; // 5 min
+  let expiryIntervalId = null;
+
+  function businessDayOf(date) {
+    const d = new Date(date);
+    if (d.getHours() < SESSION_CUTOFF_HOUR) d.setDate(d.getDate() - 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  function isSessionExpired() {
+    const loginAt = sessionStorage.getItem('sga_login_at');
+    if (!loginAt) return false; // sesión de un build viejo sin esta marca: no forzar cierre
+    return businessDayOf(loginAt) !== businessDayOf(new Date());
+  }
+
   // ─── Inicialización ─────────────────────────────────────────────────────────
 
   async function initialize(_config) {
     restoreSession();
+    if (!expiryIntervalId) {
+      expiryIntervalId = setInterval(() => {
+        if (currentUser && isSessionExpired()) {
+          logout().then(() => location.reload());
+        }
+      }, SESSION_EXPIRY_CHECK_MS);
+    }
   }
 
   // ─── Login ──────────────────────────────────────────────────────────────────
@@ -168,6 +200,7 @@
     };
 
     sessionStorage.setItem('sga_user', JSON.stringify(currentUser));
+    sessionStorage.setItem('sga_login_at', new Date().toISOString());
     return currentUser;
   }
 
@@ -176,6 +209,7 @@
   async function logout() {
     currentUser = null;
     sessionStorage.removeItem('sga_user');
+    sessionStorage.removeItem('sga_login_at');
   }
 
   function getCurrentUser() {
@@ -183,6 +217,12 @@
   }
 
   function restoreSession() {
+    if (isSessionExpired()) {
+      sessionStorage.removeItem('sga_user');
+      sessionStorage.removeItem('sga_login_at');
+      currentUser = null;
+      return;
+    }
     const stored = sessionStorage.getItem('sga_user');
     if (stored) {
       try {
