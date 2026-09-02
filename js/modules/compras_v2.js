@@ -37,6 +37,7 @@ const ComprasV2 = (() => {
     proveedorId:        null,
     proveedorNombre:    null,
     proveedorSaldo:     0,      // positive = nosotros le debemos | negative = nos deben
+    proveedorCreditoDisponible: 0, // adelantos/pagos del proveedor sin imputar a ninguna compra
     aplicarSaldo:       false,
     metodoCarga:        null,   // 'tradicional' | 'foto' — paso 0
     _fotoBase64:        null,   // transient: foto de factura para OCR (sin el prefijo data:)
@@ -78,13 +79,56 @@ const ComprasV2 = (() => {
   };
 
   // ── DB helpers ───────────────────────────────────────────────────────────────
+  // Saldo neto con el proveedor: positivo = le debemos, negativo = a favor.
+  // OJO: esto NO se calcula contra "cuenta_proveedor" (tabla vieja que solo
+  // este módulo escribía y que Cuentas Corrientes nunca leyó — quedaba
+  // desconectada de los pagos reales) — se calcula igual que en Cuentas
+  // Corrientes (cuenta_corriente_proveedores.js), contra compras y pagos
+  // reales, para que ambas pantallas siempre coincidan.
   function getProveedorSaldo(proveedorId) {
-    const r = db().query(
-      `SELECT COALESCE(SUM(CASE WHEN tipo='deuda' THEN monto ELSE -monto END),0) AS saldo
-       FROM cuenta_proveedor WHERE proveedor_id = ?`,
+    const deuda = db().query(
+      `SELECT COALESCE(SUM(total), 0) AS total FROM compras
+       WHERE proveedor_id = ? AND COALESCE(estado,'confirmada') != 'anulada'`,
       [proveedorId]
     );
-    return parseFloat(r[0]?.saldo) || 0;
+    const pagado = db().query(
+      `SELECT COALESCE(SUM(m.monto), 0) AS total
+       FROM pagos_proveedores_metodos m
+       JOIN pagos_proveedores p ON p.id = m.pago_id
+       WHERE p.proveedor_id = ?`,
+      [proveedorId]
+    );
+    return (parseFloat(deuda[0]?.total) || 0) - (parseFloat(pagado[0]?.total) || 0);
+  }
+
+  function _creditoDisponibleDePago(pagoId) {
+    const totalPago = db().query(
+      `SELECT COALESCE(SUM(monto), 0) AS total FROM pagos_proveedores_metodos WHERE pago_id = ?`,
+      [pagoId]
+    );
+    const totalImputado = db().query(
+      `SELECT COALESCE(SUM(monto_imputado), 0) AS total FROM imputaciones_pagos WHERE pago_id = ?`,
+      [pagoId]
+    );
+    return (parseFloat(totalPago[0]?.total) || 0) - (parseFloat(totalImputado[0]?.total) || 0);
+  }
+
+  // Pagos del proveedor con crédito todavía sin imputar a ninguna compra
+  // (ej. un adelanto pagado antes de cargar la factura) — más viejos
+  // primero, mismo criterio "oldest-first" que usa el imputado automático
+  // de Cuentas Corrientes al registrar un pago.
+  function getPagosConCreditoDisponible(proveedorId) {
+    const pagos = db().query(
+      `SELECT id, fecha FROM pagos_proveedores WHERE proveedor_id = ? ORDER BY fecha ASC, rowid ASC`,
+      [proveedorId]
+    );
+    return pagos
+      .map(p => ({ id: p.id, fecha: p.fecha, credito: _creditoDisponibleDePago(p.id) }))
+      .filter(p => p.credito > 0.01);
+  }
+
+  function getCreditoDisponibleProveedor(proveedorId) {
+    return getPagosConCreditoDisponible(proveedorId).reduce((s, p) => s + p.credito, 0);
   }
 
   function getRemitosCount(proveedorId) {
@@ -165,8 +209,8 @@ const ComprasV2 = (() => {
   }
 
   function calcSaldoAplicado() {
-    if (!state.aplicarSaldo || state.proveedorSaldo >= -0.01) return 0;
-    return Math.min(Math.abs(state.proveedorSaldo), calcMontoFactura());
+    if (!state.aplicarSaldo || state.proveedorCreditoDisponible <= 0.01) return 0;
+    return Math.min(state.proveedorCreditoDisponible, calcMontoFactura());
   }
 
   function calcNeto() {
@@ -617,32 +661,37 @@ const ComprasV2 = (() => {
   }
 
   // ── Proveedor panel ──────────────────────────────────────────────────────────
+  // Deuda pendiente (saldo neto histórico) y crédito disponible para aplicar
+  // (pagos/adelantos todavía sin imputar a ninguna compra) son dos cosas
+  // independientes — ej. puede haber una factura vieja sin pagar Y, aparte,
+  // un adelanto reciente sin aplicar a nada. Se muestran por separado.
   function renderProveedorPanel() {
     const section = ge('cv2-saldo-section');
     if (!section) return;
 
-    if (!state.proveedorId || Math.abs(state.proveedorSaldo) < 0.01) {
+    const hayDeuda   = state.proveedorSaldo > 0.01;
+    const hayCredito = state.proveedorCreditoDisponible > 0.01;
+
+    if (!state.proveedorId || (!hayDeuda && !hayCredito)) {
       section.style.display = 'none';
       return;
     }
 
     section.style.display = 'block';
 
-    if (state.proveedorSaldo > 0.01) {
-      // We owe them — informational only
-      section.innerHTML = `
-        <div class="cv2-saldo-badge cv2-saldo-deuda">
-          Deuda pendiente con este proveedor: ${fmt$(state.proveedorSaldo)}
-        </div>
-      `;
-    } else {
-      // They owe us (saldo a favor)
-      const disponible = Math.abs(state.proveedorSaldo);
-      const aplicado   = calcSaldoAplicado();
+    const deudaHtml = hayDeuda
+      ? `<div class="cv2-saldo-badge cv2-saldo-deuda">
+           Deuda pendiente con este proveedor: ${fmt$(state.proveedorSaldo)}
+         </div>`
+      : '';
 
-      section.innerHTML = `
+    let creditoHtml = '';
+    if (hayCredito) {
+      const disponible = state.proveedorCreditoDisponible;
+      const aplicado    = calcSaldoAplicado();
+      creditoHtml = `
         <div class="cv2-saldo-badge cv2-saldo-favor">
-          Saldo a favor: ${fmt$(disponible)}
+          Adelanto sin aplicar: ${fmt$(disponible)}
         </div>
         <label class="cv2-checkbox-row">
           <input type="checkbox" id="cv2-chk-saldo" ${state.aplicarSaldo ? 'checked' : ''}>
@@ -652,12 +701,16 @@ const ComprasV2 = (() => {
           <div class="cv2-saldo-detail">
             <span>Se aplican: ${fmt$(aplicado)}</span>
             ${disponible - aplicado > 0.01
-              ? `<span>Saldo restante: ${fmt$(disponible - aplicado)}</span>`
+              ? `<span>Adelanto restante: ${fmt$(disponible - aplicado)}</span>`
               : ''}
           </div>
         ` : ''}
       `;
+    }
 
+    section.innerHTML = deudaHtml + creditoHtml;
+
+    if (hayCredito) {
       ge('cv2-chk-saldo')?.addEventListener('change', e => {
         state.aplicarSaldo = e.target.checked;
         renderProveedorPanel();
@@ -834,7 +887,7 @@ const ComprasV2 = (() => {
       targetIdx = state.items.length - 1;
     }
     renderCart();
-    if (state.proveedorSaldo < -0.01) renderProveedorPanel();
+    if (state.proveedorCreditoDisponible > 0.01) renderProveedorPanel();
 
     // Focus and select the cantidad input of the added/updated row
     const cantInp = document.querySelector(`.cv2-cart-row[data-idx="${targetIdx}"] input[data-field="cantidad"]`);
@@ -968,13 +1021,13 @@ const ComprasV2 = (() => {
     }
 
     renderTotals();
-    if (state.proveedorSaldo < -0.01) renderProveedorPanel();
+    if (state.proveedorCreditoDisponible > 0.01) renderProveedorPanel();
   }
 
   function removeItem(idx) {
     state.items.splice(idx, 1);
     renderCart();
-    if (state.proveedorSaldo < -0.01) renderProveedorPanel();
+    if (state.proveedorCreditoDisponible > 0.01) renderProveedorPanel();
   }
 
   // ── Carga por foto (OCR con Claude Vision) ───────────────────────────────────
@@ -1713,7 +1766,8 @@ const ComprasV2 = (() => {
     state.proveedorId     = prov.id;
     state.proveedorNombre = prov.razon_social;
     state.proveedorSaldo  = getProveedorSaldo(prov.id);
-    state.aplicarSaldo    = state.proveedorSaldo < -0.01;
+    state.proveedorCreditoDisponible = getCreditoDisponibleProveedor(prov.id);
+    state.aplicarSaldo    = state.proveedorCreditoDisponible > 0.01;
 
     // Store fiscal info for badges
     state.proveedorCondicionIva  = prov.condicion_iva  || null;
@@ -1756,6 +1810,7 @@ const ComprasV2 = (() => {
     state.proveedorId            = null;
     state.proveedorNombre        = null;
     state.proveedorSaldo         = 0;
+    state.proveedorCreditoDisponible = 0;
     state.aplicarSaldo           = false;
     state.proveedorCondicionIva  = null;
     state.proveedorAgRetIva      = 0;
@@ -1835,6 +1890,7 @@ const ComprasV2 = (() => {
     state.proveedorId           = null;
     state.proveedorNombre       = null;
     state.proveedorSaldo        = 0;
+    state.proveedorCreditoDisponible = 0;
     state.aplicarSaldo          = false;
     state.condicionPago         = 'pendiente';
     state.condicionCompra       = '';
@@ -1955,7 +2011,8 @@ const ComprasV2 = (() => {
 
     if (state.proveedorId) {
       state.proveedorSaldo = getProveedorSaldo(state.proveedorId);
-      state.aplicarSaldo   = state.proveedorSaldo < -0.01;
+      state.proveedorCreditoDisponible = getCreditoDisponibleProveedor(state.proveedorId);
+      state.aplicarSaldo   = state.proveedorCreditoDisponible > 0.01;
     }
 
     // Restore proveedor card
@@ -2156,12 +2213,17 @@ const ComprasV2 = (() => {
 
     const total         = calcTotal();
     const saldoAplicado = calcSaldoAplicado();
-    // "neto" acá es el monto real que se le debe/pagó al proveedor (con IVA
-    // incluido en Factura A) — se usa para compras.total, cuenta_proveedor,
-    // caja y la pantalla de éxito. NO es calcNeto()/calcTotal() (esos son
-    // el subtotal de productos sin impuestos, para el desglose en pantalla).
+    // "neto" acá es el monto que efectivamente hay que pagar/queda a deber
+    // AHORA (con IVA incluido en Factura A, y ya descontado el adelanto
+    // aplicado) — se usa para la caja (efectivo) y la pantalla de éxito.
     const neto          = calcMontoAdeudado();
     const netoSubtotal  = calcNeto(); // pre-impuestos, solo para el chequeo "coincide con la factura"
+    // compras.total tiene que ser el importe COMPLETO de la factura (sin
+    // descontar el adelanto): el adelanto aplicado se registra aparte como
+    // una imputación de pago (más abajo), y Cuentas Corrientes calcula solo
+    // "total - pagado" — si acá ya viniera descontado, el crédito se
+    // restaría dos veces y la compra quedaría "pagada de más".
+    const montoFacturaCompleto = calcMontoFactura();
     const user          = state.currentUser;
     const ts            = nowISO();
     const compraId      = uuid();
@@ -2180,7 +2242,7 @@ const ComprasV2 = (() => {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmada', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [compraId, user.sucursal_id, state.proveedorId, user.id,
           state.fecha, state.numeroFactura || null,
-          neto, state.condicionPago, ts,
+          montoFacturaCompleto, state.condicionPago, ts,
           state.facturaPv || null,
           state.subtotalNeto, state.iva105, state.iva21, state.impInterno,
           state.percepcionIva, state.percepcionIibb, state.totalFactura,
@@ -2300,15 +2362,31 @@ const ComprasV2 = (() => {
             ts, user.id, ts]);
       }
 
-      // 4. Saldo a favor aplicado → register as pago in cuenta_proveedor
+      // 4. Saldo a favor aplicado → imputar contra los pagos/adelantos del
+      // proveedor con crédito disponible (más viejos primero), igual que el
+      // imputado automático de "Registrar Pago" en Cuentas Corrientes. Antes
+      // esto quedaba anotado en cuenta_proveedor, una tabla que esa pantalla
+      // nunca lee — la compra quedaba "pendiente" ahí aunque el adelanto ya
+      // estuviera aplicado acá.
       if (saldoAplicado > 0.01) {
-        db().run(`
-          INSERT INTO cuenta_proveedor
-            (id, proveedor_id, compra_id, tipo, monto, descripcion, fecha, usuario_id, sync_status, updated_at)
-          VALUES (?, ?, ?, 'pago', ?, ?, ?, ?, 'pending', ?)
-        `, [uuid(), state.proveedorId, compraId, saldoAplicado,
-            `Saldo aplicado — Compra ${state.numeroFactura || compraId.slice(-6).toUpperCase()}`,
-            ts, user.id, ts]);
+        let restante = saldoAplicado;
+        for (const pago of getPagosConCreditoDisponible(state.proveedorId)) {
+          if (restante <= 0.01) break;
+          const monto = Math.min(pago.credito, restante);
+          db().run(
+            `INSERT INTO imputaciones_pagos (id, pago_id, compra_id, monto_imputado, fecha) VALUES (?, ?, ?, ?, ?)`,
+            [uuid(), pago.id, compraId, monto, ts.slice(0, 10)]
+          );
+          // El pago original tiene que volver a sincronizarse con esta nueva
+          // imputación adentro (se manda embebida en su propio documento,
+          // ver denormalizePagoProveedor en sync.js) — si no se marca
+          // 'pending' acá, la otra compu nunca se entera de que se aplicó.
+          db().run(
+            `UPDATE pagos_proveedores SET sync_status='pending', updated_at=? WHERE id=?`,
+            [ts, pago.id]
+          );
+          restante -= monto;
+        }
       }
 
       // 5. Clean up pausada if resuming
@@ -2551,7 +2629,8 @@ const ComprasV2 = (() => {
     state.proveedorId        = remito.proveedor_id;
     state.proveedorNombre    = remito.proveedor_nombre;
     state.proveedorSaldo     = getProveedorSaldo(remito.proveedor_id);
-    state.aplicarSaldo       = state.proveedorSaldo < -0.01;
+    state.proveedorCreditoDisponible = getCreditoDisponibleProveedor(remito.proveedor_id);
+    state.aplicarSaldo       = state.proveedorCreditoDisponible > 0.01;
     state.proveedorCondicionIva  = remito.condicion_iva || null;
     state.proveedorAgRetIva      = remito.agente_retencion_iva  ? 1 : 0;
     state.proveedorAgRetIibb     = remito.agente_retencion_iibb ? 1 : 0;
@@ -3765,6 +3844,7 @@ const ComprasV2 = (() => {
     state.proveedorId           = null;
     state.proveedorNombre       = null;
     state.proveedorSaldo        = 0;
+    state.proveedorCreditoDisponible = 0;
     state.aplicarSaldo          = false;
     state.condicionPago         = 'pendiente';
     state.condicionCompra       = '';
