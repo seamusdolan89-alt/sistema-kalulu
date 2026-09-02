@@ -444,7 +444,7 @@ const ComprasV2 = (() => {
             </td>
             <td class="cv2-td-right cv2-td-nuevo-costo">
               <input type="number" class="cv2-num-input" value="${parseFloat(it.monto || 0).toFixed(2)}"
-                     min="0" step="any" style="width:80px"
+                     min="0" step="any" style="width:104px"
                      data-idx="${i}" data-field="monto"
                      title="${it.tipo === 'descuento' ? 'Se resta del total' : 'Se suma al total'}">
             </td>
@@ -486,7 +486,7 @@ const ComprasV2 = (() => {
           <td class="cv2-td-costo-actual cv2-td-costo-actual">${fmt$(it.costoActual)}</td>
           <td class="cv2-td-right cv2-td-nuevo-costo">
             <input type="number" class="cv2-num-input nuevo-costo" value="${parseFloat(it.costoNuevo).toFixed(2)}"
-                   min="0" step="any" style="width:80px"
+                   min="0" step="any" style="width:104px"
                    data-idx="${i}" data-field="costoNuevo">
           </td>
           <td class="cv2-td-right cv2-td-iva">
@@ -499,10 +499,10 @@ const ComprasV2 = (() => {
           <td class="cv2-td-right cv2-td-descuento">
             <div style="display:flex;gap:3px;justify-content:flex-end">
               <input type="number" class="cv2-num-input" value="${parseFloat(it.descuento || 0).toFixed(1)}"
-                     min="0" max="100" step="0.1" style="width:50px" placeholder="%"
+                     min="0" max="100" step="0.1" style="width:60px" placeholder="%"
                      data-idx="${i}" data-field="descuento" title="Descuento (%)">
               <input type="number" class="cv2-num-input" value="${parseFloat(it.descuentoMonto || 0).toFixed(2)}"
-                     min="0" step="any" style="width:66px" placeholder="$"
+                     min="0" step="any" style="width:78px" placeholder="$"
                      data-idx="${i}" data-field="descuentoMonto" title="Descuento ($)">
             </div>
           </td>
