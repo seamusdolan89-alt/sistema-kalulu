@@ -151,13 +151,30 @@ const ComprasV2 = (() => {
     return state.items.reduce((s, it) => s + itemSubtotal(it), 0);
   }
 
+  // Monto real de la factura, CON impuestos incluidos. En Factura A el costo
+  // de cada línea se carga neto de IVA (el IVA se agrega aparte en la
+  // cabecera) — calcTotal()/calcNeto() solo suman ese subtotal de productos,
+  // nunca lo que hay que pagarle al proveedor. Esta es la función a usar en
+  // cualquier lugar que muestre o registre "cuánto se debe/pagó" (cuenta
+  // corriente de proveedores, caja, compras.total, "Total Compra" en
+  // pantalla) — calcTotal()/calcNeto() siguen siendo correctas para el
+  // desglose de subtotal/IVA en el carrito y para el chequeo de que lo
+  // cargado coincide con la factura.
+  function calcMontoFactura() {
+    return state.totalFactura > 0 ? state.totalFactura : calcTotal();
+  }
+
   function calcSaldoAplicado() {
     if (!state.aplicarSaldo || state.proveedorSaldo >= -0.01) return 0;
-    return Math.min(Math.abs(state.proveedorSaldo), calcTotal());
+    return Math.min(Math.abs(state.proveedorSaldo), calcMontoFactura());
   }
 
   function calcNeto() {
     return Math.max(0, calcTotal() - calcSaldoAplicado());
+  }
+
+  function calcMontoAdeudado() {
+    return Math.max(0, calcMontoFactura() - calcSaldoAplicado());
   }
 
   // Suma de IVA calculado a partir de los items del carrito para una alícuota dada ('10.5' | '21')
@@ -544,11 +561,11 @@ const ComprasV2 = (() => {
   }
 
   function renderTotals() {
-    const gross         = calcGross();
-    const descuento     = calcDescuentoTotal();
-    const total         = calcTotal();
-    const saldoAplicado = calcSaldoAplicado();
-    const neto          = calcNeto();
+    const gross          = calcGross();
+    const descuento      = calcDescuentoTotal();
+    const montoFactura   = calcMontoFactura();   // total real (con IVA incluido en Factura A)
+    const saldoAplicado  = calcSaldoAplicado();
+    const montoAdeudado  = calcMontoAdeudado();  // lo que efectivamente queda a deber/pagar
 
     const countEl = ge('cv2-item-count');
     if (countEl) countEl.textContent = `${state.items.length} producto${state.items.length !== 1 ? 's' : ''}`;
@@ -582,13 +599,13 @@ const ComprasV2 = (() => {
     }
 
     const totalEl = ge('cv2-total');
-    if (totalEl) totalEl.textContent = fmt$(neto);
+    if (totalEl) totalEl.textContent = fmt$(montoAdeudado);
 
     const detalleEl = ge('cv2-total-detalle');
     if (detalleEl) {
       if (saldoAplicado > 0.01) {
         detalleEl.innerHTML =
-          `<span class="cv2-total-bruto">Total s/saldo: ${fmt$(total)}</span>`
+          `<span class="cv2-total-bruto">Total s/saldo: ${fmt$(montoFactura)}</span>`
         + ` <span class="cv2-saldo-desc">Saldo aplicado: −${fmt$(saldoAplicado)}</span>`;
         detalleEl.style.display = 'block';
       } else {
@@ -621,7 +638,7 @@ const ComprasV2 = (() => {
     } else {
       // They owe us (saldo a favor)
       const disponible = Math.abs(state.proveedorSaldo);
-      const aplicado   = state.aplicarSaldo ? Math.min(disponible, calcTotal()) : 0;
+      const aplicado   = calcSaldoAplicado();
 
       section.innerHTML = `
         <div class="cv2-saldo-badge cv2-saldo-favor">
@@ -1784,7 +1801,7 @@ const ComprasV2 = (() => {
           `UPDATE compras_pausadas
            SET snapshot=?, proveedor_nombre=?, num_items=?, total_estimado=?, updated_at=?
            WHERE id=?`,
-          [snapshot, state.proveedorNombre || '', state.items.length, calcTotal(), ts, state.pausadaId]
+          [snapshot, state.proveedorNombre || '', state.items.length, calcMontoFactura(), ts, state.pausadaId]
         );
       } else {
         const id = uuid();
@@ -1793,7 +1810,7 @@ const ComprasV2 = (() => {
              (id, sucursal_id, usuario_id, snapshot, proveedor_nombre, num_items, total_estimado, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [id, user.sucursal_id, user.id, snapshot,
-           state.proveedorNombre || '', state.items.length, calcTotal(), ts, ts]
+           state.proveedorNombre || '', state.items.length, calcMontoFactura(), ts, ts]
         );
         state.pausadaId = id;
       }
@@ -2012,7 +2029,7 @@ const ComprasV2 = (() => {
     const summaryEl  = ge('cv2-volver-summary');
     if (summaryEl) {
       const n = state.items.length;
-      summaryEl.textContent = `${n} ${n === 1 ? 'artículo' : 'artículos'} — ${fmt$(calcTotal())}`;
+      summaryEl.textContent = `${n} ${n === 1 ? 'artículo' : 'artículos'} — ${fmt$(calcMontoAdeudado())}`;
     }
     if (overlay) overlay.style.display = 'flex';
   }
@@ -2032,8 +2049,8 @@ const ComprasV2 = (() => {
       return;
     }
 
-    const neto    = calcNeto();
-    const total   = calcTotal();
+    const neto          = calcNeto();          // pre-impuestos, solo para el chequeo contra la cabecera
+    const montoAdeudado = calcMontoAdeudado();  // total real (con IVA incluido en Factura A) — lo que se muestra y se debe
     const factStr = state.facturaPv && state.numeroFactura
       ? `${state.facturaPv}-${state.numeroFactura}`
       : (state.numeroFactura || state.facturaPv || '—');
@@ -2071,7 +2088,7 @@ const ComprasV2 = (() => {
         </div>
         <div class="cv2-rev-total-block">
           <div class="cv2-rev-total-label">Total Compra</div>
-          <div class="cv2-rev-total-value">${fmt$(neto)}</div>
+          <div class="cv2-rev-total-value">${fmt$(montoAdeudado)}</div>
           ${mismatch ? `<div class="cv2-rev-mismatch">⚠ No coincide con ${isFacturaA() ? 'Subtotal Neto' : 'Total Factura'} (${fmt$(control)})</div>` : ''}
         </div>
       `;
@@ -2132,7 +2149,12 @@ const ComprasV2 = (() => {
 
     const total         = calcTotal();
     const saldoAplicado = calcSaldoAplicado();
-    const neto          = calcNeto();
+    // "neto" acá es el monto real que se le debe/pagó al proveedor (con IVA
+    // incluido en Factura A) — se usa para compras.total, cuenta_proveedor,
+    // caja y la pantalla de éxito. NO es calcNeto()/calcTotal() (esos son
+    // el subtotal de productos sin impuestos, para el desglose en pantalla).
+    const neto          = calcMontoAdeudado();
+    const netoSubtotal  = calcNeto(); // pre-impuestos, solo para el chequeo "coincide con la factura"
     const user          = state.currentUser;
     const ts            = nowISO();
     const compraId      = uuid();
@@ -2311,7 +2333,7 @@ const ComprasV2 = (() => {
       db().commitBatch();
 
       state.herenciaSincronizados = [];
-      showSuccessScreen({ compraId, total, neto, saldoAplicado, sesion });
+      showSuccessScreen({ compraId, total, neto, netoSubtotal, saldoAplicado, sesion });
       window.SGA_Sync?.pushPending?.();
 
     } catch (e) {
@@ -2604,7 +2626,7 @@ const ComprasV2 = (() => {
   }
 
   // ── Post-compra screen ───────────────────────────────────────────────────────
-  function showSuccessScreen({ compraId = null, total, neto, saldoAplicado, sesion, preEnrichedItems = null, snap = null }) {
+  function showSuccessScreen({ compraId = null, total, neto, netoSubtotal = null, saldoAplicado, sesion, preEnrichedItems = null, snap = null }) {
     const root = ge('cv2-root');
     if (!root) return;
 
@@ -2649,7 +2671,12 @@ const ComprasV2 = (() => {
     const isACompra       = _cc === 'Factura A';
     const controlLabel    = isACompra ? 'Subtotal Neto' : 'Total Factura';
     const controlValue    = isACompra ? _sn : _tf;
-    const verifyMismatch  = neto > 0.001 && controlValue > 0.001 && Math.abs(controlValue - neto) > 0.01;
+    // El chequeo de "coincide con la factura" tiene que ser contra el
+    // subtotal SIN impuestos (netoSubtotal) — "neto" acá es el monto real
+    // adeudado (con IVA incluido en Factura A), que siempre va a diferir del
+    // Subtotal Neto de la cabecera aunque esté todo bien cargado.
+    const netoParaControl = netoSubtotal != null ? netoSubtotal : neto;
+    const verifyMismatch  = netoParaControl > 0.001 && controlValue > 0.001 && Math.abs(controlValue - netoParaControl) > 0.01;
 
     // Format date dd/mm/yyyy
     const fechaFmt = (() => {
@@ -3066,6 +3093,7 @@ const ComprasV2 = (() => {
           condicionPago:   _cond,
           totalFactura:    _tf,
           neto,
+          netoSubtotal,
           saldoAplicado,
         }
       });
@@ -3289,6 +3317,7 @@ const ComprasV2 = (() => {
           showSuccessScreen({
             total: saved.snap?.neto ?? 0,
             neto: saved.snap?.neto ?? 0,
+            netoSubtotal: saved.snap?.netoSubtotal ?? null,
             saldoAplicado: saved.snap?.saldoAplicado ?? 0,
             sesion: null,
             preEnrichedItems: saved.items,
@@ -3712,6 +3741,7 @@ const ComprasV2 = (() => {
             showSuccessScreen({
               total:            saved.snap?.neto ?? 0,
               neto:             saved.snap?.neto ?? 0,
+              netoSubtotal:     saved.snap?.netoSubtotal ?? null,
               saldoAplicado:    saved.snap?.saldoAplicado ?? 0,
               sesion:           null,
               preEnrichedItems: saved.items,
