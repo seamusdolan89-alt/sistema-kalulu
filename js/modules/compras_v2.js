@@ -19,9 +19,17 @@ const ComprasV2 = (() => {
     return '$ ' + intFormatted + ',' + decPart;
   }
   function parseARS(s) {
-    return parseFloat(
-      String(s).replace(/\$/g, '').trim().replace(/\./g, '').replace(',', '.')
-    ) || 0;
+    // Acepta tanto "," como "." como separador decimal (el numpad puede
+    // insertar cualquiera de los dos según el fix de utils.js). Se toma el
+    // separador que aparece más a la derecha como el decimal — cualquier
+    // separador anterior a ese se asume de miles y se descarta. Así
+    // "1.234,56", "1234,56" y "1234.56" se interpretan todos como 1234.56.
+    s = String(s).replace(/\$/g, '').trim();
+    const lastSep = Math.max(s.lastIndexOf(','), s.lastIndexOf('.'));
+    if (lastSep === -1) return parseFloat(s) || 0;
+    const intPart = s.slice(0, lastSep).replace(/[.,]/g, '');
+    const decPart = s.slice(lastSep + 1).replace(/[^\d]/g, '');
+    return parseFloat(intPart + '.' + decPart) || 0;
   }
 
   // ── State ────────────────────────────────────────────────────────────────────
