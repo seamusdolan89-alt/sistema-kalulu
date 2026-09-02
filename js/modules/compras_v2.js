@@ -436,7 +436,7 @@ const ComprasV2 = (() => {
         return `
           <tr class="cv2-cart-row cv2-cart-row-ajuste" data-idx="${i}">
             <td class="cv2-td-num">${i + 1}</td>
-            <td class="cv2-cart-nombre" colspan="4">
+            <td class="cv2-cart-nombre" colspan="5">
               ${it.tipo === 'envio' ? '🚚' : '🏷️'}
               <input type="text" class="cv2-num-input" value="${esc(it.concepto || '')}"
                      style="width:70%" data-idx="${i}" data-field="concepto"
