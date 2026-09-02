@@ -95,15 +95,26 @@ const ComprasV2 = (() => {
   }
 
   // ── Cart math ────────────────────────────────────────────────────────────────
+  // Líneas "ajuste" (envío / descuento pronto pago) no son productos: no tienen
+  // cantidad/presentación/descuento%, solo un monto fijo con signo según tipo
+  // y su propia alícuota de IVA — igual que un producto más a los fines del
+  // cálculo de totales e IVA del carrito.
+  function isAjuste(item) { return item.tipo === 'envio' || item.tipo === 'descuento'; }
+
   function itemGross(item) {
+    if (isAjuste(item)) {
+      const m = Math.abs(parseFloat(item.monto) || 0);
+      return item.tipo === 'descuento' ? -m : m;
+    }
     return (parseFloat(item.cantidad)   || 0)
          * (parseFloat(item.udsPaquete) || 1)
          * (parseFloat(item.costoNuevo) || parseFloat(item.costoActual) || 0);
   }
 
-  // subtotal = gross × (1 - descuento%)
+  // subtotal = gross × (1 - descuento%) — los ajustes no tienen descuento% propio
   function itemSubtotal(item) {
     const gross = itemGross(item);
+    if (isAjuste(item)) return gross;
     const disc  = Math.min(100, Math.max(0, parseFloat(item.descuento) || 0));
     return gross * (1 - disc / 100);
   }
@@ -190,6 +201,13 @@ const ComprasV2 = (() => {
     const totalWrap = ge('cv2-fiscal-total-wrap');
     const hint      = ge('cv2-cab-hint-text');
     const totalInp  = ge('cv2-total-factura');
+
+    // Envío/descuento son ajustes de facturación — no aplican a un remito
+    // (solo trackea mercadería recibida, sin precios ni total a reconciliar).
+    const envioBtn = ge('cv2-btn-add-envio');
+    const descBtn  = ge('cv2-btn-add-descuento');
+    if (envioBtn) envioBtn.style.display = remito ? 'none' : '';
+    if (descBtn)  descBtn.style.display  = remito ? 'none' : '';
 
     // toggle between normal and remito field panels
     const camposFactura = ge('cv2-campos-factura');
@@ -404,7 +422,40 @@ const ComprasV2 = (() => {
     if (table) table.classList.toggle('cv2-cart-facturaA', isFacturaA());
 
     tbody.innerHTML = state.items.map((it, i) => {
-      const sub          = itemSubtotal(it);
+      const sub = itemSubtotal(it);
+
+      if (isAjuste(it)) {
+        return `
+          <tr class="cv2-cart-row cv2-cart-row-ajuste" data-idx="${i}">
+            <td class="cv2-td-num">${i + 1}</td>
+            <td class="cv2-cart-nombre" colspan="4">
+              ${it.tipo === 'envio' ? '🚚' : '🏷️'}
+              <input type="text" class="cv2-num-input" value="${esc(it.concepto || '')}"
+                     style="width:70%" data-idx="${i}" data-field="concepto"
+                     placeholder="${it.tipo === 'envio' ? 'Envío' : 'Descuento'}">
+            </td>
+            <td class="cv2-td-right cv2-td-nuevo-costo">
+              <input type="number" class="cv2-num-input" value="${parseFloat(it.monto || 0).toFixed(2)}"
+                     min="0" step="any" style="width:80px"
+                     data-idx="${i}" data-field="monto"
+                     title="${it.tipo === 'descuento' ? 'Se resta del total' : 'Se suma al total'}">
+            </td>
+            <td class="cv2-td-right cv2-td-iva">
+              <select class="cv2-iva-select" data-idx="${i}" data-field="iva" style="width:70px">
+                <option value=""    ${!it.iva            ? 'selected' : ''}>—</option>
+                <option value="10.5" ${it.iva === '10.5'  ? 'selected' : ''}>10,5%</option>
+                <option value="21"   ${it.iva === '21'    ? 'selected' : ''}>21%</option>
+              </select>
+            </td>
+            <td class="cv2-td-right cv2-td-descuento"></td>
+            <td class="cv2-subtotal cv2-td-right cv2-td-subtotal">${it.tipo === 'descuento' && sub !== 0 ? '− ' : ''}${fmt$(Math.abs(sub))}</td>
+            <td class="cv2-td-center">
+              <button class="cv2-remove-btn" data-idx="${i}" aria-label="Quitar" title="Quitar">×</button>
+            </td>
+          </tr>
+        `;
+      }
+
       const costoChanged = Math.abs((parseFloat(it.costoNuevo) || 0) - (parseFloat(it.costoActual) || 0)) > 0.001;
       const pendiente    = it.confirmado === false;
       return `
@@ -727,14 +778,40 @@ const ComprasV2 = (() => {
     else ge('cv2-search')?.focus();
   }
 
+  // Envío / descuento (ej. pronto pago): línea de ajuste sin producto real,
+  // para que el total del carrito pueda coincidir con el total de la factura
+  // del proveedor sin inventar un producto ficticio (ver itemGross/itemSubtotal).
+  function addAjusteToCart(tipo) {
+    state.items.push({
+      tipo,                                    // 'envio' | 'descuento'
+      productoId: null,
+      concepto:   tipo === 'envio' ? 'Envío' : 'Descuento (pronto pago, etc.)',
+      monto:      0,
+      iva:        '',
+    });
+    const targetIdx = state.items.length - 1;
+    renderCart();
+
+    const montoInp = document.querySelector(`.cv2-cart-row[data-idx="${targetIdx}"] input[data-field="monto"]`);
+    if (montoInp) { montoInp.select(); montoInp.focus(); }
+  }
+
   function updateItem(idx, field, rawValue) {
     const it = state.items[idx];
     if (!it) return;
 
+    if (field === 'concepto') {
+      it.concepto = String(rawValue).trim();
+      renderTotals();
+      return;
+    }
+
     const v = parseFloat(rawValue);
     if (isNaN(v)) return;
 
-    if (field === 'cantidad') {
+    if (field === 'monto') {
+      it.monto = Math.max(0, v);
+    } else if (field === 'cantidad') {
       if (v <= 0) { state.items.splice(idx, 1); renderCart(); return; }
       it.cantidad = v;
     } else if (field === 'costoNuevo') {
@@ -1916,12 +1993,27 @@ const ComprasV2 = (() => {
     const tbody = ge('cv2-rev-tbody');
     if (tbody) {
       tbody.innerHTML = state.items.map((it, i) => {
+        const subtotal = itemSubtotal(it);
+
+        if (isAjuste(it)) {
+          return `<tr>
+            <td class="c">${i + 1}</td>
+            <td>—</td>
+            <td>${it.tipo === 'envio' ? '🚚' : '🏷️'} ${esc(it.concepto || '')}</td>
+            <td class="c">—</td>
+            <td class="c">—</td>
+            <td class="c">—</td>
+            <td class="r">—</td>
+            <td class="r">—</td>
+            <td class="r"><strong>${it.tipo === 'descuento' && subtotal !== 0 ? '− ' : ''}${fmt$(Math.abs(subtotal))}</strong></td>
+          </tr>`;
+        }
+
         const cant    = parseFloat(it.cantidad)   || 0;
         const udsPaq  = parseFloat(it.udsPaquete) || 1;
         const cantUds = cant * udsPaq;
         const costo   = parseFloat(it.costoNuevo) || parseFloat(it.costoActual) || 0;
         const descPct = Math.min(100, Math.max(0, parseFloat(it.descuento) || 0));
-        const subtotal = itemSubtotal(it);
         return `<tr>
           <td class="c">${i + 1}</td>
           <td>${esc(it.barcode || '—')}</td>
@@ -1979,19 +2071,35 @@ const ComprasV2 = (() => {
 
       // 2. Items: compra_items + (stock if not vinculando) + cost update
       for (const item of state.items) {
+        const subtotal = itemSubtotal(item); // neto, ya con el descuento de línea aplicado
+
+        // Envío / descuento: línea de ajuste sin producto real — se registra en
+        // compra_items (para que quede en el historial y participe del cálculo
+        // de IVA de la factura) pero NO toca stock, costo de producto, ni el
+        // IVA guardado en la ficha de ningún producto.
+        if (isAjuste(item)) {
+          db().run(`
+            INSERT INTO compra_items
+              (id, compra_id, producto_id, cantidad, costo_unitario, costo_anterior,
+               subtotal, costo_modificado, unidad_compra, unidades_por_paquete,
+               descuento_pct, descuento_monto, iva, tipo, concepto)
+            VALUES (?, ?, NULL, 0, 0, 0, ?, 0, NULL, 1, 0, 0, ?, ?, ?)
+          `, [uuid(), compraId, subtotal, item.iva || null, item.tipo, item.concepto || null]);
+          continue;
+        }
+
         const cant    = parseFloat(item.cantidad)   || 0;
         const udsPaq  = parseFloat(item.udsPaquete) || 1;
         const cantUds = cant * udsPaq;
         const costoNvo = parseFloat(item.costoNuevo) || parseFloat(item.costoActual) || 0;
         const costoAnt = parseFloat(item.costoActual) || 0;
-        const subtotal = itemSubtotal(item); // neto, ya con el descuento de línea aplicado
 
         db().run(`
           INSERT INTO compra_items
             (id, compra_id, producto_id, cantidad, costo_unitario, costo_anterior,
              subtotal, costo_modificado, unidad_compra, unidades_por_paquete,
-             descuento_pct, descuento_monto, iva)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             descuento_pct, descuento_monto, iva, tipo, concepto)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'producto', NULL)
         `, [uuid(), compraId, item.productoId,
             cant, costoNvo, costoAnt, subtotal,
             Math.abs(costoNvo - costoAnt) > 0.001 ? 1 : 0,
@@ -2389,8 +2497,9 @@ const ComprasV2 = (() => {
     const root = ge('cv2-root');
     if (!root) return;
 
-    // Enrich items with current precio_venta from DB (or use pre-enriched on retomar)
-    const items = preEnrichedItems || state.items.map(it => {
+    // Enrich items with current precio_venta from DB (or use pre-enriched on retomar).
+    // Los ajustes (envío/descuento) no son productos — no hay precio que sugerir.
+    const items = preEnrichedItems || state.items.filter(it => !isAjuste(it)).map(it => {
       const row = db().query(
         `SELECT precio_venta FROM productos WHERE id = ?`, [it.productoId]
       )[0];
@@ -3715,6 +3824,10 @@ const ComprasV2 = (() => {
       });
     }
 
+    // ── Ajustes: envío / descuento (sin producto) ──
+    ge('cv2-btn-add-envio')?.addEventListener('click', () => addAjusteToCart('envio'));
+    ge('cv2-btn-add-descuento')?.addEventListener('click', () => addAjusteToCart('descuento'));
+
     // ── Product search ──
     const searchInp = ge('cv2-search');
     if (searchInp) {
@@ -3810,7 +3923,7 @@ const ComprasV2 = (() => {
         const idx   = parseInt(inp.dataset.idx);
 
         // Numeric-only filter for cantidad, costoNuevo, descuento, descuentoMonto
-        if (['cantidad','costoNuevo','descuento','descuentoMonto'].includes(field)) {
+        if (['cantidad','costoNuevo','descuento','descuentoMonto','monto'].includes(field)) {
           const allow = ['Backspace','Delete','Tab','Enter','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','.'];
           if (!allow.includes(e.key) && !/^\d$/.test(e.key) && !e.ctrlKey && !e.metaKey) {
             e.preventDefault();

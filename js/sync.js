@@ -376,13 +376,14 @@
         INSERT OR REPLACE INTO compra_items
           (id, compra_id, producto_id, cantidad, costo_unitario, costo_anterior,
            subtotal, costo_modificado, unidad_compra, unidades_por_paquete,
-           descuento_pct, descuento_monto, iva)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           descuento_pct, descuento_monto, iva, tipo, concepto)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [item.id, data.id, item.producto_id, item.cantidad,
          item.costo_unitario, item.costo_anterior || null,
          item.subtotal, item.costo_modificado ? 1 : 0,
          item.unidad_compra || 'Unidad', item.unidades_por_paquete || 1,
-         item.descuento_pct || 0, item.descuento_monto || 0, item.iva || null]
+         item.descuento_pct || 0, item.descuento_monto || 0, item.iva || null,
+         item.tipo || 'producto', item.concepto || null]
       );
 
       // Actualizar costo del producto si el admin lo marcó como modificado
