@@ -34,7 +34,7 @@ const OperacionesStock = (() => {
     `, [compraId])[0];
     if (!compra) return null;
     compra.items = db().query(`
-      SELECT ci.*, pr.nombre AS producto_nombre
+      SELECT ci.*, pr.nombre AS producto_nombre, pr.precio_venta AS producto_precio_venta
       FROM compra_items ci
       LEFT JOIN productos pr ON pr.id = ci.producto_id
       WHERE ci.compra_id = ?
@@ -113,6 +113,14 @@ const OperacionesStock = (() => {
     });
   }
 
+  // Margen de venta: null si no hay precio cargado (no aplica calificación de color).
+  function calcMargenPct(costo, precio) {
+    costo  = parseFloat(costo)  || 0;
+    precio = parseFloat(precio) || 0;
+    if (precio <= 0) return null;
+    return ((precio - costo) / precio) * 100;
+  }
+
   function renderDetalleCompra(compraId) {
     const compra = getDetalleCompra(compraId);
     const overlay = ge('ops-detalle-overlay');
@@ -125,6 +133,12 @@ const OperacionesStock = (() => {
       ? `${esc(compra.factura_pv)}-${esc(compra.numero_factura)}`
       : esc(compra.numero_factura || '—');
 
+    // En ADMIN POS se agregan dos columnas: Precio Venta (editable, escribe
+    // directo en productos.precio_venta) y Margen (calculado contra el costo
+    // de ESTA compra) — para poder revisar y corregir de una los precios que
+    // el sistema sugirió y se aceptaron sin chequear al confirmar la compra.
+    const isAdmin = !!window.ADMIN_MODE;
+
     body.innerHTML = `
       <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #e0e6ee">
         <div style="font-weight:700;font-size:15px">${esc(compra.proveedor_nombre || '—')}</div>
@@ -134,6 +148,7 @@ const OperacionesStock = (() => {
           ${compra.condicion_pago === 'efectivo' ? '✓ Efectivo' : '⏳ Pendiente'}
         </div>
       </div>
+      <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px">
         <thead>
           <tr style="background:#f0f2f5">
@@ -143,10 +158,14 @@ const OperacionesStock = (() => {
             <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Costo unit.</th>
             <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Descuento</th>
             <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Subtotal</th>
+            ${isAdmin ? `
+              <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Precio Venta</th>
+              <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Margen</th>
+            ` : ''}
           </tr>
         </thead>
         <tbody>
-          ${(compra.items || []).map(it => {
+          ${(compra.items || []).map((it, idx) => {
             const esAjuste = it.tipo === 'envio' || it.tipo === 'descuento';
             if (esAjuste) {
               const sub = parseFloat(it.subtotal) || 0;
@@ -158,25 +177,76 @@ const OperacionesStock = (() => {
                 <td style="padding:7px 10px;text-align:right">—</td>
                 <td style="padding:7px 10px;text-align:right;color:#607080">—</td>
                 <td style="padding:7px 10px;text-align:right;font-weight:600">${sub < 0 ? '− ' : ''}${fmt$(Math.abs(sub))}</td>
+                ${isAdmin ? `<td style="padding:7px 10px;text-align:right">—</td><td style="padding:7px 10px;text-align:right">—</td>` : ''}
               </tr>`;
             }
             const descPct = parseFloat(it.descuento_pct) || 0;
             const esMuestra = it.tipo === 'muestra';
-            return `<tr style="border-bottom:1px solid #eef0f3${esMuestra ? ';background:#f6f2ff' : ''}">
+            const precioActual = parseFloat(it.producto_precio_venta) || 0;
+            // Margen contra el costo de ESTA muestra no dice nada (costo casi
+            // $0 a propósito) — no calificar con color en ese caso.
+            const margen = esMuestra ? null : calcMargenPct(it.costo_unitario, precioActual);
+            const margenColor = margen == null ? '#8090a0' : margen < 0 ? '#c62828' : margen < 15 ? '#e65100' : '#445566';
+            return `<tr class="ops-detalle-row" data-idx="${idx}" style="border-bottom:1px solid #eef0f3${esMuestra ? ';background:#f6f2ff' : ''}">
               <td style="padding:7px 10px">${esc(it.producto_nombre || '—')}${esMuestra ? ' <span style="font-size:10px;font-weight:700;color:#6a1fc9">🎁 Muestra</span>' : ''}</td>
               <td style="padding:7px 10px;text-align:right">${it.cantidad}</td>
               <td style="padding:7px 10px;color:#607080">${esc(it.unidad_compra || 'Unidad')}</td>
               <td style="padding:7px 10px;text-align:right">${fmt$(it.costo_unitario)}</td>
               <td style="padding:7px 10px;text-align:right;color:#607080">${descPct > 0.001 ? descPct.toFixed(1) + '%' : '—'}</td>
               <td style="padding:7px 10px;text-align:right;font-weight:600">${fmt$(it.subtotal)}</td>
+              ${isAdmin ? (
+                it.producto_id
+                  ? `<td style="padding:5px 10px;text-align:right">
+                       <input type="number" class="ops-precio-input" data-idx="${idx}" data-prodid="${esc(it.producto_id)}"
+                              value="${precioActual.toFixed(2)}" min="0" step="any"
+                              style="width:92px;padding:4px 6px;border:1px solid #c8d0dc;border-radius:4px;text-align:right;font-size:13px">
+                     </td>
+                     <td class="ops-margen-cell" data-idx="${idx}" style="padding:7px 10px;text-align:right;font-weight:700;color:${margenColor}">
+                       ${margen == null ? '—' : margen.toFixed(1) + '%'}
+                     </td>`
+                  : `<td style="padding:7px 10px;text-align:right">—</td><td style="padding:7px 10px;text-align:right">—</td>`
+              ) : ''}
             </tr>`;
           }).join('')}
         </tbody>
       </table>
+      </div>
       <div style="text-align:right;font-size:16px;font-weight:800;color:#1a2e4a">Total: ${fmt$(compra.total || 0)}</div>
     `;
 
     overlay.style.display = 'flex';
+
+    if (isAdmin) {
+      body.querySelectorAll('.ops-precio-input').forEach(inp => {
+        inp.addEventListener('blur', () => {
+          const idx    = parseInt(inp.dataset.idx);
+          const prodId = inp.dataset.prodid;
+          const item   = compra.items[idx];
+          const nuevoPrecio = parseFloat(inp.value);
+          if (isNaN(nuevoPrecio) || nuevoPrecio < 0) { inp.value = (parseFloat(item.producto_precio_venta) || 0).toFixed(2); return; }
+          if (Math.abs(nuevoPrecio - (parseFloat(item.producto_precio_venta) || 0)) < 0.001) return; // sin cambios
+
+          const ts = window.SGA_Utils.formatISODate(new Date());
+          db().run(
+            `UPDATE productos SET precio_venta=?, ultima_modificacion_precio=?, sync_status='pending', updated_at=? WHERE id=?`,
+            [nuevoPrecio, ts, ts, prodId]
+          );
+          item.producto_precio_venta = nuevoPrecio;
+          inp.value = nuevoPrecio.toFixed(2);
+
+          const margenCell = body.querySelector(`.ops-margen-cell[data-idx="${idx}"]`);
+          if (margenCell) {
+            const esMuestra = item.tipo === 'muestra';
+            const margen = esMuestra ? null : calcMargenPct(item.costo_unitario, nuevoPrecio);
+            const color = margen == null ? '#8090a0' : margen < 0 ? '#c62828' : margen < 15 ? '#e65100' : '#445566';
+            margenCell.style.color = color;
+            margenCell.textContent = margen == null ? '—' : margen.toFixed(1) + '%';
+          }
+          window.SGA_Utils.showNotification('Precio actualizado', 'success', 1500);
+        });
+        inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
+      });
+    }
   }
 
   // ── KPIs Y ACTIVIDAD RECIENTE ──────────────────────────────────────────────
