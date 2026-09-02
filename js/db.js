@@ -706,7 +706,7 @@
           updated_at TEXT
         )
       `);
-      database.run(`INSERT OR IGNORE INTO system_config VALUES ('tope_deuda_default', '50000', datetime('now'))`);
+      database.run(`INSERT OR IGNORE INTO system_config VALUES ('tope_deuda_default', '10000', datetime('now'))`);
     } catch(e) { console.warn('system_config:', e.message); }
 
     // cuenta_proveedor — accounts payable ledger per supplier
@@ -743,10 +743,12 @@
       'ALTER TABLE orden_compra_items ADD COLUMN costo_anterior REAL DEFAULT 0',
       'ALTER TABLE clientes ADD COLUMN direccion TEXT',
       'ALTER TABLE clientes ADD COLUMN lote TEXT',
-      'ALTER TABLE clientes ADD COLUMN tope_deuda REAL DEFAULT 50000',
+      'ALTER TABLE clientes ADD COLUMN tope_deuda REAL DEFAULT 10000',
       'ALTER TABLE clientes ADD COLUMN cliente_master_id TEXT',
       'ALTER TABLE clientes ADD COLUMN es_master INTEGER DEFAULT 0',
       'ALTER TABLE clientes ADD COLUMN ultima_visita TEXT',
+      // Migración de clientes: id del sistema anterior, para poder rastrear/matchear después
+      'ALTER TABLE clientes ADD COLUMN codigo_viejo TEXT',
       'ALTER TABLE productos ADD COLUMN pedido_unidades_por_paquete REAL DEFAULT NULL',
       // Fix: compras_v2 uses these columns that were missing from the original schema
       "ALTER TABLE compras ADD COLUMN condicion_pago TEXT",
