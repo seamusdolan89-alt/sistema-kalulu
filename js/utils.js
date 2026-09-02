@@ -312,4 +312,30 @@
     $,
     $$,
   };
+
+  // ── Punto decimal del teclado numérico ──────────────────────────────────
+  // La tecla física del numpad (debajo del 3, code "NumpadDecimal") a veces
+  // el sistema operativo la manda como "," según la configuración regional
+  // de Windows — pero <input type="number"> solo acepta "." como separador
+  // decimal, así que ese "," queda descartado y el número nunca entra con
+  // decimales. Se intercepta por el código físico de la tecla (no por el
+  // carácter que mande el layout del teclado) para que siempre entre como
+  // punto, sin depender de la configuración regional de cada compu. Corre
+  // en fase de captura para adelantarse a cualquier keydown propio de cada
+  // módulo (ej. compras_v2 filtra teclas no numéricas).
+  document.addEventListener('keydown', (e) => {
+    if (e.code !== 'NumpadDecimal') return;
+    const el = e.target;
+    if (!(el instanceof HTMLInputElement) || el.type !== 'number') return;
+
+    e.preventDefault();
+    const start = el.selectionStart ?? el.value.length;
+    const end   = el.selectionEnd   ?? el.value.length;
+    // No insertar un segundo punto si ya hay uno fuera de lo seleccionado
+    if ((el.value.slice(0, start) + el.value.slice(end)).includes('.')) return;
+
+    el.value = el.value.slice(0, start) + '.' + el.value.slice(end);
+    el.setSelectionRange(start + 1, start + 1);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }, true);
 })();
