@@ -121,6 +121,23 @@
         } catch(e) { console.warn('Fix pagos_proveedores_metodos:', e.message); }
       }
 
+      // Fix de una sola vez: compras confirmadas ANTES de corregir el bug de
+      // "compras.total quedaba con el subtotal sin IVA en vez del total de la
+      // factura" (ver memoria) — total_factura siempre tuvo el valor correcto,
+      // total no. Se recalcula desde ahí y se vuelve a marcar 'pending' para
+      // que la corrección viaje también a la otra compu.
+      if (!localStorage.getItem('fix_compras_total_v1_done')) {
+        try {
+          const ts = new Date().toISOString();
+          window.SGA_DB.run(`
+            UPDATE compras SET total = total_factura, sync_status = 'pending', updated_at = ?
+            WHERE total_factura > 0 AND ABS(total - total_factura) > 0.01
+          `, [ts]);
+          localStorage.setItem('fix_compras_total_v1_done', '1');
+          console.log('🔧 Fix compras.total: recalculado desde total_factura en compras anteriores al fix');
+        } catch(e) { console.warn('Fix compras.total:', e.message); }
+      }
+
       await syncNow();
 
       if (!window.ADMIN_MODE) {
