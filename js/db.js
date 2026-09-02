@@ -749,6 +749,7 @@
       'ALTER TABLE clientes ADD COLUMN ultima_visita TEXT',
       // Migración de clientes: id del sistema anterior, para poder rastrear/matchear después
       'ALTER TABLE clientes ADD COLUMN codigo_viejo TEXT',
+      'ALTER TABLE clientes ADD COLUMN observaciones TEXT',
       'ALTER TABLE productos ADD COLUMN pedido_unidades_por_paquete REAL DEFAULT NULL',
       // Fix: compras_v2 uses these columns that were missing from the original schema
       "ALTER TABLE compras ADD COLUMN condicion_pago TEXT",

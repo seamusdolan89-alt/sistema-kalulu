@@ -245,13 +245,13 @@ const SGA_Clientes = (() => {
     const n = now();
     db().run(`
       INSERT INTO clientes
-        (id, nombre, apellido, telefono, email, lote, direccion,
+        (id, nombre, apellido, telefono, email, lote, direccion, observaciones,
          tope_deuda, cliente_master_id, es_master, activo,
          fecha_alta, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)
     `, [
       id, data.nombre.trim(), data.apellido || null, data.telefono || null,
-      data.email || null, data.lote || null, data.direccion || null,
+      data.email || null, data.lote || null, data.direccion || null, data.observaciones || null,
       data.tope_deuda != null ? data.tope_deuda : topeDefault,
       data.cliente_master_id || null, data.es_master ? 1 : 0,
       n, 'pending', n
@@ -262,7 +262,7 @@ const SGA_Clientes = (() => {
   function actualizar(id, data, userRol) {
     const fields = [];
     const vals = [];
-    const allowed = ['nombre','apellido','telefono','email','lote','direccion',
+    const allowed = ['nombre','apellido','telefono','email','lote','direccion','observaciones',
                      'es_master','cliente_master_id','activo'];
     for (const k of allowed) {
       if (data[k] !== undefined) { fields.push(`${k} = ?`); vals.push(data[k]); }
@@ -879,11 +879,11 @@ const ClientesUI = (() => {
   // ── EXPORT TEMPLATE ───────────────────────────────────────────────────────
 
   function downloadTemplate() {
-    // col idx:  0        1          2      3           4          5       6     7            8        9          10               11             12
+    // col idx:  0        1          2      3           4          5       6     7            8        9          10               11             12              13
     const headers = [
       'nombre', 'apellido', 'lote', 'direccion', 'telefono',
       'email', 'dni', 'tope_deuda', 'activo', 'es_master', 'familia_codigo',
-      'codigo_viejo', 'saldo_inicial'
+      'codigo_viejo', 'saldo_inicial', 'observaciones'
     ];
 
     const colFormats = {
@@ -900,15 +900,17 @@ const ClientesUI = (() => {
       10: { t: 's', z: '@' }, // familia_codigo
       11: { t: 's', z: '@' }, // codigo_viejo
       12: { t: 'n', z: '#,##0.00' }, // saldo_inicial
+      13: { t: 's', z: '@' }, // observaciones
     };
 
-    const instrRow = Array(13).fill('');
+    const instrRow = Array(14).fill('');
     instrRow[7]  = '→ Monto máximo de deuda';
     instrRow[8]  = '→ 1=activo, 0=inactivo';
     instrRow[9]  = '→ 1=master del lote, 0=no';
     instrRow[10] = '→ Mismo código para master y sus miembros. Vacío = cliente independiente.';
     instrRow[11] = '→ Id/código del sistema anterior, solo para referencia';
     instrRow[12] = '→ Positivo = debe; negativo = a favor. Solo se aplica al crear el cliente (no en actualizaciones)';
+    instrRow[13] = '→ Texto libre';
 
     const exportRows = window.SGA_DB.query(`
       SELECT c.*,
@@ -939,13 +941,14 @@ const ClientesUI = (() => {
         c.familia_codigo || '',
         c.codigo_viejo || '',
         '',
+        c.observaciones || '',
       ]);
       filename = 'clientes_exportados.xlsx';
     } else {
       dataRows = [
-        ['Juan',  'García', 'M12 L3', 'Calle Falsa 123', '3415000000', 'juan@mail.com', '30000000', 10000, 1, 1, 'LOTE_M12', '', 0],
-        ['María', 'García', 'M12 L3', '',                '3415000001', '',               '',         10000, 1, 0, 'LOTE_M12', '', 0],
-        ['Pedro', 'López',  '',        '',                '3415000002', '',               '',         10000, 1, 0, '',         '', -1500],
+        ['Juan',  'García', 'M12 L3', 'Calle Falsa 123', '3415000000', 'juan@mail.com', '30000000', 10000, 1, 1, 'LOTE_M12', '', 0, ''],
+        ['María', 'García', 'M12 L3', '',                '3415000001', '',               '',         10000, 1, 0, 'LOTE_M12', '', 0, ''],
+        ['Pedro', 'López',  '',        '',                '3415000002', '',               '',         10000, 1, 0, '',         '', -1500, ''],
       ];
       filename = 'plantilla_clientes.xlsx';
     }
@@ -976,6 +979,7 @@ const ClientesUI = (() => {
       { wch: 24 }, // familia_codigo
       { wch: 16 }, // codigo_viejo
       { wch: 14 }, // saldo_inicial
+      { wch: 30 }, // observaciones
     ];
 
     const wb = XLSX.utils.book_new();
@@ -1036,6 +1040,7 @@ const ClientesUI = (() => {
           familia_codigo: idxOf('familia_codigo'),
           codigo_viejo:   idxOf('codigo_viejo'),
           saldo_inicial:  idxOf('saldo_inicial'),
+          observaciones:  idxOf('observaciones'),
         };
 
         // Skip header + optional instruction row (instruction row has no nombre)
@@ -1055,6 +1060,7 @@ const ClientesUI = (() => {
             familia_codigo: idx.familia_codigo >= 0 ? String(row[idx.familia_codigo] || '').trim() : '',
             codigo_viejo:   idx.codigo_viejo >= 0    ? String(row[idx.codigo_viejo] || '').trim() : '',
             saldo_inicial:  idx.saldo_inicial >= 0   ? (parseFloat(row[idx.saldo_inicial]) || 0) : 0,
+            observaciones:  idx.observaciones >= 0   ? String(row[idx.observaciones] || '').trim() : '',
           }))
           .filter(r => r.nombre); // filter out instruction rows and blanks
 
@@ -1128,14 +1134,14 @@ const ClientesUI = (() => {
               UPDATE clientes SET
                 apellido = ?, lote = ?, direccion = ?, telefono = ?, email = ?, dni = ?,
                 tope_deuda = COALESCE(?, tope_deuda), activo = ?, es_master = ?,
-                codigo_viejo = COALESCE(?, codigo_viejo),
+                codigo_viejo = COALESCE(?, codigo_viejo), observaciones = COALESCE(?, observaciones),
                 updated_at = ?, sync_status = 'pending'
               WHERE id = ?
             `, [
               fila.apellido || null, fila.lote || null, fila.direccion || null,
               fila.telefono || null, fila.email || null, fila.dni || null,
               fila.tope_deuda, fila.activo, fila.es_master,
-              fila.codigo_viejo || null, n, id
+              fila.codigo_viejo || null, fila.observaciones || null, n, id
             ]);
             actualizados++;
           } else {
@@ -1146,12 +1152,13 @@ const ClientesUI = (() => {
           window.SGA_DB.run(`
             INSERT INTO clientes
               (id, nombre, apellido, lote, direccion, telefono, email, dni,
-               tope_deuda, activo, es_master, codigo_viejo, fecha_alta, updated_at, sync_status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending')
+               tope_deuda, activo, es_master, codigo_viejo, observaciones, fecha_alta, updated_at, sync_status)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending')
           `, [
             id, fila.nombre, fila.apellido || null, fila.lote || null,
             fila.direccion || null, fila.telefono || null, fila.email || null, fila.dni || null,
-            fila.tope_deuda ?? topeDefault, fila.activo, fila.es_master, fila.codigo_viejo || null, n, n
+            fila.tope_deuda ?? topeDefault, fila.activo, fila.es_master,
+            fila.codigo_viejo || null, fila.observaciones || null, n, n
           ]);
           nuevos++;
 
@@ -1231,6 +1238,7 @@ const ClientesUI = (() => {
     ge('mc-telefono').value = prefill.telefono || '';
     ge('mc-email').value = prefill.email || '';
     ge('mc-tope-deuda').value = prefill.tope_deuda != null ? prefill.tope_deuda : '';
+    ge('mc-observaciones').value = prefill.observaciones || '';
     ge('modal-cliente-title').textContent = prefill.id ? '✏️ Editar Cliente' : '+ Nuevo Cliente';
 
     // Store master link if provided
@@ -1266,6 +1274,7 @@ const ClientesUI = (() => {
       telefono: ge('mc-telefono').value.trim() || null,
       email: ge('mc-email').value.trim() || null,
       tope_deuda: tope,
+      observaciones: ge('mc-observaciones').value.trim() || null,
       cliente_master_id: masterId,
     };
 
