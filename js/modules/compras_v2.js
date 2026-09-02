@@ -680,9 +680,16 @@ const ComprasV2 = (() => {
     const btn = ge('cv2-btn-confirmar');
     if (!btn) return;
     const hayPendientes = state.items.some(it => it.confirmado === false);
-    btn.disabled = !(state.proveedorId && state.items.length > 0) || hayPendientes;
+    // Sin Total Factura cargado en la cabecera no hay forma de saber cuánto
+    // se le debe realmente al proveedor (con impuestos incluidos) — sin este
+    // chequeo, confirmar sin completar la cabecera terminaría registrando el
+    // subtotal del carrito como si fuera el total, mismo bug que se corrigió.
+    const faltaTotalFactura = !state.modoRemito && !(state.totalFactura > 0);
+    btn.disabled = !(state.proveedorId && state.items.length > 0) || hayPendientes || faltaTotalFactura;
     btn.title = hayPendientes
       ? 'Escaneá el código de cada producto para confirmarlo antes de continuar'
+      : faltaTotalFactura
+      ? 'Completá el Total Factura en la cabecera antes de confirmar'
       : '';
 
     if (state.modoRemito) {
