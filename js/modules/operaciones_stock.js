@@ -161,8 +161,9 @@ const OperacionesStock = (() => {
               </tr>`;
             }
             const descPct = parseFloat(it.descuento_pct) || 0;
-            return `<tr style="border-bottom:1px solid #eef0f3">
-              <td style="padding:7px 10px">${esc(it.producto_nombre || '—')}</td>
+            const esMuestra = it.tipo === 'muestra';
+            return `<tr style="border-bottom:1px solid #eef0f3${esMuestra ? ';background:#f6f2ff' : ''}">
+              <td style="padding:7px 10px">${esc(it.producto_nombre || '—')}${esMuestra ? ' <span style="font-size:10px;font-weight:700;color:#6a1fc9">🎁 Muestra</span>' : ''}</td>
               <td style="padding:7px 10px;text-align:right">${it.cantidad}</td>
               <td style="padding:7px 10px;color:#607080">${esc(it.unidad_compra || 'Unidad')}</td>
               <td style="padding:7px 10px;text-align:right">${fmt$(it.costo_unitario)}</td>

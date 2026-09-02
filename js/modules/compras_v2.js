@@ -67,6 +67,7 @@ const ComprasV2 = (() => {
     searchResults:        [],
     searchHighlight:      -1,
     searchQuerySaved:     '',   // typed query before arrow navigation
+    modoMuestra:          false, // true: el próximo producto elegido en el buscador se agrega como línea de muestra (no se fusiona con una línea existente del mismo producto)
     provResults:          [],
     provHighlight:        -1,
     herenciaSincronizados: [], // products synced via herencia modal during post-compra
@@ -109,6 +110,17 @@ const ComprasV2 = (() => {
   // cálculo de totales e IVA del carrito.
   function isAjuste(item) { return item.tipo === 'envio' || item.tipo === 'descuento'; }
 
+  // Costo a usar para una línea de producto: el "Nuevo Costo" cargado, o el
+  // costo actual del producto como respaldo SOLO si Nuevo Costo todavía no
+  // es un número válido (recién agregado, sin tipear nada aún). OJO: usar
+  // "||" acá sería un bug — un Nuevo Costo de $0 tipeado a propósito (ej.
+  // una línea de muestra gratis) es "falsy" en JS y el "||" lo pisaría con
+  // el costo real del producto, cobrando la muestra a precio completo.
+  function costoUsado(item) {
+    const cn = parseFloat(item.costoNuevo);
+    return !isNaN(cn) ? cn : (parseFloat(item.costoActual) || 0);
+  }
+
   function itemGross(item) {
     if (isAjuste(item)) {
       const m = Math.abs(parseFloat(item.monto) || 0);
@@ -116,7 +128,7 @@ const ComprasV2 = (() => {
     }
     return (parseFloat(item.cantidad)   || 0)
          * (parseFloat(item.udsPaquete) || 1)
-         * (parseFloat(item.costoNuevo) || parseFloat(item.costoActual) || 0);
+         * costoUsado(item);
   }
 
   // subtotal = gross × (1 - descuento%) — los ajustes no tienen descuento% propio
@@ -212,10 +224,14 @@ const ComprasV2 = (() => {
 
     // Envío/descuento son ajustes de facturación — no aplican a un remito
     // (solo trackea mercadería recibida, sin precios ni total a reconciliar).
-    const envioBtn = ge('cv2-btn-add-envio');
-    const descBtn  = ge('cv2-btn-add-descuento');
-    if (envioBtn) envioBtn.style.display = remito ? 'none' : '';
-    if (descBtn)  descBtn.style.display  = remito ? 'none' : '';
+    // Muestra tampoco: existe para no pisar el costo del producto, y un
+    // remito no muestra ni toca costos.
+    const envioBtn   = ge('cv2-btn-add-envio');
+    const descBtn    = ge('cv2-btn-add-descuento');
+    const muestraBtn = ge('cv2-btn-add-muestra');
+    if (envioBtn)   envioBtn.style.display   = remito ? 'none' : '';
+    if (descBtn)    descBtn.style.display    = remito ? 'none' : '';
+    if (muestraBtn) muestraBtn.style.display = remito ? 'none' : '';
 
     // toggle between normal and remito field panels
     const camposFactura = ge('cv2-campos-factura');
@@ -474,14 +490,16 @@ const ComprasV2 = (() => {
       const costoChanged = Math.abs((parseFloat(it.costoNuevo) || 0) - (parseFloat(it.costoActual) || 0)) > 0.001;
       const pendiente    = it.confirmado === false;
       return `
-        <tr class="cv2-cart-row${pendiente ? ' cv2-cart-row-pendiente' : ''}" data-idx="${i}">
+        <tr class="cv2-cart-row${pendiente ? ' cv2-cart-row-pendiente' : ''}${it.esMuestra ? ' cv2-cart-row-muestra' : ''}" data-idx="${i}">
           <td class="cv2-td-num">${i + 1}</td>
           <td class="cv2-td-cod">${pendiente
             ? `<input type="text" class="cv2-codigo-scan" data-idx="${i}" placeholder="Escanear código…" autocomplete="off">`
             : esc(it.barcode || '')}</td>
           <td class="cv2-cart-nombre" title="${esc(it.nombre)}">
             ${esc(it.nombre)}
-            ${costoChanged ? `<span class="cv2-costo-changed" title="Costo modificado">↑</span>` : ''}
+            ${it.esMuestra
+              ? `<span class="cv2-muestra-badge" title="Muestra: no pisa el costo del producto">🎁 Muestra</span>`
+              : (costoChanged ? `<span class="cv2-costo-changed" title="Costo modificado">↑</span>` : '')}
           </td>
           <td class="cv2-td-present">${parseFloat(it.udsPaquete) || 1} × ${esc(it.unidadCompra || 'Unidad')}</td>
           <td class="cv2-td-right">
@@ -748,7 +766,7 @@ const ComprasV2 = (() => {
   function selectSearchResult(idx) {
     const r = state.searchResults[idx];
     if (!r) return;
-    addToCart({
+    const prod = {
       productoId:   r.id,
       nombre:       r.nombre,
       barcode:      r.barcode || '',
@@ -757,14 +775,21 @@ const ComprasV2 = (() => {
       costoActual:  parseFloat(r.costo) || 0,
       costoNuevo:   parseFloat(r.costo) || 0,
       iva:          r.iva || '',
-    });
+    };
+    if (state.modoMuestra) {
+      addMuestraToCart(prod);
+      state.modoMuestra = false;
+      updateMuestraModeUI();
+    } else {
+      addToCart(prod);
+    }
     clearSearch();
   }
 
   // ── Cart mutations ───────────────────────────────────────────────────────────
   function addToCart(prod) {
     let targetIdx;
-    const existing = state.items.findIndex(it => it.productoId === prod.productoId);
+    const existing = state.items.findIndex(it => it.productoId === prod.productoId && !it.esMuestra);
     if (existing >= 0) {
       state.items[existing].cantidad = parseFloat(state.items[existing].cantidad) + 1;
       targetIdx = existing;
@@ -793,6 +818,36 @@ const ComprasV2 = (() => {
     else ge('cv2-search')?.focus();
   }
 
+  // Muestra gratis: línea aparte para un producto que YA está (o puede estar)
+  // en el carrito a su costo real, pero con costo propio (normalmente $0 o
+  // casi $0) — no se fusiona con la línea existente de ese mismo producto, y
+  // al confirmar la compra NO pisa el costo/precio guardado del producto
+  // (ver commitCompra: se salta el UPDATE de costo para líneas con esMuestra).
+  function addMuestraToCart(prod) {
+    state.items.push({
+      productoId:      prod.productoId,
+      nombre:          prod.nombre,
+      barcode:         prod.barcode || '',
+      unidadCompra:    prod.unidadCompra,
+      udsPaquete:      prod.udsPaquete,
+      costoActual:     prod.costoActual,
+      costoNuevo:      0,
+      cantidad:        1,
+      descuento:       0,
+      descuentoMonto:  0,
+      iva:             prod.iva || '',
+      esMuestra:       true,
+    });
+    const targetIdx = state.items.length - 1;
+    renderCart();
+
+    // Foco en el costo (lo que normalmente hay que corregir en una muestra:
+    // cantidad ya viene en 1, pero el costo por defecto es $0).
+    const costoInp = document.querySelector(`.cv2-cart-row[data-idx="${targetIdx}"] input[data-field="costoNuevo"]`);
+    if (costoInp) { costoInp.select(); costoInp.focus(); }
+    else ge('cv2-search')?.focus();
+  }
+
   // Envío / descuento (ej. pronto pago): línea de ajuste sin producto real,
   // para que el total del carrito pueda coincidir con el total de la factura
   // del proveedor sin inventar un producto ficticio (ver itemGross/itemSubtotal).
@@ -809,6 +864,23 @@ const ComprasV2 = (() => {
 
     const montoInp = document.querySelector(`.cv2-cart-row[data-idx="${targetIdx}"] input[data-field="monto"]`);
     if (montoInp) { montoInp.select(); montoInp.focus(); }
+  }
+
+  // Refleja state.modoMuestra en el botón "+ Muestra" y en el buscador, para
+  // que quede claro que el próximo producto elegido se va a agregar como
+  // línea de muestra en vez de fusionarse con una línea existente.
+  function updateMuestraModeUI() {
+    const btn = ge('cv2-btn-add-muestra');
+    const inp = ge('cv2-search');
+    if (btn) {
+      btn.classList.toggle('active', state.modoMuestra);
+      btn.textContent = state.modoMuestra ? '🎁 Elegí el producto…' : '🎁 + Muestra';
+    }
+    if (inp) {
+      inp.placeholder = state.modoMuestra
+        ? 'Muestra: buscá el producto por nombre, SKU o Cód. Barras…'
+        : 'Buscar producto por nombre, SKU, Cód. Barras o escanee...';
+    }
   }
 
   function updateItem(idx, field, rawValue) {
@@ -852,8 +924,9 @@ const ComprasV2 = (() => {
     const subEl = document.querySelector(`.cv2-cart-row[data-idx="${idx}"] .cv2-subtotal`);
     if (subEl) subEl.textContent = fmt$(itemSubtotal(it));
 
-    // Refresh cost-changed indicator if costoNuevo changed
-    if (field === 'costoNuevo') {
+    // Refresh cost-changed indicator if costoNuevo changed (las muestras ya
+    // muestran su propia insignia 🎁 en vez de esta, ver renderCart)
+    if (field === 'costoNuevo' && !it.esMuestra) {
       const nombreTd = document.querySelector(`.cv2-cart-row[data-idx="${idx}"] .cv2-cart-nombre`);
       if (nombreTd) {
         const changed = Math.abs((parseFloat(it.costoNuevo) || 0) - (parseFloat(it.costoActual) || 0)) > 0.001;
@@ -2027,12 +2100,12 @@ const ComprasV2 = (() => {
         const cant    = parseFloat(it.cantidad)   || 0;
         const udsPaq  = parseFloat(it.udsPaquete) || 1;
         const cantUds = cant * udsPaq;
-        const costo   = parseFloat(it.costoNuevo) || parseFloat(it.costoActual) || 0;
+        const costo   = costoUsado(it);
         const descPct = Math.min(100, Math.max(0, parseFloat(it.descuento) || 0));
         return `<tr>
           <td class="c">${i + 1}</td>
           <td>${esc(it.barcode || '—')}</td>
-          <td>${esc(it.nombre)}</td>
+          <td>${esc(it.nombre)}${it.esMuestra ? ' <span style="font-size:10px;font-weight:700;color:#6a1fc9">🎁 Muestra</span>' : ''}</td>
           <td class="c">${cant}</td>
           <td class="c">${udsPaq}</td>
           <td class="c"><strong>${cantUds}</strong></td>
@@ -2106,7 +2179,7 @@ const ComprasV2 = (() => {
         const cant    = parseFloat(item.cantidad)   || 0;
         const udsPaq  = parseFloat(item.udsPaquete) || 1;
         const cantUds = cant * udsPaq;
-        const costoNvo = parseFloat(item.costoNuevo) || parseFloat(item.costoActual) || 0;
+        const costoNvo = costoUsado(item);
         const costoAnt = parseFloat(item.costoActual) || 0;
 
         db().run(`
@@ -2114,13 +2187,13 @@ const ComprasV2 = (() => {
             (id, compra_id, producto_id, cantidad, costo_unitario, costo_anterior,
              subtotal, costo_modificado, unidad_compra, unidades_por_paquete,
              descuento_pct, descuento_monto, iva, tipo, concepto)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'producto', NULL)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
         `, [uuid(), compraId, item.productoId,
             cant, costoNvo, costoAnt, subtotal,
             Math.abs(costoNvo - costoAnt) > 0.001 ? 1 : 0,
             item.unidadCompra || 'Unidad', udsPaq,
             parseFloat(item.descuento) || 0, parseFloat(item.descuentoMonto) || 0,
-            item.iva || null]);
+            item.iva || null, item.esMuestra ? 'muestra' : 'producto']);
 
         // Stock: only increment if NOT vinculando (remito already updated stock)
         if (!state.vinculandoRemitoId) {
@@ -2145,8 +2218,10 @@ const ComprasV2 = (() => {
           window.SGA_DB.registrarHistorialStock(item.productoId, user.sucursal_id);
         }
 
-        // Cost update (if changed)
-        if (costoNvo > 0 && Math.abs(costoNvo - costoAnt) > 0.001) {
+        // Cost update (if changed) — las líneas de muestra NUNCA actualizan el
+        // costo del producto: su costo (normalmente $0) no es el costo real
+        // de reposición, y pisarlo arruinaría precios/márgenes.
+        if (!item.esMuestra && costoNvo > 0 && Math.abs(costoNvo - costoAnt) > 0.001) {
           db().run(
             `UPDATE productos SET costo=?, costo_paquete=?, sync_status='pending', updated_at=? WHERE id=?`,
             [costoNvo, costoNvo * udsPaq, ts, item.productoId]
@@ -2514,7 +2589,9 @@ const ComprasV2 = (() => {
 
     // Enrich items with current precio_venta from DB (or use pre-enriched on retomar).
     // Los ajustes (envío/descuento) no son productos — no hay precio que sugerir.
-    const items = preEnrichedItems || state.items.filter(it => !isAjuste(it)).map(it => {
+    // Las muestras tampoco: su costo (~$0) no debe disparar una sugerencia de
+    // "bajar el precio de venta" del producto real.
+    const items = preEnrichedItems || state.items.filter(it => !isAjuste(it) && !it.esMuestra).map(it => {
       const row = db().query(
         `SELECT precio_venta FROM productos WHERE id = ?`, [it.productoId]
       )[0];
@@ -3652,6 +3729,7 @@ const ComprasV2 = (() => {
     state.searchResults         = [];
     state.searchHighlight       = -1;
     state.searchQuerySaved      = '';
+    state.modoMuestra           = false;
     state.provResults           = [];
     state.provHighlight         = -1;
     state.modoRemito            = false;
@@ -3842,6 +3920,13 @@ const ComprasV2 = (() => {
     // ── Ajustes: envío / descuento (sin producto) ──
     ge('cv2-btn-add-envio')?.addEventListener('click', () => addAjusteToCart('envio'));
     ge('cv2-btn-add-descuento')?.addEventListener('click', () => addAjusteToCart('descuento'));
+
+    // ── Muestra: el próximo producto buscado se agrega como línea aparte ──
+    ge('cv2-btn-add-muestra')?.addEventListener('click', () => {
+      state.modoMuestra = !state.modoMuestra;
+      updateMuestraModeUI();
+      if (state.modoMuestra) ge('cv2-search')?.focus();
+    });
 
     // ── Product search ──
     const searchInp = ge('cv2-search');
