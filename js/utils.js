@@ -336,14 +336,28 @@
     if (!isNumberInput && !isDecimalText) return;
 
     e.preventDefault();
+
+    if (isNumberInput) {
+      // OJO: en <input type="number"> no se puede insertar el punto
+      // asignando el.value directamente (como sí funciona en los campos de
+      // texto de abajo). El navegador sanea ese IDL property en cada
+      // asignación por JS, y mientras el usuario está a mitad de tipear
+      // (ej. "45." sin dígitos después todavía) ese string no es un número
+      // válido — lo vacía a "" y se pierde todo lo tipeado. execCommand
+      // simula una tecla real, que sí tolera ese estado intermedio (igual
+      // que si el navegador hubiera dejado pasar un "." tipeado a mano).
+      if (el.value.includes('.')) return; // ya tiene punto decimal
+      document.execCommand('insertText', false, '.');
+      return;
+    }
+
     const start = el.selectionStart ?? el.value.length;
     const end   = el.selectionEnd   ?? el.value.length;
     const rest = el.value.slice(0, start) + el.value.slice(end);
     // No insertar un segundo separador decimal si ya hay uno fuera de lo
     // seleccionado (en los campos de texto también cuenta la "," como
     // separador ya puesto, para no terminar con "1234,56.78").
-    const yaTieneSeparador = isNumberInput ? rest.includes('.') : /[.,]/.test(rest);
-    if (yaTieneSeparador) return;
+    if (/[.,]/.test(rest)) return;
 
     el.value = el.value.slice(0, start) + '.' + el.value.slice(end);
     el.setSelectionRange(start + 1, start + 1);
