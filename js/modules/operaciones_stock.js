@@ -147,6 +147,19 @@ const OperacionesStock = (() => {
         </thead>
         <tbody>
           ${(compra.items || []).map(it => {
+            const esAjuste = it.tipo === 'envio' || it.tipo === 'descuento';
+            if (esAjuste) {
+              const sub = parseFloat(it.subtotal) || 0;
+              const icon = it.tipo === 'envio' ? '🚚' : '🏷️';
+              return `<tr style="border-bottom:1px solid #eef0f3">
+                <td style="padding:7px 10px">${icon} ${esc(it.concepto || (it.tipo === 'envio' ? 'Envío' : 'Descuento'))}</td>
+                <td style="padding:7px 10px;text-align:right">—</td>
+                <td style="padding:7px 10px;color:#607080">—</td>
+                <td style="padding:7px 10px;text-align:right">—</td>
+                <td style="padding:7px 10px;text-align:right;color:#607080">—</td>
+                <td style="padding:7px 10px;text-align:right;font-weight:600">${sub < 0 ? '− ' : ''}${fmt$(Math.abs(sub))}</td>
+              </tr>`;
+            }
             const descPct = parseFloat(it.descuento_pct) || 0;
             return `<tr style="border-bottom:1px solid #eef0f3">
               <td style="padding:7px 10px">${esc(it.producto_nombre || '—')}</td>

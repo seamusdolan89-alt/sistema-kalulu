@@ -433,7 +433,9 @@
         costo_unitario REAL,
         costo_anterior REAL,
         subtotal REAL,
-        costo_modificado INTEGER DEFAULT 0
+        costo_modificado INTEGER DEFAULT 0,
+        tipo TEXT DEFAULT 'producto',
+        concepto TEXT
       )`,
 
       // Matcheo aprendido: código interno del proveedor → producto. Se completa
@@ -826,6 +828,11 @@
       // (registrado_por_usuario_id), y guardar precio de venta del momento para informes
       "ALTER TABLE consumo_interno ADD COLUMN registrado_por_usuario_id TEXT",
       "ALTER TABLE consumo_interno ADD COLUMN precio_venta_unitario REAL DEFAULT 0",
+      // Compra_items: líneas de ajuste (envío/descuento) sin producto real —
+      // tipo distingue 'producto'/'envio'/'descuento', concepto es el texto
+      // libre a mostrar cuando no hay producto_id (JOIN a productos da null)
+      "ALTER TABLE compra_items ADD COLUMN tipo TEXT DEFAULT 'producto'",
+      "ALTER TABLE compra_items ADD COLUMN concepto TEXT",
     ];
     for (const sql of columnAlterations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }
