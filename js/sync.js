@@ -386,8 +386,11 @@
          item.tipo || 'producto', item.concepto || null]
       );
 
-      // Actualizar costo del producto si el admin lo marcó como modificado
-      if (item.costo_modificado && item.costo_unitario) {
+      // Actualizar costo del producto si el admin lo marcó como modificado.
+      // Las líneas de muestra (tipo='muestra') nunca actualizan el costo del
+      // producto — su costo no es el costo real de reposición (ver
+      // commitCompra en compras_v2.js, misma regla del lado que registra).
+      if (item.tipo !== 'muestra' && item.costo_modificado && item.costo_unitario) {
         window.SGA_DB.run(
           `UPDATE productos SET costo = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
           [item.costo_unitario, now, item.producto_id]
