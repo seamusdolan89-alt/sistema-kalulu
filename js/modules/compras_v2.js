@@ -2287,6 +2287,27 @@ const ComprasV2 = (() => {
         db().run(`DELETE FROM compras_pausadas WHERE id=?`, [state.pausadaId]);
       }
 
+      // Verificación pre-commit: db().run() nunca tira excepción aunque el SQL
+      // falle (queda solo un console.error) — un INSERT roto en el medio del
+      // loop de ítems NO frena la transacción ni hace fallar este try/catch,
+      // y sin este chequeo la compra se guardaría "confirmada" con el detalle
+      // de productos vacío (pasó de verdad: se perdió el detalle de una
+      // compra entera sin ningún aviso). Se compara la cantidad de filas que
+      // realmente quedaron en compra_items contra la cantidad de ítems del
+      // carrito, ANTES de hacer commitBatch — todavía se puede abortar.
+      const compraGuardada = db().query(`SELECT COUNT(*) AS n FROM compras WHERE id=?`, [compraId])[0]?.n || 0;
+      const itemsGuardados = db().query(`SELECT COUNT(*) AS n FROM compra_items WHERE compra_id=?`, [compraId])[0]?.n || 0;
+      if (!compraGuardada || itemsGuardados < state.items.length) {
+        db().rollbackBatch();
+        console.error('[commitCompra] Verificación falló:', { compraGuardada, itemsGuardados, esperados: state.items.length });
+        alert(
+          '⚠️ No se pudo confirmar la compra: algo falló al guardar los productos ' +
+          '(no es un error de datos, no se perdió nada — no se guardó nada todavía).\n\n' +
+          'Recargá la página (Ctrl+F5) y volvé a intentar. Si el problema sigue, avisá a Seamus.'
+        );
+        return;
+      }
+
       db().commitBatch();
 
       state.herenciaSincronizados = [];
