@@ -323,16 +323,27 @@
   // punto, sin depender de la configuración regional de cada compu. Corre
   // en fase de captura para adelantarse a cualquier keydown propio de cada
   // módulo (ej. compras_v2 filtra teclas no numéricas).
+  //
+  // También cubre los campos de texto tipo "importe" (inputmode="decimal",
+  // ej. subtotal/IVA/IIBB de la cabecera de compras_v2) — no son
+  // <input type="number"> pero igual esperan que el punto separe decimales.
   document.addEventListener('keydown', (e) => {
     if (e.code !== 'NumpadDecimal') return;
     const el = e.target;
-    if (!(el instanceof HTMLInputElement) || el.type !== 'number') return;
+    if (!(el instanceof HTMLInputElement)) return;
+    const isNumberInput = el.type === 'number';
+    const isDecimalText = el.type === 'text' && el.inputMode === 'decimal';
+    if (!isNumberInput && !isDecimalText) return;
 
     e.preventDefault();
     const start = el.selectionStart ?? el.value.length;
     const end   = el.selectionEnd   ?? el.value.length;
-    // No insertar un segundo punto si ya hay uno fuera de lo seleccionado
-    if ((el.value.slice(0, start) + el.value.slice(end)).includes('.')) return;
+    const rest = el.value.slice(0, start) + el.value.slice(end);
+    // No insertar un segundo separador decimal si ya hay uno fuera de lo
+    // seleccionado (en los campos de texto también cuenta la "," como
+    // separador ya puesto, para no terminar con "1234,56.78").
+    const yaTieneSeparador = isNumberInput ? rest.includes('.') : /[.,]/.test(rest);
+    if (yaTieneSeparador) return;
 
     el.value = el.value.slice(0, start) + '.' + el.value.slice(end);
     el.setSelectionRange(start + 1, start + 1);
