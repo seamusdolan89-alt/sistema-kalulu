@@ -52,7 +52,7 @@
     { table: 'ordenes_compra',    collection: 'ordenes_compra',    pk: 'id',   denormalize: denormalizeOrden },
     { table: 'pagos_proveedores', collection: 'pagos_proveedores', pk: 'id',   denormalize: denormalizePagoProveedor },
     { table: 'stock',             collection: 'stock',             pk: null,   compositeKey: ['producto_id', 'sucursal_id'], denormalize: denormalizeStock },
-    { table: 'productos',         collection: 'productos',         pk: 'id',   denormalize: null },
+    { table: 'productos',         collection: 'productos',         pk: 'id',   denormalize: denormalizeProducto },
     { table: 'cuenta_corriente',  collection: 'cuenta_corriente',  pk: 'id',   denormalize: denormalizeCuentaCorriente },
     { table: 'clientes',          collection: 'clientes',          pk: 'id',   denormalize: null },
     { table: 'promociones',       collection: 'promociones',       pk: 'id',   denormalize: denormalizePromocion },
@@ -585,6 +585,27 @@
 
   // ─── Denormalizadores (Push) ─────────────────────────────────────────────────
 
+  // codigos_barras y producto_sustitutos son tablas propias (no columnas de
+  // productos), así que sin esto el push de productos nunca los incluía —
+  // applyProductoFull() ya sabía aplicarlos desde data.codigos_barras/
+  // producto_sustitutos, pero nunca le llegaba nada porque el lado que
+  // pushea (denormalize: null) solo mandaba las columnas propias de la fila.
+  function denormalizeProducto(row) {
+    const codigos = window.SGA_DB.query(
+      `SELECT id, codigo, es_principal FROM codigos_barras WHERE producto_id = ?`,
+      [row.id]
+    );
+    const sustitutos = window.SGA_DB.query(
+      `SELECT sustituto_id, referencia_id, activo, fecha_asignacion FROM producto_sustitutos WHERE producto_id = ?`,
+      [row.id]
+    );
+    return {
+      ...row,
+      codigos_barras: codigos,
+      producto_sustitutos: sustitutos,
+    };
+  }
+
   function denormalizeVenta(venta) {
     const items = window.SGA_DB.query(
       `SELECT vi.*, p.nombre AS producto_nombre, p.costo AS costo_actual,
@@ -769,6 +790,16 @@
           INSERT OR IGNORE INTO codigos_barras (id, producto_id, codigo, es_principal)
           VALUES (?,?,?,?)`,
           [cb.id, data.id, cb.codigo, cb.es_principal ? 1 : 0]
+        );
+      } catch (_) {}
+    }
+
+    for (const s of (data.producto_sustitutos || [])) {
+      try {
+        window.SGA_DB.run(`
+          INSERT OR REPLACE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion)
+          VALUES (?,?,?,?,?)`,
+          [data.id, s.sustituto_id, s.referencia_id, s.activo ? 1 : 0, s.fecha_asignacion || null]
         );
       } catch (_) {}
     }
