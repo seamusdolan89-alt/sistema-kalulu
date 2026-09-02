@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "kalulu-3139e"
+    "default": "kalulu-3139e",
+    "dev": "dev-kalulu"
   }
 }

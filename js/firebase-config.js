@@ -1,30 +1,24 @@
 /**
  * firebase-config.js — Configuración Firebase para Sistema Kalulu
  *
- * INSTRUCCIONES DE CONFIGURACIÓN (hacer una sola vez):
- * =====================================================
- * 1. Ir a https://console.firebase.google.com
- * 2. Crear un proyecto nuevo (ej: "sistema-kalulu")
- * 3. En Project Settings > General > "Your apps", clic en el ícono </> (Web App)
- * 4. Registrar la app (no hace falta Firebase Hosting), copiar el objeto firebaseConfig
- * 5. Reemplazar los valores de FIREBASE_CONFIG abajo con los de tu proyecto
+ * Dos proyectos Firebase, elegidos automáticamente según dónde corre la app:
+ * - PRODUCCIÓN (kalulu-3139e): cualquier dominio real (GitHub Pages, etc.) —
+ *   es la base real que usan el local y vos.
+ * - DEV (dev-kalulu): solo cuando se abre desde localhost/127.0.0.1 — para
+ *   probar features nuevas (rama `dev`) sin tocar datos reales. Mismo
+ *   código en las dos ramas, no hay nada que se pueda pisar en un merge.
  *
- * EN EL PANEL DE FIREBASE, HABILITAR:
- * - Firestore Database → Crear en modo producción
- * - Authentication → Sign-in method → Email/Password (activar)
+ * CÓMO PROBAR CONTRA DEV:
+ * - Bajar la rama `dev`, y abrir la app con un servidor local
+ *   (ej: `python -m http.server 8000` desde la raíz del repo) y entrar por
+ *   http://localhost:8000/ — ahí va a usar dev-kalulu automáticamente.
  *
- * CREAR EL USUARIO ADMIN:
- * - Authentication → Users → Add user
- * - Email: admin@tulocal.com (o el que prefieras)
- * - Password: contraseña segura
- *
- * REGLAS DE SEGURIDAD FIRESTORE (pegar en Firestore → Rules):
+ * REGLAS DE SEGURIDAD FIRESTORE (pegar en Firestore → Rules, en AMBOS proyectos):
  * -----------------------------------------------------------
  * rules_version = '2';
  * service cloud.firestore {
  *   match /databases/{database}/documents {
  *     match /{document=**} {
- *       // El POS escribe con sesión anónima, el admin lee con email/pass
  *       allow read: if request.auth != null;
  *       allow write: if request.auth != null;
  *     }
@@ -32,7 +26,7 @@
  * }
  */
 
-window.FIREBASE_CONFIG = {
+const FIREBASE_CONFIG_PROD = {
   apiKey:            'AIzaSyAJMHYd8SLREmuexmj6EtTtQCHcyzJsBGs',
   authDomain:        'kalulu-3139e.firebaseapp.com',
   projectId:         'kalulu-3139e',
@@ -40,6 +34,26 @@ window.FIREBASE_CONFIG = {
   messagingSenderId: '691696375666',
   appId:             '1:691696375666:web:a6c57a91a69068a8742feb',
 };
+
+const FIREBASE_CONFIG_DEV = {
+  apiKey:            'AIzaSyDBOVZfRvxBZEJRIVgGOeQ6NYbk8_ipgIM',
+  authDomain:        'dev-kalulu.firebaseapp.com',
+  projectId:         'dev-kalulu',
+  storageBucket:     'dev-kalulu.firebasestorage.app',
+  messagingSenderId: '971104444700',
+  appId:             '1:971104444700:web:321dad8bb435e25e9b5ad9',
+};
+
+const isLocalTesting = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+
+window.FIREBASE_CONFIG = isLocalTesting ? FIREBASE_CONFIG_DEV : FIREBASE_CONFIG_PROD;
+
+// Aviso bien visible para nunca tener dudas de contra qué base se está corriendo
+console.log(
+  isLocalTesting
+    ? '🧪 Firebase: proyecto de PRUEBAS (dev-kalulu) — localhost detectado'
+    : '🟢 Firebase: proyecto de PRODUCCIÓN (kalulu-3139e)'
+);
 
 // Identificador de este local en Firestore (útil si en el futuro hay varias sucursales)
 window.SK_SUCURSAL_FIREBASE_ID = 'sucursal-1';
