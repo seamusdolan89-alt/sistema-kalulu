@@ -366,8 +366,15 @@ const ComprasV2 = (() => {
   }
 
   function showCarrito() {
-    const cab  = ge('cv2-cabecera');
-    const cart = ge('cv2-carrito-wrap');
+    const metodo = ge('cv2-metodo-carga');
+    const foto   = ge('cv2-foto-captura');
+    const cab    = ge('cv2-cabecera');
+    const cart   = ge('cv2-carrito-wrap');
+    // Ocultar también los pasos previos (método de carga / foto): al retomar
+    // una compra pausada se salta directo acá sin pasar por showCabecera(),
+    // así que si no se ocultan quedan pegados arriba del carrito.
+    if (metodo) metodo.style.display = 'none';
+    if (foto)   foto.style.display   = 'none';
     if (cab)  cab.style.display  = 'none';
     if (cart) cart.style.display = 'flex';
 
