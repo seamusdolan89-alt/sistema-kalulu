@@ -406,7 +406,7 @@
       `CREATE TABLE IF NOT EXISTS venta_pagos (
         id TEXT PRIMARY KEY,
         venta_id TEXT REFERENCES ventas(id),
-        medio TEXT NOT NULL CHECK(medio IN ('efectivo','mercadopago','tarjeta','transferencia','cuenta_corriente')),
+        medio TEXT NOT NULL,
         monto REAL NOT NULL,
         referencia TEXT
       )`,
@@ -677,7 +677,15 @@
       }
     } catch(e) { console.warn('ordenes_compra revisada migration:', e.message); }
 
-    // Migrate venta_pagos: add 'saldo_favor' to medio CHECK constraint
+    // Migrate venta_pagos: sacar el CHECK de "medio" por completo. Antes tenía
+    // una lista fija (efectivo/mercadopago/tarjeta/transferencia/
+    // cuenta_corriente/saldo_favor) — pero medios_cobro es una tabla que el
+    // usuario edita libremente desde Configuración (cualquier medio nuevo que
+    // agregue ahí, ej. "Link de pago", genera un id propio). Con el CHECK
+    // fijo, cobrar con un medio custom hacía fallar este INSERT en silencio
+    // (db().run() no tira excepción) — la venta se registraba igual pero sin
+    // ningún rastro de cómo se cobró esa parte, y esa plata quedaba invisible
+    // en el cierre de caja. Sin CHECK, cualquier id de medios_cobro entra bien.
     try {
       const vpStmt = database.prepare(
         `SELECT sql FROM sqlite_master WHERE type='table' AND name='venta_pagos'`
@@ -685,17 +693,18 @@
       let vpRow = null;
       if (vpStmt.step()) vpRow = vpStmt.getAsObject();
       vpStmt.free();
-      if (vpRow && vpRow.sql && !vpRow.sql.includes('saldo_favor')) {
+      if (vpRow && vpRow.sql && vpRow.sql.includes('CHECK')) {
         database.run(`ALTER TABLE venta_pagos RENAME TO venta_pagos_bak`);
         database.run(`CREATE TABLE venta_pagos (
           id TEXT PRIMARY KEY,
           venta_id TEXT REFERENCES ventas(id),
-          medio TEXT NOT NULL CHECK(medio IN ('efectivo','mercadopago','tarjeta','transferencia','cuenta_corriente','saldo_favor')),
+          medio TEXT NOT NULL,
           monto REAL NOT NULL,
           referencia TEXT
         )`);
         database.run(`INSERT INTO venta_pagos SELECT * FROM venta_pagos_bak`);
         database.run(`DROP TABLE venta_pagos_bak`);
+        console.log('✅ Migración venta_pagos: CHECK de "medio" eliminado (medios_cobro es dinámico)');
       }
     } catch(e) { console.warn('venta_pagos migration:', e.message); }
 
