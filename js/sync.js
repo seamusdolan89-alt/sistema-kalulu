@@ -895,13 +895,44 @@
 
   function applyClienteFull(data) {
     if (tienePendienteLocal('clientes', 'id = ?', [data.id])) return;
+
+    // INSERT OR REPLACE reescribe la fila entera: cualquier columna que no se
+    // liste vuelve a su DEFAULT. Aca se listaban 8 de 16, asi que cada pull
+    // reseteaba tope_deuda a 10000, sacaba al cliente de su lote
+    // (cliente_master_id / es_master) y borraba direccion, lote, observaciones,
+    // ultima_visita y codigo_viejo. El limite de fiado no es que no viajaba: se
+    // destruia al sincronizar.
+    //
+    // Ademas, si el documento que baja no trae un campo (quedo escrito por una
+    // version anterior), se conserva el valor local en vez de pisarlo con null.
+    const prev = window.SGA_DB.query(
+      `SELECT * FROM clientes WHERE id = ?`, [data.id]
+    )[0] || {};
+
+    const val = (campo, def = null) => {
+      if (data[campo] !== undefined && data[campo] !== null) return data[campo];
+      if (prev[campo] !== undefined && prev[campo] !== null) return prev[campo];
+      return def;
+    };
+    const flag = (campo, def) => {
+      if (data[campo] !== undefined && data[campo] !== null) return data[campo] ? 1 : 0;
+      if (prev[campo] !== undefined && prev[campo] !== null) return prev[campo] ? 1 : 0;
+      return def;
+    };
+
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO clientes
-        (id, nombre, apellido, telefono, email, dni, fecha_alta, activo, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,'synced',?)`,
-      [data.id, data.nombre || '?', data.apellido || null, data.telefono || null,
-       data.email || null, data.dni || null, data.fecha_alta || null,
-       data.activo !== false ? 1 : 0, data.updated_at || null]
+        (id, nombre, apellido, telefono, email, dni, fecha_alta, activo,
+         direccion, lote, tope_deuda, cliente_master_id, es_master,
+         ultima_visita, codigo_viejo, observaciones,
+         sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+      [data.id, val('nombre', '?'), val('apellido'), val('telefono'),
+       val('email'), val('dni'), val('fecha_alta'), flag('activo', 1),
+       val('direccion'), val('lote'), val('tope_deuda', 10000),
+       val('cliente_master_id'), flag('es_master', 0),
+       val('ultima_visita'), val('codigo_viejo'), val('observaciones'),
+       val('updated_at')]
     );
   }
 
