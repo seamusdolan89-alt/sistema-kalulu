@@ -412,7 +412,12 @@ const Caja = (() => {
   function startAutoRefresh() {
     stopAutoRefresh();
     state.refreshTimer = setInterval(() => {
-      if (state.sesion && state.currentTab === 'resumen') renderResumen();
+      if (!state.sesion || state.currentTab !== 'resumen') return;
+      // Cinturon y tiradores: si otra instancia del modulo se quedo con la
+      // pantalla (ver destroy()), no le pisamos lo que esta mostrando.
+      const tabActiva = document.querySelector('.caja-tab.active');
+      if (tabActiva && tabActiva.dataset.tab !== 'resumen') return;
+      renderResumen();
     }, 60000);
   }
 
@@ -1441,8 +1446,9 @@ case 'egresos':     renderEgresosIngresos(content);   break;
           </span>
         </div>
       </div>
-      <div style="margin-top:16px">
+      <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
         <button id="btn-guardar-recuento" class="btn btn-primary">Guardar recuento</button>
+        <button id="btn-reset-recuento" class="btn btn-outline">Reiniciar contador</button>
       </div>
     `;
 
@@ -1485,6 +1491,18 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       } catch (e) {
         showToast('Error al guardar: ' + e.message, 'error');
       }
+    });
+
+    // Reiniciar: deja todas las denominaciones en 0 para volver a contar desde
+    // cero. Se ponen en 0 explicitamente (y no vaciando el objeto) porque
+    // renderRecuento, si encuentra billetes vacio, recarga lo ultimo guardado
+    // y volveriamos a ver los numeros viejos.
+    const btnReset = ge('btn-reset-recuento');
+    if (btnReset) btnReset.addEventListener('click', () => {
+      const hayAlgo = denoms.some(d => (parseFloat(state.recuento.billetes[d]) || 0) > 0);
+      if (hayAlgo && !confirm('¿Poner en cero todas las cantidades del recuento?')) return;
+      denoms.forEach(d => { state.recuento.billetes[d] = 0; });
+      renderRecuento(el);
     });
 
     const btnEditDenoms = ge('btn-editar-denoms');
@@ -2278,6 +2296,13 @@ case 'egresos':     renderEgresosIngresos(content);   break;
 
   // ── WINDOW DATA LAYER ─────────────────────────────────────────────────────────
 
+  // Lo llama el router (app.js) antes de montar el modulo siguiente: corta el
+  // auto-refresh para que esta instancia no siga escribiendo en el DOM cuando
+  // ya no es la que esta en pantalla.
+  const destroy = () => {
+    stopAutoRefresh();
+  };
+
   window.SGA_Caja = {
     getSesionActiva,
     abrirCaja,
@@ -2287,7 +2312,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     getTotalesSesion,
   };
 
-  return { init };
+  return { init, destroy };
 })();
 
 export default Caja;

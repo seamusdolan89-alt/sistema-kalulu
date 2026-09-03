@@ -554,7 +554,7 @@ main#app { overflow: hidden; }
       <button class="pos-btn pos-btn-green"  id="btn-nueva-venta">🛒 Nueva Venta · F3</button>
       <button class="pos-btn pos-btn-ghost"  id="btn-pedidos-header" style="position:relative">📋 Pedido Abierto · F4<span id="pedidos-count-badge" class="pos-btn-badge" style="display:none"></span></button>
       <button class="pos-btn pos-btn-ghost"  id="btn-devolucion-header">↩ Devolución</button>
-<button class="pos-btn pos-btn-danger" id="btn-cerrar-caja">🔒 Cerrar Caja</button>
+<button class="pos-btn pos-btn-ghost"  id="btn-egresos-header">💸 Egresos</button>
     </div>
   </div>
 
@@ -827,6 +827,22 @@ main#app { overflow: hidden; }
     <div class="pmodal-ftr">
       <button class="mbtn mbtn-secondary" id="btn-cierre-cancel">Cancelar</button>
       <button class="mbtn mbtn-danger"    id="btn-cierre-confirm">Cerrar Caja</button>
+    </div>
+  </div>
+</div>
+
+<!-- Egresos de la caja actual (solo lectura) -->
+<div id="modal-egresos" class="pbackdrop hidden">
+  <div class="pmodal">
+    <div class="pmodal-hdr">
+      <span class="pmodal-title">💸 Egresos de la caja</span>
+      <button class="pmodal-close" id="btn-egresos-close" aria-label="Cerrar" title="Cerrar">✕</button>
+    </div>
+    <div class="pmodal-body">
+      <div id="egresos-lista"></div>
+    </div>
+    <div class="pmodal-ftr">
+      <button class="mbtn mbtn-secondary" id="btn-egresos-cerrar">Cerrar</button>
     </div>
   </div>
 </div>
