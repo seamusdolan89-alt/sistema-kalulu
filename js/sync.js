@@ -527,11 +527,15 @@
     }
 
     for (const imp of (data._imputaciones || [])) {
+      // gasto_id viaja igual que compra_id: una imputacion puede aplicarse
+      // contra un gasto de servicios cargado como "queda a pagar". Sin esta
+      // columna, del otro lado el gasto seguia figurando impago.
       window.SGA_DB.run(`
         INSERT OR IGNORE INTO imputaciones_pagos
-          (id, pago_id, compra_id, monto_imputado, fecha)
-        VALUES (?,?,?,?,?)`,
-        [imp.id, data.id, imp.compra_id, imp.monto_imputado, imp.fecha || data.fecha]
+          (id, pago_id, compra_id, gasto_id, monto_imputado, fecha)
+        VALUES (?,?,?,?,?,?)`,
+        [imp.id, data.id, imp.compra_id || null, imp.gasto_id || null,
+         imp.monto_imputado, imp.fecha || data.fecha]
       );
     }
   }

@@ -846,6 +846,9 @@
       // poder ofrecer "Editar" desde el POS solo sobre compras de la caja
       // actual (en ADMIN POS no aplica esta restricción).
       "ALTER TABLE compras ADD COLUMN sesion_caja_id TEXT",
+      // Un pago a proveedor puede imputarse contra una compra o contra un gasto
+      // de servicios cargado como "queda a pagar" (ver cuenta corriente).
+      "ALTER TABLE imputaciones_pagos ADD COLUMN gasto_id TEXT",
     ];
     for (const sql of columnAlterations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }
