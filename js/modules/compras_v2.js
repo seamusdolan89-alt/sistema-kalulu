@@ -2573,10 +2573,15 @@ const ComprasV2 = (() => {
       const itemsGuardados = db().query(`SELECT COUNT(*) AS n FROM compra_items WHERE compra_id=?`, [compraId])[0]?.n || 0;
       if (!compraGuardada || itemsGuardados < state.items.length) {
         db().rollbackBatch();
-        console.error('[commitCompra] Verificación falló:', { compraGuardada, itemsGuardados, esperados: state.items.length });
+        // El error SQL real: db().run() no propaga excepciones, asi que sin
+        // esto el aviso decia solo "algo fallo" y no habia manera de saber
+        // que columna o tabla fue la que falto.
+        const sqlErr = db().getLastError?.();
+        console.error('[commitCompra] Verificación falló:', { compraGuardada, itemsGuardados, esperados: state.items.length, sqlErr });
         alert(
           '⚠️ No se pudo confirmar la compra: algo falló al guardar los productos ' +
           '(no es un error de datos, no se perdió nada — no se guardó nada todavía).\n\n' +
+          (sqlErr ? 'Detalle: ' + sqlErr.message + '\n' + sqlErr.sql + '\n\n' : '') +
           'Recargá la página (Ctrl+F5) y volvé a intentar. Si el problema sigue, avisá a Seamus.'
         );
         return;
@@ -2755,7 +2760,11 @@ const ComprasV2 = (() => {
       const itemsFinales = db().query(`SELECT COUNT(*) AS n FROM compra_items WHERE compra_id=?`, [compraId])[0]?.n || 0;
       if (itemsFinales !== state.items.length) {
         db().rollbackBatch();
-        alert('⚠️ No se pudo guardar la edición: algo falló al guardar los productos. No se guardó nada todavía — probá de nuevo.');
+        const sqlErrEd = db().getLastError?.();
+        console.error('[commitCompraEdicion] Verificacion fallo:',
+          { itemsFinales, esperados: state.items.length, sqlErr: sqlErrEd });
+        alert('⚠️ No se pudo guardar la edición: algo falló al guardar los productos. No se guardó nada todavía — probá de nuevo.' +
+          (sqlErrEd ? '\n\n' + 'Detalle: ' + sqlErrEd.message + '\n' + sqlErrEd.sql : ''));
         return;
       }
 

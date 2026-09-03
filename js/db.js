@@ -1310,6 +1310,17 @@
    */
   let batchMode = false;
 
+  // Ultimo error SQL de run(). run() a proposito NO propaga excepciones (hay
+  // muchos flujos que dependen de que no lo haga), asi que sin esto un INSERT
+  // roto —por ejemplo una columna que falta porque db.js quedo cacheado— queda
+  // solo como un console.error y el llamador no tiene con que explicarle al
+  // usuario que fue lo que paso.
+  let lastRunError = null;
+
+  function getLastError() {
+    return lastRunError;
+  }
+
   function run(sql, params = []) {
     if (!db.isInitialized || !database) {
       throw new Error('Database not initialized');
@@ -1323,11 +1334,17 @@
 
       if (!batchMode) saveDatabase();
 
+      lastRunError = null;
       return {
         lastID: null,
         changes: 1
       };
     } catch (error) {
+      lastRunError = {
+        message: error.message,
+        sql: String(sql).trim().replace(/\s+/g, ' ').slice(0, 160),
+        at: new Date().toISOString(),
+      };
       console.error('Run error:', error, sql);
       return { lastID: null, changes: 0 };
     }
@@ -1438,6 +1455,7 @@
     beginBatch,
     commitBatch,
     rollbackBatch,
+    getLastError,
     isInitialized: () => db.isInitialized,
     usingOPFS: () => db.usingOPFS,
     useFeature: () => db.useFeature,

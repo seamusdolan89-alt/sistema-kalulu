@@ -658,7 +658,7 @@ export const POS = (() => {
       const like = `%${q}%`;
       return window.SGA_DB.query(`
         SELECT DISTINCT p.id, p.nombre, p.precio_venta, p.costo,
-          p.unidad_venta, p.stock_minimo,
+          p.stock_minimo,
           (SELECT codigo FROM codigos_barras WHERE producto_id = p.id AND es_principal = 1 LIMIT 1) as codigo,
           COALESCE(st.cantidad, 0) AS stock_actual
         FROM productos p
@@ -669,14 +669,17 @@ export const POS = (() => {
       `, [state.currentSucursal.id, like, like]);
     };
 
-    // Etiqueta de stock disponible para el dropdown de busqueda
+    // Etiqueta de stock disponible para el dropdown de busqueda.
+    // NO se muestra la unidad: productos.unidad_venta es texto libre y en los
+    // datos reales trae cualquier cosa — habia productos con "3000" cargado
+    // ahi, que se leian como "Stock: 19 3000". El numero solo alcanza.
     const stockBadge = (p) => {
       const qty = parseFloat(p.stock_actual) || 0;
       const min = parseFloat(p.stock_minimo) || 0;
-      const num = qty.toLocaleString('es-AR', { maximumFractionDigits: 2 });
-      const uni = p.unidad_venta && p.unidad_venta.toLowerCase() !== 'unidad' ? ` ${p.unidad_venta}` : '';
       const cls = qty <= 0 ? 'sri-stock-cero' : (min > 0 && qty <= min) ? 'sri-stock-bajo' : '';
-      const txt = qty === 0 ? 'Sin stock' : `Stock: ${num}${uni}`;
+      const txt = qty === 0
+        ? 'Sin stock'
+        : `Stock: ${qty.toLocaleString('es-AR', { maximumFractionDigits: 2 })}`;
       return `<div class="sri-stock ${cls}">${txt}</div>`;
     };
 
