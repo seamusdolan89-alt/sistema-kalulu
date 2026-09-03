@@ -138,20 +138,32 @@ const SGA_Familia = (() => {
   }
 
   /**
+   * Hijos reales, mirando quien le apunta con producto_madre_id.
+   *
+   * A proposito NO se usa la bandera productos.es_madre: se queda en 0 en
+   * varios caminos de alta (por ejemplo cuando los hijos se asignaron desde la
+   * otra maquina) y entonces un producto con hijos no era reconocido como
+   * madre. La pantalla de Familia del editor ya decide asi —muestra "Es
+   * producto madre" cuando encuentra hijos—, con lo cual el sistema mostraba
+   * la familia armada mientras el wizard no se abria nunca.
+   */
+  function tieneHijos(prodId) {
+    return (db().query(
+      `SELECT 1 FROM productos WHERE producto_madre_id = ? LIMIT 1`, [prodId]
+    ) || []).length > 0;
+  }
+
+  /**
    * True si el producto pertenece a una familia con al menos otro miembro.
    * Sirve para no abrir un wizard vacio.
    */
   function tieneFamilia(prodId) {
     const p = db().query(
-      `SELECT es_madre, producto_madre_id FROM productos WHERE id=?`, [prodId]
+      `SELECT producto_madre_id FROM productos WHERE id=?`, [prodId]
     )[0];
     if (!p) return false;
-    if (p.es_madre == 1) {
-      return (db().query(
-        `SELECT 1 FROM productos WHERE producto_madre_id=? LIMIT 1`, [prodId]
-      ) || []).length > 0;
-    }
-    return !!p.producto_madre_id;
+    if (p.producto_madre_id) return true;   // es hijo de alguien
+    return tieneHijos(prodId);              // o es madre de alguien
   }
 
   function showHerenciaModal({ prodId, prodNombre, nuevoCosto, nuevoPrecio, onDone, onSync }) {
@@ -162,8 +174,11 @@ const SGA_Familia = (() => {
     )[0];
     if (!thisProd) { done(); return; }
 
-    const esMadre = thisProd.es_madre == 1;
+    // Madre = tiene hijos de verdad (ver tieneHijos). Si no tiene hijos pero si
+    // una madre, es un hijo y la familia es la de su madre.
+    const esMadre = tieneHijos(prodId);
     const madreId = esMadre ? prodId : thisProd.producto_madre_id;
+    if (!madreId) { done(); return; }
 
     const madreProd = esMadre
       ? { id: prodId, nombre: prodNombre }
@@ -436,7 +451,7 @@ const SGA_Familia = (() => {
     });
   }
 
-  return { showHerenciaModal, tieneFamilia, ensureCss };
+  return { showHerenciaModal, tieneFamilia, tieneHijos, ensureCss };
 })();
 
 window.SGA_Familia = SGA_Familia;
