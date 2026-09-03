@@ -370,7 +370,32 @@
 
   // ─── Apply functions (Firestore → SQLite) ────────────────────────────────────
 
+  // ─── Guarda anti-pisada de cambios locales ───────────────────────────────────
+  // Los applyX escriben con INSERT OR REPLACE y dejan la fila en 'synced'. Si esa
+  // fila tenia un cambio local todavia sin subir, el pull lo pisaba Y encima la
+  // sacaba de la cola de subida, con lo cual el cambio se perdia para siempre y
+  // sin aviso. Antes de aplicar un documento se mira la copia local: si esta
+  // 'pending', gana lo local, que se va a subir en el proximo push.
+  //
+  // Quedan afuera a proposito medios_cobro y sucursales: son admin-authoritative
+  // (posPush:false), el POS nunca los sube y ahi el admin siempre tiene razon.
+  function tienePendienteLocal(tabla, whereSql, params) {
+    try {
+      const row = window.SGA_DB.query(
+        `SELECT sync_status FROM ${tabla} WHERE ${whereSql} LIMIT 1`, params
+      )[0];
+      if (row && row.sync_status === 'pending') {
+        console.log(`⏭️  Pull: se conserva ${tabla} local con cambios sin sincronizar`, params);
+        return true;
+      }
+    } catch (e) {
+      console.warn(`tienePendienteLocal(${tabla}):`, e.message);
+    }
+    return false;
+  }
+
   function applyCompra(data) {
+    if (tienePendienteLocal('compras', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO compras
@@ -449,6 +474,7 @@
   }
 
   function applyOrdenCompra(data) {
+    if (tienePendienteLocal('ordenes_compra', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO ordenes_compra
@@ -475,6 +501,7 @@
   }
 
   function applyPagoProveedor(data) {
+    if (tienePendienteLocal('pagos_proveedores', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
     window.SGA_DB.run(`
       INSERT OR IGNORE INTO pagos_proveedores
@@ -504,6 +531,7 @@
   }
 
   function applyIngresoCaja(data) {
+    if (tienePendienteLocal('ingresos_caja', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO ingresos_caja
@@ -516,6 +544,7 @@
   }
 
   function applyCuentaCorriente(data) {
+    if (tienePendienteLocal('cuenta_corriente', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO cuenta_corriente
@@ -528,6 +557,7 @@
   }
 
   function applyGasto(data) {
+    if (tienePendienteLocal('gastos', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO gastos
@@ -544,6 +574,7 @@
   }
 
   function applyConsumoInternoFull(data) {
+    if (tienePendienteLocal('consumo_interno', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO consumo_interno
@@ -560,6 +591,7 @@
   }
 
   function applyCajaAdmin(data) {
+    if (tienePendienteLocal('caja_admin', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO caja_admin
@@ -599,6 +631,7 @@
   }
 
   function applyPromocion(data) {
+    if (tienePendienteLocal('promociones', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO promociones
@@ -752,6 +785,7 @@
   // ─── Apply functions para sincronización inicial (todas las colecciones) ────────
 
   function applyUsuarioFull(data) {
+    if (tienePendienteLocal('usuarios', 'id = ?', [data.id])) return;
     // firebase_uid queda fuera a propósito: es un campo vestigial (login es local,
     // no usa Firebase Auth) y evita choques de UNIQUE entre usuarios "demo" viejos.
     window.SGA_DB.run(`
@@ -766,6 +800,7 @@
   }
 
   function applyCodigoProveedorFull(data) {
+    if (tienePendienteLocal('producto_codigo_proveedor', 'proveedor_id = ? AND codigo = ?', [data.proveedor_id, data.codigo])) return;
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO producto_codigo_proveedor
         (proveedor_id, codigo, producto_id, sync_status, updated_at)
@@ -783,6 +818,7 @@
   }
 
   function applyProveedorFull(data) {
+    if (tienePendienteLocal('proveedores', 'id = ?', [data.id])) return;
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO proveedores
         (id, razon_social, cuit, telefono, email, contacto_nombre, condicion_pago,
@@ -799,6 +835,7 @@
   }
 
   function applyProductoFull(data) {
+    if (tienePendienteLocal('productos', 'id = ?', [data.id])) return;
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO productos
         (id, nombre, descripcion, categoria_id, proveedor_principal_id, proveedor_alternativo_id,
@@ -846,6 +883,7 @@
   }
 
   function applyClienteFull(data) {
+    if (tienePendienteLocal('clientes', 'id = ?', [data.id])) return;
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO clientes
         (id, nombre, apellido, telefono, email, dni, fecha_alta, activo, sync_status, updated_at)
@@ -857,6 +895,7 @@
   }
 
   function applyStockFull(data) {
+    if (tienePendienteLocal('stock', 'producto_id = ? AND sucursal_id = ?', [data.producto_id, data.sucursal_id || (window.SK_SUCURSAL_FIREBASE_ID || 'sucursal-1')])) return;
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at)
       VALUES (?,?,?,?,'synced',?)`,
@@ -884,6 +923,7 @@
   }
 
   function applySesionCajaFull(data) {
+    if (tienePendienteLocal('sesiones_caja', 'id = ?', [data.id])) return;
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO sesiones_caja
         (id, sucursal_id, usuario_apertura_id, usuario_cierre_id,
@@ -907,6 +947,7 @@
   }
 
   function applyEgresoCajaFull(data) {
+    if (tienePendienteLocal('egresos_caja', 'id = ?', [data.id])) return;
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO egresos_caja
         (id, sesion_caja_id, monto, descripcion, fecha, usuario_id)
@@ -918,18 +959,7 @@
   }
 
   function applyVentaFull(data) {
-    // No pisar una venta que tiene cambios locales sin sincronizar. Si el POS
-    // acaba de anularla, ese cambio todavia no viajo y el documento que baja
-    // de Firestore sigue diciendo 'completada': sin esta guarda, el pull la
-    // "desanulaba" sola y encima le ponia sync_status='synced', con lo cual el
-    // cambio local se perdia para siempre y nunca se llegaba a subir.
-    const localRow = window.SGA_DB.query(
-      `SELECT sync_status FROM ventas WHERE id = ?`, [data.id]
-    )[0];
-    if (localRow && localRow.sync_status === 'pending') {
-      console.log('⏭️  Pull: se conserva la venta local con cambios sin sincronizar', data.id);
-      return;
-    }
+    if (tienePendienteLocal('ventas', 'id = ?', [data.id])) return;
 
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO ventas
