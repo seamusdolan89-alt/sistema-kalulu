@@ -144,7 +144,8 @@ const ComprasV2 = (() => {
 
   function getSesionActiva(sucursalId) {
     const r = db().query(
-      `SELECT id FROM sesiones_caja WHERE sucursal_id=? AND estado='abierta' LIMIT 1`,
+      `SELECT id, fecha_apertura FROM sesiones_caja
+       WHERE sucursal_id=? AND estado='abierta' LIMIT 1`,
       [sucursalId]
     );
     return r[0] || null;
@@ -2076,6 +2077,29 @@ const ComprasV2 = (() => {
     const compra = db().query(`SELECT * FROM compras WHERE id=?`, [compraId])[0];
     if (!compra) { alert('Compra no encontrada'); window.location.hash = 'operaciones_stock'; return; }
 
+    // Defensa en profundidad: en el POS (no admin) solo se puede editar una
+    // compra de la sesión de caja que está abierta ahora — repetir acá la
+    // misma regla que ya decide si el botón "Editar" aparece en el
+    // historial, por si se llega a este punto por otro camino (ej. una
+    // pestaña vieja con la caja ya cerrada).
+    if (!window.ADMIN_MODE) {
+      if (!window.SGA_Permisos?.can('can_editar_compras_caja')) {
+        alert('No tenés permiso para editar compras.');
+        window.location.hash = 'operaciones_stock';
+        return;
+      }
+      // Misma regla que decide si aparece el botón en el historial: sesión de
+      // caja abierta, abierta HOY, y la compra cargada en esa sesión.
+      const sesionActiva = getSesionActiva(state.currentUser.sucursal_id);
+      const sesionEsDeHoy = !!sesionActiva &&
+        (sesionActiva.fecha_apertura || '').slice(0, 10) === todayDate();
+      if (!sesionEsDeHoy || compra.sesion_caja_id !== sesionActiva.id) {
+        alert('Solo se pueden editar las compras cargadas en la caja de hoy.');
+        window.location.hash = 'operaciones_stock';
+        return;
+      }
+    }
+
     const prov = compra.proveedor_id
       ? db().query(`SELECT id, razon_social, condicion_iva, agente_retencion_iva, agente_retencion_iibb FROM proveedores WHERE id=?`, [compra.proveedor_id])[0]
       : null;
@@ -2381,15 +2405,15 @@ const ComprasV2 = (() => {
           (id, sucursal_id, proveedor_id, usuario_id, fecha, numero_factura,
            total, condicion_pago, estado, sync_status, updated_at,
            factura_pv, subtotal_neto, iva_105, iva_21, imp_interno,
-           percepcion_iva, percepcion_iibb, total_factura, condicion_compra)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmada', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           percepcion_iva, percepcion_iibb, total_factura, condicion_compra, sesion_caja_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmada', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [compraId, user.sucursal_id, state.proveedorId, user.id,
           state.fecha, state.numeroFactura || null,
           montoFacturaCompleto, state.condicionPago, ts,
           state.facturaPv || null,
           state.subtotalNeto, state.iva105, state.iva21, state.impInterno,
           state.percepcionIva, state.percepcionIibb, state.totalFactura,
-          state.condicionCompra || null]);
+          state.condicionCompra || null, sesion?.id || null]);
 
       // 2. Items: compra_items + (stock if not vinculando) + cost update
       for (const item of state.items) {

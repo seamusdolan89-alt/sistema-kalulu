@@ -833,6 +833,10 @@
       // libre a mostrar cuando no hay producto_id (JOIN a productos da null)
       "ALTER TABLE compra_items ADD COLUMN tipo TEXT DEFAULT 'producto'",
       "ALTER TABLE compra_items ADD COLUMN concepto TEXT",
+      // Qué sesión de caja estaba abierta cuando se cargó la compra — para
+      // poder ofrecer "Editar" desde el POS solo sobre compras de la caja
+      // actual (en ADMIN POS no aplica esta restricción).
+      "ALTER TABLE compras ADD COLUMN sesion_caja_id TEXT",
     ];
     for (const sql of columnAlterations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }

@@ -377,15 +377,16 @@
         (id, sucursal_id, proveedor_id, usuario_id, fecha, numero_factura, total,
          condicion_pago, estado, factura_pv, procesado_por,
          subtotal_neto, iva_105, iva_21, imp_interno, percepcion_iva, percepcion_iibb,
-         total_factura, condicion_compra, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+         total_factura, condicion_compra, sesion_caja_id, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.sucursal_id, data.proveedor_id, data.usuario_id, data.fecha,
        data.numero_factura, data.total, data.condicion_pago || null,
        data.estado || 'confirmada', data.factura_pv || null,
        data.procesado_por || null,
        data.subtotal_neto || 0, data.iva_105 || 0, data.iva_21 || 0, data.imp_interno || 0,
        data.percepcion_iva || 0, data.percepcion_iibb || 0,
-       data.total_factura || 0, data.condicion_compra || null, data.updated_at || now]
+       data.total_factura || 0, data.condicion_compra || null, data.sesion_caja_id || null,
+       data.updated_at || now]
     );
 
     // Reemplazo completo de los ítems: se borran los que había localmente
