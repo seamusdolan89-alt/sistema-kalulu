@@ -52,6 +52,7 @@
     { table: 'ordenes_compra',    collection: 'ordenes_compra',    pk: 'id',   denormalize: denormalizeOrden },
     { table: 'pagos_proveedores', collection: 'pagos_proveedores', pk: 'id',   denormalize: denormalizePagoProveedor },
     { table: 'stock',             collection: 'stock',             pk: null,   compositeKey: ['producto_id', 'sucursal_id'], denormalize: denormalizeStock },
+    { table: 'categorias',        collection: 'categorias',        pk: 'id',   denormalize: null },
     { table: 'productos',         collection: 'productos',         pk: 'id',   denormalize: denormalizeProducto },
     { table: 'cuenta_corriente',  collection: 'cuenta_corriente',  pk: 'id',   denormalize: denormalizeCuentaCorriente },
     { table: 'clientes',          collection: 'clientes',          pk: 'id',   denormalize: null },
@@ -76,6 +77,7 @@
     { collection: 'ordenes_compra',    applyFn: applyOrdenCompra },
     { collection: 'pagos_proveedores', applyFn: applyPagoProveedor },
     { collection: 'gastos',            applyFn: applyGasto },
+    { collection: 'categorias',        applyFn: applyCategoria },
     { collection: 'productos',         applyFn: applyProductoFull },
     { collection: 'promociones',       applyFn: applyPromocion },
     { collection: 'proveedores',       applyFn: applyProveedorFull },
@@ -810,6 +812,7 @@
   }
 
   function applyCategoria(data) {
+    if (tienePendienteLocal('categorias', 'id = ?', [data.id])) return;
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO categorias (id, nombre, comision_pct, sync_status, updated_at)
       VALUES (?,?,?,'synced',?)`,
