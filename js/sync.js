@@ -446,7 +446,11 @@
       // podría pisar con un costo desactualizado el de una compra posterior
       // ya aplicada del otro lado. Las líneas de muestra (tipo='muestra')
       // nunca actualizan el costo — no es el costo real de reposición.
-      if (item.tipo !== 'muestra' && item.costo_modificado && item.costo_unitario) {
+      // costo_unitario es el de LISTA; el costo real del producto es ese menos
+      // el descuento de la linea (ver costoNetoUsado en compras_v2.js).
+      const descPct   = Math.min(100, Math.max(0, parseFloat(item.descuento_pct) || 0));
+      const costoNeto = (parseFloat(item.costo_unitario) || 0) * (1 - descPct / 100);
+      if (item.tipo !== 'muestra' && item.costo_modificado && costoNeto > 0) {
         const masReciente = window.SGA_DB.query(
           `SELECT 1 FROM compra_items ci JOIN compras c ON c.id = ci.compra_id
            WHERE ci.producto_id = ? AND c.id != ? AND c.fecha > ? LIMIT 1`,
@@ -455,7 +459,7 @@
         if (!masReciente.length) {
           window.SGA_DB.run(
             `UPDATE productos SET costo = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
-            [item.costo_unitario, now, item.producto_id]
+            [costoNeto, now, item.producto_id]
           );
         }
       }

@@ -169,6 +169,16 @@ const ComprasV2 = (() => {
     return !isNaN(cn) ? cn : (parseFloat(item.costoActual) || 0);
   }
 
+  // Costo unitario REAL: el de lista menos el descuento de la linea. Es lo que
+  // de verdad costo reponer una unidad, y por lo tanto el que va a
+  // productos.costo y del que salen la variacion y el precio sugerido.
+  // costoUsado() sigue devolviendo el de lista, que es el que se guarda en
+  // compra_items para que la linea coincida con la factura del proveedor.
+  function costoNetoUsado(item) {
+    const disc = Math.min(100, Math.max(0, parseFloat(item.descuento) || 0));
+    return costoUsado(item) * (1 - disc / 100);
+  }
+
   function itemGross(item) {
     if (isAjuste(item)) {
       const m = Math.abs(parseFloat(item.monto) || 0);
@@ -2437,7 +2447,8 @@ const ComprasV2 = (() => {
         const cant    = parseFloat(item.cantidad)   || 0;
         const udsPaq  = parseFloat(item.udsPaquete) || 1;
         const cantUds = cant * udsPaq;
-        const costoNvo = costoUsado(item);
+        const costoNvo  = costoUsado(item);      // de lista, va a compra_items
+        const costoNeto = costoNetoUsado(item);  // real, va al producto
         const costoAnt = parseFloat(item.costoActual) || 0;
 
         db().run(`
@@ -2448,7 +2459,7 @@ const ComprasV2 = (() => {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
         `, [uuid(), compraId, item.productoId,
             cant, costoNvo, costoAnt, subtotal,
-            Math.abs(costoNvo - costoAnt) > 0.001 ? 1 : 0,
+            Math.abs(costoNeto - costoAnt) > 0.001 ? 1 : 0,
             item.unidadCompra || 'Unidad', udsPaq,
             parseFloat(item.descuento) || 0, parseFloat(item.descuentoMonto) || 0,
             item.iva || null, item.esMuestra ? 'muestra' : 'producto']);
@@ -2479,10 +2490,10 @@ const ComprasV2 = (() => {
         // Cost update (if changed) — las líneas de muestra NUNCA actualizan el
         // costo del producto: su costo (normalmente $0) no es el costo real
         // de reposición, y pisarlo arruinaría precios/márgenes.
-        if (!item.esMuestra && costoNvo > 0 && Math.abs(costoNvo - costoAnt) > 0.001) {
+        if (!item.esMuestra && costoNeto > 0 && Math.abs(costoNeto - costoAnt) > 0.001) {
           db().run(
             `UPDATE productos SET costo=?, costo_paquete=?, sync_status='pending', updated_at=? WHERE id=?`,
-            [costoNvo, costoNvo * udsPaq, ts, item.productoId]
+            [costoNeto, costoNeto * udsPaq, ts, item.productoId]
           );
         }
 
@@ -2665,9 +2676,10 @@ const ComprasV2 = (() => {
         const cant     = parseFloat(item.cantidad)   || 0;
         const udsPaq   = parseFloat(item.udsPaquete) || 1;
         const cantUds  = cant * udsPaq;
-        const costoNvo = costoUsado(item);
+        const costoNvo  = costoUsado(item);      // de lista, va a compra_items
+        const costoNeto = costoNetoUsado(item);  // real, va al producto
         const costoAnt = parseFloat(item.costoActual) || 0;
-        const costoModificado = Math.abs(costoNvo - costoAnt) > 0.001 ? 1 : 0;
+        const costoModificado = Math.abs(costoNeto - costoAnt) > 0.001 ? 1 : 0;
 
         let cantUdsAntes = 0;
         if (item._ciId) {
@@ -2720,7 +2732,7 @@ const ComprasV2 = (() => {
 
         // Costo del producto: solo si cambió Y esta sigue siendo la compra
         // más reciente en la que se compró este producto.
-        if (!item.esMuestra && costoModificado && costoNvo > 0) {
+        if (!item.esMuestra && costoModificado && costoNeto > 0) {
           const masReciente = db().query(
             `SELECT 1 FROM compra_items ci JOIN compras c ON c.id = ci.compra_id
              WHERE ci.producto_id = ? AND c.id != ? AND c.fecha > ? LIMIT 1`,
@@ -2729,7 +2741,7 @@ const ComprasV2 = (() => {
           if (!masReciente.length) {
             db().run(
               `UPDATE productos SET costo=?, costo_paquete=?, sync_status='pending', updated_at=? WHERE id=?`,
-              [costoNvo, costoNvo * udsPaq, ts, item.productoId]
+              [costoNeto, costoNeto * udsPaq, ts, item.productoId]
             );
           }
         }
@@ -3078,7 +3090,12 @@ const ComprasV2 = (() => {
         `SELECT precio_venta FROM productos WHERE id = ?`, [it.productoId]
       )[0];
       const costoAnt  = parseFloat(it.costoActual) || 0;
-      const costoNvo  = parseFloat(it.costoNuevo) || costoAnt;
+      // Con el descuento de la linea aplicado: es el costo real de reposicion,
+      // y es el que tiene que mandar la variacion y el precio sugerido. Antes
+      // se usaba el de lista, asi que una compra con 50% de descuento se leia
+      // como "el costo no cambio" y sugeria un precio calculado sobre el doble.
+      const costoNeto = costoNetoUsado(it);
+      const costoNvo  = costoNeto > 0 ? costoNeto : costoAnt;
       const pvActual  = parseFloat(row?.precio_venta) || 0;
       const cant      = parseFloat(it.cantidad) || 0;
       const udsPaq    = parseFloat(it.udsPaquete) || 1;
