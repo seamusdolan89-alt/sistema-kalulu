@@ -45,6 +45,7 @@
 
     // ── COMPRAS Y PROVEEDORES ────────────────────────────────────────────
     { key: 'can_compras',             label: 'Gestionar compras',                        grupo: 'Compras y Proveedores', riesgo: 'medio', tipo: 'bool', default: false },
+    { key: 'can_editar_compras_caja', label: 'Editar compras de la caja actual',         grupo: 'Compras y Proveedores', riesgo: 'medio', tipo: 'bool', default: false, requiere: 'can_compras' },
     { key: 'can_ordenes',             label: 'Órdenes de compra',                        grupo: 'Compras y Proveedores', riesgo: 'bajo',  tipo: 'bool', default: false },
     { key: 'can_proveedores',         label: 'Ver proveedores',                          grupo: 'Compras y Proveedores', riesgo: 'bajo',  tipo: 'bool', default: false },
     { key: 'can_cta_cte_proveedores', label: 'Cuenta corriente de proveedores (pagos)',  grupo: 'Compras y Proveedores', riesgo: 'alto',  tipo: 'bool', default: false, requiere: 'can_proveedores' },

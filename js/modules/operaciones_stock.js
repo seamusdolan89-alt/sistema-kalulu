@@ -17,6 +17,7 @@ const OperacionesStock = (() => {
     if (fechaHasta) { where.push('c.fecha <= ?'); params.push(fechaHasta + 'T23:59:59'); }
     return db().query(`
       SELECT c.id, c.fecha, c.numero_factura, c.factura_pv, c.total, c.condicion_pago, c.estado,
+             c.sesion_caja_id,
              p.razon_social AS proveedor_nombre,
              (SELECT COUNT(*) FROM compra_items ci WHERE ci.compra_id = c.id) AS num_items,
              (SELECT COUNT(*) FROM remitos r WHERE r.compra_id = c.id) AS de_remito
@@ -25,6 +26,27 @@ const OperacionesStock = (() => {
       WHERE ${where.join(' AND ')}
       ORDER BY c.fecha DESC
     `, params);
+  }
+
+  // Sesión de caja abierta ahora mismo para esta sucursal, y SOLO si se abrió
+  // hoy — se usa para decidir, en el POS, qué compras del historial son "de la
+  // caja actual" y por lo tanto editables. El chequeo de fecha existe porque
+  // una caja que quedó sin cerrar de días anteriores sigue 'abierta': sin él,
+  // la cajera podría editar compras de la semana pasada. Se mira la fecha de
+  // apertura de la sesión (turno real) y no compras.fecha, que es la fecha de
+  // la FACTURA y se carga a mano — una factura de la semana pasada que entra
+  // hoy tiene que poder corregirse en el momento.
+  function getSesionActivaIdDeHoy() {
+    const user = window.SGA_Auth.getCurrentUser();
+    const r = db().query(
+      `SELECT id, fecha_apertura FROM sesiones_caja
+       WHERE sucursal_id=? AND estado='abierta' LIMIT 1`,
+      [user.sucursal_id]
+    );
+    const ses = r[0];
+    if (!ses) return null;
+    const hoy = new Date().toISOString().slice(0, 10);
+    return (ses.fecha_apertura || '').slice(0, 10) === hoy ? ses.id : null;
   }
 
   function getDetalleCompra(compraId) {
@@ -54,6 +76,13 @@ const OperacionesStock = (() => {
       body.innerHTML = '<p style="color:#8090a0;text-align:center;padding:30px 0">Sin compras en el período seleccionado.</p>';
       return;
     }
+
+    // En ADMIN POS, editar no tiene restricción. Desde el POS del local hace
+    // falta el permiso puntual Y que la compra se haya cargado en la sesión de
+    // caja abierta ahora, abierta hoy (no se toca nada de otro día ni turno).
+    const puedeEditarAdmin = !!window.ADMIN_MODE;
+    const puedeEditarPos   = !window.ADMIN_MODE && !!window.SGA_Permisos?.can('can_editar_compras_caja');
+    const sesionActualId   = puedeEditarPos ? getSesionActivaIdDeHoy() : null;
 
     const ESTADO_LABEL = {
       borrador: 'Borrador', confirmada: 'Confirmada',
@@ -102,7 +131,7 @@ const OperacionesStock = (() => {
               <td style="padding:8px 10px;text-align:center;font-size:12px;color:#607080">${pago}</td>
               <td style="padding:8px 10px;text-align:center;white-space:nowrap">
                 <button style="padding:3px 12px;background:#2e7d32;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px" data-ver-compra="${esc(c.id)}">Ver</button>
-                ${window.ADMIN_MODE && estado !== 'anulada' && !c.de_remito ? `
+                ${estado !== 'anulada' && !c.de_remito && (puedeEditarAdmin || (puedeEditarPos && c.sesion_caja_id && c.sesion_caja_id === sesionActualId)) ? `
                   <button style="padding:3px 12px;margin-left:4px;background:#fff;color:#1a5c2e;border:1px solid #1a5c2e;border-radius:4px;cursor:pointer;font-size:12px" data-editar-compra="${esc(c.id)}">✏️ Editar</button>
                 ` : ''}
               </td>
