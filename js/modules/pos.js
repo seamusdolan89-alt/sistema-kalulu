@@ -531,12 +531,19 @@ export const POS = (() => {
   function init(params = []) {
     console.log('💳 POS module initialized');
 
-    // Restore ventas incorrectly marked as 'anulada' or 'editando' that still have venta_items
-    // 'editando' is a transient state that should never be persisted across sessions
+    // 'editando' es un estado transitorio: si quedo grabado es porque una
+    // edicion se corto por la mitad (se cerro la pestaña, se recargo), y la
+    // venta original sigue siendo valida. Se la devuelve a 'completada'.
+    //
+    // 'anulada' NO entra aca. Es un estado final y deliberado, y estaba
+    // incluido en este UPDATE: como corre en cada init del modulo, cada
+    // anulacion se deshacia sola apenas el cajero volvia al POS. El stock ya
+    // habia sido devuelto y la reversion de cuenta corriente ya estaba hecha,
+    // asi que la venta revivia sumando de nuevo a la caja y al informe.
     try {
       window.SGA_DB.run(
         `UPDATE ventas SET estado = 'completada', sync_status = 'pending'
-         WHERE estado IN ('anulada', 'editando')
+         WHERE estado = 'editando'
            AND id IN (SELECT DISTINCT venta_id FROM venta_items)`
       );
     } catch(e) { console.warn('restore_ventas:', e); }
