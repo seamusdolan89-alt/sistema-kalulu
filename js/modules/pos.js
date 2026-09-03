@@ -658,12 +658,26 @@ export const POS = (() => {
       const like = `%${q}%`;
       return window.SGA_DB.query(`
         SELECT DISTINCT p.id, p.nombre, p.precio_venta, p.costo,
-          (SELECT codigo FROM codigos_barras WHERE producto_id = p.id AND es_principal = 1 LIMIT 1) as codigo
+          p.unidad_venta, p.stock_minimo,
+          (SELECT codigo FROM codigos_barras WHERE producto_id = p.id AND es_principal = 1 LIMIT 1) as codigo,
+          COALESCE(st.cantidad, 0) AS stock_actual
         FROM productos p
         LEFT JOIN codigos_barras cb ON cb.producto_id = p.id
+        LEFT JOIN stock st ON st.producto_id = p.id AND st.sucursal_id = ?
         WHERE p.activo = 1 AND (p.nombre LIKE ? OR cb.codigo LIKE ?)
         ORDER BY p.nombre LIMIT 12
-      `, [like, like]);
+      `, [state.currentSucursal.id, like, like]);
+    };
+
+    // Etiqueta de stock disponible para el dropdown de busqueda
+    const stockBadge = (p) => {
+      const qty = parseFloat(p.stock_actual) || 0;
+      const min = parseFloat(p.stock_minimo) || 0;
+      const num = qty.toLocaleString('es-AR', { maximumFractionDigits: 2 });
+      const uni = p.unidad_venta && p.unidad_venta.toLowerCase() !== 'unidad' ? ` ${p.unidad_venta}` : '';
+      const cls = qty <= 0 ? 'sri-stock-cero' : (min > 0 && qty <= min) ? 'sri-stock-bajo' : '';
+      const txt = qty === 0 ? 'Sin stock' : `Stock: ${num}${uni}`;
+      return `<div class="sri-stock ${cls}">${txt}</div>`;
     };
 
     const getProductoByBarcode = (codigo) => {
@@ -2637,7 +2651,10 @@ export const POS = (() => {
                 <div class="sri-nombre">${p.nombre}</div>
                 ${p.codigo ? `<div class="sri-codigo">${p.codigo}</div>` : ''}
               </div>
-              <div class="sri-precio">${formatCurrency(p.precio_venta)}</div>
+              <div class="sri-right">
+                <div class="sri-precio">${formatCurrency(p.precio_venta)}</div>
+                ${stockBadge(p)}
+              </div>
             </div>`).join('');
           dd.style.display = 'block';
           lastSearchResults = results;
