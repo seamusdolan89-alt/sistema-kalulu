@@ -1499,10 +1499,29 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     // y volveriamos a ver los numeros viejos.
     const btnReset = ge('btn-reset-recuento');
     if (btnReset) btnReset.addEventListener('click', () => {
+      const resetear = () => {
+        denoms.forEach(d => { state.recuento.billetes[d] = 0; });
+        renderRecuento(el);
+      };
+      // Sin nada contado no hay que preguntar nada.
       const hayAlgo = denoms.some(d => (parseFloat(state.recuento.billetes[d]) || 0) > 0);
-      if (hayAlgo && !confirm('¿Poner en cero todas las cantidades del recuento?')) return;
-      denoms.forEach(d => { state.recuento.billetes[d] = 0; });
-      renderRecuento(el);
+      if (!hayAlgo) { resetear(); return; }
+
+      openModal(`
+        <button class="caja-modal-close" id="btn-close-reset" aria-label="Cerrar" title="Cerrar">✕</button>
+        <h3>Reiniciar contador</h3>
+        <p style="margin:0;color:#666;font-size:14px;line-height:1.5">
+          Se ponen en cero todas las cantidades que estás contando.
+          El último recuento guardado no se toca.
+        </p>
+        <div class="caja-modal-footer">
+          <button class="btn btn-outline" id="btn-cancel-reset">Cancelar</button>
+          <button class="btn btn-primary" id="btn-confirm-reset">Reiniciar</button>
+        </div>
+      `);
+      ge('btn-close-reset').addEventListener('click', closeModal);
+      ge('btn-cancel-reset').addEventListener('click', closeModal);
+      ge('btn-confirm-reset').addEventListener('click', () => { closeModal(); resetear(); });
     });
 
     const btnEditDenoms = ge('btn-editar-denoms');

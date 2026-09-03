@@ -3341,21 +3341,14 @@ export const POS = (() => {
           confirmarClienteBuscar();
           return;
         }
-        const clientInput = ge('client-search-input');
-        const noClient = !state.clienteId && (!clientInput || clientInput.value.trim() === '');
-        const firstChip = document.querySelector('#payment-chips .pchip');
-        const activeChip = document.querySelector('#payment-chips .pchip.active');
-        const recibeInput = ge('recibe-efectivo');
-        const recibeVal = parseFloat(recibeInput?.value) || 0;
-        if (noClient) {
-          if (clientInput) clientInput.focus();
-        } else if (!activeChip && firstChip) {
-          firstChip.focus();
-        } else if (recibeInput && recibeVal === 0) {
-          recibeInput.focus();
-        } else {
-          ge('btn-confirm-venta')?.click();
-        }
+        // F2 confirma la venta, que es lo que dicen el boton y el pie de
+        // pantalla. Antes hacia un recorrido progresivo (enfocaba el buscador
+        // de cliente, despues el medio de pago, despues "recibe") y en la
+        // venta tipica, sin cliente cargado, se quedaba para siempre en el
+        // primer paso: parecia que la tecla no hacia nada y habia que usar
+        // F10. El handler de confirmar ya valida por su cuenta que el
+        // efectivo recibido alcance, asi que llamarlo directo es seguro.
+        ge('btn-confirm-venta')?.click();
       }
       if (e.key === 'F3') { e.preventDefault(); if (state.mode === 'sale') showDescTotalModal(); }
       if (e.key === 'F4') { e.preventDefault(); showModalPedidos(); }
