@@ -3001,6 +3001,13 @@ const ComprasV2 = (() => {
                    VALUES (?, ?, ?, ?, ?)`,
                   [uuid(), p.id, compraId, monto, todayDate()]
                 );
+                // El pago original viaja a la otra compu con sus imputaciones
+                // embebidas (ver denormalizePagoProveedor en sync.js) — sin
+                // esto, la otra compu nunca se entera de que se aplicó.
+                db().run(
+                  `UPDATE pagos_proveedores SET sync_status='pending', updated_at=? WHERE id=?`,
+                  [nowISO(), p.id]
+                );
                 restante -= monto;
               }
               db().commitBatch();
