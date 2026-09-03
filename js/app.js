@@ -132,6 +132,20 @@
       const appContainer = document.getElementById('app');
       const v = Date.now();
 
+      // Cada navegacion importa el modulo con ?v=Date.now(), o sea que crea un
+      // closure NUEVO: el anterior sigue vivo con sus timers y sus listeners.
+      // Sin este destroy, el setInterval de una instancia vieja de caja seguia
+      // corriendo y cada 60s reescribia #caja-tab-content con el Resumen,
+      // pisando la pestaña que el usuario estaba mirando (el recuento de
+      // dinero "se iba solo"). Alcanzaba con entrar a #caja/efectivo, salir y
+      // volver para dejar un timer huerfano dando vueltas.
+      try {
+        app.currentModule?.destroy?.();
+      } catch (e) {
+        console.warn('destroy del modulo anterior:', e);
+      }
+      app.currentModule = null;
+
       // Always fetch HTML fresh (no cache)
       const viewsBase = window.VIEWS_BASE_PATH || './views/';
       const response = await fetch(`${viewsBase}${moduleName}.html?v=${v}`, { cache: 'no-store' });

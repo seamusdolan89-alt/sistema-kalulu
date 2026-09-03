@@ -1930,6 +1930,46 @@ export const POS = (() => {
       setTimeout(() => ge('btn-ticket-nueva-venta')?.focus(), 80);
     };
 
+    // Egresos de la sesion de caja abierta. Es la unica parte del wizard de
+    // cierre que se usa desde el mostrador; el cierre en si se hace por
+    // CAJAS > EFECTIVO > RECUENTO > CIERRE.
+    const showModalEgresos = () => {
+      const cont = ge('egresos-lista');
+      if (!cont) return;
+
+      if (!state.sesionActiva) {
+        cont.innerHTML = '<p style="color:#aaa;text-align:center;padding:20px">No hay una caja abierta.</p>';
+        showModal('modal-egresos');
+        return;
+      }
+
+      const egresos = window.SGA_DB.query(
+        `SELECT * FROM egresos_caja WHERE sesion_caja_id = ? ORDER BY fecha DESC`,
+        [state.sesionActiva.id]
+      );
+      const total = egresos.reduce((s, e) => s + (parseFloat(e.monto) || 0), 0);
+
+      cont.innerHTML = egresos.length
+        ? `<table style="width:100%;font-size:0.9em;border-collapse:collapse">
+             ${egresos.map(e => `
+               <tr>
+                 <td style="padding:7px 0;border-bottom:1px solid #f0f0f0">
+                   ${formatTime(e.fecha)} — ${e.descripcion || ''}
+                 </td>
+                 <td style="text-align:right;font-weight:700;padding:7px 0;border-bottom:1px solid #f0f0f0;white-space:nowrap">
+                   ${formatCurrency(e.monto)}
+                 </td>
+               </tr>`).join('')}
+             <tr>
+               <td style="padding:10px 0;font-weight:700">Total</td>
+               <td style="text-align:right;font-weight:700;padding:10px 0;white-space:nowrap">${formatCurrency(total)}</td>
+             </tr>
+           </table>`
+        : '<p style="color:#aaa;text-align:center;padding:20px">Sin egresos registrados en esta caja</p>';
+
+      showModal('modal-egresos');
+    };
+
     const showModalCierre = () => {
       if (!state.sesionActiva) return;
       const s = state.sesionActiva;
@@ -2535,7 +2575,9 @@ export const POS = (() => {
     safeOn('btn-nueva-venta', 'click', enterSaleMode);
     safeOn('btn-pedidos-header', 'click', showModalPedidos);
     safeOn('btn-devolucion-header', 'click', showModalDevolucion);
-    safeOn('btn-cerrar-caja', 'click', showModalCierre);
+    safeOn('btn-egresos-header', 'click', showModalEgresos);
+    safeOn('btn-egresos-close',  'click', () => hideModal('modal-egresos'));
+    safeOn('btn-egresos-cerrar', 'click', () => hideModal('modal-egresos'));
     // Sale mode: back button
     safeOn('btn-volver-dashboard', 'click', () => {
       if (state.editingVentaId) {
@@ -3353,7 +3395,7 @@ export const POS = (() => {
     // ── ADMIN_MODE: deshabilitar controles de acción ───────────────
     if (window.ADMIN_MODE) {
       [
-        'btn-nueva-venta', 'btn-cerrar-caja', 'btn-devolucion-header',
+        'btn-nueva-venta', 'btn-devolucion-header',
         'btn-pedidos-header', 'btn-cliente-rapido', 'btn-pausar-venta',
       ].forEach(id => {
         const el = ge(id);
