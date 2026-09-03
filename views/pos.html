@@ -286,6 +286,11 @@ main#app { overflow: hidden; }
 .saldo-badge.deuda  { background: #ffebee; color: #c62828; }
 .saldo-badge.favor  { background: #e8f5e9; color: #2e7d32; }
 .saldo-badge.neutro { background: #f5f5f5; color: #888; }
+.client-tope-info { font-size: 0.78em; color: #666; margin-top: 4px; line-height: 1.45; }
+.client-tope-info .ct-lim     { color: #555; }
+.client-tope-info .ct-disp-ok { color: #2e7d32; font-weight: 700; }
+.client-tope-info .ct-disp-no { color: #c62828; font-weight: 700; }
+.client-tope-info .ct-none    { color: #999; font-style: italic; }
 .client-clear { background: none; border: none; color: #bbb; cursor: pointer; font-size: 0.9em; padding: 2px 4px; }
 .client-clear:hover { color: #f44336; }
 .deuda-row { background: #fff3e0; border-radius: 6px; padding: 8px 12px; font-size: 0.85em; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
@@ -687,6 +692,7 @@ main#app { overflow: hidden; }
               <div>
                 <div class="client-card-name" id="client-card-name"></div>
                 <span id="client-saldo-badge" class="saldo-badge neutro"></span>
+                <div id="client-tope-info" class="client-tope-info" style="display:none"></div>
               </div>
               <button class="client-clear" id="btn-clear-client" aria-label="Quitar cliente" title="Quitar cliente">✕</button>
             </div>

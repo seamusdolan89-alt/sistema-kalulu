@@ -1020,6 +1020,89 @@ export const POS = (() => {
       renderPaymentInputs();
     };
 
+    // Excedente del cobro simple: lo que el cliente entrego de mas, por el
+    // medio que sea. Para efectivo el excedente es el vuelto (pagosAmounts
+    // queda en el total y la plata fisica vuelve al cliente); para el resto el
+    // monto tipeado ES el pago, asi que el excedente entro de verdad a la caja
+    // y la unica salida sensata es dejarlo a favor del cliente.
+    const getSobranteSimple = () => {
+      if (state.cobroMultiple) return 0;
+      const mid = [...state.activeMedios][0];
+      if (!mid) return 0;
+      const recibido = mid === 'efectivo'
+        ? (state.recibeEfectivo || 0)
+        : (state.pagosAmounts[mid] || 0);
+      return Math.max(0, recibido - getEffectiveTotal());
+    };
+
+    // HTML del bloque de excedente. Es el mismo para efectivo y para los demas
+    // medios; solo cambia el encabezado, porque "vuelto" solo aplica a la plata
+    // en mano.
+    const buildSobranteHtml = (sobrante, esEfectivo) => {
+      const titulo = esEfectivo
+        ? `<div style="color:#2E7D32;font-weight:600">💵 Vuelto: ${formatCurrency(sobrante)}</div>`
+        : `<div style="color:#2E7D32;font-weight:600">↩ Pagó de más: ${formatCurrency(sobrante)}</div>`;
+
+      if (!state.clienteId) {
+        const nota = esEfectivo
+          ? 'Recordá entregar el cambio al cliente'
+          : 'Seleccioná un cliente para poder dejarlo a favor';
+        return titulo +
+          `<div style="font-size:12px;color:#666;margin-top:4px">${nota}</div>
+           <div id="saldo-favor-warn" style="display:none;color:#E65100;font-size:12px;margin-top:4px">⚠️ Seleccioná un cliente para registrar el saldo a favor</div>`;
+      }
+
+      // Desglose segun la deuda del cliente
+      const saldo = state.clienteSaldo; // positivo = debe; negativo = tiene a favor
+      let breakdownHtml;
+      if (saldo > 0 && !state.ccCobrarDeuda) {
+        if (sobrante >= saldo) {
+          const resto = sobrante - saldo;
+          breakdownHtml = `Cancela deuda ${formatCurrency(saldo)}` +
+            (resto > 0 ? ` + Saldo a favor: ${formatCurrency(resto)}` : '');
+        } else {
+          breakdownHtml = `Cancela deuda parcial: ${formatCurrency(sobrante)} (resta debe: ${formatCurrency(saldo - sobrante)})`;
+        }
+      } else {
+        breakdownHtml = `Saldo a favor: ${formatCurrency(sobrante)}`;
+      }
+
+      return titulo +
+        `<div class="saldo-favor-row" style="margin-top:6px">
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+            <input type="checkbox" id="chk-saldo-favor"> 💚 Dejar ${formatCurrency(sobrante)} como saldo a favor
+          </label>
+          <div id="saldo-favor-breakdown" style="display:none;font-size:12px;color:#2E7D32;margin-top:4px">${breakdownHtml}</div>
+        </div>
+        <div id="saldo-favor-warn" style="display:none;color:#E65100;font-size:12px;margin-top:4px">⚠️ Seleccioná un cliente para registrar el saldo a favor</div>`;
+    };
+
+    const wireSaldoFavorChk = () => {
+      const chk = ge('chk-saldo-favor');
+      if (!chk) return;
+      chk.addEventListener('change', () => {
+        const bd = ge('saldo-favor-breakdown');
+        if (bd) bd.style.display = chk.checked ? 'block' : 'none';
+        updateConfirmBtn();
+      });
+    };
+
+    // Excedente para el cobro simple por un medio distinto de efectivo.
+    const renderSobranteSimple = () => {
+      const el = ge('mpay-simple-sobrante');
+      if (!el) return;
+      const sobrante = getSobranteSimple();
+      if (sobrante <= 0.001) {
+        el.style.display = 'none';
+        el.innerHTML = '';
+        return;
+      }
+      el.className = 'pinput-vuelto ok';
+      el.innerHTML = buildSobranteHtml(sobrante, false);
+      el.style.display = 'block';
+      wireSaldoFavorChk();
+    };
+
     const renderVuelto = () => {
       const effTotal = getEffectiveTotal();
       const recibe = state.recibeEfectivo;
@@ -1063,46 +1146,8 @@ export const POS = (() => {
         if (debtRow) debtRow.style.display = 'none';
         el.className = 'pinput-vuelto ok';
 
-        let html = `<div style="color:#2E7D32;font-weight:600">💵 Vuelto: ${formatCurrency(vuelto)}</div>`;
-
-        if (!state.clienteId) {
-          html += `<div style="font-size:12px;color:#666;margin-top:4px">Recordá entregar el cambio al cliente</div>
-                   <div id="saldo-favor-warn" style="display:none;color:#E65100;font-size:12px;margin-top:4px">⚠️ Seleccioná un cliente para registrar el saldo a favor</div>`;
-        } else {
-          // Smart breakdown based on client debt
-          const saldo = state.clienteSaldo; // positive = owes store, negative = store owes client
-          let breakdownHtml = '';
-          if (saldo > 0 && !state.ccCobrarDeuda) {
-            // Debt not being collected in this sale — vuelto goes toward debt
-            if (vuelto >= saldo) {
-              const sobrante = vuelto - saldo;
-              breakdownHtml = `Cancela deuda ${formatCurrency(saldo)}` +
-                (sobrante > 0 ? ` + Saldo a favor: ${formatCurrency(sobrante)}` : '');
-            } else {
-              breakdownHtml = `Cancela deuda parcial: ${formatCurrency(vuelto)} (resta debe: ${formatCurrency(saldo - vuelto)})`;
-            }
-          } else {
-            // Either no debt, or debt is already being fully collected via ccCobrarDeuda
-            breakdownHtml = `Saldo a favor: ${formatCurrency(vuelto)}`;
-          }
-          html += `<div class="saldo-favor-row" style="margin-top:6px">
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
-              <input type="checkbox" id="chk-saldo-favor"> 💚 Dejar ${formatCurrency(vuelto)} como saldo a favor
-            </label>
-            <div id="saldo-favor-breakdown" style="display:none;font-size:12px;color:#2E7D32;margin-top:4px">${breakdownHtml}</div>
-          </div>
-          <div id="saldo-favor-warn" style="display:none;color:#E65100;font-size:12px;margin-top:4px">⚠️ Seleccioná un cliente para registrar el saldo a favor</div>`;
-        }
-
-        el.innerHTML = html;
-        const chk = ge('chk-saldo-favor');
-        if (chk) {
-          chk.addEventListener('change', () => {
-            const bd = ge('saldo-favor-breakdown');
-            if (bd) bd.style.display = chk.checked ? 'block' : 'none';
-            updateConfirmBtn();
-          });
-        }
+        el.innerHTML = buildSobranteHtml(vuelto, true);
+        wireSaldoFavorChk();
         el.style.display = 'block';
 
       } else {
@@ -1209,6 +1254,7 @@ export const POS = (() => {
             <div class="pinput-total-ro">${formatCurrency(effTotal)}</div>
             <div class="pinput-sub-lbl">Monto recibido</div>
             <input type="number" class="pinput-field" data-medio="${mid}" value="${amount.toFixed(2)}" min="0" step="0.01">
+            <div id="mpay-simple-sobrante" class="pinput-vuelto" style="display:none"></div>
           </div>`;
         }
       }
@@ -1217,9 +1263,11 @@ export const POS = (() => {
       container.querySelectorAll('.pinput-field').forEach(inp => {
         inp.addEventListener('input', () => {
           state.pagosAmounts[inp.dataset.medio] = parseFloat(inp.value) || 0;
+          renderSobranteSimple();
           updateConfirmBtn();
         });
       });
+      renderSobranteSimple();
 
       const recibeEl = ge('recibe-efectivo');
       if (recibeEl) {
@@ -1346,16 +1394,32 @@ export const POS = (() => {
       // Tope check — warn and block debt toggle if tope exceeded
       const topeWarn = ge('client-tope-warn');
       const topeWarnText = ge('client-tope-warn-text');
+      const topeInfo = ge('client-tope-info');
       const chkDeuda = ge('chk-registrar-deuda');
       let topeAlcanzado = false;
       if (window.SGA_Clientes) {
         const topeDisp = window.SGA_Clientes.getTopeDisponible(c.id);
+        const topeRows = window.SGA_DB.query(
+          `SELECT tope_deuda FROM clientes WHERE id = ?`, [c.id]
+        );
+        const topeVal = topeRows.length ? (parseFloat(topeRows[0].tope_deuda) || 0) : 0;
+
+        // Limite y disponible a la vista, para no tener que abrir la ficha del
+        // cliente. getTopeDisponible ya resuelve el caso de los lotes: si el
+        // cliente es miembro de uno, el tope y la deuda que valen son los del
+        // lote, no los suyos. Con tope en 0 el sistema no permite fiar, asi
+        // que decirlo con todas las letras es mas claro que "Limite: $0".
+        if (topeInfo) {
+          topeInfo.innerHTML = topeVal > 0
+            ? `<span class="ct-lim">Límite: ${formatCurrency(topeVal)}</span> · ` +
+              `<span class="${topeDisp > 0 ? 'ct-disp-ok' : 'ct-disp-no'}">Disponible: ` +
+              `${formatCurrency(Math.max(0, topeDisp))}</span>`
+            : `<span class="ct-none">Sin límite de fiado asignado</span>`;
+          topeInfo.style.display = 'block';
+        }
+
         if (topeDisp <= 0) {
           topeAlcanzado = true;
-          const tope = window.SGA_DB.query(
-            `SELECT tope_deuda FROM clientes WHERE id = ?`, [c.id]
-          );
-          const topeVal = tope.length ? tope[0].tope_deuda : 0;
           if (topeWarnText) topeWarnText.textContent = `Tope de deuda alcanzado ($${formatCurrency(topeVal).replace(/[^0-9,.]/g,'')})`;
         }
       }
@@ -1397,6 +1461,8 @@ export const POS = (() => {
       if (deudaRow) deudaRow.style.display = 'none';
       const topeWarn = ge('client-tope-warn');
       if (topeWarn) topeWarn.style.display = 'none';
+      const topeInfo = ge('client-tope-info');
+      if (topeInfo) { topeInfo.style.display = 'none'; topeInfo.innerHTML = ''; }
       const favorRow = ge('client-favor-row');
       if (favorRow) favorRow.style.display = 'none';
       const chkDeuda = ge('chk-registrar-deuda');
@@ -3230,8 +3296,9 @@ export const POS = (() => {
         // Vuelto como saldo a favor
         // If ccCobrarDeuda was used, the debt is already fully paid above → treat residual balance as 0.
         if (ge('chk-saldo-favor')?.checked) {
-          const recibe = state.recibeEfectivo || 0;
-          const vuelto = Math.max(0, recibe - effTotal);
+          // getSobranteSimple() resuelve los dos casos: el vuelto del efectivo
+          // y el excedente de cualquier otro medio de pago.
+          const vuelto = getSobranteSimple();
           if (vuelto > 0.001) {
             const saldoResidual = state.ccCobrarDeuda ? 0 : state.clienteSaldo;
             if (saldoResidual > 0.001) {
@@ -3660,6 +3727,51 @@ export const POS = (() => {
             'pending',
             now
           ]);
+        }
+      }
+
+      // Revertir los totales guardados de la sesion de caja. caja.js recalcula
+      // estos numeros al vuelo desde venta_pagos filtrando estado='completada',
+      // asi que del lado del modulo Cajas ya daban bien; el problema era la
+      // copia acumulada en sesiones_caja, que el POS usa para su "saldo
+      // esperado" y que ademas se sincroniza a la otra compu.
+      //
+      // Solo se toca si la caja sigue abierta: si ya se cerro, el recuento
+      // fisico se hizo con esa plata adentro y reescribir el total a posteriori
+      // le inventaria una diferencia a un cierre que estaba bien. La venta
+      // igual desaparece de todos los informes, que filtran por estado.
+      if (venta.sesion_caja_id) {
+        const sesion = window.SGA_DB.query(
+          `SELECT estado FROM sesiones_caja WHERE id = ?`, [venta.sesion_caja_id]
+        )[0];
+
+        if (sesion && sesion.estado === 'abierta') {
+          const pagos = window.SGA_DB.query(
+            `SELECT medio, SUM(monto) AS total FROM venta_pagos WHERE venta_id = ? GROUP BY medio`,
+            [ventaId]
+          );
+
+          // saldo_favor nunca sumo a la caja fisica, y los medios personalizados
+          // (Link de Pago, etc.) no tienen columna propia: de esos se encarga
+          // getTotalesSesion leyendo venta_pagos. Se revierte lo que se acumulo.
+          const tot = { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0, cuenta_corriente: 0 };
+          for (const pg of pagos) {
+            if (Object.prototype.hasOwnProperty.call(tot, pg.medio)) {
+              tot[pg.medio] += parseFloat(pg.total) || 0;
+            }
+          }
+
+          window.SGA_DB.run(`
+            UPDATE sesiones_caja SET
+              total_efectivo         = total_efectivo - ?,
+              total_mercadopago      = total_mercadopago - ?,
+              total_tarjeta          = total_tarjeta - ?,
+              total_transferencia    = total_transferencia - ?,
+              total_cuenta_corriente = total_cuenta_corriente - ?,
+              sync_status = 'pending', updated_at = ?
+            WHERE id = ?
+          `, [tot.efectivo, tot.mercadopago, tot.tarjeta, tot.transferencia,
+              tot.cuenta_corriente, now, venta.sesion_caja_id]);
         }
       }
 
