@@ -522,6 +522,10 @@
       // `if (window.SGA_Clientes)`, asi que sin precargarlo quedaba en silencio
       // en cualquier sesion que no hubiera pasado por la pantalla de Clientes.
       await import('./modules/clientes.js');
+      // Wizard de familia de productos: lo usan compras_v2 y el editor de
+      // productos, y ademas inyecta su propio CSS, asi que tiene que estar
+      // disponible sin importar por que pantalla se entro.
+      await import('./modules/familia.js');
 
       // Check authentication
       console.log('🔐 Checking authentication...');

@@ -2607,6 +2607,10 @@ const EditorProducto = (() => {
     const uppCompraRaw = (ge('ed-unidades-paquete-compra') || {}).value;
     const newPrecioVenta = parseFloat((ge('ed-precio-venta') || {}).value) || 0;
     const precioChanged = newPrecioVenta !== (state.producto.precio_venta || 0);
+    // Para el wizard de familia: state.producto todavia tiene los valores
+    // previos en este punto, asi que la comparacion es contra lo que habia.
+    const newCosto = parseFloat((ge('ed-costo') || {}).value) || 0;
+    const costoChanged = newCosto !== (state.producto.costo || 0);
 
     // fieldValues: 27 items, nombre → imagen (shared between INSERT and UPDATE)
     const fieldValues = [
@@ -2723,11 +2727,32 @@ const EditorProducto = (() => {
     state.dirty = false;
     showToast('✅ Cambios guardados');
 
-    const returnTo = sessionStorage.getItem('editor_returnTo');
-    if (returnTo) {
-      sessionStorage.removeItem('editor_returnTo');
-      window.location.hash = returnTo;
+    const volver = () => {
+      const returnTo = sessionStorage.getItem('editor_returnTo');
+      if (returnTo) {
+        sessionStorage.removeItem('editor_returnTo');
+        window.location.hash = returnTo;
+      }
+    };
+
+    // Familia de productos: si cambio el costo o el precio y este producto
+    // comparte familia con otros, se ofrece aplicar el cambio al resto. Es el
+    // mismo wizard que se abre al confirmar una compra (js/modules/familia.js);
+    // hasta ahora ese era el unico camino por el que aparecia, asi que un
+    // cambio de precio hecho desde el editor dejaba a los hermanos desfasados.
+    const fam = window.SGA_Familia;
+    if ((costoChanged || precioChanged) && fam && fam.tieneFamilia(state.productoId)) {
+      fam.showHerenciaModal({
+        prodId:      state.productoId,
+        prodNombre:  nombre,
+        nuevoCosto:  newCosto,
+        nuevoPrecio: newPrecioVenta,
+        onDone:      volver,
+      });
+      return;
     }
+
+    volver();
   };
 
   const handleCancel = () => {
