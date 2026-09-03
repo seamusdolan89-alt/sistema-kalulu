@@ -34,6 +34,10 @@ const Gastos = (() => {
   ];
 
   const METODOS = [
+    // "Queda a pagar" es el unico metodo que manda el gasto a la cuenta
+    // corriente del proveedor. El resto se asume pagado en el momento, que es
+    // como venia funcionando.
+    { value: 'cuenta_corriente',  label: 'Queda a pagar (cta. cte.)' },
     { value: 'transferencia',     label: 'Transferencia'     },
     { value: 'debito_automatico', label: 'Débito Automático' },
     { value: 'efectivo',          label: 'Efectivo'          },

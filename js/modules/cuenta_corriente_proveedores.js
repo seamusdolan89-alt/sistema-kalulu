@@ -22,6 +22,28 @@ const SGA_PagosProveedores = (() => {
     return parseFloat(r[0]?.total) || 0;
   }
 
+  function _getPagadoDeGasto(gastoId) {
+    const r = db().query(
+      `SELECT COALESCE(SUM(monto_imputado), 0) AS total FROM imputaciones_pagos WHERE gasto_id = ?`,
+      [gastoId]
+    );
+    return parseFloat(r[0]?.total) || 0;
+  }
+
+  // Gastos de servicios que entran a la cuenta corriente. Son SOLO los cargados
+  // con metodo "queda a pagar": un gasto pagado en el momento (transferencia,
+  // efectivo, debito) no es una deuda con el proveedor, y meterlos a todos
+  // haria aparecer deuda falsa por cada gasto historico ya saldado.
+  function _getGastosCtaCte(proveedorId) {
+    return db().query(
+      `SELECT id, fecha, comprobante, descripcion, monto
+       FROM gastos
+       WHERE proveedor_id = ? AND metodo_pago = 'cuenta_corriente'
+       ORDER BY fecha ASC, rowid ASC`,
+      [proveedorId]
+    ) || [];
+  }
+
   function _getCreditoDisponibleDePago(pagoId) {
     const totalPago = db().query(
       `SELECT COALESCE(SUM(monto), 0) AS total FROM pagos_proveedores_metodos WHERE pago_id = ?`,
@@ -39,6 +61,11 @@ const SGA_PagosProveedores = (() => {
       `SELECT COALESCE(SUM(total), 0) AS total FROM compras WHERE proveedor_id = ? AND COALESCE(estado,'confirmada') != 'anulada'`,
       [proveedorId]
     );
+    const deudaGastos = db().query(
+      `SELECT COALESCE(SUM(monto), 0) AS total FROM gastos
+       WHERE proveedor_id = ? AND metodo_pago = 'cuenta_corriente'`,
+      [proveedorId]
+    );
     const pagado = db().query(
       `SELECT COALESCE(SUM(m.monto), 0) AS total
        FROM pagos_proveedores_metodos m
@@ -46,7 +73,9 @@ const SGA_PagosProveedores = (() => {
        WHERE p.proveedor_id = ?`,
       [proveedorId]
     );
-    return (parseFloat(deuda[0]?.total) || 0) - (parseFloat(pagado[0]?.total) || 0);
+    return (parseFloat(deuda[0]?.total) || 0)
+         + (parseFloat(deudaGastos[0]?.total) || 0)
+         - (parseFloat(pagado[0]?.total) || 0);
   }
 
   function getComprasPendientes(proveedorId) {
@@ -57,13 +86,39 @@ const SGA_PagosProveedores = (() => {
        ORDER BY fecha ASC, rowid ASC`,
       [proveedorId]
     );
-    return compras
+    const pendientesCompras = compras
       .map(c => ({
         ...c,
+        tipo:   'compra',
         pagado: _getPagadoDeCompra(c.id),
         saldo:  (parseFloat(c.total) || 0) - _getPagadoDeCompra(c.id),
       }))
       .filter(c => c.saldo > 0.01);
+
+    // Los gastos "queda a pagar" se comportan igual que una factura: se listan
+    // como comprobante pendiente y se les puede imputar un pago. numero_factura
+    // toma el N° de comprobante del gasto para que los consumidores que arman
+    // la referencia con factura_pv/numero_factura sigan funcionando igual.
+    const pendientesGastos = _getGastosCtaCte(proveedorId)
+      .map(g => {
+        const pagado = _getPagadoDeGasto(g.id);
+        return {
+          id:             g.id,
+          tipo:           'gasto',
+          fecha:          g.fecha,
+          numero_factura: g.comprobante || null,
+          factura_pv:     null,
+          descripcion:    g.descripcion || null,
+          total:          parseFloat(g.monto) || 0,
+          condicion_pago: 'pendiente',
+          pagado,
+          saldo:          (parseFloat(g.monto) || 0) - pagado,
+        };
+      })
+      .filter(g => g.saldo > 0.01);
+
+    return [...pendientesCompras, ...pendientesGastos]
+      .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
   }
 
   function getCreditosDisponibles(proveedorId) {
@@ -106,6 +161,22 @@ const SGA_PagosProveedores = (() => {
         condicion_pago: c.condicion_pago,
         pagado,
         saldo_item:     (parseFloat(c.total) || 0) - pagado,
+      };
+    });
+
+    const gastos = _getGastosCtaCte(proveedorId).map(g => {
+      const pagado = _getPagadoDeGasto(g.id);
+      const monto  = parseFloat(g.monto) || 0;
+      return {
+        tipo:           'gasto',
+        id:             g.id,
+        fecha:          g.fecha,
+        referencia:     g.comprobante || g.descripcion || 'Gasto',
+        debe:           monto,
+        haber:          0,
+        condicion_pago: 'pendiente',
+        pagado,
+        saldo_item:     monto - pagado,
       };
     });
 
@@ -231,13 +302,14 @@ const SGA_PagosProveedores = (() => {
       if (imputaciones !== undefined) {
         for (const imp of imputaciones) {
           if (creditoRestante <= 0.01) break;
-          const compraId = imp.compra_id || imp.id;
-          if (!compraId) continue; // huérfano explícito
+          const docId = imp.compra_id || imp.gasto_id || imp.id;
+          if (!docId) continue; // huérfano explícito
           const monto = Math.min(parseFloat(imp.monto) || 0, creditoRestante);
           if (monto <= 0.01) continue;
+          const esGasto = imp.tipo === 'gasto' || (!imp.compra_id && !!imp.gasto_id);
           db().run(
-            `INSERT INTO imputaciones_pagos (id, pago_id, compra_id, monto_imputado, fecha) VALUES (?, ?, ?, ?, ?)`,
-            [uid(), pagoId, compraId, monto, fechaPago]
+            `INSERT INTO imputaciones_pagos (id, pago_id, compra_id, gasto_id, monto_imputado, fecha) VALUES (?, ?, ?, ?, ?, ?)`,
+            [uid(), pagoId, esGasto ? null : docId, esGasto ? docId : null, monto, fechaPago]
           );
           creditoRestante -= monto;
         }
@@ -248,8 +320,11 @@ const SGA_PagosProveedores = (() => {
           if (creditoRestante <= 0.01) break;
           const monto = Math.min(creditoRestante, c.saldo);
           db().run(
-            `INSERT INTO imputaciones_pagos (id, pago_id, compra_id, monto_imputado, fecha) VALUES (?, ?, ?, ?, ?)`,
-            [uid(), pagoId, c.id, monto, fechaPago]
+            `INSERT INTO imputaciones_pagos (id, pago_id, compra_id, gasto_id, monto_imputado, fecha) VALUES (?, ?, ?, ?, ?, ?)`,
+            [uid(), pagoId,
+             c.tipo === 'gasto' ? null : c.id,
+             c.tipo === 'gasto' ? c.id : null,
+             monto, fechaPago]
           );
           creditoRestante -= monto;
         }
@@ -265,21 +340,44 @@ const SGA_PagosProveedores = (() => {
     }
   }
 
-  function imputar(pagoId, compraId, monto) {
+  // docId puede ser una compra o un gasto "queda a pagar". Si no se aclara el
+  // tipo se deduce: primero se busca como compra y, si no existe, como gasto.
+  function imputar(pagoId, docId, monto, tipo) {
     const credito = _getCreditoDisponibleDePago(pagoId);
     if (credito <= 0.01) return { success: false, error: 'Sin crédito disponible' };
-    const compra = db().query(`SELECT total FROM compras WHERE id = ?`, [compraId])[0];
-    if (!compra) return { success: false, error: 'Compra no encontrada' };
-    const saldoCompra = (parseFloat(compra.total) || 0) - _getPagadoDeCompra(compraId);
-    if (saldoCompra <= 0.01) return { success: false, error: 'Compra ya saldada' };
+
+    let esGasto = tipo === 'gasto';
+    let total   = null;
+
+    if (!esGasto) {
+      const compra = db().query(`SELECT total FROM compras WHERE id = ?`, [docId])[0];
+      if (compra) {
+        total = parseFloat(compra.total) || 0;
+      } else if (tipo === undefined) {
+        esGasto = true; // no es compra: probamos como gasto
+      }
+    }
+    if (esGasto && total === null) {
+      const gasto = db().query(
+        `SELECT monto FROM gastos WHERE id = ? AND metodo_pago = 'cuenta_corriente'`, [docId]
+      )[0];
+      if (!gasto) return { success: false, error: 'Comprobante no encontrado' };
+      total = parseFloat(gasto.monto) || 0;
+    }
+    if (total === null) return { success: false, error: 'Comprobante no encontrado' };
+
+    const pagadoDoc = esGasto ? _getPagadoDeGasto(docId) : _getPagadoDeCompra(docId);
+    const saldoDoc  = total - pagadoDoc;
+    if (saldoDoc <= 0.01) return { success: false, error: 'Comprobante ya saldado' };
+
     const montoImp = monto !== undefined
-      ? Math.min(parseFloat(monto), credito, saldoCompra)
-      : Math.min(credito, saldoCompra);
+      ? Math.min(parseFloat(monto), credito, saldoDoc)
+      : Math.min(credito, saldoDoc);
     if (montoImp <= 0.01) return { success: false, error: 'Monto inválido' };
     try {
       db().run(
-        `INSERT INTO imputaciones_pagos (id, pago_id, compra_id, monto_imputado, fecha) VALUES (?, ?, ?, ?, ?)`,
-        [uid(), pagoId, compraId, montoImp, now().slice(0, 10)]
+        `INSERT INTO imputaciones_pagos (id, pago_id, compra_id, gasto_id, monto_imputado, fecha) VALUES (?, ?, ?, ?, ?, ?)`,
+        [uid(), pagoId, esGasto ? null : docId, esGasto ? docId : null, montoImp, now().slice(0, 10)]
       );
       return { success: true, monto_aplicado: montoImp };
     } catch (e) {
