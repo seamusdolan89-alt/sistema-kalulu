@@ -1871,6 +1871,9 @@ export const POS = (() => {
           if (!confirm('¿Anular esta venta? Se restaurará el stock.')) return;
           const result = anularVenta(venta.id, 'Anulación manual');
           if (result.success) {
+            // Subirla ya: mientras siga en 'pending' local, es una carrera
+            // contra el proximo pull (ver la guarda en applyVentaFull).
+            window.SGA_Sync?.pushPending?.();
             closeDetailPanel();
             checkSesion();
             loadDashboard();
@@ -3201,7 +3204,22 @@ export const POS = (() => {
           alert('Pago insuficiente. El monto recibido no cubre el total.');
           return;
         }
-        if (Math.abs(asig - effTotal) > 0.01 && !state.ccRegistrarDeuda) { alert('El monto asignado no coincide con el total'); return; }
+        // Con un medio distinto de efectivo el monto tipeado ES el pago, asi
+        // que puede superar el total: ese excedente es valido si el cajero
+        // eligio dejarlo a favor del cliente. Si no lo dejo a favor sigue
+        // siendo un error de tipeo y hay que frenarlo, pero diciendo cuanto
+        // sobra en vez del generico "no coincide con el total".
+        const dejaFavor = !!ge('chk-saldo-favor')?.checked;
+        const excedente = asig - effTotal;
+        if (excedente > 0.01 && !dejaFavor) {
+          alert(
+            `El monto recibido supera el total en ${formatCurrency(excedente)}.\n\n` +
+            'Corregí el monto, o marcá "Dejar como saldo a favor" ' +
+            '(hace falta un cliente seleccionado).'
+          );
+          return;
+        }
+        if (!dejaFavor && Math.abs(asig - effTotal) > 0.01 && !state.ccRegistrarDeuda) { alert('El monto asignado no coincide con el total'); return; }
 
         saldoFavorApplied = (state.ccAplicarFavor && state.clienteSaldo < -0.01)
           ? Math.min(Math.abs(state.clienteSaldo), getCartTotal())

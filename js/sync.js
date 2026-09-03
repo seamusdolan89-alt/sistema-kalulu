@@ -918,6 +918,19 @@
   }
 
   function applyVentaFull(data) {
+    // No pisar una venta que tiene cambios locales sin sincronizar. Si el POS
+    // acaba de anularla, ese cambio todavia no viajo y el documento que baja
+    // de Firestore sigue diciendo 'completada': sin esta guarda, el pull la
+    // "desanulaba" sola y encima le ponia sync_status='synced', con lo cual el
+    // cambio local se perdia para siempre y nunca se llegaba a subir.
+    const localRow = window.SGA_DB.query(
+      `SELECT sync_status FROM ventas WHERE id = ?`, [data.id]
+    )[0];
+    if (localRow && localRow.sync_status === 'pending') {
+      console.log('⏭️  Pull: se conserva la venta local con cambios sin sincronizar', data.id);
+      return;
+    }
+
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO ventas
         (id, sucursal_id, sesion_caja_id, cliente_id, usuario_id,
