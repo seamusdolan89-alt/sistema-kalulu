@@ -184,10 +184,14 @@ main#app { overflow: hidden; }
 .sri:last-child { border-bottom: none; }
 .sri:hover, .sri.highlighted { background: #f0f4ff; }
 .sri.highlighted { outline: 2px solid #667eea; outline-offset: -2px; }
-.sri-left { display: flex; flex-direction: column; gap: 2px; }
+.sri-left { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .sri-nombre { font-weight: 600; color: #333; }
 .sri-codigo { color: #aaa; font-size: 0.83em; }
+.sri-right { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; margin-left: 12px; }
 .sri-precio { font-weight: 700; color: #667eea; white-space: nowrap; }
+.sri-stock { color: #888; font-size: 0.83em; white-space: nowrap; }
+.sri-stock-bajo { color: #ef6c00; font-weight: 600; }
+.sri-stock-cero { color: #d32f2f; font-weight: 600; }
 
 .cart-wrap { flex: 1; overflow: hidden; display: flex; flex-direction: column; padding: 12px 14px; gap: 10px; }
 .cart-scroll { flex: 1; overflow-y: auto; background: white; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
