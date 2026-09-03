@@ -1,3 +1,8 @@
+// Import estatico por el mismo motivo que en compras_v2/editor-producto: el
+// POS usa SGA_Clientes.getTopeDisponible() para el limite de fiado, y depender
+// del preload de app.js dejaba ese control mudo en una pestaña vieja.
+import './clientes.js';
+
 /**
  * pos.js — Point of Sale (POS) Module - DATA LAYER ONLY
  * 
