@@ -18,7 +18,8 @@ const OperacionesStock = (() => {
     return db().query(`
       SELECT c.id, c.fecha, c.numero_factura, c.factura_pv, c.total, c.condicion_pago, c.estado,
              p.razon_social AS proveedor_nombre,
-             (SELECT COUNT(*) FROM compra_items ci WHERE ci.compra_id = c.id) AS num_items
+             (SELECT COUNT(*) FROM compra_items ci WHERE ci.compra_id = c.id) AS num_items,
+             (SELECT COUNT(*) FROM remitos r WHERE r.compra_id = c.id) AS de_remito
       FROM compras c
       LEFT JOIN proveedores p ON p.id = c.proveedor_id
       WHERE ${where.join(' AND ')}
@@ -99,8 +100,11 @@ const OperacionesStock = (() => {
                 <span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;background:${color}22;color:${color}">${esc(label)}</span>
               </td>
               <td style="padding:8px 10px;text-align:center;font-size:12px;color:#607080">${pago}</td>
-              <td style="padding:8px 10px;text-align:center">
+              <td style="padding:8px 10px;text-align:center;white-space:nowrap">
                 <button style="padding:3px 12px;background:#2e7d32;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px" data-ver-compra="${esc(c.id)}">Ver</button>
+                ${window.ADMIN_MODE && estado !== 'anulada' && !c.de_remito ? `
+                  <button style="padding:3px 12px;margin-left:4px;background:#fff;color:#1a5c2e;border:1px solid #1a5c2e;border-radius:4px;cursor:pointer;font-size:12px" data-editar-compra="${esc(c.id)}">✏️ Editar</button>
+                ` : ''}
               </td>
             </tr>`;
           }).join('')}
@@ -110,6 +114,12 @@ const OperacionesStock = (() => {
 
     body.querySelectorAll('[data-ver-compra]').forEach(btn => {
       btn.addEventListener('click', () => renderDetalleCompra(btn.dataset.verCompra));
+    });
+    body.querySelectorAll('[data-editar-compra]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        sessionStorage.setItem('compras_v2_editar_id', btn.dataset.editarCompra);
+        window.location.hash = 'compras_v2';
+      });
     });
   }
 

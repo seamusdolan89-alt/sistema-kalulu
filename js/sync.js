@@ -388,9 +388,18 @@
        data.total_factura || 0, data.condicion_compra || null, data.updated_at || now]
     );
 
+    // Reemplazo completo de los ítems: se borran los que había localmente
+    // para esta compra y se insertan de nuevo todos los del documento. Antes
+    // esto solo hacía upsert (INSERT OR REPLACE) — si una edición borraba
+    // una línea (ver compras_v2.js#commitCompraEdicion), esa línea quedaba
+    // huérfana para siempre del otro lado, nunca se enteraba del borrado.
+    // _items siempre trae el set COMPLETO y actual (denormalizeCompra
+    // reconsulta compra_items entero en cada push), así que reconstruir
+    // desde cero acá es seguro e idempotente.
+    window.SGA_DB.run(`DELETE FROM compra_items WHERE compra_id = ?`, [data.id]);
     for (const item of (data._items || [])) {
       window.SGA_DB.run(`
-        INSERT OR REPLACE INTO compra_items
+        INSERT INTO compra_items
           (id, compra_id, producto_id, cantidad, costo_unitario, costo_anterior,
            subtotal, costo_modificado, unidad_compra, unidades_por_paquete,
            descuento_pct, descuento_monto, iva, tipo, concepto)
@@ -403,15 +412,24 @@
          item.tipo || 'producto', item.concepto || null]
       );
 
-      // Actualizar costo del producto si el admin lo marcó como modificado.
-      // Las líneas de muestra (tipo='muestra') nunca actualizan el costo del
-      // producto — su costo no es el costo real de reposición (ver
-      // commitCompra en compras_v2.js, misma regla del lado que registra).
+      // Actualizar costo del producto si el admin lo marcó como modificado —
+      // pero solo si ESTA compra es la más reciente en la que se compró este
+      // producto. Sin este chequeo, sincronizar (o editar) una compra vieja
+      // podría pisar con un costo desactualizado el de una compra posterior
+      // ya aplicada del otro lado. Las líneas de muestra (tipo='muestra')
+      // nunca actualizan el costo — no es el costo real de reposición.
       if (item.tipo !== 'muestra' && item.costo_modificado && item.costo_unitario) {
-        window.SGA_DB.run(
-          `UPDATE productos SET costo = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
-          [item.costo_unitario, now, item.producto_id]
+        const masReciente = window.SGA_DB.query(
+          `SELECT 1 FROM compra_items ci JOIN compras c ON c.id = ci.compra_id
+           WHERE ci.producto_id = ? AND c.id != ? AND c.fecha > ? LIMIT 1`,
+          [item.producto_id, data.id, data.fecha]
         );
+        if (!masReciente.length) {
+          window.SGA_DB.run(
+            `UPDATE productos SET costo = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
+            [item.costo_unitario, now, item.producto_id]
+          );
+        }
       }
     }
 
