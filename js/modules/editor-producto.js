@@ -5,6 +5,8 @@
  * a multi-section product editor. Navigating away restores the shell.
  */
 
+import Familia from './familia.js';
+
 const EditorProducto = (() => {
   'use strict';
 
@@ -2740,9 +2742,8 @@ const EditorProducto = (() => {
     // mismo wizard que se abre al confirmar una compra (js/modules/familia.js);
     // hasta ahora ese era el unico camino por el que aparecia, asi que un
     // cambio de precio hecho desde el editor dejaba a los hermanos desfasados.
-    const fam = window.SGA_Familia;
-    if ((costoChanged || precioChanged) && fam && fam.tieneFamilia(state.productoId)) {
-      fam.showHerenciaModal({
+    if ((costoChanged || precioChanged) && Familia.tieneFamilia(state.productoId)) {
+      Familia.showHerenciaModal({
         prodId:      state.productoId,
         prodNombre:  nombre,
         nuevoCosto:  newCosto,

@@ -1,5 +1,11 @@
 'use strict';
 
+// Import estatico y no window.SGA_Familia: el modulo que necesita el wizard se
+// lo trae solo. Depender del preload de app.js significaba que una pestaña
+// abierta desde antes del deploy tuviera el codigo nuevo con el bootstrap
+// viejo, y el wizard no se abriera nunca sin decir nada.
+import Familia from './familia.js';
+
 const ComprasV2 = (() => {
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -3843,9 +3849,7 @@ const ComprasV2 = (() => {
   // editor de productos). Aca solo se le pasa el callback que alimenta el
   // resumen final de la compra.
   function showHerenciaModal({ prodId, prodNombre, nuevoCosto, nuevoPrecio, onDone }) {
-    const fam = window.SGA_Familia;
-    if (!fam) { onDone(); return; }
-    fam.showHerenciaModal({
+    Familia.showHerenciaModal({
       prodId, prodNombre, nuevoCosto, nuevoPrecio, onDone,
       onSync: (info) => {
         if (!state.herenciaSincronizados.find(x => x.id === info.id)) {
