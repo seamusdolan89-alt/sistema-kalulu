@@ -27,6 +27,7 @@ const mod = {
       sugeridas: [],
       sugeridasFocusIdx: -1,
       sugeridasFiltros: { categorias: new Set(), proveedores: new Set() },
+      soloConStock: false,
     };
     this._loadPending();
     this._loadSugeridas();
@@ -221,6 +222,14 @@ const mod = {
         this._state.items = [];
         this._state.sugeridasFocusIdx = -1;
         this._render(); this._bind(); return;
+      }
+
+      // Toggle "solo con stock"
+      const chkStock = e.target.closest('#etiq-sug-chk-stock');
+      if (chkStock) {
+        this._state.soloConStock = chkStock.checked;
+        this._renderSugeridas();
+        return;
       }
 
       // Slicers: limpiar filtro
@@ -458,19 +467,22 @@ const mod = {
 
   // ── Sugeridas ──────────────────────────────────────────────────────────
   _loadSugeridas() {
+    const sucursalId = window.SGA_Auth?.getCurrentUser()?.sucursal_id || '1';
     const rows = this._db().query(`
       SELECT p.id, p.nombre, p.precio_venta, p.ultima_modificacion_precio,
         p.categoria_id, c.nombre AS categoria_nombre,
         p.proveedor_principal_id, pv.razon_social AS proveedor_nombre,
+        COALESCE(st.cantidad, 0) AS stock_actual,
         (SELECT codigo FROM codigos_barras WHERE producto_id = p.id AND es_principal = 1 LIMIT 1) AS codigo
       FROM productos p
       LEFT JOIN categorias c ON c.id = p.categoria_id
       LEFT JOIN proveedores pv ON pv.id = p.proveedor_principal_id
+      LEFT JOIN stock st ON st.producto_id = p.id AND st.sucursal_id = ?
       WHERE p.activo = 1
         AND (p.ultima_impresion_etiqueta IS NULL
              OR p.ultima_modificacion_precio > p.ultima_impresion_etiqueta)
       ORDER BY p.nombre
-    `) || [];
+    `, [sucursalId]) || [];
     this._state.sugeridas = rows;
   },
 
@@ -481,6 +493,10 @@ const mod = {
       list = list.filter(r => sugeridasFiltros.categorias.has(r.categoria_id || '__none__'));
     if (sugeridasFiltros.proveedores.size > 0)
       list = list.filter(r => sugeridasFiltros.proveedores.has(r.proveedor_principal_id || '__none__'));
+    // Solo con stock: no tiene sentido imprimir la etiqueta de algo que no esta
+    // en gondola. Se cuenta > 0; el stock negativo (sobreventa) tampoco entra.
+    if (this._state.soloConStock)
+      list = list.filter(r => (parseFloat(r.stock_actual) || 0) > 0);
     return list;
   },
 
@@ -525,6 +541,11 @@ const mod = {
       return `<div class="etiq-sug-empty">Todos los productos tienen sus etiquetas al día.</div>`;
     }
     const visible = this._getFilteredSugeridas();
+    // Cuantos quedarian afuera por no tener stock (se calcula sobre lo que ya
+    // pasó los otros filtros, para que el numero se entienda en contexto).
+    const ocultosPorStock = this._state.soloConStock
+      ? 0
+      : visible.filter(r => (parseFloat(r.stock_actual) || 0) <= 0).length;
     const itemIds = new Set(this._state.items.map(i => i.id));
     const allChecked = visible.length > 0 && visible.every(r => itemIds.has(r.id));
     const rows = visible.map((r, i) => `
@@ -536,13 +557,19 @@ const mod = {
       </div>
     `).join('');
     const listContent = visible.length === 0
-      ? `<div class="etiq-sug-empty">Ningún producto coincide con los filtros seleccionados.</div>`
+      ? `<div class="etiq-sug-empty">${this._state.soloConStock
+            ? 'Ningún producto con stock coincide con los filtros seleccionados.'
+            : 'Ningún producto coincide con los filtros seleccionados.'}</div>`
       : `<div class="etiq-sug-list">${rows}</div>`;
     return `
       <div class="etiq-sug-toolbar">
         <label class="etiq-sug-selectall">
           <input type="checkbox" id="etiq-sug-chk-all" ${allChecked ? 'checked' : ''}>
           Seleccionar todo
+        </label>
+        <label class="etiq-sug-selectall" title="Ocultar los productos sin stock en esta sucursal">
+          <input type="checkbox" id="etiq-sug-chk-stock" ${this._state.soloConStock ? 'checked' : ''}>
+          Solo con stock${ocultosPorStock > 0 ? ` <span class="etiq-sug-stock-count">(${ocultosPorStock} sin stock)</span>` : ''}
         </label>
         ${this._state.items.length > 0 ? `<button id="etiq-sug-limpiar" class="etiq-sug-clear-btn">Limpiar todo</button>` : ''}
       </div>
