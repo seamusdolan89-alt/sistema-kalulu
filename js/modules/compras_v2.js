@@ -76,6 +76,9 @@ const ComprasV2 = (() => {
     modoRemito:          false,
     vinculandoRemitoId:  null,
     remitoNumero:        '',
+    // edición de una compra ya confirmada (desde Operaciones de Stock)
+    editandoCompraId:    null,
+    editandoSucursalId:  null,
   };
 
   // ── DB helpers ───────────────────────────────────────────────────────────────
@@ -1887,6 +1890,8 @@ const ComprasV2 = (() => {
   }
 
   function resetToNew() {
+    state.editandoCompraId      = null;
+    state.editandoSucursalId    = null;
     state.proveedorId           = null;
     state.proveedorNombre       = null;
     state.proveedorSaldo        = 0;
@@ -2062,6 +2067,130 @@ const ComprasV2 = (() => {
     showCarrito();
   }
 
+  // ── Editar una compra ya confirmada (desde Operaciones de Stock) ────────────
+  // Mismo patrón que resumir() (compras pausadas), pero cargando desde
+  // `compras`/`compra_items` en vez de un snapshot en compras_pausadas, y
+  // aterrizando en la cabecera (no directo al carrito) — el usuario pidió
+  // poder revisar/corregir primero los datos de cabecera.
+  function cargarCompraParaEditar(compraId) {
+    const compra = db().query(`SELECT * FROM compras WHERE id=?`, [compraId])[0];
+    if (!compra) { alert('Compra no encontrada'); window.location.hash = 'operaciones_stock'; return; }
+
+    const prov = compra.proveedor_id
+      ? db().query(`SELECT id, razon_social, condicion_iva, agente_retencion_iva, agente_retencion_iibb FROM proveedores WHERE id=?`, [compra.proveedor_id])[0]
+      : null;
+
+    const rows = db().query(`
+      SELECT ci.id AS ci_id, ci.producto_id, ci.cantidad, ci.costo_unitario, ci.costo_anterior,
+             ci.unidad_compra, ci.unidades_por_paquete, ci.descuento_pct, ci.descuento_monto,
+             ci.iva, ci.tipo, ci.subtotal, ci.concepto,
+             p.nombre AS producto_nombre, cb.codigo AS barcode
+      FROM compra_items ci
+      LEFT JOIN productos p ON p.id = ci.producto_id
+      LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
+      WHERE ci.compra_id = ?
+      GROUP BY ci.id
+      ORDER BY p.nombre
+    `, [compraId]);
+
+    state.items = rows.map(r => {
+      if (r.tipo === 'envio' || r.tipo === 'descuento') {
+        return {
+          _ciId: r.ci_id, tipo: r.tipo, productoId: null,
+          concepto: r.concepto || (r.tipo === 'envio' ? 'Envío' : 'Descuento (pronto pago, etc.)'),
+          monto: Math.abs(parseFloat(r.subtotal) || 0), iva: r.iva || '',
+        };
+      }
+      return {
+        _ciId: r.ci_id, productoId: r.producto_id, nombre: r.producto_nombre || '(producto eliminado)',
+        barcode: r.barcode || '', unidadCompra: r.unidad_compra || 'Unidad',
+        udsPaquete: parseFloat(r.unidades_por_paquete) || 1,
+        costoActual: parseFloat(r.costo_anterior) || 0, costoNuevo: parseFloat(r.costo_unitario) || 0,
+        cantidad: parseFloat(r.cantidad) || 0,
+        descuento: parseFloat(r.descuento_pct) || 0, descuentoMonto: parseFloat(r.descuento_monto) || 0,
+        iva: r.iva || '', esMuestra: r.tipo === 'muestra',
+      };
+    });
+
+    state.editandoCompraId = compraId;
+    // El stock hay que ajustarlo en la MISMA sucursal de la compra original,
+    // no en la del usuario que está editando ahora (puede ser otra: admin
+    // editando desde su casa una compra que se hizo en el local).
+    state.editandoSucursalId = compra.sucursal_id;
+    state.proveedorId        = compra.proveedor_id;
+    state.proveedorNombre    = prov?.razon_social || '(proveedor eliminado)';
+    state.proveedorCondicionIva  = prov?.condicion_iva || null;
+    state.proveedorAgRetIva      = prov?.agente_retencion_iva  ? 1 : 0;
+    state.proveedorAgRetIibb     = prov?.agente_retencion_iibb ? 1 : 0;
+    state.condicionPago    = compra.condicion_pago || 'pendiente';
+    state.condicionCompra  = compra.condicion_compra || '';
+    state.facturaPv        = compra.factura_pv || '';
+    state.numeroFactura    = compra.numero_factura || '';
+    state.fecha             = compra.fecha ? compra.fecha.slice(0, 10) : todayDate();
+    state.fechaVencimiento = '';
+    state.totalFactura     = parseFloat(compra.total_factura) || 0;
+    state.subtotalNeto     = parseFloat(compra.subtotal_neto) || 0;
+    state.iva105           = parseFloat(compra.iva_105) || 0;
+    state.iva21            = parseFloat(compra.iva_21) || 0;
+    state.impInterno       = parseFloat(compra.imp_interno) || 0;
+    state.percepcionIva    = parseFloat(compra.percepcion_iva) || 0;
+    state.percepcionIibb   = parseFloat(compra.percepcion_iibb) || 0;
+    state.modoRemito         = false;
+    state.vinculandoRemitoId = null;
+    state.pausadaId           = null;
+    state.aplicarSaldo        = false; // el crédito ya aplicado (si lo hay) no se vuelve a tocar acá
+    state.proveedorSaldo             = state.proveedorId ? getProveedorSaldo(state.proveedorId) : 0;
+    state.proveedorCreditoDisponible = state.proveedorId ? getCreditoDisponibleProveedor(state.proveedorId) : 0;
+
+    // Proveedor card
+    const card   = ge('cv2-prov-card');
+    const nameEl = ge('cv2-prov-nombre');
+    const provInp = ge('cv2-prov-search');
+    if (state.proveedorNombre) {
+      if (card)    card.style.display = 'flex';
+      if (nameEl)  nameEl.textContent = state.proveedorNombre;
+      if (provInp) provInp.style.display = 'none';
+    }
+
+    // Cabecera
+    const pvInp = ge('cv2-factura-pv');
+    if (pvInp) pvInp.value = state.facturaPv;
+    const facturaInp = ge('cv2-factura');
+    if (facturaInp) facturaInp.value = state.numeroFactura;
+    const fechaInp = ge('cv2-fecha');
+    if (fechaInp) fechaInp.value = state.fecha;
+    const condSel = ge('cv2-condicion-compra');
+    if (condSel) condSel.value = state.condicionCompra;
+    const tfInp = ge('cv2-total-factura');
+    if (tfInp) tfInp.value = state.totalFactura > 0 ? formatARS(state.totalFactura) : '';
+    const fiscalMap = {
+      'cv2-subtotal-neto': state.subtotalNeto, 'cv2-iva-105': state.iva105, 'cv2-iva-21': state.iva21,
+      'cv2-imp-interno': state.impInterno, 'cv2-percepcion-iva': state.percepcionIva, 'cv2-percepcion-iibb': state.percepcionIibb,
+    };
+    for (const [id, val] of Object.entries(fiscalMap)) {
+      const inp = ge(id);
+      if (inp) inp.value = val > 0 ? formatARS(val) : '';
+    }
+    renderFiscalBadges();
+    renderCabeceraFields();
+    renderCart();
+
+    // Banner + botones: dejar en claro que se está editando, no cargando una compra nueva
+    const editBanner = ge('cv2-editando-banner');
+    if (editBanner) {
+      editBanner.style.display = 'flex';
+      editBanner.textContent = `✏️ Editando compra de ${state.proveedorNombre} del ${state.fecha.split('-').reverse().join('/')} — los cambios van a ajustar el stock y, si corresponde, el costo del producto.`;
+    }
+    const headerTitle = document.querySelector('.cv2-header-title');
+    if (headerTitle) headerTitle.textContent = 'Compras — Editando Compra';
+    ge('cv2-btn-pausadas')?.style.setProperty('display', 'none');
+    ge('cv2-btn-pausar')?.style.setProperty('display', 'none');
+    ge('cv2-btn-remitos-pendientes')?.style.setProperty('display', 'none');
+
+    window.SGA_Utils.showNotification('Compra cargada para editar', 'info');
+    showCabecera();
+  }
+
   function deletePausada(id) {
     if (!confirm('¿Eliminar esta compra pausada?')) return;
     db().run(`DELETE FROM compras_pausadas WHERE id=?`, [id]);
@@ -2084,9 +2213,16 @@ const ComprasV2 = (() => {
   }
 
   // ── Volver modal ─────────────────────────────────────────────────────────────
+  // Destino al salir de compras_v2: al POS normalmente, pero si se estaba
+  // editando una compra ya confirmada hay que volver al historial de donde
+  // vino (Operaciones de Stock) — #pos no tiene sentido en ese contexto.
+  function salirCompras() {
+    window.location.hash = state.editandoCompraId ? 'operaciones_stock' : '#pos';
+  }
+
   function showVolverModal() {
     if (!state.items.length) {
-      window.location.hash = '#pos';
+      salirCompras();
       return;
     }
     const overlay    = ge('cv2-volver-overlay');
@@ -2095,6 +2231,8 @@ const ComprasV2 = (() => {
       const n = state.items.length;
       summaryEl.textContent = `${n} ${n === 1 ? 'artículo' : 'artículos'} — ${fmt$(calcMontoAdeudado())}`;
     }
+    const pausarOpt = ge('cv2-volver-pausar');
+    if (pausarOpt) pausarOpt.style.display = state.editandoCompraId ? 'none' : '';
     if (overlay) overlay.style.display = 'flex';
   }
 
@@ -2112,6 +2250,9 @@ const ComprasV2 = (() => {
       commitRemito();
       return;
     }
+
+    const revConfirmBtn = ge('cv2-rev-btn-confirmar');
+    if (revConfirmBtn) revConfirmBtn.textContent = state.editandoCompraId ? '💾 Guardar Cambios · F10' : '✓ Confirmar Ingreso · F10';
 
     const neto          = calcNeto();          // pre-impuestos, solo para el chequeo contra la cabecera
     const montoAdeudado = calcMontoAdeudado();  // total real (con IVA incluido en Factura A) — lo que se muestra y se debe
@@ -2210,6 +2351,8 @@ const ComprasV2 = (() => {
   // ── Commit (ex-confirmar) ─────────────────────────────────────────────────────
   function commitCompra() {
     hideReviewOverlay();
+
+    if (state.editandoCompraId) { commitCompraEdicion(); return; }
 
     const total         = calcTotal();
     const saldoAplicado = calcSaldoAplicado();
@@ -2425,6 +2568,183 @@ const ComprasV2 = (() => {
       db().rollbackBatch();
       console.error('Error confirming compra:', e);
       alert('Error al confirmar la compra: ' + e.message);
+    }
+  }
+
+  // ── Editar una compra ya confirmada: guardar cambios ────────────────────────
+  // A diferencia de commitCompra() (que siempre INSERTa todo desde cero), acá
+  // hay que: (a) comparar contra lo que la compra tenía ANTES de abrir el
+  // editor para mover el stock solo por la diferencia (no por el total de
+  // nuevo), (b) UPDATE de compra_items existentes en vez de reinsertarlos —
+  // así conservan su id y la sincronización a la otra compu los actualiza en
+  // vez de duplicarlos —, (c) borrar del stock lo que corresponda a líneas
+  // que el usuario sacó del carrito, y (d) solo tocar productos.costo si esta
+  // sigue siendo la compra más reciente de ese producto (si no, una edición
+  // vieja podría pisar un costo ya actualizado por una compra posterior).
+  function commitCompraEdicion() {
+    const compraId    = state.editandoCompraId;
+    const sucursalId  = state.editandoSucursalId;
+    const user        = state.currentUser;
+    const ts          = nowISO();
+    const montoFacturaCompleto = calcMontoFactura();
+
+    const itemsAntes  = db().query(
+      `SELECT id, producto_id, cantidad, unidades_por_paquete, tipo FROM compra_items WHERE compra_id=?`,
+      [compraId]
+    );
+    const antesPorId = new Map(itemsAntes.map(r => [r.id, r]));
+
+    try {
+      db().beginBatch();
+
+      db().run(`
+        UPDATE compras SET
+          proveedor_id=?, fecha=?, numero_factura=?, factura_pv=?, condicion_compra=?,
+          total=?, subtotal_neto=?, iva_105=?, iva_21=?, imp_interno=?,
+          percepcion_iva=?, percepcion_iibb=?, total_factura=?,
+          sync_status='pending', updated_at=?
+        WHERE id=?
+      `, [state.proveedorId, state.fecha, state.numeroFactura || null, state.facturaPv || null,
+          state.condicionCompra || null, montoFacturaCompleto, state.subtotalNeto, state.iva105, state.iva21,
+          state.impInterno, state.percepcionIva, state.percepcionIibb, state.totalFactura,
+          ts, compraId]);
+
+      const idsVistos = new Set();
+
+      for (const item of state.items) {
+        const subtotal = itemSubtotal(item);
+
+        if (isAjuste(item)) {
+          if (item._ciId) {
+            idsVistos.add(item._ciId);
+            db().run(
+              `UPDATE compra_items SET subtotal=?, iva=?, tipo=?, concepto=? WHERE id=?`,
+              [subtotal, item.iva || null, item.tipo, item.concepto || null, item._ciId]
+            );
+          } else {
+            db().run(`
+              INSERT INTO compra_items
+                (id, compra_id, producto_id, cantidad, costo_unitario, costo_anterior,
+                 subtotal, costo_modificado, unidad_compra, unidades_por_paquete,
+                 descuento_pct, descuento_monto, iva, tipo, concepto)
+              VALUES (?, ?, NULL, 0, 0, 0, ?, 0, NULL, 1, 0, 0, ?, ?, ?)
+            `, [uuid(), compraId, subtotal, item.iva || null, item.tipo, item.concepto || null]);
+          }
+          continue;
+        }
+
+        const cant     = parseFloat(item.cantidad)   || 0;
+        const udsPaq   = parseFloat(item.udsPaquete) || 1;
+        const cantUds  = cant * udsPaq;
+        const costoNvo = costoUsado(item);
+        const costoAnt = parseFloat(item.costoActual) || 0;
+        const costoModificado = Math.abs(costoNvo - costoAnt) > 0.001 ? 1 : 0;
+
+        let cantUdsAntes = 0;
+        if (item._ciId) {
+          idsVistos.add(item._ciId);
+          const prev = antesPorId.get(item._ciId);
+          cantUdsAntes = prev ? (parseFloat(prev.cantidad) || 0) * (parseFloat(prev.unidades_por_paquete) || 1) : 0;
+          db().run(`
+            UPDATE compra_items SET
+              producto_id=?, cantidad=?, costo_unitario=?, costo_anterior=?, subtotal=?,
+              costo_modificado=?, unidad_compra=?, unidades_por_paquete=?,
+              descuento_pct=?, descuento_monto=?, iva=?, tipo=?, concepto=NULL
+            WHERE id=?
+          `, [item.productoId, cant, costoNvo, costoAnt, subtotal, costoModificado,
+              item.unidadCompra || 'Unidad', udsPaq,
+              parseFloat(item.descuento) || 0, parseFloat(item.descuentoMonto) || 0,
+              item.iva || null, item.esMuestra ? 'muestra' : 'producto', item._ciId]);
+        } else {
+          db().run(`
+            INSERT INTO compra_items
+              (id, compra_id, producto_id, cantidad, costo_unitario, costo_anterior,
+               subtotal, costo_modificado, unidad_compra, unidades_por_paquete,
+               descuento_pct, descuento_monto, iva, tipo, concepto)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+          `, [uuid(), compraId, item.productoId, cant, costoNvo, costoAnt, subtotal, costoModificado,
+              item.unidadCompra || 'Unidad', udsPaq,
+              parseFloat(item.descuento) || 0, parseFloat(item.descuentoMonto) || 0,
+              item.iva || null, item.esMuestra ? 'muestra' : 'producto']);
+        }
+
+        // Stock: ajustar solo por la diferencia contra lo que había antes
+        const deltaUds = cantUds - cantUdsAntes;
+        if (Math.abs(deltaUds) > 0.0001) {
+          const stockRow = db().query(
+            `SELECT cantidad FROM stock WHERE producto_id=? AND sucursal_id=?`,
+            [item.productoId, sucursalId]
+          )[0];
+          if (stockRow) {
+            db().run(
+              `UPDATE stock SET cantidad=cantidad+?, fecha_modificacion=?, sync_status='pending', updated_at=? WHERE producto_id=? AND sucursal_id=?`,
+              [deltaUds, ts, ts, item.productoId, sucursalId]
+            );
+          } else {
+            db().run(
+              `INSERT INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at) VALUES (?, ?, ?, ?, 'pending', ?)`,
+              [item.productoId, sucursalId, deltaUds, ts, ts]
+            );
+          }
+          window.SGA_DB.registrarHistorialStock(item.productoId, sucursalId);
+        }
+
+        // Costo del producto: solo si cambió Y esta sigue siendo la compra
+        // más reciente en la que se compró este producto.
+        if (!item.esMuestra && costoModificado && costoNvo > 0) {
+          const masReciente = db().query(
+            `SELECT 1 FROM compra_items ci JOIN compras c ON c.id = ci.compra_id
+             WHERE ci.producto_id = ? AND c.id != ? AND c.fecha > ? LIMIT 1`,
+            [item.productoId, compraId, state.fecha]
+          );
+          if (!masReciente.length) {
+            db().run(
+              `UPDATE productos SET costo=?, costo_paquete=?, sync_status='pending', updated_at=? WHERE id=?`,
+              [costoNvo, costoNvo * udsPaq, ts, item.productoId]
+            );
+          }
+        }
+        if (item.iva) {
+          db().run(`UPDATE productos SET iva=?, sync_status='pending', updated_at=? WHERE id=?`, [item.iva, ts, item.productoId]);
+        }
+      }
+
+      // Líneas que estaban antes y ya no están: devolver el stock que habían sumado y borrarlas
+      for (const prev of itemsAntes) {
+        if (idsVistos.has(prev.id)) continue;
+        if (prev.tipo !== 'envio' && prev.tipo !== 'descuento') {
+          const cantUdsPrev = (parseFloat(prev.cantidad) || 0) * (parseFloat(prev.unidades_por_paquete) || 1);
+          if (Math.abs(cantUdsPrev) > 0.0001) {
+            db().run(
+              `UPDATE stock SET cantidad=cantidad-?, fecha_modificacion=?, sync_status='pending', updated_at=? WHERE producto_id=? AND sucursal_id=?`,
+              [cantUdsPrev, ts, ts, prev.producto_id, sucursalId]
+            );
+            window.SGA_DB.registrarHistorialStock(prev.producto_id, sucursalId);
+          }
+        }
+        db().run(`DELETE FROM compra_items WHERE id=?`, [prev.id]);
+      }
+
+      // Verificación pre-commit (mismo criterio que commitCompra): confirmar
+      // que la cantidad de ítems que quedaron grabados coincide con lo que
+      // se ve en pantalla, antes de dar la edición por buena.
+      const itemsFinales = db().query(`SELECT COUNT(*) AS n FROM compra_items WHERE compra_id=?`, [compraId])[0]?.n || 0;
+      if (itemsFinales !== state.items.length) {
+        db().rollbackBatch();
+        alert('⚠️ No se pudo guardar la edición: algo falló al guardar los productos. No se guardó nada todavía — probá de nuevo.');
+        return;
+      }
+
+      db().commitBatch();
+      window.SGA_Sync?.pushPending?.();
+      window.SGA_Utils.showNotification('Compra actualizada', 'success');
+      salirCompras(); // tiene que ir ANTES de limpiar editandoCompraId, que es lo que usa para decidir el destino
+      state.editandoCompraId   = null;
+      state.editandoSucursalId = null;
+    } catch (e) {
+      db().rollbackBatch();
+      console.error('Error editando compra:', e);
+      alert('Error al guardar los cambios: ' + e.message);
     }
   }
 
@@ -4276,10 +4596,10 @@ const ComprasV2 = (() => {
     // ── Volver modal options ──
     ge('cv2-volver-pausar')?.addEventListener('click', () => {
       hideVolverModal();
-      if (pausar()) window.location.hash = '#pos';
+      if (pausar()) salirCompras();
     });
     ge('cv2-volver-descartar')?.addEventListener('click', () => {
-      window.location.hash = '#pos';
+      salirCompras();
     });
     ge('cv2-volver-seguir')?.addEventListener('click', hideVolverModal);
     ge('cv2-volver-overlay')?.addEventListener('click', e => {
@@ -4311,9 +4631,15 @@ const ComprasV2 = (() => {
     // Vincular factura a un remito (viene desde CxC proveedores)
     // Se detecta AQUÍ para que todos los event listeners estén registrados primero
     const vincularRemitoId = sessionStorage.getItem('compras_v2_vincular_remito');
+    // Editar una compra ya confirmada (viene de Operaciones de Stock) — mismo
+    // motivo: tiene que ir después de que se registren todos los listeners.
+    const editarCompraId = sessionStorage.getItem('compras_v2_editar_id');
     if (vincularRemitoId) {
       sessionStorage.removeItem('compras_v2_vincular_remito');
       vincularFacturaDesdeRemito(vincularRemitoId);
+    } else if (editarCompraId) {
+      sessionStorage.removeItem('compras_v2_editar_id');
+      cargarCompraParaEditar(editarCompraId);
     } else {
       showMetodoCarga();
     }

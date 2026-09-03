@@ -706,6 +706,12 @@
     padding: 6px 14px; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap;
   }
   .cv2-pending-banner-btn:hover { background: #ff6f00; }
+  .cv2-editando-banner {
+    display: none; align-items: center; gap: 10px;
+    background: #e8f0fe; border: 1.5px solid #1a5c2e;
+    border-radius: 8px; margin: 10px 20px 0; padding: 9px 14px;
+    font-size: 13px; color: #1a5c2e; font-weight: 600; flex-shrink: 0;
+  }
   .cv2-pending-banner-descartar {
     background: none; border: none; color: #8d6e63; cursor: pointer;
     font-size: 16px; padding: 2px 6px; border-radius: 4px;
@@ -1282,6 +1288,8 @@
       <button class="cv2-btn-hdr" id="cv2-btn-pausar">Pausar</button>
     </div>
   </div>
+
+  <div id="cv2-editando-banner" class="cv2-editando-banner"></div>
 
   <!-- ── MÉTODO DE CARGA (PASO 0) ── -->
   <div id="cv2-metodo-carga" style="display:none">
