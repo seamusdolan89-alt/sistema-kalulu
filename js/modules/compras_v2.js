@@ -3832,17 +3832,12 @@ const ComprasV2 = (() => {
   }
 
   // ── Family helpers ───────────────────────────────────────────────────────────
+  // Una sola definicion de "pertenece a una familia", en familia.js. Antes esta
+  // copia se guiaba por la bandera es_madre y devolvia false para productos que
+  // tenian hijos con la bandera sin poner: por eso el wizard tampoco se abria
+  // desde el ajuste post-compra.
   function checkHasFamily(prodId) {
-    const p = db().query(
-      `SELECT es_madre, producto_madre_id FROM productos WHERE id=?`, [prodId]
-    )[0];
-    if (!p) return false;
-    if (p.es_madre == 1) {
-      // Has children?
-      const cnt = db().query(`SELECT COUNT(*) AS n FROM productos WHERE producto_madre_id=?`, [prodId])[0]?.n || 0;
-      return cnt > 0;
-    }
-    return !!p.producto_madre_id;
+    return Familia.tieneFamilia(prodId);
   }
 
   // El wizard de familia vive en js/modules/familia.js (se comparte con el
