@@ -396,9 +396,52 @@
   };
 
 
+  // ── FILTROS: recordarlos al ir y volver del editor ────────────────────────
+  // El editor de producto es otra ruta, asi que volver dispara el router y
+  // rearma este modulo desde cero, con el state en blanco. Antes de salir se
+  // guarda una foto de la busqueda y los filtros para poder dejar la lista tal
+  // como estaba.
+  const FILTROS_SNAPSHOT_KEY = 'productos_filtros_snapshot';
+
+  const guardarFiltros = () => {
+    try {
+      sessionStorage.setItem(FILTROS_SNAPSHOT_KEY, JSON.stringify({
+        filters:       state.filters,
+        columnFilters: state.columnFilters,
+        sort:          state.sort,
+        page:          state.page,
+      }));
+    } catch (e) { console.warn('guardarFiltros:', e); }
+  };
+
+  const olvidarFiltros = () => {
+    try { sessionStorage.removeItem(FILTROS_SNAPSHOT_KEY); } catch (e) {}
+  };
+
+  // Se consume una sola vez: si despues se entra a Productos desde el menu, la
+  // lista arranca completa, que es lo esperable.
+  const restaurarFiltros = () => {
+    let snap = null;
+    try {
+      const raw = sessionStorage.getItem(FILTROS_SNAPSHOT_KEY);
+      if (raw) snap = JSON.parse(raw);
+    } catch (e) { console.warn('restaurarFiltros:', e); }
+    olvidarFiltros();
+    if (!snap) return;
+
+    if (snap.filters)       Object.assign(state.filters, snap.filters);
+    if (snap.columnFilters) Object.assign(state.columnFilters, snap.columnFilters);
+    if (snap.sort)          Object.assign(state.sort, snap.sort);
+    if (snap.page)          state.page = snap.page;
+
+    const searchEl = getElement('search-productos');
+    if (searchEl) searchEl.value = state.filters.query || '';
+  };
+
   // ── EDIT PRODUCT — navigate to full-page editor ───────────────────────────
 
   const openEditModal = (productId) => {
+    guardarFiltros();
     window.location.hash = `#editor-producto/${productId}`;
   };
 
@@ -1983,7 +2026,12 @@
     }
 
     getElement('btn-descargar-plantilla')?.addEventListener('click', downloadTemplate);
-    getElement('btn-nuevo-producto')?.addEventListener('click', () => { window.location.hash = '#editor-producto/new'; });
+    getElement('btn-nuevo-producto')?.addEventListener('click', () => {
+      // Al crear uno nuevo se vuelve a la lista completa: si se conservara el
+      // filtro anterior, el producto recien creado podria no aparecer.
+      olvidarFiltros();
+      window.location.hash = '#editor-producto/new';
+    });
     getElement('btn-importar-excel')?.addEventListener('click', () => openImportModal());
     getElement('btn-bajo-minimo')?.addEventListener('click', () => {
       // Clear all filters and show only below-minimum products
@@ -2299,7 +2347,11 @@
     setUpEvents();
     loadCategorias();
     loadProveedores();
+    // Antes de loadProductos, que termina en applyFilters(): asi la lista se
+    // dibuja una sola vez y ya filtrada.
+    restaurarFiltros();
     loadProductos();
+    updateLimpiarFiltrosBtn();
     updateMadreSelector();
     populateMadres();
     console.log('Productos module initialized');
