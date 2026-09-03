@@ -516,6 +516,12 @@
       
       // Pre-load caja module so window.SGA_Caja is always available (used by POS data layer)
       await import('./modules/caja.js');
+      // Idem clientes: el POS usa window.SGA_Clientes.getTopeDisponible() para
+      // el limite de fiado (cartel en la ficha, aviso de tope alcanzado y
+      // control al confirmar la venta). Todo eso vive detras de un
+      // `if (window.SGA_Clientes)`, asi que sin precargarlo quedaba en silencio
+      // en cualquier sesion que no hubiera pasado por la pantalla de Clientes.
+      await import('./modules/clientes.js');
 
       // Check authentication
       console.log('🔐 Checking authentication...');
