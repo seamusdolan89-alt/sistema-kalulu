@@ -5,6 +5,8 @@
  * Exports default { init } for SPA router (full UI).
  */
 
+import PagoWizard from './pago_proveedor_wizard.js';
+
 // ── DATA LAYER ───────────────────────────────────────────────────────────────
 
 const SGA_PagosProveedores = (() => {
@@ -243,6 +245,16 @@ const SGA_PagosProveedores = (() => {
     if (!proveedor_id) return { success: false, error: 'proveedor_id requerido' };
     const metodosFiltrados = metodos.filter(m => parseFloat(m.monto) > 0);
     if (!metodosFiltrados.length) return { success: false, error: 'Ingresá al menos un monto' };
+
+    // Efectivo exige caja abierta. Sin sesion, el pago se registraba igual pero
+    // el egreso nunca se creaba (mas abajo esta condicionado a sesion_caja_id):
+    // quedaba plata saliendo de la caja sin movimiento que la respalde.
+    const efectivoSinCaja = metodosFiltrados.some(
+      m => m.metodo === 'efectivo' && !m.sesion_caja_id
+    );
+    if (efectivoSinCaja) {
+      return { success: false, error: 'No hay una caja abierta: no se puede registrar un pago en efectivo' };
+    }
 
     const totalPago = metodosFiltrados.reduce((s, m) => s + parseFloat(m.monto), 0);
     const pagoId = uid();
@@ -918,6 +930,7 @@ const CuentaCorrienteProveedores = (() => {
   // del mismo monto podian convivir dando saldo 0 sin estar asociados: la cuenta
   // cerraba pero no se sabia que pago cancelo que comprobante.
   function openModalImputar(pagoId, credito, proveedorId, proveedorNombre) {
+    PagoWizard.ensureCss();   // el chrome del modal vive ahora en ese modulo
     const overlay = ge('ccprov-overlay');
     if (!overlay) return;
 
@@ -1118,460 +1131,16 @@ const CuentaCorrienteProveedores = (() => {
 
   // ── MODAL PAGO ───────────────────────────────────────────────────────────────
 
+  // El wizard vive en js/modules/pago_proveedor_wizard.js: se comparte con Caja,
+  // para que los dos botones de "pago a proveedor" abran exactamente lo mismo.
   function openModalPago(proveedorId, proveedorNombre) {
-    const overlay = ge('ccprov-overlay');
-    if (!overlay) return;
-
-    const user = window.SGA_Auth?.getCurrentUser?.();
-    const sesion = user?.sucursal_id
-      ? data().getSesionActiva(user.sucursal_id)
-      : null;
-
-    // Obtener proveedores para selector
-    const proveedores = window.SGA_DB.query(
-      `SELECT id, razon_social FROM proveedores WHERE activo=1 ORDER BY razon_social COLLATE NOCASE ASC`
-    );
-
-    const selProvOpts = proveedores.map(p =>
-      `<option value="${esc(p.id)}" ${p.id === proveedorId ? 'selected' : ''}>${esc(p.razon_social)}</option>`
-    ).join('');
-
-    overlay.innerHTML = `
-      <div class="ccprov-modal">
-        <div class="ccprov-modal-hdr">
-          <span>💳 Registrar Pago a Proveedor</span>
-          <button class="ccprov-modal-close" id="btn-modal-close" aria-label="Cerrar" title="Cerrar">✕</button>
-        </div>
-        <div class="ccprov-modal-body">
-
-          <!-- PROVEEDOR + FECHA -->
-          <div class="ccprov-field-row">
-            <div class="ccprov-field" style="flex:2">
-              <label>Proveedor <span style="color:var(--color-danger)">*</span></label>
-              <select class="ccprov-input" id="mp-proveedor">
-                <option value="">— Seleccionar —</option>
-                ${selProvOpts}
-              </select>
-            </div>
-            <div class="ccprov-field" style="flex:1">
-              <label>Fecha</label>
-              <input type="date" class="ccprov-input" id="mp-fecha" value="${today()}">
-            </div>
-          </div>
-
-          <div class="ccprov-field">
-            <label>Observaciones</label>
-            <input type="text" class="ccprov-input" id="mp-obs" placeholder="Factura, descripción, etc.">
-          </div>
-
-          <!-- MÉTODOS DE PAGO -->
-          <div>
-            <p class="ccprov-section-title">Formas de pago</p>
-
-            <div class="ccprov-metodo-row" id="row-efectivo">
-              <input type="checkbox" class="ccprov-metodo-check" id="chk-efectivo">
-              <span class="ccprov-metodo-label">💵 Efectivo</span>
-              <div class="ccprov-metodo-inputs">
-                <input type="number" class="ccprov-input" id="mp-ef-monto"
-                  placeholder="$ 0,00" min="0" step="0.01"
-                  ${!sesion ? 'disabled title="No hay caja abierta"' : ''}>
-                ${!sesion ? '<span style="font-size:12px;color:#999">Sin caja abierta</span>' : ''}
-              </div>
-            </div>
-
-            <div class="ccprov-metodo-row" id="row-transferencia">
-              <input type="checkbox" class="ccprov-metodo-check" id="chk-transferencia">
-              <span class="ccprov-metodo-label">🏦 Transferencia</span>
-              <div class="ccprov-metodo-inputs">
-                <input type="number" class="ccprov-input" id="mp-tr-monto" placeholder="$ 0,00" min="0" step="0.01">
-                <input type="text" class="ccprov-input ccprov-metodo-ref" id="mp-tr-ref" placeholder="Nro. comprobante (opcional)">
-              </div>
-            </div>
-
-            ${window.ADMIN_MODE ? `
-            <div class="ccprov-metodo-row" id="row-caja-seamus">
-              <input type="checkbox" class="ccprov-metodo-check" id="chk-caja-seamus">
-              <span class="ccprov-metodo-label">💼 Caja Seamus</span>
-              <div class="ccprov-metodo-inputs">
-                <input type="number" class="ccprov-input" id="mp-cs-monto" placeholder="$ 0,00" min="0" step="0.01">
-              </div>
-            </div>` : ''}
-
-            <div class="ccprov-total-row">
-              <span>Total del pago:</span>
-              <span class="ccprov-total-monto" id="mp-total">$ 0,00</span>
-            </div>
-          </div>
-
-          <!-- IMPUTACIÓN -->
-          <div id="mp-imp-section">
-            <p class="ccprov-section-title">Aplicar a comprobantes</p>
-            <div id="mp-imp-content">
-              <span style="font-size:13px;color:var(--color-text-secondary)">
-                Seleccioná un proveedor para ver sus comprobantes pendientes.
-              </span>
-            </div>
-          </div>
-
-          <!-- SOBRANTE / PREVIEW -->
-          <div id="mp-sobrante-wrap" style="display:none"></div>
-
-          <!-- ERROR -->
-          <div class="ccprov-error" id="mp-error"></div>
-
-        </div>
-        <div class="ccprov-modal-ftr">
-          <span style="font-size:12px;color:var(--color-text-secondary)" id="mp-sesion-info">
-            ${sesion ? '✅ Caja abierta' : '⚠️ Sin caja — los pagos en efectivo no estarán disponibles'}
-          </span>
-          <div class="ccprov-modal-ftr-right">
-            <button class="ccprov-btn-secondary" id="btn-modal-cancel">Cancelar</button>
-            <button class="ccprov-btn-primary" id="btn-modal-guardar">Guardar pago</button>
-          </div>
-        </div>
-      </div>
-    `;
-
-    overlay.classList.remove('hidden');
-
-    // ── Estado del modal ──────────────────────────────────────────────────────
-    let autoImputar = true;
-    let comprasPendientes = [];
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-    const close = () => {
-      overlay.classList.add('hidden');
-      overlay.innerHTML = '';
-    };
-    const getTotal = () => {
-      let t = 0;
-      if (ge('chk-efectivo').checked) t += parseFloat(ge('mp-ef-monto').value) || 0;
-      if (ge('chk-transferencia').checked) t += parseFloat(ge('mp-tr-monto').value) || 0;
-      if (ge('chk-caja-seamus')?.checked) t += parseFloat(ge('mp-cs-monto')?.value) || 0;
-      return t;
-    };
-    const showError = msg => {
-      const el = ge('mp-error');
-      el.textContent = msg;
-      el.classList.add('visible');
-    };
-    const clearError = () => ge('mp-error').classList.remove('visible');
-
-    // ── Actualizar total + sobrante ───────────────────────────────────────────
-    // onTotalChanged: hook for renderImpSection to react when total changes
-    let onTotalChanged = null;
-
-    const updateTotal = () => {
-      const total = getTotal();
-      ge('mp-total').textContent = fmt$(total);
-      updateSobrante(total);
-      if (onTotalChanged) onTotalChanged(total);
-    };
-
-    const updateSobrante = (total) => {
-      const wrap = ge('mp-sobrante-wrap');
-      if (total <= 0) { wrap.style.display = 'none'; return; }
-
-      if (autoImputar) {
-        const provId = ge('mp-proveedor').value;
-        if (!provId) { wrap.style.display = 'none'; return; }
-        // Calcular cuánto quedaría sin imputar
-        let restante = total;
-        for (const c of comprasPendientes) {
-          if (restante <= 0.01) break;
-          restante -= Math.min(restante, c.saldo);
-        }
-        if (restante > 0.01) {
-          wrap.style.display = '';
-          wrap.innerHTML = `<div class="ccprov-sobrante">
-            💡 Quedarán <strong>${fmt$(restante)}</strong> como crédito a favor (pago adelantado)
-          </div>`;
-        } else {
-          wrap.style.display = 'none';
-        }
-      } else {
-        // Manual: calcular diferencia entre total pago y suma de montos manuales
-        let imputado = 0;
-        document.querySelectorAll('.imp-monto-input').forEach(inp => {
-          imputado += parseFloat(inp.value) || 0;
-        });
-        const diff = total - imputado;
-        if (Math.abs(diff) > 0.01) {
-          wrap.style.display = '';
-          wrap.innerHTML = `<div class="ccprov-sobrante ${diff < 0 ? 'warn' : ''}">
-            ${diff > 0
-              ? `💡 Quedarán <strong>${fmt$(diff)}</strong> sin imputar (crédito a favor)`
-              : `⚠️ Los montos imputados superan el total del pago en <strong>${fmt$(Math.abs(diff))}</strong>`}
-          </div>`;
-        } else {
-          wrap.style.display = 'none';
-        }
-      }
-    };
-
-    // ── Render sección imputación ─────────────────────────────────────────────
-    const renderImpSection = () => {
-      const provId = ge('mp-proveedor').value;
-      const cont = ge('mp-imp-content');
-      if (!provId) {
-        cont.innerHTML = `<span style="font-size:13px;color:var(--color-text-secondary)">Seleccioná un proveedor.</span>`;
-        return;
-      }
-
-      comprasPendientes = data().getComprasPendientes(provId);
-      const creditos = data().getCreditosDisponibles(provId);
-      const totalCredito = creditos.reduce((s, c) => s + c.credito_disponible, 0);
-
-      let html = '';
-
-      if (totalCredito > 0.01) {
-        html += `<div class="ccprov-credito-alert" style="margin:0 0 10px">
-          💡 Crédito disponible sin imputar: <strong>${fmt$(totalCredito)}</strong>
-        </div>`;
-      }
-
-      if (!comprasPendientes.length) {
-        html += `<div style="font-size:13px;color:var(--color-text-secondary);padding:8px 0">
-          ✅ Este proveedor no tiene comprobantes pendientes. El pago quedará como crédito a favor.
-        </div>`;
-        cont.innerHTML = html;
-        updateSobrante(getTotal());
-        return;
-      }
-
-      html += `
-        <label class="ccprov-imp-toggle" style="margin-bottom:10px">
-          <input type="checkbox" id="chk-auto-imputar" ${autoImputar ? 'checked' : ''}>
-          Aplicar automáticamente por antigüedad
-        </label>
-
-        <table class="ccprov-pending-table">
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th>Comprobante</th>
-              <th class="right">Total</th>
-              <th class="right">Saldo</th>
-              <th class="right">Imputar</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${comprasPendientes.map((c, idx) => {
-              // Un gasto no tiene punto de venta ni numero de factura: se lo
-              // identifica por su comprobante o, si no tiene, su descripcion.
-              const esGasto = c.tipo === 'gasto';
-              const ref = esGasto
-                ? (c.numero_factura || c.descripcion || 'Gasto')
-                : ([c.factura_pv, c.numero_factura].filter(Boolean).join('-') || c.id.slice(-6).toUpperCase());
-              return `
-              <tr>
-                <td>${fmtFecha(c.fecha)}</td>
-                <td>${esc(ref)}${esGasto ? ' <span style="font-size:11px;color:#8090a0">(gasto)</span>' : ''}</td>
-                <td class="right">${fmt$(c.total)}</td>
-                <td class="right" style="color:#e65100;font-weight:600">${fmt$(c.saldo)}</td>
-                <td class="right">
-                  <input type="number" class="ccprov-imp-amount imp-monto-input"
-                    data-idx="${idx}"
-                    data-saldo="${c.saldo}"
-                    data-compra-id="${esc(c.id)}"
-                    data-tipo="${esc(c.tipo || 'compra')}"
-                    placeholder="${autoImputar ? '' : '0,00'}"
-                    min="0" max="${c.saldo}" step="0.01"
-                    ${autoImputar ? 'disabled' : ''}>
-                </td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-      `;
-
-      cont.innerHTML = html;
-
-      // Calcula cuánto le corresponde a cada comprobante según oldest-first con el total actual
-      const calcAutoMontos = (total) => {
-        let restante = total;
-        return comprasPendientes.map(c => {
-          if (restante <= 0.01) return 0;
-          const monto = Math.min(restante, c.saldo);
-          restante -= monto;
-          return monto;
-        });
-      };
-
-      // Pobla los inputs con los montos calculados (auto) o los vacía (manual)
-      const syncInputValues = () => {
-        const inputs = document.querySelectorAll('.imp-monto-input');
-        if (autoImputar) {
-          const montos = calcAutoMontos(getTotal());
-          inputs.forEach((inp, i) => {
-            inp.value = montos[i] > 0.001 ? montos[i].toFixed(2) : '';
-            inp.disabled = true;
-            inp.placeholder = '';
-          });
-        } else {
-          inputs.forEach(inp => {
-            inp.value = '';
-            inp.disabled = false;
-            inp.placeholder = '0,00';
-          });
-        }
-      };
-
-      // Populate initial values if auto is on
-      syncInputValues();
-
-      // Toggle auto/manual
-      ge('chk-auto-imputar').addEventListener('change', e => {
-        autoImputar = e.target.checked;
-        syncInputValues();
-        updateSobrante(getTotal());
-      });
-
-      // Re-calculate auto distribution whenever total changes
-      onTotalChanged = () => { if (autoImputar) syncInputValues(); };
-
-      // Actualizar sobrante al cambiar montos manuales
-      cont.querySelectorAll('.imp-monto-input').forEach(inp => {
-        inp.addEventListener('input', () => updateSobrante(getTotal()));
-      });
-
-      updateSobrante(getTotal());
-    };
-
-    // ── Checkbox handlers ─────────────────────────────────────────────────────
-    const syncCheckboxStyle = (id, rowId) => {
-      const checked = ge(id).checked;
-      ge(rowId).classList.toggle('active', checked);
-    };
-
-    ge('chk-efectivo').addEventListener('change', () => {
-      syncCheckboxStyle('chk-efectivo', 'row-efectivo');
-      updateTotal();
-    });
-    ge('chk-transferencia').addEventListener('change', () => {
-      syncCheckboxStyle('chk-transferencia', 'row-transferencia');
-      updateTotal();
-    });
-    ge('chk-caja-seamus')?.addEventListener('change', () => {
-      syncCheckboxStyle('chk-caja-seamus', 'row-caja-seamus');
-      updateTotal();
-    });
-    ge('mp-ef-monto').addEventListener('input', updateTotal);
-    ge('mp-tr-monto').addEventListener('input', updateTotal);
-
-    // ── Proveedor change ──────────────────────────────────────────────────────
-    ge('mp-proveedor').addEventListener('change', () => {
-      renderImpSection();
-      updateTotal();
-    });
-
-    // Render inicial si ya había proveedor
-    if (proveedorId) renderImpSection();
-
-    // ── Close handlers ────────────────────────────────────────────────────────
-    ge('btn-modal-close').addEventListener('click', close);
-    ge('btn-modal-cancel').addEventListener('click', close);
-    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-
-    // ── Guardar ───────────────────────────────────────────────────────────────
-    ge('btn-modal-guardar').addEventListener('click', () => {
-      clearError();
-
-      const provId = ge('mp-proveedor').value;
-      if (!provId) { showError('Seleccioná un proveedor.'); return; }
-
-      const total = getTotal();
-      if (total <= 0) { showError('Ingresá al menos un monto.'); return; }
-
-      // Construir metodos
-      const metodos = [];
-      if (ge('chk-efectivo').checked) {
-        const monto = parseFloat(ge('mp-ef-monto').value) || 0;
-        if (monto > 0) {
-          metodos.push({
-            metodo: 'efectivo',
-            monto,
-            sesion_caja_id: sesion?.id || null,
-          });
-        }
-      }
-      if (ge('chk-transferencia').checked) {
-        const monto = parseFloat(ge('mp-tr-monto').value) || 0;
-        if (monto > 0) {
-          metodos.push({
-            metodo: 'transferencia',
-            monto,
-            referencia: ge('mp-tr-ref').value.trim() || null,
-          });
-        }
-      }
-      if (ge('chk-caja-seamus')?.checked) {
-        const monto = parseFloat(ge('mp-cs-monto')?.value) || 0;
-        if (monto > 0) metodos.push({ metodo: 'caja_seamus', monto, referencia: null });
-      }
-      if (!metodos.length) { showError('Ingresá al menos un monto.'); return; }
-
-      // Construir imputaciones
-      let imputaciones;
-      if (!autoImputar) {
-        imputaciones = [];
-        document.querySelectorAll('.imp-monto-input').forEach(inp => {
-          const monto = parseFloat(inp.value) || 0;
-          if (monto > 0) {
-            // El tipo define si la imputacion se guarda en compra_id o en
-            // gasto_id: sin esto, imputar contra un gasto lo dejaba apuntando
-            // a una compra que no existe y el gasto seguia impago.
-            const tipo = inp.dataset.tipo || 'compra';
-            imputaciones.push(tipo === 'gasto'
-              ? { gasto_id: inp.dataset.compraId, tipo, monto }
-              : { compra_id: inp.dataset.compraId, tipo, monto });
-          }
-        });
-        // Validar que no superen el saldo de cada compra
-        for (const inp of document.querySelectorAll('.imp-monto-input')) {
-          const monto = parseFloat(inp.value) || 0;
-          const saldo = parseFloat(inp.dataset.saldo) || 0;
-          if (monto > saldo + 0.01) {
-            showError(`El monto imputado no puede superar el saldo del comprobante.`);
-            return;
-          }
-        }
-      }
-
-      const result = data().crearPago({
-        proveedor_id: provId,
-        fecha: ge('mp-fecha').value || today(),
-        observaciones: ge('mp-obs').value.trim() || null,
-        usuario_id: user?.id || null,
-        metodos,
-        imputaciones,
-        auto_imputar: autoImputar,
-      });
-
-      if (!result.success) {
-        showError('Error al guardar: ' + result.error);
-        return;
-      }
-
-      close();
-
-      // Refrescar la vista actual
-      if (state.view === 'detalle' && state.proveedorId === provId) {
-        renderDetalle(state.proveedorId, state.proveedorNombre);
-      } else if (state.view === 'detalle') {
-        renderDetalle(state.proveedorId, state.proveedorNombre);
-      } else {
-        renderLista();
-      }
-
-      // Toast
-      if (window.SGA_Utils?.showToast) {
-        const sobrante = result.credito_sobrante || 0;
-        const msg = sobrante > 0.01
-          ? `Pago registrado. Crédito disponible: ${fmt$(sobrante)}`
-          : 'Pago registrado correctamente.';
-        window.SGA_Utils.showToast(msg, 'success');
-      }
+    PagoWizard.abrir({
+      proveedorId,
+      proveedorNombre,
+      onSaved: () => {
+        if (state.view === 'detalle') renderDetalle(state.proveedorId, state.proveedorNombre);
+        else renderLista();
+      },
     });
   }
 
