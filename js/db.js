@@ -850,6 +850,20 @@
       // de servicios cargado como "queda a pagar" (ver cuenta corriente).
       "ALTER TABLE imputaciones_pagos ADD COLUMN gasto_id TEXT",
     ];
+    // es_madre: dejarla en 1 para todo producto que tenga hijos apuntandole.
+    // Nada del sistema depende de esta bandera —todos los lugares que la miran
+    // la combinan con los hijos reales— pero verla en 0 en un producto con
+    // familia armada es confuso, y de hecho fue lo que despisto al diagnosticar
+    // por que no se abria el wizard de familia. Corre en cada arranque, asi que
+    // tambien cubre los hijos que se asignan desde la otra maquina.
+    try {
+      database.run(`
+        UPDATE productos SET es_madre = 1
+        WHERE COALESCE(es_madre, 0) != 1
+          AND EXISTS (SELECT 1 FROM productos h WHERE h.producto_madre_id = productos.id)
+      `);
+    } catch(e) { console.warn('es_madre coherente:', e.message); }
+
     for (const sql of columnAlterations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }
     }
