@@ -1172,15 +1172,19 @@
       proveedoresCreados: [],
       sustitutosResueltos: 0,
       sustitutosPendientes: [],
+      madresResueltas: 0,
+      madresPendientes: [],
       preciosAjustados: [],
       errores: []
     };
 
     const madresTocadas = new Set();
 
-    // Los vinculos de sustituto se juntan aca y se resuelven al final, cuando
-    // ya existen todos los productos del archivo (ver segunda pasada).
+    // Los vinculos de sustituto y de producto madre se juntan aca y se resuelven
+    // al final, cuando ya existen todos los productos del archivo (ver segunda
+    // pasada). Resolverlos dentro del bucle dependia del orden de las filas.
     const sustitutosPorResolver = [];
+    const madresPorResolver     = [];
 
     const now = window.SGA_Utils.formatISODate(new Date());
 
@@ -1262,7 +1266,15 @@
             const mRow = window.SGA_DB.query(
               'SELECT producto_id FROM codigos_barras WHERE codigo = ?', [madreCodStr]
             );
-            nuevo_madre_id = mRow.length ? mRow[0].producto_id : null;
+            if (mRow.length) {
+              nuevo_madre_id = mRow[0].producto_id;
+            } else {
+              // Todavia no existe: puede ser que su fila venga mas abajo en el
+              // archivo. Se difiere a la segunda pasada y NO se toca la madre
+              // actual — antes se escribia null aca, lo que ademas de perder el
+              // vinculo del archivo borraba la madre que el producto ya tuviera.
+              madresPorResolver.push({ producto_id, madreCod: madreCodStr, nombre });
+            }
           } else {
             nuevo_madre_id = null;  // mapped but blank → clear madre
           }
@@ -1410,6 +1422,32 @@
       } catch (err) {
         results.errores.push(`${nombre || codigo}: ${err.message}`);
       }
+    }
+
+    // ── Segunda pasada: producto madre ───────────────────────────────────────
+    // Igual que con los sustitutos: recien aca existen todos los productos del
+    // archivo. Si aun asi no aparece, se deja la madre como estaba y se avisa,
+    // en vez de borrarla.
+    for (const md of madresPorResolver) {
+      const mRow = window.SGA_DB.query(
+        'SELECT producto_id FROM codigos_barras WHERE codigo = ?', [md.madreCod]
+      );
+      if (!mRow.length) {
+        console.warn('Producto madre no encontrado:', md.madreCod, '—', md.nombre);
+        results.madresPendientes.push(md.madreCod);
+        continue;
+      }
+      const madreId = mRow[0].producto_id;
+      if (madreId === md.producto_id) {
+        console.warn('Producto madre auto-referencia ignorado:', md.madreCod);
+        continue;
+      }
+      window.SGA_DB.run(
+        `UPDATE productos SET producto_madre_id = ?, fecha_modificacion = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
+        [madreId, now, now, md.producto_id]
+      );
+      madresTocadas.add(madreId);
+      results.madresResueltas++;
     }
 
     // ── Segunda pasada: vinculos de sustituto ────────────────────────────────
