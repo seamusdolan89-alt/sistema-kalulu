@@ -208,8 +208,11 @@ const SGA_PagosProveedores = (() => {
       };
     });
 
-    const entries = [...compras, ...pagos].sort((a, b) =>
-      a.fecha.localeCompare(b.fecha) || (a.tipo === 'compra' ? -1 : 1)
+    // Los gastos van con las compras: los dos son comprobantes que suman deuda.
+    // El orden dentro de un mismo dia pone primero lo que se debe y despues lo
+    // que se pago, para que el saldo acumulado se lea bien.
+    const entries = [...compras, ...gastos, ...pagos].sort((a, b) =>
+      a.fecha.localeCompare(b.fecha) || (a.tipo === 'pago' ? 1 : -1)
     );
 
     let saldo = 0;
@@ -385,6 +388,29 @@ const SGA_PagosProveedores = (() => {
     }
   }
 
+  // Imputaciones de un comprobante, ya formateadas. Sirve igual para una compra
+  // (columna compra_id) que para un gasto (columna gasto_id).
+  function _impsDeComprobante(campo, id) {
+    return db().query(
+      `SELECT ip.fecha, ip.monto_imputado, ip.pago_id, p.observaciones
+       FROM imputaciones_pagos ip
+       JOIN pagos_proveedores p ON p.id = ip.pago_id
+       WHERE ip.${campo} = ?
+       ORDER BY ip.fecha ASC`,
+      [id]
+    ).map(i => {
+      const metodos = db().query(
+        `SELECT metodo, referencia FROM pagos_proveedores_metodos WHERE pago_id = ?`,
+        [i.pago_id]
+      );
+      const MLBL = { efectivo: 'Efectivo', transferencia: 'Transferencia', caja_seamus: 'Caja Seamus', mercadopago: 'MercadoPago' };
+      const desc = metodos.map(m =>
+        (MLBL[m.metodo] || m.metodo) + (m.referencia ? ` (${m.referencia})` : '')
+      ).join(' + ') || i.observaciones || 'Pago';
+      return { fecha: i.fecha, monto: parseFloat(i.monto_imputado) || 0, desc, pago_id: i.pago_id };
+    });
+  }
+
   function getLedgerAgrupado(proveedorId) {
     const compras = db().query(
       `SELECT id, fecha, numero_factura, factura_pv, total
@@ -393,27 +419,10 @@ const SGA_PagosProveedores = (() => {
        ORDER BY fecha ASC, rowid ASC`,
       [proveedorId]
     ).map(c => {
-      const imps = db().query(
-        `SELECT ip.fecha, ip.monto_imputado, ip.pago_id, p.observaciones
-         FROM imputaciones_pagos ip
-         JOIN pagos_proveedores p ON p.id = ip.pago_id
-         WHERE ip.compra_id = ?
-         ORDER BY ip.fecha ASC`,
-        [c.id]
-      ).map(i => {
-        const metodos = db().query(
-          `SELECT metodo, referencia FROM pagos_proveedores_metodos WHERE pago_id = ?`,
-          [i.pago_id]
-        );
-        const MLBL = { efectivo: 'Efectivo', transferencia: 'Transferencia', caja_seamus: 'Caja Seamus', mercadopago: 'MercadoPago' };
-        const desc = metodos.map(m =>
-          (MLBL[m.metodo] || m.metodo)
-          + (m.referencia ? ` (${m.referencia})` : '')
-        ).join(' + ') || i.observaciones || 'Pago';
-        return { fecha: i.fecha, monto: parseFloat(i.monto_imputado) || 0, desc, pago_id: i.pago_id };
-      });
+      const imps   = _impsDeComprobante('compra_id', c.id);
       const pagado = imps.reduce((s, i) => s + i.monto, 0);
       return {
+        tipo:       'compra',
         id:         c.id,
         fecha:      c.fecha,
         referencia: [c.factura_pv, c.numero_factura].filter(Boolean).join('-') || '—',
@@ -423,6 +432,28 @@ const SGA_PagosProveedores = (() => {
         imputaciones: imps,
       };
     });
+
+    // Gastos "queda a pagar": mismo tratamiento que una factura. Sin esto, un
+    // gasto sumaba al saldo del proveedor pero no figuraba en ningun listado,
+    // asi que la cuenta daba bien y aun asi decia "Sin movimientos".
+    const gastos = _getGastosCtaCte(proveedorId).map(g => {
+      const imps   = _impsDeComprobante('gasto_id', g.id);
+      const pagado = imps.reduce((s, i) => s + i.monto, 0);
+      const monto  = parseFloat(g.monto) || 0;
+      return {
+        tipo:       'gasto',
+        id:         g.id,
+        fecha:      g.fecha,
+        referencia: g.comprobante || g.descripcion || 'Gasto',
+        total:      monto,
+        pagado,
+        saldo_item: monto - pagado,
+        imputaciones: imps,
+      };
+    });
+
+    compras.push(...gastos);
+    compras.sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
 
     const pagos_sin_imputar = db().query(
       `SELECT p.id, p.fecha, p.observaciones,
@@ -926,9 +957,9 @@ const CuentaCorrienteProveedores = (() => {
         <div class="ccprov-saldo-item">
           <span class="ccprov-saldo-label">Comprobantes</span>
           <span class="ccprov-saldo-value" style="color:var(--color-text)">
-            ${ledger.filter(e => e.tipo === 'compra').length}
+            ${ledger.filter(e => e.tipo === 'compra' || e.tipo === 'gasto').length}
           </span>
-          <span style="font-size:12px;color:var(--color-text-secondary);margin-top:2px">compras registradas</span>
+          <span style="font-size:12px;color:var(--color-text-secondary);margin-top:2px">compras y gastos</span>
         </div>
         <div class="ccprov-saldo-item">
           <span class="ccprov-saldo-label">Pagos</span>
