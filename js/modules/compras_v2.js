@@ -217,13 +217,16 @@ const ComprasV2 = (() => {
 
   // Monto real de la factura, CON impuestos incluidos. En Factura A el costo
   // de cada línea se carga neto de IVA (el IVA se agrega aparte en la
-  // cabecera) — calcTotal()/calcNeto() solo suman ese subtotal de productos,
-  // nunca lo que hay que pagarle al proveedor. Esta es la función a usar en
-  // cualquier lugar que muestre o registre "cuánto se debe/pagó" (cuenta
-  // corriente de proveedores, caja, compras.total, "Total Compra" en
-  // pantalla) — calcTotal()/calcNeto() siguen siendo correctas para el
-  // desglose de subtotal/IVA en el carrito y para el chequeo de que lo
-  // cargado coincide con la factura.
+  // cabecera) — calcTotal() solo suma ese subtotal de productos, nunca lo que
+  // hay que pagarle al proveedor. Esta es la función a usar en cualquier lugar
+  // que muestre o registre "cuánto se debe/pagó" (cuenta corriente de
+  // proveedores, caja, compras.total, "A pagar" en pantalla).
+  //
+  // Para el chequeo de que lo cargado coincide con la factura va calcTotal() a
+  // secas: ahí NO entra el saldo del proveedor. Existía una calcNeto() que le
+  // restaba el adelanto y se usaba justo para eso; se eliminó porque mezclaba
+  // dos cosas independientes y hacía desaparecer el control cuando un adelanto
+  // cubría la compra.
   function calcMontoFactura() {
     return state.totalFactura > 0 ? state.totalFactura : calcTotal();
   }
@@ -231,10 +234,6 @@ const ComprasV2 = (() => {
   function calcSaldoAplicado() {
     if (!state.aplicarSaldo || state.proveedorCreditoDisponible <= 0.01) return 0;
     return Math.min(state.proveedorCreditoDisponible, calcMontoFactura());
-  }
-
-  function calcNeto() {
-    return Math.max(0, calcTotal() - calcSaldoAplicado());
   }
 
   function calcMontoAdeudado() {
@@ -782,7 +781,10 @@ const ComprasV2 = (() => {
       return;
     }
 
-    const neto    = calcNeto();
+    // Carrito vs factura, sin el saldo del proveedor en el medio: son dos cosas
+    // independientes. Antes esto usaba calcNeto(), que resta el adelanto, y con
+    // un adelanto que cubria la compra el control directamente desaparecia.
+    const neto    = calcTotal();
     const control = isFacturaA() ? state.subtotalNeto : state.totalFactura;
     const mismatch = control > 0.001 && Math.abs(control - neto) > 0.01 && neto > 0.001;
     btn.classList.toggle('cv2-btn-confirmar-alert', mismatch && !btn.disabled);
@@ -2306,7 +2308,7 @@ const ComprasV2 = (() => {
     const revConfirmBtn = ge('cv2-rev-btn-confirmar');
     if (revConfirmBtn) revConfirmBtn.textContent = state.editandoCompraId ? '💾 Guardar Cambios · F10' : '✓ Confirmar Ingreso · F10';
 
-    const neto          = calcNeto();          // pre-impuestos, solo para el chequeo contra la cabecera
+    const neto          = calcTotal();          // carrito pre-impuestos, para el chequeo contra la cabecera
     const montoAdeudado = calcMontoAdeudado();  // total real (con IVA incluido en Factura A) — lo que se muestra y se debe
     const factStr = state.facturaPv && state.numeroFactura
       ? `${state.facturaPv}-${state.numeroFactura}`
@@ -2412,7 +2414,7 @@ const ComprasV2 = (() => {
     // AHORA (con IVA incluido en Factura A, y ya descontado el adelanto
     // aplicado) — se usa para la caja (efectivo) y la pantalla de éxito.
     const neto          = calcMontoAdeudado();
-    const netoSubtotal  = calcNeto(); // pre-impuestos, solo para el chequeo "coincide con la factura"
+    const netoSubtotal  = calcTotal(); // carrito pre-impuestos, para el chequeo "coincide con la factura"
     // compras.total tiene que ser el importe COMPLETO de la factura (sin
     // descontar el adelanto): el adelanto aplicado se registra aparte como
     // una imputación de pago (más abajo), y Cuentas Corrientes calcula solo
