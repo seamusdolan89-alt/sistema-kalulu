@@ -3176,6 +3176,17 @@ export const POS = (() => {
     // Confirm venta
     safeOn('btn-confirm-venta', 'click', () => {
       if (!state.sesionActiva || !state.cart.length) return;
+
+      // Si el ticket esta a la vista, esta venta YA se registro y lo unico que
+      // falta es cerrarlo: el carrito recien se vacia ahi, asi que cualquier
+      // nuevo confirmar registraria la misma venta otra vez. Se chequea contra
+      // el DOM y no contra una variable del modulo porque el DOM es uno solo
+      // para toda la pagina: cubre tambien el caso de una instancia vieja.
+      const _ticket = ge('modal-ticket');
+      if (_ticket && !_ticket.classList.contains('hidden')) {
+        console.warn('Confirmar venta ignorado: el ticket de la venta anterior sigue abierto');
+        return;
+      }
       // Dos disparos casi simultaneos —un doble click, o F2 llegando por
       // listeners duplicados— registraban DOS ventas identicas. Una venta real
       // nunca se confirma dos veces en menos de un segundo y medio.
@@ -3456,6 +3467,21 @@ export const POS = (() => {
     // ── KEYBOARD SHORTCUTS ─────────────────────────────────────────
     _docKeydown = e => {
       if (e.key === 'F1' && state.mode === 'sale') { e.preventDefault(); ge('pos-search-input')?.focus(); }
+      // Con el ticket en pantalla la venta YA esta registrada. Sin este corte,
+      // F2/F10 volvian a clickear "Confirmar venta" y la registraban de nuevo:
+      // es la via mas comun de venta duplicada, porque el cajero usa F2 para
+      // cerrar el ticket. Ahora hacen lo que se espera: finalizar y volver.
+      const _ticketVisible = () => {
+        const t = ge('modal-ticket');
+        return !!t && !t.classList.contains('hidden');
+      };
+
+      if ((e.key === 'F2' || e.key === 'F10') && _ticketVisible()) {
+        e.preventDefault();
+        ge('btn-ticket-confirmar')?.click();
+        return;
+      }
+
       if (e.key === 'F2' && state.mode === 'sale') {
         e.preventDefault();
         if (!ge('modal-buscar-cliente')?.classList.contains('hidden')) {
