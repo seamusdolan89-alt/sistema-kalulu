@@ -845,7 +845,7 @@ const CuentaCorrienteProveedores = (() => {
           ${compras.map(c => `
             <tr class="ledger-row-compra${c.saldo_item < 0.01 ? ' ledger-row-compra-saldada' : ''}">
               <td>${fmtFecha(c.fecha)}</td>
-              <td><span class="ledger-type-badge ledger-type-compra">Compra</span></td>
+              <td><span class="ledger-type-badge ${c.tipo === 'gasto' ? 'ledger-type-gasto' : 'ledger-type-compra'}">${c.tipo === 'gasto' ? 'Gasto' : 'Compra'}</span></td>
               <td>${esc(c.referencia)}</td>
               <td class="right"><span class="ledger-debe">${fmt$(c.total)}</span></td>
               <td class="right">—</td>
@@ -895,11 +895,103 @@ const CuentaCorrienteProveedores = (() => {
                   <td>${esc(p.desc)}</td>
                   <td class="right">—</td>
                   <td class="right"><span class="ledger-haber">${fmt$(p.credito_disponible)}</span></td>
-                  <td class="right">Crédito disponible</td>
+                  <td class="right">
+                    <button class="ledger-btn-imputar" data-imputar-pago="${esc(p.id)}"
+                            data-credito="${p.credito_disponible}">Imputar…</button>
+                  </td>
                 </tr>`).join('')}
             </tbody>
           </table>
         </div>` : ''}`;
+  }
+
+  // Imputar un pago YA registrado contra los comprobantes pendientes. Antes la
+  // seccion "Pagos sin imputar" era de solo lectura, asi que un gasto y un pago
+  // del mismo monto podian convivir dando saldo 0 sin estar asociados: la cuenta
+  // cerraba pero no se sabia que pago cancelo que comprobante.
+  function openModalImputar(pagoId, credito, proveedorId, proveedorNombre) {
+    const overlay = ge('ccprov-overlay');
+    if (!overlay) return;
+
+    const pendientes = data().getComprasPendientes(proveedorId);
+    if (!pendientes.length) {
+      alert('Este proveedor no tiene comprobantes pendientes para imputar.');
+      return;
+    }
+
+    // Se prellena de mas viejo a mas nuevo hasta agotar el credito, que es el
+    // criterio habitual; el usuario puede cambiar cualquier monto.
+    let restante = credito;
+    const filas = pendientes.map(c => {
+      const sug = Math.min(restante, c.saldo);
+      restante = Math.max(0, restante - sug);
+      const ref = c.tipo === 'gasto'
+        ? (c.numero_factura || c.descripcion || 'Gasto')
+        : ([c.factura_pv, c.numero_factura].filter(Boolean).join('-') || c.id.slice(-6).toUpperCase());
+      return { ...c, ref, sug };
+    });
+
+    overlay.innerHTML = `
+      <div class="ccprov-modal" style="max-width:620px">
+        <div class="ccprov-modal-hdr">
+          <span>\u{1F4CE} Imputar pago \u2014 ${esc(proveedorNombre)}</span>
+          <button class="ccprov-modal-close" id="btn-imp-close" aria-label="Cerrar" title="Cerrar">\u2715</button>
+        </div>
+        <div class="ccprov-modal-body">
+          <p style="margin:0 0 10px;font-size:13px;color:var(--color-text-secondary)">
+            Cr\u00e9dito disponible de este pago: <strong style="color:#2e7d32">${fmt$(credito)}</strong>
+          </p>
+          <div class="ledger-imputar-box">
+            ${filas.map(c => `
+              <div class="ledger-imputar-row">
+                <span class="ledger-type-badge ${c.tipo === 'gasto' ? 'ledger-type-gasto' : 'ledger-type-compra'}">${c.tipo === 'gasto' ? 'Gasto' : 'Compra'}</span>
+                <span class="lir-ref">${esc(c.ref)}</span>
+                <span style="color:var(--color-text-secondary)">saldo ${fmt$(c.saldo)}</span>
+                <input type="number" class="imp-row-input" data-id="${esc(c.id)}"
+                       data-tipo="${esc(c.tipo)}" data-saldo="${c.saldo}"
+                       value="${c.sug > 0 ? c.sug.toFixed(2) : ''}" min="0" max="${c.saldo}" step="0.01"
+                       placeholder="0,00">
+              </div>`).join('')}
+          </div>
+          <div id="imp-error" style="display:none;color:#c62828;font-size:13px;margin-top:8px"></div>
+        </div>
+        <div class="ccprov-modal-ftr">
+          <button class="btn btn-outline" id="btn-imp-cancel">Cancelar</button>
+          <button class="btn btn-primary" id="btn-imp-ok">Imputar</button>
+        </div>
+      </div>`;
+    overlay.classList.remove('hidden');
+
+    const close = () => { overlay.classList.add('hidden'); overlay.innerHTML = ''; };
+    ge('btn-imp-close').addEventListener('click', close);
+    ge('btn-imp-cancel').addEventListener('click', close);
+
+    ge('btn-imp-ok').addEventListener('click', () => {
+      const err = ge('imp-error');
+      const mostrar = m => { if (err) { err.textContent = m; err.style.display = 'block'; } };
+
+      const aplicar = [];
+      let suma = 0;
+      for (const inp of overlay.querySelectorAll('.imp-row-input')) {
+        const monto = parseFloat(inp.value) || 0;
+        if (monto <= 0) continue;
+        const saldo = parseFloat(inp.dataset.saldo) || 0;
+        if (monto > saldo + 0.01) { mostrar('Un monto supera el saldo del comprobante.'); return; }
+        suma += monto;
+        aplicar.push({ id: inp.dataset.id, tipo: inp.dataset.tipo, monto });
+      }
+      if (!aplicar.length) { mostrar('Ingres\u00e1 al menos un monto.'); return; }
+      if (suma > credito + 0.01) { mostrar('La suma supera el cr\u00e9dito disponible del pago.'); return; }
+
+      for (const a of aplicar) {
+        const r = data().imputar(pagoId, a.id, a.monto, a.tipo);
+        if (!r.success) { mostrar('Error al imputar: ' + r.error); return; }
+      }
+
+      close();
+      renderDetalle(proveedorId, proveedorNombre);
+      if (window.SGA_Utils?.showToast) window.SGA_Utils.showToast('Pago imputado', 'success');
+    });
   }
 
   function renderLedgerContent(proveedorId, saldo) {
@@ -912,6 +1004,15 @@ const CuentaCorrienteProveedores = (() => {
       const ledger = data().getLedger(proveedorId);
       wrap.innerHTML = buildTablaPlana(ledger, saldo);
     }
+    wrap.querySelectorAll('[data-imputar-pago]').forEach(btn => {
+      btn.addEventListener('click', () => openModalImputar(
+        btn.dataset.imputarPago,
+        parseFloat(btn.dataset.credito) || 0,
+        proveedorId,
+        state.proveedorNombre
+      ));
+    });
+
     // Sync toggle buttons
     ge('btn-ledger-agrupado')?.classList.toggle('active', state.ledgerMode === 'agrupado');
     ge('btn-ledger-plano')?.classList.toggle('active', state.ledgerMode === 'cronologico');
