@@ -709,12 +709,35 @@ export const POS = (() => {
       return `<div class="sri-stock ${cls}">${txt}</div>`;
     };
 
+    // Busqueda por codigo de barras tolerante a los ceros a la izquierda.
+    //
+    // Un mismo producto puede estar guardado como UPC-A de 12 digitos y
+    // escanearse como EAN-13 con un cero adelante, o al reves. Ademas, si la
+    // columna del Excel venia con formato numerico, la importacion la convierte
+    // con String(Math.round(val)) y ahi los ceros iniciales se pierden: el
+    // codigo queda guardado con un digito menos del que manda el lector.
+    //
+    // El sintoma es el reportado: el lector "no lo toma" pero buscandolo por
+    // nombre aparece, porque esa busqueda usa LIKE y no comparacion exacta.
     const getProductoByBarcode = (codigo) => {
+      const raw = String(codigo || '').trim();
+      if (!raw) return null;
+
+      const variantes = [raw];
+      if (/^[0-9]+$/.test(raw)) {
+        const sinCeros = raw.replace(/^0+/, '');
+        if (sinCeros && sinCeros !== raw) variantes.push(sinCeros);
+        variantes.push('0' + raw);
+        if (raw.length === 12) variantes.push('00' + raw);
+      }
+      const unicos = [...new Set(variantes)];
+      const ph = unicos.map(() => '?').join(',');
+
       const r = window.SGA_DB.query(`
         SELECT p.* FROM productos p
         JOIN codigos_barras cb ON cb.producto_id = p.id
-        WHERE cb.codigo = ? AND p.activo = 1 LIMIT 1
-      `, [codigo]);
+        WHERE cb.codigo IN (${ph}) AND p.activo = 1 LIMIT 1
+      `, unicos);
       return r.length ? r[0] : null;
     };
 
