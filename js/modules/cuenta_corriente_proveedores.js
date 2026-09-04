@@ -382,6 +382,14 @@ const SGA_PagosProveedores = (() => {
         `INSERT INTO imputaciones_pagos (id, pago_id, compra_id, gasto_id, monto_imputado, fecha) VALUES (?, ?, ?, ?, ?, ?)`,
         [uid(), pagoId, esGasto ? null : docId, esGasto ? docId : null, montoImp, now().slice(0, 10)]
       );
+      // El pago viaja a la otra maquina con sus imputaciones embebidas (ver
+      // denormalizePagoProveedor en sync.js). Como ya estaba 'synced', sin este
+      // UPDATE la imputacion se quedaba en la maquina donde se hizo y del otro
+      // lado el comprobante seguia figurando impago.
+      db().run(
+        `UPDATE pagos_proveedores SET sync_status='pending', updated_at=? WHERE id=?`,
+        [now(), pagoId]
+      );
       return { success: true, monto_aplicado: montoImp };
     } catch (e) {
       return { success: false, error: e.message };
