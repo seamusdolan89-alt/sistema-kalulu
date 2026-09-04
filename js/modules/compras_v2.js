@@ -227,6 +227,13 @@ const ComprasV2 = (() => {
   // restaba el adelanto y se usaba justo para eso; se eliminó porque mezclaba
   // dos cosas independientes y hacía desaparecer el control cuando un adelanto
   // cubría la compra.
+  // Diferencia maxima que se acepta entre el carrito y los importes de la
+  // cabecera antes de marcar "≠ carrito". Los costos se cargan redondeados a 2
+  // decimales, asi que una factura de varios items acumula unos centavos de
+  // deriva: con la tolerancia en $0,01 saltaba la alarma en compras que estaban
+  // perfectas, y un aviso que salta siempre se deja de mirar.
+  const TOLERANCIA_CONTROL = 10;
+
   function calcMontoFactura() {
     return state.totalFactura > 0 ? state.totalFactura : calcTotal();
   }
@@ -786,7 +793,7 @@ const ComprasV2 = (() => {
     // un adelanto que cubria la compra el control directamente desaparecia.
     const neto    = calcTotal();
     const control = isFacturaA() ? state.subtotalNeto : state.totalFactura;
-    const mismatch = control > 0.001 && Math.abs(control - neto) > 0.01 && neto > 0.001;
+    const mismatch = control > 0.001 && Math.abs(control - neto) > TOLERANCIA_CONTROL && neto > 0.001;
     btn.classList.toggle('cv2-btn-confirmar-alert', mismatch && !btn.disabled);
 
     // Update control line in summary bar
@@ -2319,7 +2326,7 @@ const ComprasV2 = (() => {
       return d && m && y ? `${d}/${m}/${y}` : (state.fecha || '—');
     })();
     const control  = isFacturaA() ? state.subtotalNeto : state.totalFactura;
-    const mismatch = neto > 0.001 && control > 0.001 && Math.abs(control - neto) > 0.01;
+    const mismatch = neto > 0.001 && control > 0.001 && Math.abs(control - neto) > TOLERANCIA_CONTROL;
 
     // Form bar
     const formBar = ge('cv2-rev-form-bar');
@@ -3152,7 +3159,7 @@ const ComprasV2 = (() => {
     // adeudado (con IVA incluido en Factura A), que siempre va a diferir del
     // Subtotal Neto de la cabecera aunque esté todo bien cargado.
     const netoParaControl = netoSubtotal != null ? netoSubtotal : neto;
-    const verifyMismatch  = netoParaControl > 0.001 && controlValue > 0.001 && Math.abs(controlValue - netoParaControl) > 0.01;
+    const verifyMismatch  = netoParaControl > 0.001 && controlValue > 0.001 && Math.abs(controlValue - netoParaControl) > TOLERANCIA_CONTROL;
 
     // Format date dd/mm/yyyy
     const fechaFmt = (() => {
