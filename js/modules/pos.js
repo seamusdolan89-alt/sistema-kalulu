@@ -16,6 +16,20 @@ import './clientes.js';
  */
 
 export const POS = (() => {
+
+  // Listeners a nivel document: se guardan para poder removerlos en destroy().
+  // El router importa el modulo con ?v=Date.now(), o sea que cada navegacion
+  // crea un closure nuevo; sin removerlos, los de las instancias viejas seguian
+  // escuchando y una sola tecla disparaba la accion varias veces.
+  let _docKeydown = null;
+  let _docInput   = null;
+  // Momento del ultimo confirmar aceptado. Va en window y no en el closure a
+  // proposito: si llegara a sobrevivir una instancia vieja del modulo, cada una
+  // tendria su propio contador y no se frenarian entre si. En window el freno es
+  // uno solo para toda la pagina, que es lo que hace falta como red de seguridad
+  // por si el destroy() fallara.
+  const ultimoConfirm    = () => window.__sga_ultimo_confirm_venta || 0;
+  const marcarConfirm    = t => { window.__sga_ultimo_confirm_venta = t; };
   'use strict';
 
   /**
@@ -2725,13 +2739,14 @@ export const POS = (() => {
     });
 
     // Billetes live calculation
-    document.addEventListener('input', e => {
+    _docInput = e => {
       if (e.target.classList.contains('billet-inp') && state.sesionActiva) {
         const s = state.sesionActiva;
         const saldoEsperado = (s.saldo_inicial || 0) + (s.total_efectivo || 0) - (s.total_egresos || 0);
         recalcBilletes(saldoEsperado);
       }
-    });
+    };
+    document.addEventListener('input', _docInput);
 
     // Pedidos
     safeOn('btn-pedidos-close', 'click', () => hideModal('modal-pedidos'));
@@ -3161,6 +3176,15 @@ export const POS = (() => {
     // Confirm venta
     safeOn('btn-confirm-venta', 'click', () => {
       if (!state.sesionActiva || !state.cart.length) return;
+      // Dos disparos casi simultaneos —un doble click, o F2 llegando por
+      // listeners duplicados— registraban DOS ventas identicas. Una venta real
+      // nunca se confirma dos veces en menos de un segundo y medio.
+      const _ahora = Date.now();
+      if (_ahora - ultimoConfirm() < 1500) {
+        console.warn('Confirmar venta ignorado: llego otro disparo hace', _ahora - ultimoConfirm(), 'ms');
+        return;
+      }
+      marcarConfirm(_ahora);
       // Safety: toggles that require a client
       if (ge('chk-saldo-favor')?.checked && !state.clienteId) {
         alert('Seleccioná un cliente para poder dejar el vuelto como saldo a favor.');
@@ -3430,7 +3454,7 @@ export const POS = (() => {
     safeOn('btn-devolucion-close', 'click', () => hideModal('modal-devolucion'));
 
     // ── KEYBOARD SHORTCUTS ─────────────────────────────────────────
-    document.addEventListener('keydown', e => {
+    _docKeydown = e => {
       if (e.key === 'F1' && state.mode === 'sale') { e.preventDefault(); ge('pos-search-input')?.focus(); }
       if (e.key === 'F2' && state.mode === 'sale') {
         e.preventDefault();
@@ -3480,7 +3504,8 @@ export const POS = (() => {
           if (si) { si.focus(); }
         }
       }
-    });
+    };
+    document.addEventListener('keydown', _docKeydown);
 
     // ── ADMIN_MODE: deshabilitar controles de acción ───────────────
     if (window.ADMIN_MODE) {
@@ -3898,7 +3923,16 @@ export const POS = (() => {
   }
 
   // Public API
+  // Lo llama el router antes de montar la pantalla siguiente. Sin esto, los
+  // listeners de document de esta instancia seguian vivos y se sumaban a los de
+  // la proxima: con dos instancias, una tecla disparaba dos ventas.
+  const destroy = () => {
+    if (_docKeydown) { document.removeEventListener('keydown', _docKeydown); _docKeydown = null; }
+    if (_docInput)   { document.removeEventListener('input',   _docInput);   _docInput   = null; }
+  };
+
   return {
+    destroy,
     abrirCaja,
     registrarVenta,
     calcularVuelto,
