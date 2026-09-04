@@ -4452,7 +4452,9 @@ const ComprasV2 = (() => {
     }
   }
 
-  return { init };
+  // teardownKeyboard ya existia pero no se exportaba, asi que el router nunca
+  // podia llamarla y el listener de teclado de cada instancia quedaba vivo.
+  return { init, destroy: teardownKeyboard };
 })();
 
 export default ComprasV2;

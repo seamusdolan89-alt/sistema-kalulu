@@ -2,6 +2,12 @@
  * promociones.js — Módulo de Promociones y Combos
  */
 
+// Listeners a nivel document: se guardan para poder removerlos en destroy(). El
+// router importa el modulo con ?v=Date.now(), asi que cada navegacion crea uno
+// nuevo; sin removerlos, los de las instancias viejas seguian escuchando.
+let _docMousedown = null;
+let _docKeydown   = null;
+
 export default {
   init() {
     'use strict';
@@ -676,12 +682,13 @@ export default {
     }
 
     // Close dropdown on outside click
-    document.addEventListener('mousedown', e => {
+    _docMousedown = e => {
       const dd = ge('modal-search-dropdown');
       if (dd && !dd.contains(e.target) && e.target !== searchInput) {
         dd.style.display = 'none';
       }
-    });
+    };
+    document.addEventListener('mousedown', _docMousedown);
 
     // ── Save ────────────────────────────────────────────────────────────
     ge('btn-promo-save')?.addEventListener('click', () => {
@@ -721,15 +728,22 @@ export default {
     });
 
     // Escape key closes modal
-    document.addEventListener('keydown', e => {
+    _docKeydown = e => {
       if (e.key === 'Escape' && !ge('promo-modal-backdrop')?.classList.contains('hidden')) {
         const dd = ge('modal-search-dropdown');
         if (dd && dd.style.display !== 'none') return; // let search handle it
         closeModal();
       }
-    });
+    };
+    document.addEventListener('keydown', _docKeydown);
 
     // ── Initial render ──────────────────────────────────────────────────
     renderList();
-  }
+  },
+
+  // Lo llama el router antes de montar la pantalla siguiente.
+  destroy() {
+    if (_docMousedown) { document.removeEventListener('mousedown', _docMousedown); _docMousedown = null; }
+    if (_docKeydown)   { document.removeEventListener('keydown',   _docKeydown);   _docKeydown   = null; }
+  },
 };
