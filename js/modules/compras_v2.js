@@ -662,20 +662,32 @@ const ComprasV2 = (() => {
       }
     }
 
-    const totalEl = ge('cv2-total');
-    if (totalEl) totalEl.textContent = fmt$(montoAdeudado);
+    // "Total Compra" es lo que vale la factura y punto. El adelanto del
+    // proveedor y lo que queda a pagar van en lineas propias, porque antes
+    // cv2-total mostraba el monto ADEUDADO bajo el rotulo "Total Compra": una
+    // compra cubierta por un adelanto se leia como "Total Compra $0,00" y
+    // parecia que el sistema habia perdido la factura entera.
+    const hayAdelanto = saldoAplicado > 0.01;
 
+    const totalFacturaEl = ge('cv2-sum-total-factura');
+    if (totalFacturaEl) totalFacturaEl.textContent = fmt$(montoFactura);
+
+    const adelantoEl   = ge('cv2-sum-adelanto');
+    const adelantoWrap = ge('cv2-adelanto-wrap');
+    if (adelantoEl)   adelantoEl.textContent = '−' + fmt$(saldoAplicado);
+    if (adelantoWrap) adelantoWrap.style.display = hayAdelanto ? '' : 'none';
+
+    // "A pagar" solo aparece cuando difiere del total; sin adelanto seria
+    // repetir el mismo numero dos veces.
+    const totalEl    = ge('cv2-total');
+    const apagarWrap = ge('cv2-apagar-wrap');
+    if (totalEl)    totalEl.textContent = fmt$(montoAdeudado);
+    if (apagarWrap) apagarWrap.style.display = hayAdelanto ? '' : 'none';
+
+    // La linea chica de "Total s/saldo … Saldo aplicado" queda redundante con
+    // las filas de arriba.
     const detalleEl = ge('cv2-total-detalle');
-    if (detalleEl) {
-      if (saldoAplicado > 0.01) {
-        detalleEl.innerHTML =
-          `<span class="cv2-total-bruto">Total s/saldo: ${fmt$(montoFactura)}</span>`
-        + ` <span class="cv2-saldo-desc">Saldo aplicado: −${fmt$(saldoAplicado)}</span>`;
-        detalleEl.style.display = 'block';
-      } else {
-        detalleEl.style.display = 'none';
-      }
-    }
+    if (detalleEl) detalleEl.style.display = 'none';
 
     updateConfirmBtn();
   }

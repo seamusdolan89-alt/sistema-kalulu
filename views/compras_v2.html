@@ -365,6 +365,7 @@
   .cv2-total-detalle { font-size: 11px; color: #8090a0; }
   .cv2-saldo-desc { color: #1565c0; }
   .cv2-total-bruto { text-decoration: line-through; }
+  .cv2-sum-adelanto { color: #2e7d32; }
 
   .cv2-btn-confirmar {
     background: linear-gradient(135deg, #1565c0, #1976d2);
@@ -1499,6 +1500,15 @@
         </div>
         <div class="cv2-summary-item cv2-summary-total-main">
           <span class="cv2-sum-label">Total Compra</span>
+          <span class="cv2-sum-value" id="cv2-sum-total-factura">$ 0,00</span>
+        </div>
+        <div class="cv2-summary-item" id="cv2-adelanto-wrap" style="display:none"
+             title="Adelanto del proveedor que se aplica a esta compra">
+          <span class="cv2-sum-label">Adelanto aplicado</span>
+          <span class="cv2-sum-value cv2-sum-adelanto" id="cv2-sum-adelanto">$ 0,00</span>
+        </div>
+        <div class="cv2-summary-item cv2-summary-total-main" id="cv2-apagar-wrap" style="display:none">
+          <span class="cv2-sum-label">A pagar</span>
           <span class="cv2-sum-value" id="cv2-total">$ 0,00</span>
         </div>
       </div>
