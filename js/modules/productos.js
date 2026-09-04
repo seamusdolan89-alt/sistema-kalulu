@@ -1178,6 +1178,10 @@
 
     const madresTocadas = new Set();
 
+    // Los vinculos de sustituto se juntan aca y se resuelven al final, cuando
+    // ya existen todos los productos del archivo (ver segunda pasada).
+    const sustitutosPorResolver = [];
+
     const now = window.SGA_Utils.formatISODate(new Date());
 
     // Cache lookups to avoid repeated queries within the same import
@@ -1396,30 +1400,42 @@
           window.SGA_DB.registrarHistorialStock(producto_id, sucursal_id);
         }
 
-        // Sustituto referencia — set group membership
+        // Sustituto referencia — se resuelve en la segunda pasada, despues del
+        // bucle. Resolverlo aca dependia del orden de las filas: si la fila del
+        // producto de referencia venia mas abajo, todavia no existia y el
+        // vinculo se perdia sin aviso.
         const codSustRef = String(fila.codigo_sustituto_referencia || '').trim();
-        if (codSustRef) {
-          const refCb = window.SGA_DB.query('SELECT producto_id FROM codigos_barras WHERE codigo = ?', [codSustRef]);
-          if (refCb.length) {
-            const referencia_id = refCb[0].producto_id;
-            if (referencia_id === producto_id) {
-              console.warn('Sustituto auto-referencia ignorado:', codSustRef);
-            } else {
-              window.SGA_DB.run(
-                'INSERT OR REPLACE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion) VALUES (?, ?, ?, 1, ?)',
-                [producto_id, referencia_id, referencia_id, now]
-              );
-              results.sustitutosResueltos++;
-            }
-          } else {
-            console.warn('Producto de referencia no encontrado:', codSustRef);
-            results.sustitutosPendientes.push(codSustRef);
-          }
-        }
+        if (codSustRef) sustitutosPorResolver.push({ producto_id, codSustRef, nombre });
 
       } catch (err) {
         results.errores.push(`${nombre || codigo}: ${err.message}`);
       }
+    }
+
+    // ── Segunda pasada: vinculos de sustituto ────────────────────────────────
+    // Recien aca existen TODOS los productos del archivo, asi que el orden de
+    // las filas deja de importar. Antes esto se hacia dentro del bucle y los
+    // productos listados por encima de su referencia quedaban sin agrupar: se
+    // los seguia pidiendo por separado en las ordenes de compra.
+    for (const s of sustitutosPorResolver) {
+      const refCb = window.SGA_DB.query(
+        'SELECT producto_id FROM codigos_barras WHERE codigo = ?', [s.codSustRef]
+      );
+      if (!refCb.length) {
+        console.warn('Producto de referencia no encontrado:', s.codSustRef);
+        results.sustitutosPendientes.push(s.codSustRef);
+        continue;
+      }
+      const referencia_id = refCb[0].producto_id;
+      if (referencia_id === s.producto_id) {
+        console.warn('Sustituto auto-referencia ignorado:', s.codSustRef);
+        continue;
+      }
+      window.SGA_DB.run(
+        'INSERT OR REPLACE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion) VALUES (?, ?, ?, 1, ?)',
+        [s.producto_id, referencia_id, referencia_id, now]
+      );
+      results.sustitutosResueltos++;
     }
 
     // Resolve price conflicts within madre/hijo families touched by this import:
