@@ -2150,12 +2150,13 @@
     });
 
     // Close column filter on outside click
-    document.addEventListener('click', (e) => {
+    _docClick = (e) => {
       const dropdown = getElement('col-filter-dropdown');
       if (dropdown && !dropdown.contains(e.target)) {
         dropdown.classList.add('hidden');
       }
-    });
+    };
+    document.addEventListener('click', _docClick);
 
     // Limpiar filtros button
     getElement('btn-limpiar-filtros')?.addEventListener('click', () => {
@@ -2379,6 +2380,14 @@
     addCol('producto_sustitutos', 'referencia_id', 'TEXT', colsSustitutos);
   };
 
+  // Listener a nivel document: se guarda para poder removerlo en destroy(). Sin
+  // eso, cada navegacion a Productos dejaba otro escuchando.
+  let _docClick = null;
+
+  const destroy = () => {
+    if (_docClick) { document.removeEventListener('click', _docClick); _docClick = null; }
+  };
+
   const init = () => {
     // FIX 2: Clear any selected product state when returning to the list
     state.editingProduct = null;
@@ -2414,6 +2423,7 @@
 
   return {
     init,
+    destroy,
     loadProductos,
     getStockDisponible,
     getProductosBajoMinimo,

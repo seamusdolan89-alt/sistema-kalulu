@@ -1123,6 +1123,8 @@ const Ordenes = (() => {
 
   return {
     init,
+    // Igual que en compras_v2: la limpieza estaba escrita pero sin exportar.
+    destroy: teardownKeyboard,
     // Data API — accesible desde otros módulos si se necesita
     generarOrdenCompra,
     getOrdenes,
