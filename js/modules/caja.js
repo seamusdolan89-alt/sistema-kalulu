@@ -1,4 +1,9 @@
 import PagoWizard from './pago_proveedor_wizard.js';
+// El wizard usa la capa de datos SGA_PagosProveedores, que la define este
+// modulo al evaluarse. Sin este import, entrar directo a Caja sin haber
+// pasado por Cuenta Corriente dejaba el global sin definir y el boton
+// explotaba con "Cannot read properties of undefined".
+import './cuenta_corriente_proveedores.js';
 
 /**
  * caja.js — Cash Register Module
