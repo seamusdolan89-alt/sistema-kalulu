@@ -3466,7 +3466,15 @@ export const POS = (() => {
 
     // ── KEYBOARD SHORTCUTS ─────────────────────────────────────────
     _docKeydown = e => {
-      if (e.key === 'F1' && state.mode === 'sale') { e.preventDefault(); ge('pos-search-input')?.focus(); }
+      // Regla general: si hay un modal abierto, el teclado es del modal. Todos
+      // usan .pbackdrop y se ocultan con .hidden, asi que alcanza con mirar el
+      // DOM. Antes los atajos y el fallback del lector de codigo de barras
+      // seguian actuando sobre la pantalla de atras: con el panel de descuento
+      // abierto, tipear un numero terminaba escribiendo en el buscador de
+      // productos.
+      const _modalAbierto = !!document.querySelector('.pbackdrop:not(.hidden)');
+
+      if (e.key === 'F1' && state.mode === 'sale' && !_modalAbierto) { e.preventDefault(); ge('pos-search-input')?.focus(); }
       // Con el ticket en pantalla la venta YA esta registrada. Sin este corte,
       // F2/F10 volvian a clickear "Confirmar venta" y la registraban de nuevo:
       // es la via mas comun de venta duplicada, porque el cajero usa F2 para
@@ -3482,12 +3490,21 @@ export const POS = (() => {
         return;
       }
 
+      // F2 dentro del buscador de clientes: confirma la seleccion. Es, junto al
+      // ticket, el unico atajo que corresponde con un modal abierto.
+      if (e.key === 'F2' && !ge('modal-buscar-cliente')?.classList.contains('hidden')) {
+        e.preventDefault();
+        confirmarClienteBuscar();
+        return;
+      }
+
+      // A partir de aca son atajos que operan sobre la pantalla de atras: con un
+      // modal abierto no corresponden. Escape queda afuera del corte porque es
+      // justamente el que cierra el modal.
+      if (_modalAbierto && e.key !== 'Escape') return;
+
       if (e.key === 'F2' && state.mode === 'sale') {
         e.preventDefault();
-        if (!ge('modal-buscar-cliente')?.classList.contains('hidden')) {
-          confirmarClienteBuscar();
-          return;
-        }
         // F2 confirma la venta, que es lo que dicen el boton y el pie de
         // pantalla. Antes hacia un recorrido progresivo (enfocaba el buscador
         // de cliente, despues el medio de pago, despues "recibe") y en la
@@ -3497,6 +3514,7 @@ export const POS = (() => {
         // efectivo recibido alcance, asi que llamarlo directo es seguro.
         ge('btn-confirm-venta')?.click();
       }
+
       if (e.key === 'F3') { e.preventDefault(); if (state.mode === 'sale') showDescTotalModal(); }
       if (e.key === 'F4') { e.preventDefault(); showModalPedidos(); }
       if (e.key === 'F5' && state.mode === 'sale') { e.preventDefault(); openBuscarClienteModal(); }
