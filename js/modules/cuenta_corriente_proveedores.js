@@ -1217,11 +1217,16 @@ const CuentaCorrienteProveedores = (() => {
           </thead>
           <tbody>
             ${comprasPendientes.map((c, idx) => {
-              const ref = [c.factura_pv, c.numero_factura].filter(Boolean).join('-') || c.id.slice(-6).toUpperCase();
+              // Un gasto no tiene punto de venta ni numero de factura: se lo
+              // identifica por su comprobante o, si no tiene, su descripcion.
+              const esGasto = c.tipo === 'gasto';
+              const ref = esGasto
+                ? (c.numero_factura || c.descripcion || 'Gasto')
+                : ([c.factura_pv, c.numero_factura].filter(Boolean).join('-') || c.id.slice(-6).toUpperCase());
               return `
               <tr>
                 <td>${fmtFecha(c.fecha)}</td>
-                <td>${esc(ref)}</td>
+                <td>${esc(ref)}${esGasto ? ' <span style="font-size:11px;color:#8090a0">(gasto)</span>' : ''}</td>
                 <td class="right">${fmt$(c.total)}</td>
                 <td class="right" style="color:#e65100;font-weight:600">${fmt$(c.saldo)}</td>
                 <td class="right">
@@ -1229,6 +1234,7 @@ const CuentaCorrienteProveedores = (() => {
                     data-idx="${idx}"
                     data-saldo="${c.saldo}"
                     data-compra-id="${esc(c.id)}"
+                    data-tipo="${esc(c.tipo || 'compra')}"
                     placeholder="${autoImputar ? '' : '0,00'}"
                     min="0" max="${c.saldo}" step="0.01"
                     ${autoImputar ? 'disabled' : ''}>
@@ -1372,7 +1378,13 @@ const CuentaCorrienteProveedores = (() => {
         document.querySelectorAll('.imp-monto-input').forEach(inp => {
           const monto = parseFloat(inp.value) || 0;
           if (monto > 0) {
-            imputaciones.push({ compra_id: inp.dataset.compraId, monto });
+            // El tipo define si la imputacion se guarda en compra_id o en
+            // gasto_id: sin esto, imputar contra un gasto lo dejaba apuntando
+            // a una compra que no existe y el gasto seguia impago.
+            const tipo = inp.dataset.tipo || 'compra';
+            imputaciones.push(tipo === 'gasto'
+              ? { gasto_id: inp.dataset.compraId, tipo, monto }
+              : { compra_id: inp.dataset.compraId, tipo, monto });
           }
         });
         // Validar que no superen el saldo de cada compra
