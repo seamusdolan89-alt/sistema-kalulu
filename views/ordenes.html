@@ -482,4 +482,27 @@
   </div>
 </div>
 
+<div id="ord-cambiar-prov-overlay" class="ord-overlay" style="display:none">
+  <div class="ord-editcant-box">
+    <div class="ord-overlay-header">
+      <span>Cambiar proveedor</span>
+      <button class="ord-overlay-close" id="ord-cambprov-close" aria-label="Cerrar" title="Cerrar">×</button>
+    </div>
+    <div class="ord-editcant-body">
+      <div>
+        <div class="ord-editcant-label" id="ord-cambprov-producto">—</div>
+        <div class="ord-editcant-row">
+          <select id="ord-cambprov-select" class="ord-editcant-select" style="flex:1"></select>
+        </div>
+        <div id="ord-cambprov-aviso"
+             style="margin-top:10px;font-size:12px;color:#8090a0;line-height:1.5"></div>
+      </div>
+    </div>
+    <div class="ord-overlay-footer">
+      <button class="ord-btn-cancel" id="ord-cambprov-cancel">Cancelar</button>
+      <button class="ord-btn-action ord-btn-confirmar" id="ord-cambprov-ok">Guardar cambio</button>
+    </div>
+  </div>
+</div>
+
 <script type="module" src="./js/modules/ordenes.js"></script>
