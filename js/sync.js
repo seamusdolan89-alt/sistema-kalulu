@@ -494,11 +494,13 @@
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO ordenes_compra
         (id, sucursal_id, proveedor_id, usuario_id, fecha_creacion, fecha_entrega,
-         estado, notas, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,'synced',?)`,
+         estado, notas, revisada_en, confirmada_en, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.sucursal_id, data.proveedor_id, data.usuario_id,
        data.fecha_creacion, data.fecha_entrega || null,
-       data.estado || 'borrador', data.notas || null, data.updated_at || now]
+       data.estado || 'borrador', data.notas || null,
+       data.revisada_en || null, data.confirmada_en || null,
+       data.updated_at || now]
     );
 
     // Reemplazo completo, igual que en applyCompra: si del otro lado sacaron un
@@ -506,15 +508,29 @@
     window.SGA_DB.run(`DELETE FROM orden_compra_items WHERE orden_id = ?`, [data.id]);
 
     for (const item of (data._items || [])) {
+      // Las 18 columnas de la tabla. Antes se insertaban 8 y las otras 10
+      // llegaban vacias: stock_actual, stock_minimo, cantidad_sugerida y
+      // demas quedaban en cero del otro lado, asi que la orden se veia con
+      // todos los productos en cero aunque el push las mandaba (oi.*).
       window.SGA_DB.run(`
         INSERT OR REPLACE INTO orden_compra_items
-          (id, orden_id, producto_id, cantidad_pedida, cantidad_recibida,
-           estado, costo_unitario, costo_anterior)
-        VALUES (?,?,?,?,?,?,?,?)`,
+          (id, orden_id, producto_id, cantidad_pedida, cantidad_recibida, estado,
+           costo_unitario, costo_anterior, codigo_proveedor,
+           stock_actual, stock_minimo, cantidad_deseada,
+           ventas_30d, ventas_prom_6m, dias_sin_stock_6m,
+           cantidad_sugerida, cantidad_final, unidad_pedida)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [item.id, data.id, item.producto_id,
          item.cantidad_pedida, item.cantidad_recibida || 0,
          item.estado || 'pendiente',
-         item.costo_unitario || 0, item.costo_anterior || 0]
+         item.costo_unitario || 0, item.costo_anterior || 0,
+         item.codigo_proveedor ?? null,
+         item.stock_actual ?? null, item.stock_minimo ?? null,
+         item.cantidad_deseada ?? null,
+         item.ventas_30d || 0, item.ventas_prom_6m || 0,
+         item.dias_sin_stock_6m || 0,
+         item.cantidad_sugerida ?? null, item.cantidad_final ?? null,
+         item.unidad_pedida || 'unidad']
       );
     }
   }
