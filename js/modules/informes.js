@@ -272,6 +272,12 @@ const Informes = (() => {
         SUM(CASE WHEN vp.medio = 'tarjeta'          THEN vp.monto ELSE 0 END) AS tarjeta,
         SUM(CASE WHEN vp.medio = 'transferencia'    THEN vp.monto ELSE 0 END) AS transferencia,
         SUM(CASE WHEN vp.medio = 'cuenta_corriente' THEN vp.monto ELSE 0 END) AS cuenta_corriente,
+        -- "Otros": cualquier medio_cobro custom agregado desde Configuración
+        -- (ej. "Link de Pago") que no sea uno de los 4 fijos de arriba. Sin este
+        -- bucket esa plata sumaba a total_cobrado pero no aparecía en ninguna
+        -- columna del desglose — quedaba invisible aunque el total cuadrara.
+        SUM(CASE WHEN vp.medio NOT IN ('efectivo','mercadopago','tarjeta','transferencia','cuenta_corriente')
+                 THEN vp.monto ELSE 0 END) AS otros,
         SUM(CASE WHEN vp.medio != 'cuenta_corriente' THEN vp.monto ELSE 0 END) AS total_cobrado,
         COUNT(DISTINCT v.id) AS num_ventas
       FROM ventas v
@@ -1003,11 +1009,12 @@ const Informes = (() => {
       tarjeta:         acc.tarjeta         + (r.tarjeta         || 0),
       transferencia:   acc.transferencia   + (r.transferencia   || 0),
       cuenta_corriente:acc.cuenta_corriente+ (r.cuenta_corriente|| 0),
+      otros:           acc.otros           + (r.otros           || 0),
       total_cobrado:   acc.total_cobrado   + (r.total_cobrado   || 0),
       egresos:         acc.egresos         + (r.egresos         || 0),
       neto:            acc.neto            + (r.neto            || 0),
       num_ventas:      acc.num_ventas      + (r.num_ventas      || 0),
-    }), { efectivo:0, mercadopago:0, tarjeta:0, transferencia:0, cuenta_corriente:0, total_cobrado:0, egresos:0, neto:0, num_ventas:0 });
+    }), { efectivo:0, mercadopago:0, tarjeta:0, transferencia:0, cuenta_corriente:0, otros:0, total_cobrado:0, egresos:0, neto:0, num_ventas:0 });
 
     return `
       ${reportHeader('Resumen Diario de Caja (Cobranzas)')}
@@ -1025,6 +1032,7 @@ const Informes = (() => {
               <th>Fecha</th><th class="num">Ventas</th>
               <th class="num">Efectivo</th><th class="num">Mercado Pago</th>
               <th class="num">Tarjeta</th><th class="num">Transferencia</th>
+              <th class="num">Otros</th>
               <th class="num">Cta. Cte. (fiada)</th>
               <th class="num">Total cobrado</th>
               <th class="num">Egresos</th><th class="num">Neto</th>
@@ -1038,6 +1046,7 @@ const Informes = (() => {
                   <td class="num">${r.mercadopago  > 0 ? fmtPeso(r.mercadopago)  : '—'}</td>
                   <td class="num">${r.tarjeta      > 0 ? fmtPeso(r.tarjeta)      : '—'}</td>
                   <td class="num">${r.transferencia> 0 ? fmtPeso(r.transferencia): '—'}</td>
+                  <td class="num">${r.otros        > 0 ? fmtPeso(r.otros)       : '—'}</td>
                   <td class="num text-muted">${r.cuenta_corriente > 0 ? fmtPeso(r.cuenta_corriente) : '—'}</td>
                   <td class="num bold">${fmtPeso(r.total_cobrado)}</td>
                   <td class="num text-danger">${r.egresos > 0 ? '- ' + fmtPeso(r.egresos) : '—'}</td>
@@ -1052,6 +1061,7 @@ const Informes = (() => {
               <td class="num">${fmtPeso(tot.mercadopago)}</td>
               <td class="num">${fmtPeso(tot.tarjeta)}</td>
               <td class="num">${fmtPeso(tot.transferencia)}</td>
+              <td class="num">${fmtPeso(tot.otros)}</td>
               <td class="num text-muted">${fmtPeso(tot.cuenta_corriente)}</td>
               <td class="num bold">${fmtPeso(tot.total_cobrado)}</td>
               <td class="num text-danger">- ${fmtPeso(tot.egresos)}</td>
@@ -1254,9 +1264,9 @@ const Informes = (() => {
     }
     if (rep === 'resumen_diario') {
       const headers = ['Fecha','Ventas','Efectivo','Mercado Pago','Tarjeta',
-                       'Transferencia','Cta. Cte. (fiada)','Total cobrado','Egresos','Neto'];
+                       'Transferencia','Otros','Cta. Cte. (fiada)','Total cobrado','Egresos','Neto'];
       const data = rows.map(r => [fmtFechaCorta(r.dia), r.num_ventas,
-        r.efectivo, r.mercadopago, r.tarjeta, r.transferencia,
+        r.efectivo, r.mercadopago, r.tarjeta, r.transferencia, r.otros,
         r.cuenta_corriente, r.total_cobrado, r.egresos, r.neto]);
       return { title, periodo, headers, data };
     }

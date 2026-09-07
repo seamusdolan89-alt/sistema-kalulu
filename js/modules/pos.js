@@ -650,8 +650,11 @@ export const POS = (() => {
     const getCartTotal = () => Math.max(0, getCartSubtotal() - getCartDescuento());
     const getTotalAsignado = () => {
       if (state.cobroMultiple) {
-        return ['efectivo','mercadopago','tarjeta','transferencia']
-          .reduce((s, m) => s + (state.pagosAmounts[m] || 0), 0);
+        // Sumar sobre TODOS los medios configurados (MEDIOS es dinámico, viene de
+        // medios_cobro), no una lista fija — un medio custom como "Link de Pago"
+        // quedaba afuera y el botón de confirmar nunca se habilitaba pese a que
+        // la suma cubría el total.
+        return MEDIOS.reduce((s, m) => s + (state.pagosAmounts[m.id] || 0), 0);
       }
       return [...state.activeMedios].reduce((s, m) => s + (state.pagosAmounts[m] || 0), 0);
     };
@@ -3237,7 +3240,7 @@ export const POS = (() => {
           alert('Pago insuficiente. La suma de los medios no cubre el total.');
           return;
         }
-        pagos = ['efectivo','mercadopago','tarjeta','transferencia']
+        pagos = MEDIOS.map(m => m.id)
           .filter(m => (state.pagosAmounts[m] || 0) > 0.001)
           .map(m => ({ medio: m, monto: state.pagosAmounts[m], referencia: null }));
         if (state.ccRegistrarDeuda) {
@@ -3887,15 +3890,21 @@ export const POS = (() => {
   }
 
   /**
-   * Get enabled payment methods
+   * Get enabled payment methods — lee medios_cobro (configurable desde
+   * Configuración) en vez de una lista fija, para no repetir el bug de
+   * "Link de Pago" (ver [[project_pos_bugs]]): un medio custom quedaba
+   * afuera de cualquier lista hardcodeada de medios de pago.
    */
   function getMediosHabilitados() {
+    try {
+      const rows = window.SGA_DB.query(
+        `SELECT id, nombre, icono FROM medios_cobro WHERE activo = 1 ORDER BY orden ASC, nombre ASC`
+      );
+      if (rows.length) return rows.map(r => ({ id: r.id, nombre: r.nombre, icon: r.icono || '' }));
+    } catch (e) { console.warn('medios_cobro:', e); }
     return [
       { id: 'efectivo', nombre: 'Efectivo', icon: '💵' },
       { id: 'mercadopago', nombre: 'Mercado Pago', icon: '📱' },
-      { id: 'tarjeta', nombre: 'Tarjeta', icon: '💳' },
-      { id: 'transferencia', nombre: 'Transferencia', icon: '🏦' },
-      { id: 'cuenta_corriente', nombre: 'Cuenta Corriente', icon: '📋' }
     ];
   }
 

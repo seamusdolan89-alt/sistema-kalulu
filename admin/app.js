@@ -551,7 +551,7 @@
     const diasMap = {};
     ventas.forEach(v => {
       const dia = v.fecha.slice(0, 10);
-      if (!diasMap[dia]) diasMap[dia] = { dia, efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0, cta_cte: 0, total_cobrado: 0, num_ventas: 0, egresos: 0 };
+      if (!diasMap[dia]) diasMap[dia] = { dia, efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0, otros: 0, cta_cte: 0, total_cobrado: 0, num_ventas: 0, egresos: 0 };
       diasMap[dia].num_ventas++;
       (v.pagos || []).forEach(p => {
         if (p.medio === 'efectivo')        diasMap[dia].efectivo       += p.monto;
@@ -559,6 +559,10 @@
         else if (p.medio === 'tarjeta')     diasMap[dia].tarjeta       += p.monto;
         else if (p.medio === 'transferencia') diasMap[dia].transferencia += p.monto;
         else if (p.medio === 'cuenta_corriente') diasMap[dia].cta_cte  += p.monto;
+        // Cualquier otro medio_cobro custom (ej. "Link de Pago") cae aca en vez
+        // de perderse del desglose — antes solo sumaba a total_cobrado sin
+        // aparecer en ninguna columna.
+        else diasMap[dia].otros += p.monto;
         if (p.medio !== 'cuenta_corriente') diasMap[dia].total_cobrado += p.monto;
       });
     });
@@ -571,9 +575,10 @@
     const tot = rows.reduce((s, r) => ({
       efectivo: s.efectivo + r.efectivo, mercadopago: s.mercadopago + r.mercadopago,
       tarjeta: s.tarjeta + r.tarjeta, transferencia: s.transferencia + r.transferencia,
+      otros: s.otros + r.otros,
       cta_cte: s.cta_cte + r.cta_cte, total_cobrado: s.total_cobrado + r.total_cobrado,
       egresos: s.egresos + r.egresos, num_ventas: s.num_ventas + r.num_ventas,
-    }), { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0, cta_cte: 0, total_cobrado: 0, egresos: 0, num_ventas: 0 });
+    }), { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0, otros: 0, cta_cte: 0, total_cobrado: 0, egresos: 0, num_ventas: 0 });
 
     container.innerHTML = infReportHeader('Resumen Diario de Caja', rows.length, null) + `
       <div class="inf-table-wrap">
@@ -581,7 +586,7 @@
           <thead><tr>
             <th>Fecha</th><th>Ventas</th><th class="num">Efectivo</th>
             <th class="num">M.Pago</th><th class="num">Tarjeta</th>
-            <th class="num">Transfer.</th><th class="num">Cta.Cte.</th>
+            <th class="num">Transfer.</th><th class="num">Otros</th><th class="num">Cta.Cte.</th>
             <th class="num">Egresos</th><th class="num bold">Total cobrado</th>
             <th class="num">Neto</th>
           </tr></thead>
@@ -593,6 +598,7 @@
               <td class="num">${infFmt$(r.mercadopago)}</td>
               <td class="num">${infFmt$(r.tarjeta)}</td>
               <td class="num">${infFmt$(r.transferencia)}</td>
+              <td class="num">${infFmt$(r.otros)}</td>
               <td class="num">${infFmt$(r.cta_cte)}</td>
               <td class="num text-danger">${infFmt$(r.egresos)}</td>
               <td class="num bold">${infFmt$(r.total_cobrado)}</td>
@@ -605,6 +611,7 @@
             <td class="num">${infFmt$(tot.mercadopago)}</td>
             <td class="num">${infFmt$(tot.tarjeta)}</td>
             <td class="num">${infFmt$(tot.transferencia)}</td>
+            <td class="num">${infFmt$(tot.otros)}</td>
             <td class="num">${infFmt$(tot.cta_cte)}</td>
             <td class="num text-danger">${infFmt$(tot.egresos)}</td>
             <td class="num bold">${infFmt$(tot.total_cobrado)}</td>
@@ -615,9 +622,9 @@
 
     document.getElementById('inf-export-btn')?.addEventListener('click', () => {
       exportExcel('Resumen_Diario', [
-        ['Fecha','Ventas','Efectivo','MercadoPago','Tarjeta','Transferencia','Cta.Cte.','Egresos','Total Cobrado','Neto'],
-        ...rows.map(r => [r.dia, r.num_ventas, r.efectivo, r.mercadopago, r.tarjeta, r.transferencia, r.cta_cte, r.egresos, r.total_cobrado, r.total_cobrado - r.egresos]),
-        ['TOTAL', tot.num_ventas, tot.efectivo, tot.mercadopago, tot.tarjeta, tot.transferencia, tot.cta_cte, tot.egresos, tot.total_cobrado, tot.total_cobrado - tot.egresos],
+        ['Fecha','Ventas','Efectivo','MercadoPago','Tarjeta','Transferencia','Otros','Cta.Cte.','Egresos','Total Cobrado','Neto'],
+        ...rows.map(r => [r.dia, r.num_ventas, r.efectivo, r.mercadopago, r.tarjeta, r.transferencia, r.otros, r.cta_cte, r.egresos, r.total_cobrado, r.total_cobrado - r.egresos]),
+        ['TOTAL', tot.num_ventas, tot.efectivo, tot.mercadopago, tot.tarjeta, tot.transferencia, tot.otros, tot.cta_cte, tot.egresos, tot.total_cobrado, tot.total_cobrado - tot.egresos],
       ]);
     });
   }
