@@ -868,6 +868,29 @@
       try { database.run(sql); } catch(e) { /* column already exists */ }
     }
 
+    // ── eliminaciones — marcas de borrado que viajan por sync ────────────────
+    // Un DELETE no se puede sincronizar: la fila deja de existir y el push solo
+    // manda filas con sync_status='pending'. Sin esto, borrar una orden en una
+    // maquina la dejaba viva en la otra para siempre, y peor: si la otra maquina
+    // llegaba a pushear su copia, la resucitaba.
+    // La PK es "tabla:registro_id" para que registrar dos veces el mismo borrado
+    // no genere marcas duplicadas.
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS eliminaciones (
+          id TEXT PRIMARY KEY,
+          tabla TEXT NOT NULL,
+          registro_id TEXT NOT NULL,
+          fecha TEXT,
+          usuario_id TEXT,
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
+        )
+      `);
+      database.run(`CREATE INDEX IF NOT EXISTS idx_eliminaciones_reg
+                    ON eliminaciones(tabla, registro_id)`);
+    } catch(e) { console.warn('eliminaciones:', e.message); }
+
     // ── historial_stock — snapshot of stock per product+branch after every change ─
     try {
       database.run(`
@@ -1367,6 +1390,78 @@
     }
   }
 
+  // Tablas cuyo borrado se propaga, y sus hijos. Es una lista blanca: el nombre
+  // de tabla llega desde un documento de Firestore y se interpola en el SQL.
+  const HIJOS_DE = {
+    ordenes_compra: [['orden_compra_items', 'orden_id']],
+    compras:        [['compra_items', 'compra_id']],
+    productos:      [['codigos_barras', 'producto_id'],
+                     ['producto_sustitutos', 'producto_id'],
+                     ['producto_sustitutos', 'sustituto_id']],
+    promociones:    [['promocion_items', 'promocion_id']],
+    ventas:         [['venta_items', 'venta_id'], ['venta_pagos', 'venta_id']],
+    clientes:       [],
+    proveedores:    [],
+    gastos:         [],
+  };
+
+  /**
+   * Deja constancia de que un registro se borro, para que el borrado viaje.
+   * Llamar SIEMPRE junto al DELETE, no en lugar de el.
+   */
+  function registrarEliminacion(tabla, registroId) {
+    if (!HIJOS_DE[tabla]) {
+      console.warn('registrarEliminacion: tabla no habilitada:', tabla);
+      return;
+    }
+    try {
+      const ts  = new Date().toISOString();
+      const uid = window.SGA_Auth?.getCurrentUser?.()?.id || null;
+      database.run(
+        `INSERT OR REPLACE INTO eliminaciones
+           (id, tabla, registro_id, fecha, usuario_id, sync_status, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
+        [tabla + ':' + registroId, tabla, registroId, ts, uid, ts]
+      );
+      if (!batchMode) saveDatabase();
+    } catch (e) {
+      console.warn('registrarEliminacion:', e.message);
+    }
+  }
+
+  /** Borra un registro y sus hijos. Lo usa el sync al recibir una marca. */
+  function aplicarEliminacion(tabla, registroId) {
+    const hijos = HIJOS_DE[tabla];
+    if (!hijos) {
+      console.warn('aplicarEliminacion: tabla no habilitada:', tabla);
+      return false;
+    }
+    try {
+      for (const [tablaHija, campo] of hijos) {
+        database.run(`DELETE FROM ${tablaHija} WHERE ${campo} = ?`, [registroId]);
+      }
+      database.run(`DELETE FROM ${tabla} WHERE id = ?`, [registroId]);
+      if (!batchMode) saveDatabase();
+      return true;
+    } catch (e) {
+      console.warn('aplicarEliminacion:', e.message);
+      return false;
+    }
+  }
+
+  /** True si ese registro figura como borrado. Evita que un documento viejo lo reviva. */
+  function fueEliminado(tabla, registroId) {
+    try {
+      const r = query(
+        `SELECT 1 AS x FROM eliminaciones WHERE tabla = ? AND registro_id = ? LIMIT 1`,
+        [tabla, registroId]
+      );
+      return Array.isArray(r) && r.length > 0;
+    } catch (e) {
+      return false;
+    }
+  }
+
   /**
    * Insert a snapshot of the current stock into historial_stock.
    * Call this immediately after any UPDATE/INSERT to the `stock` table.
@@ -1473,6 +1568,9 @@
     commitBatch,
     rollbackBatch,
     getLastError,
+    registrarEliminacion,
+    aplicarEliminacion,
+    fueEliminado,
     isInitialized: () => db.isInitialized,
     usingOPFS: () => db.usingOPFS,
     useFeature: () => db.useFeature,

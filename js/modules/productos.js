@@ -380,6 +380,7 @@
         if (!confirm('¿Seguro que desea eliminar este producto?')) return;
         try {
           window.SGA_DB.run('DELETE FROM productos WHERE id = ?', [id]);
+          window.SGA_DB.registrarEliminacion('productos', id);
           loadProductos();
         } catch (error) {
           alert('Error al eliminar producto: ' + error.message);

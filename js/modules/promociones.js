@@ -111,6 +111,7 @@ export default {
     const deletePromocion = (id) => {
       window.SGA_DB.run(`DELETE FROM promocion_items WHERE promocion_id = ?`, [id]);
       window.SGA_DB.run(`DELETE FROM promociones WHERE id = ?`, [id]);
+      window.SGA_DB.registrarEliminacion('promociones', id);
     };
 
     // ── Detail panel ──────────────────────────────────────────────────
