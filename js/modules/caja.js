@@ -15,7 +15,6 @@ import './cuenta_corriente_proveedores.js';
 const Caja = (() => {
   'use strict';
 
-  const MEDIOS = ['efectivo', 'mercadopago', 'cuenta_corriente'];
   const MEDIOS_LABEL = {
     efectivo: 'Efectivo',
     mercadopago: 'Mercado Pago',
