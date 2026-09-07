@@ -750,7 +750,14 @@ export const POS = (() => {
       const si = ge('pos-search-input');
       if (si) si.value = '';
       const dd = ge('pos-search-dropdown');
-      if (dd) dd.style.display = 'none';
+      if (dd) { dd.style.display = 'none'; dd.innerHTML = ''; }
+      // El lector de codigo de barras escribe + Enter mucho mas rapido que el
+      // debounce de 180ms del listener de 'input' (ver mas abajo): sin este
+      // clearTimeout, la busqueda debounced del codigo que acabamos de agregar
+      // segui pendiente y terminaba renderizando el dropdown con ese mismo
+      // producto DESPUES de que el input ya quedo vacio — parecia una
+      // "sugerencia" del ultimo producto escaneado.
+      clearTimeout(searchTimeout);
       searchHlIdx = -1;
     };
 
@@ -1677,6 +1684,15 @@ export const POS = (() => {
       state.mode = 'sale';
       window.SGA_POS_ACTIVE_SALE = true;
       state.recibeEfectivo = null; // always start with blank "Recibe $" — cashier must enter explicitly
+      // Defensivo: el dropdown del buscador es el mismo nodo del DOM entre una
+      // venta y la siguiente (esta pantalla no se re-renderiza desde cero), asi
+      // que cualquier resultado que haya quedado visible al terminar la venta
+      // anterior (ver clearTimeout en addToCart) seguiria mostrandose apenas
+      // se abre la venta nueva si no se limpia aca explicitamente.
+      clearTimeout(searchTimeout);
+      searchHlIdx = -1;
+      const staleDd = ge('pos-search-dropdown');
+      if (staleDd) { staleDd.style.display = 'none'; staleDd.innerHTML = ''; }
       if (retomar) saveCart(); // persist recovered cart to sessionStorage for nav guard
       const dash = ge('pos-dashboard');
       const sale = ge('pos-sale');
