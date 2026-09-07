@@ -315,6 +315,33 @@
   .ord-row-focus td { background: #eef2ff !important; }
   .ord-row-focus td:first-child { border-left: 3px solid #667eea; }
 
+  /* ── Panel de acciones sobre la fila (se abre con →) ── */
+  .ord-acciones-cell { position: relative; }
+  .ord-panel-fila {
+    position: absolute; top: 50%; right: 4px; transform: translateY(-50%);
+    display: flex; align-items: center; gap: 4px; white-space: nowrap;
+    background: #1e3a5f; padding: 5px; border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(30, 58, 95, .30); z-index: 20;
+  }
+  .ord-panel-acc {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: transparent; border: 1px solid transparent; border-radius: 6px;
+    color: #eef2f7; font-size: 12px; font-family: inherit;
+    padding: 5px 9px; cursor: pointer;
+  }
+  .ord-panel-acc:hover  { background: rgba(255, 255, 255, .12); }
+  .ord-panel-acc:focus-visible { outline: none; border-color: #f0b429; }
+  .ord-panel-acc.peligro:hover { background: rgba(198, 40, 40, .38); }
+  .ord-panel-tecla {
+    font-family: ui-monospace, Consolas, monospace; font-size: 10px; font-weight: 700;
+    background: rgba(255, 255, 255, .14); border: 1px solid rgba(255, 255, 255, .22);
+    border-bottom-width: 2px; border-radius: 4px; padding: 1px 5px;
+  }
+  .ord-panel-sep {
+    width: 1px; align-self: stretch; margin: 2px 3px;
+    background: rgba(255, 255, 255, .18);
+  }
+
   /* ── Tabs de sección ── */
   .prov-section-tabs {
     display: flex;
@@ -478,6 +505,31 @@
     <div class="ord-overlay-footer">
       <button class="ord-btn-cancel" id="ord-editcant-cancel">Cancelar</button>
       <button class="ord-btn-action ord-btn-confirmar" id="ord-editcant-ok">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<div id="ord-sustituto-overlay" class="ord-overlay" style="display:none">
+  <div class="ord-overlay-box">
+    <div class="ord-overlay-header">
+      <span>Asociar sustituto</span>
+      <button class="ord-overlay-close" id="ord-sust-close" aria-label="Cerrar" title="Cerrar">×</button>
+    </div>
+    <div class="ord-overlay-body">
+      <div class="ord-editcant-label" id="ord-sust-producto">—</div>
+      <div id="ord-sust-grupo" style="margin:6px 0 12px;font-size:12px;color:#607080;line-height:1.5"></div>
+      <input type="text" id="ord-sust-search" class="ord-search-input"
+             placeholder="Buscar el producto que lo reemplaza…">
+      <div id="ord-sust-results"></div>
+      <div id="ord-sust-confirm" style="display:none;margin-top:14px;padding-top:12px;border-top:1px solid #e0e6ee">
+        <div style="font-size:12px;font-weight:600;color:#43526a;margin-bottom:6px">Se le pide siempre a:</div>
+        <select id="ord-sust-ref" class="ord-editcant-select" style="width:100%"></select>
+        <div id="ord-sust-aviso" style="margin-top:10px;font-size:12px;color:#8090a0;line-height:1.5"></div>
+      </div>
+    </div>
+    <div class="ord-overlay-footer">
+      <button class="ord-btn-cancel" id="ord-sust-cancel">Cancelar</button>
+      <button class="ord-btn-action ord-btn-confirmar" id="ord-sust-ok" disabled>Asociar</button>
     </div>
   </div>
 </div>
