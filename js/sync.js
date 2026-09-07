@@ -412,8 +412,9 @@
         (id, sucursal_id, proveedor_id, usuario_id, fecha, numero_factura, total,
          condicion_pago, estado, factura_pv, procesado_por,
          subtotal_neto, iva_105, iva_21, imp_interno, percepcion_iva, percepcion_iibb,
-         total_factura, condicion_compra, sesion_caja_id, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+         total_factura, condicion_compra, sesion_caja_id,
+         imagen_path, origen_carga, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.sucursal_id, data.proveedor_id, data.usuario_id, data.fecha,
        data.numero_factura, data.total, data.condicion_pago || null,
        data.estado || 'confirmada', data.factura_pv || null,
@@ -421,6 +422,7 @@
        data.subtotal_neto || 0, data.iva_105 || 0, data.iva_21 || 0, data.imp_interno || 0,
        data.percepcion_iva || 0, data.percepcion_iibb || 0,
        data.total_factura || 0, data.condicion_compra || null, data.sesion_caja_id || null,
+       data.imagen_path || null, data.origen_carga || null,
        data.updated_at || now]
     );
 
@@ -602,13 +604,17 @@
       INSERT OR REPLACE INTO gastos
         (id, sucursal_id, usuario_id, fecha, categoria, descripcion, monto,
          metodo_pago, proveedor_id, observaciones, periodo, subcategoria,
+         comprobante, subtotal_neto, iva_alicuota, iva_monto, iibb_monto,
          sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.sucursal_id, data.usuario_id, data.fecha,
        data.categoria, data.descripcion, data.monto,
        data.metodo_pago || 'efectivo', data.proveedor_id || null,
        data.observaciones || null, data.periodo || null,
-       data.subcategoria || null, data.updated_at || now]
+       data.subcategoria || null,
+       data.comprobante || null, data.subtotal_neto ?? null,
+       data.iva_alicuota || null, data.iva_monto ?? null, data.iibb_monto ?? null,
+       data.updated_at || now]
     );
   }
 
@@ -676,13 +682,21 @@
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO promociones
         (id, nombre, tipo, descripcion, fecha_desde, fecha_hasta,
-         activa, aplica_a, valor_descuento, tipo_descuento, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+         activa, aplica_a, valor_descuento, tipo_descuento,
+         precio_combo, stock_maximo, stock_vendido, flexible,
+         solo_clientes_registrados, cantidad_total_requerida, medios_permitidos,
+         sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.nombre, data.tipo || null, data.descripcion || null,
        data.fecha_desde || null, data.fecha_hasta || null,
        data.activa !== false ? 1 : 0,
        data.aplica_a || null, data.valor_descuento || null,
-       data.tipo_descuento || null, data.updated_at || now]
+       data.tipo_descuento || null,
+       // Sin estas, un combo llegaba sin precio y sin sus reglas: no funcionaba.
+       data.precio_combo || 0, data.stock_maximo || 0, data.stock_vendido || 0,
+       data.flexible ? 1 : 0, data.solo_clientes_registrados ? 1 : 0,
+       data.cantidad_total_requerida ?? null, data.medios_permitidos || null,
+       data.updated_at || now]
     );
 
     // Reemplazar items de la promoción
@@ -864,14 +878,15 @@
       INSERT OR REPLACE INTO proveedores
         (id, razon_social, cuit, telefono, email, contacto_nombre, condicion_pago,
          tipo_proveedor, alias, condicion_iva, agente_retencion_iva, agente_retencion_iibb,
-         condicion_compra, order_day, activo, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+         condicion_compra, order_day, dia_entrega, activo, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.razon_social || '?', data.cuit || null, data.telefono || null,
        data.email || null, data.contacto_nombre || null, data.condicion_pago || null,
        data.tipo_proveedor || 'mercaderia', data.alias || null,
        data.condicion_iva || null, data.agente_retencion_iva ? 1 : 0,
        data.agente_retencion_iibb ? 1 : 0, data.condicion_compra || null,
-       data.order_day ?? null, data.activo !== false ? 1 : 0, data.updated_at || null]
+       data.order_day ?? null, data.dia_entrega ?? null,
+       data.activo !== false ? 1 : 0, data.updated_at || null]
     );
   }
 
@@ -886,8 +901,10 @@
          cant_pedido, pedido_unidad, unidad_compra, unidades_por_paquete_compra,
          unidad_venta, costo_paquete, precio_lista_por, precio_lista_divisor,
          hereda_costo, hereda_precio, es_oferta, oferta_desde, oferta_hasta,
-         activo, fecha_alta, iva, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+         activo, fecha_alta, iva, imagen, fecha_modificacion,
+         pedido_unidades_por_paquete, ultima_impresion_etiqueta, ultima_modificacion_precio,
+         sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.nombre || '?', data.descripcion || null,
        data.categoria_id || null, data.proveedor_principal_id || null, data.proveedor_alternativo_id || null,
        data.producto_madre_id || null, data.es_madre ? 1 : 0, data.precio_independiente ? 1 : 0,
@@ -900,7 +917,14 @@
        data.precio_lista_por || 'Por unidad de compra', data.precio_lista_divisor || 1,
        data.hereda_costo !== false ? 1 : 0, data.hereda_precio !== false ? 1 : 0,
        data.es_oferta ? 1 : 0, data.oferta_desde || null, data.oferta_hasta || null,
-       data.activo !== false ? 1 : 0, data.fecha_alta || null, data.iva || null, data.updated_at || null]
+       data.activo !== false ? 1 : 0, data.fecha_alta || null, data.iva || null,
+       data.imagen || null, data.fecha_modificacion || null,
+       data.pedido_unidades_por_paquete ?? null,
+       data.ultima_impresion_etiqueta || null,
+       // ultima_modificacion_precio alimenta las etiquetas sugeridas: sin ella,
+       // la maquina que recibe no se entera de que hay que reimprimir.
+       data.ultima_modificacion_precio || null,
+       data.updated_at || null]
     );
 
     // Reemplazo completo de codigos y sustitutos: sin esto, quitar un codigo de
@@ -1014,8 +1038,9 @@
          total_efectivo, total_mercadopago, total_tarjeta,
          total_transferencia, total_cuenta_corriente,
          total_egresos, saldo_final_esperado, saldo_final_real,
-         diferencia, detalle_billetes, estado, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+         diferencia, detalle_billetes, estado, cierre_automatico,
+         sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.sucursal_id || null,
        data.usuario_apertura_id || null, data.usuario_cierre_id || null,
        data.fecha_apertura || null, data.fecha_cierre || null,
@@ -1025,7 +1050,8 @@
        data.total_cuenta_corriente || 0, data.total_egresos || 0,
        data.saldo_final_esperado || 0, data.saldo_final_real ?? null,
        data.diferencia ?? null, data.detalle_billetes || null,
-       data.estado || 'abierta', data.updated_at || null]
+       data.estado || 'abierta', data.cierre_automatico ? 1 : 0,
+       data.updated_at || null]
     );
   }
 
@@ -1033,11 +1059,16 @@
     if (tienePendienteLocal('egresos_caja', 'id = ?', [data.id])) return;
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO egresos_caja
-        (id, sesion_caja_id, monto, descripcion, fecha, usuario_id)
-      VALUES (?,?,?,?,?,?)`,
+        (id, sesion_caja_id, monto, descripcion, fecha, usuario_id,
+         tipo, proveedor_id, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.sesion_caja_id || null,
        data.monto || 0, data.descripcion || null,
-       data.fecha || null, data.usuario_id || null]
+       data.fecha || null, data.usuario_id || null,
+       // tipo distingue un pago a proveedor de un egreso comun; sin el, del
+       // otro lado todos se veian igual.
+       data.tipo || null, data.proveedor_id || null,
+       data.updated_at || new Date().toISOString()]
     );
   }
 
