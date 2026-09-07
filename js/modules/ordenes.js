@@ -241,9 +241,33 @@ const Ordenes = (() => {
       : [nuevoEstado, ts, ordenId];
 
     db().run(
-      `UPDATE ordenes_compra SET estado = ?, updated_at = ?${extra} WHERE id = ?`,
+      `UPDATE ordenes_compra SET estado = ?, sync_status = 'pending', updated_at = ?${extra} WHERE id = ?`,
       params
     );
+  }
+
+  /**
+   * Marca la orden para que el proximo push la suba.
+   *
+   * Los items NO tienen sync_status propio: viajan embebidos en la orden (ver
+   * denormalizeOrden en sync.js), asi que alcanza con marcar el padre. Sin
+   * esto, todo lo que se editaba desde el POS —marcarla revisada, sacar un
+   * producto, corregir una cantidad— se quedaba en esa maquina: el push
+   * selecciona por sync_status y la orden seguia figurando como 'synced'.
+   */
+  function marcarOrdenPendiente(ordenId) {
+    if (!ordenId) return;
+    db().run(
+      `UPDATE ordenes_compra SET sync_status = 'pending', updated_at = ? WHERE id = ?`,
+      [now(), ordenId]
+    );
+  }
+
+  function ordenDeItem(itemId) {
+    const r = db().query(
+      `SELECT orden_id FROM orden_compra_items WHERE id = ?`, [itemId]
+    )[0];
+    return r ? r.orden_id : null;
   }
 
   /**
@@ -254,13 +278,17 @@ const Ordenes = (() => {
       `UPDATE orden_compra_items SET cantidad_final = ?, notas = ? WHERE id = ?`,
       [cantidadFinal, notas || null, itemId]
     );
+    marcarOrdenPendiente(ordenDeItem(itemId));
   }
 
   /**
    * Elimina un item de la orden (solo en borrador/revisada).
    */
   function eliminarItem(itemId) {
+    // El id de la orden hay que leerlo ANTES de borrar la fila.
+    const ordenId = ordenDeItem(itemId);
     db().run(`DELETE FROM orden_compra_items WHERE id = ?`, [itemId]);
+    marcarOrdenPendiente(ordenId);
   }
 
   /**
@@ -294,7 +322,7 @@ const Ordenes = (() => {
     ]);
 
     db().run(
-      `UPDATE ordenes_compra SET updated_at = ? WHERE id = ?`,
+      `UPDATE ordenes_compra SET sync_status = 'pending', updated_at = ? WHERE id = ?`,
       [ts, ordenId]
     );
     return true;
@@ -491,7 +519,7 @@ const Ordenes = (() => {
     notasInput.onblur = () => {
       if (editable) {
         db().run(
-          `UPDATE ordenes_compra SET notas = ?, updated_at = ? WHERE id = ?`,
+          `UPDATE ordenes_compra SET notas = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
           [notasInput.value || null, now(), orden.id]
         );
       }
@@ -616,7 +644,7 @@ const Ordenes = (() => {
           `UPDATE orden_compra_items SET notas = ?, codigo_proveedor = ? WHERE id = ?`,
           [notas, cod, itemId]
         );
-        db().run(`UPDATE ordenes_compra SET updated_at = ? WHERE id = ?`, [now(), ui.ordenActiva]);
+        marcarOrdenPendiente(ui.ordenActiva);
       };
 
       inputNotas?.addEventListener('blur', saveRow);
@@ -661,7 +689,7 @@ const Ordenes = (() => {
         `UPDATE orden_compra_items SET cantidad_final = ?, unidad_pedida = ? WHERE id = ?`,
         [cant, unidad, itemId]
       );
-      db().run(`UPDATE ordenes_compra SET updated_at = ? WHERE id = ?`, [now(), ui.ordenActiva]);
+      marcarOrdenPendiente(ui.ordenActiva);
       overlay.style.display = 'none';
       renderOrden();
     };
