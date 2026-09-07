@@ -4,6 +4,8 @@
  * Flujo: borrador → revisada → confirmada → enviada → recibiendo → recibida_parcial → cerrada
  */
 
+import Buscador from './buscador_productos.js';
+
 const Ordenes = (() => {
   'use strict';
 
@@ -1019,9 +1021,9 @@ const Ordenes = (() => {
       LEFT JOIN stock st ON st.producto_id = p.id AND st.sucursal_id = ?
       LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
       WHERE p.activo = 1
-        AND (p.nombre LIKE ? OR cb.codigo = ?)
+        AND (p.nombre LIKE ? OR cb.codigo IN (${Buscador.variantesCodigo(q).map(() => '?').join(',') || "''"}))
       LIMIT 20
-    `, [ui.user.sucursal_id, `%${q}%`, q]);
+    `, [ui.user.sucursal_id, `%${q}%`, ...Buscador.variantesCodigo(q)]);
 
     ge('ord-agregar-results').innerHTML = res.length
       ? res.map(p => `
