@@ -604,7 +604,12 @@ const Ordenes = (() => {
           <td class="${diasCls}">${dias}</td>
           <td><input class="ord-cell-input ord-cell-input-text" type="text"
             value="${esc(it.notas || '')}" placeholder="—"></td>
-          <td><button class="ord-btn-del" data-del="${esc(it.id)}" aria-label="Eliminar" title="Eliminar">×</button></td>
+          <td style="white-space:nowrap">
+            <button class="ord-btn-edit-cant" data-cambiar-prov="${esc(it.id)}"
+              data-prod="${esc(it.producto_id)}" data-nombre="${esc(it.producto_nombre || '')}"
+              title="Cambiar el proveedor de este producto">🏭</button>
+            <button class="ord-btn-del" data-del="${esc(it.id)}" aria-label="Eliminar" title="Eliminar">×</button>
+          </td>
         </tr>`;
       } else {
         return `<tr>
@@ -658,6 +663,12 @@ const Ordenes = (() => {
       });
     });
 
+    tbody.querySelectorAll('[data-cambiar-prov]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        openCambiarProvOverlay(btn.dataset.cambiarProv, btn.dataset.prod, btn.dataset.nombre);
+      });
+    });
+
     // Eliminar item
     tbody.querySelectorAll('[data-del]').forEach(btn =>
       btn.addEventListener('click', () => {
@@ -670,6 +681,90 @@ const Ordenes = (() => {
   }
 
   // ── OVERLAY: EDITAR CANTIDAD ──────────────────────────────────────────────────
+
+  /**
+   * Cambia el proveedor de un producto desde la revision de una orden.
+   *
+   * Al confirmar pasan dos cosas: el producto queda asignado al proveedor
+   * nuevo y sale de esta orden, que es de otro proveedor y por lo tanto ya no
+   * le corresponde.
+   */
+  function openCambiarProvOverlay(itemId, productoId, productoNombre) {
+    const overlay = ge('ord-cambiar-prov-overlay');
+    const select   = ge('ord-cambprov-select');
+    const aviso    = ge('ord-cambprov-aviso');
+    const titulo   = ge('ord-cambprov-producto');
+    if (!overlay || !select) return;
+
+    const orden = getOrden(ui.ordenActiva);
+    const provOrdenId = orden?.proveedor_id || null;
+
+    const prod = db().query(
+      `SELECT proveedor_principal_id, proveedor_alternativo_id FROM productos WHERE id = ?`,
+      [productoId]
+    )[0] || {};
+
+    const proveedores = db().query(
+      `SELECT id, razon_social FROM proveedores WHERE activo = 1
+       ORDER BY razon_social COLLATE NOCASE ASC`
+    ) || [];
+
+    titulo.textContent = productoNombre || 'Producto';
+    select.innerHTML =
+      '<option value="">— Seleccionar proveedor —</option>' +
+      proveedores
+        .filter(p => p.id !== provOrdenId)   // el de esta orden es justamente el que no va
+        .map(p => `<option value="${esc(p.id)}">${esc(p.razon_social)}</option>`)
+        .join('');
+
+    // Si el proveedor de esta orden figura como alternativo del producto, hay
+    // que sacarlo tambien: la orden se arma con
+    // (proveedor_principal_id = ? OR proveedor_alternativo_id = ?), asi que si
+    // queda, el producto vuelve a aparecer en la proxima orden de este mismo
+    // proveedor y el cambio no sirve de nada.
+    const eraAlternativo = prod.proveedor_alternativo_id
+      && prod.proveedor_alternativo_id === provOrdenId;
+
+    aviso.innerHTML = 'El producto se quita de esta orden y queda asignado al proveedor elegido.'
+      + (eraAlternativo
+          ? '<br>También se lo va a quitar como proveedor alternativo, porque si no volvería a aparecer en la próxima orden.'
+          : '');
+
+    overlay.style.display = 'flex';
+    setTimeout(() => select.focus(), 60);
+
+    const cerrar = () => { overlay.style.display = 'none'; };
+
+    const doSave = () => {
+      const nuevoProv = select.value;
+      if (!nuevoProv) { showToast('Elegí un proveedor', 'error'); return; }
+
+      const ts = now();
+      const campos = ['proveedor_principal_id = ?'];
+      const vals   = [nuevoProv];
+      if (eraAlternativo) { campos.push('proveedor_alternativo_id = NULL'); }
+      campos.push("sync_status = 'pending'", 'updated_at = ?');
+      vals.push(ts, productoId);
+
+      db().run(`UPDATE productos SET ${campos.join(', ')} WHERE id = ?`, vals);
+
+      // Sale de esta orden (eliminarItem ya marca la orden como pendiente)
+      eliminarItem(itemId);
+
+      cerrar();
+      renderOrden();
+      const nombreProv = proveedores.find(p => p.id === nuevoProv)?.razon_social || 'el nuevo proveedor';
+      showToast(`Producto reasignado a ${nombreProv} y quitado de esta orden`, 'success');
+    };
+
+    ge('ord-cambprov-ok').onclick     = doSave;
+    ge('ord-cambprov-cancel').onclick = cerrar;
+    ge('ord-cambprov-close').onclick  = cerrar;
+    select.onkeydown = e => {
+      if (e.key === 'Enter')  doSave();
+      if (e.key === 'Escape') cerrar();
+    };
+  }
 
   function openEditCantOverlay(itemId, cantActual, unidadActual) {
     const overlay = ge('ord-edit-cant-overlay');
