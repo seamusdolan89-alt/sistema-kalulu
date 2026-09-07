@@ -409,6 +409,10 @@ const Ordenes = (() => {
         const ordenId = btn.dataset.eliminar;
         db().run(`DELETE FROM orden_compra_items WHERE orden_id = ?`, [ordenId]);
         db().run(`DELETE FROM ordenes_compra WHERE id = ?`, [ordenId]);
+        // Deja la marca para que el borrado llegue a la otra maquina: un DELETE
+        // por si solo no se puede sincronizar, la fila deja de existir y no hay
+        // nada que pushear.
+        db().registrarEliminacion('ordenes_compra', ordenId);
         renderLista();
       })
     );

@@ -53,6 +53,9 @@
     { table: 'pagos_proveedores', collection: 'pagos_proveedores', pk: 'id',   denormalize: denormalizePagoProveedor },
     { table: 'stock',             collection: 'stock',             pk: null,   compositeKey: ['producto_id', 'sucursal_id'], denormalize: denormalizeStock },
     { table: 'categorias',        collection: 'categorias',        pk: 'id',   denormalize: null },
+    // Las marcas de borrado viajan como cualquier otra tabla; del otro lado
+    // applyEliminacion las convierte en el DELETE correspondiente.
+    { table: 'eliminaciones',     collection: 'eliminaciones',     pk: 'id',   denormalize: null },
     { table: 'productos',         collection: 'productos',         pk: 'id',   denormalize: denormalizeProducto },
     { table: 'cuenta_corriente',  collection: 'cuenta_corriente',  pk: 'id',   denormalize: denormalizeCuentaCorriente },
     { table: 'clientes',          collection: 'clientes',          pk: 'id',   denormalize: null },
@@ -71,6 +74,11 @@
   // Cada entrada define cómo aplicar un documento admin al SQLite local.
 
   const PULL_SOURCES = [
+    // Va primero a proposito: si en la misma tanda viene una marca de borrado y
+    // ademas el documento viejo del registro, conviene borrar antes de que el
+    // otro intente recrearlo (igual applyX consulta fueEliminado, esto es para
+    // no hacer trabajo al pedo).
+    { collection: 'eliminaciones',     applyFn: applyEliminacion },
     { collection: 'usuarios',          applyFn: applyUsuarioFull },
     { collection: 'producto_codigo_proveedor', applyFn: applyCodigoProveedorFull },
     { collection: 'compras',           applyFn: applyCompra },
@@ -480,6 +488,7 @@
   }
 
   function applyOrdenCompra(data) {
+    if (window.SGA_DB.fueEliminado('ordenes_compra', data.id)) return;
     if (tienePendienteLocal('ordenes_compra', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
     window.SGA_DB.run(`
@@ -491,6 +500,10 @@
        data.fecha_creacion, data.fecha_entrega || null,
        data.estado || 'borrador', data.notas || null, data.updated_at || now]
     );
+
+    // Reemplazo completo, igual que en applyCompra: si del otro lado sacaron un
+    // item de la orden, con INSERT OR REPLACE solo se quedaba para siempre.
+    window.SGA_DB.run(`DELETE FROM orden_compra_items WHERE orden_id = ?`, [data.id]);
 
     for (const item of (data._items || [])) {
       window.SGA_DB.run(`
@@ -641,6 +654,7 @@
   }
 
   function applyPromocion(data) {
+    if (window.SGA_DB.fueEliminado('promociones', data.id)) return;
     if (tienePendienteLocal('promociones', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
     window.SGA_DB.run(`
@@ -846,6 +860,7 @@
   }
 
   function applyProductoFull(data) {
+    if (window.SGA_DB.fueEliminado('productos', data.id)) return;
     if (tienePendienteLocal('productos', 'id = ?', [data.id])) return;
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO productos
@@ -871,6 +886,16 @@
        data.es_oferta ? 1 : 0, data.oferta_desde || null, data.oferta_hasta || null,
        data.activo !== false ? 1 : 0, data.fecha_alta || null, data.iva || null, data.updated_at || null]
     );
+
+    // Reemplazo completo de codigos y sustitutos: sin esto, quitar un codigo de
+    // barras o sacar un producto de su grupo no viajaba — el registro seguia
+    // existiendo del otro lado porque solo se insertaba, nunca se borraba.
+    if (Array.isArray(data.codigos_barras)) {
+      window.SGA_DB.run(`DELETE FROM codigos_barras WHERE producto_id = ?`, [data.id]);
+    }
+    if (Array.isArray(data.producto_sustitutos)) {
+      window.SGA_DB.run(`DELETE FROM producto_sustitutos WHERE producto_id = ?`, [data.id]);
+    }
 
     for (const cb of (data.codigos_barras || [])) {
       try {
@@ -998,6 +1023,27 @@
        data.monto || 0, data.descripcion || null,
        data.fecha || null, data.usuario_id || null]
     );
+  }
+
+  // Marca de borrado recibida del otro lado: se guarda la marca y se aplica el
+  // DELETE. La marca queda para que un documento viejo que siga en Firestore no
+  // reviva el registro (ver la consulta a fueEliminado en cada applyX).
+  function applyEliminacion(data) {
+    const tabla = data.tabla;
+    const regId = data.registro_id;
+    if (!tabla || !regId) return;
+
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO eliminaciones
+        (id, tabla, registro_id, fecha, usuario_id, sync_status, updated_at)
+      VALUES (?,?,?,?,?, 'synced', ?)`,
+      [data.id || (tabla + ':' + regId), tabla, regId,
+       data.fecha || null, data.usuario_id || null,
+       data.updated_at || new Date().toISOString()]
+    );
+
+    const ok = window.SGA_DB.aplicarEliminacion(tabla, regId);
+    if (ok) console.log('🗑️  Borrado sincronizado:', tabla, regId);
   }
 
   function applyVentaFull(data) {
