@@ -2224,6 +2224,12 @@ export const POS = (() => {
     const devSearchVentas = (q, expandido) => {
       if (!q || q.length < 2 || !state.currentSucursal) return [];
       const like = `%${q}%`;
+      // El buscador dice "codigo de barras" y de verdad acepta uno, asi que
+      // tiene que tolerar las mismas diferencias de ceros que el resto del
+      // sistema: un EAN-8 puede llegar expandido a EAN-13 y un UPC-A guardado
+      // desde un Excel numerico perdio su cero inicial (ver buscador_productos).
+      const codVariantes = Buscador.variantesCodigo(q);
+      const codPh = codVariantes.length ? codVariantes.map(() => '?').join(',') : "''";
       const dateFilter = expandido ? '' : `AND v.fecha >= date('now', '-90 days')`;
       try {
         return window.SGA_DB.query(`
@@ -2240,11 +2246,11 @@ export const POS = (() => {
             AND (
               LOWER(COALESCE(c.nombre,'') || ' ' || COALESCE(c.apellido,'')) LIKE LOWER(?)
               OR LOWER(p.nombre) LIKE LOWER(?)
-              OR cb.codigo = ?
+              OR cb.codigo IN (${codPh})
               OR LOWER(v.id) LIKE LOWER(?)
             )
           ORDER BY v.fecha DESC LIMIT 40
-        `, [state.currentSucursal.id, like, like, q, like]);
+        `, [state.currentSucursal.id, like, like, ...codVariantes, like]);
       } catch (e) { console.warn('devSearchVentas:', e); return []; }
     };
 
