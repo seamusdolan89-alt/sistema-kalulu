@@ -338,6 +338,7 @@ const Ordenes = (() => {
     user:          null,
     kbHandler:     null,
     focusedItemId: null,      // ID del item con foco de teclado en la tabla
+    panelAbierto: false,      // panel de acciones desplegado sobre la fila con foco
   };
 
   let agHlIdx = -1; // highlight index para el dropdown de agregar producto
@@ -577,6 +578,10 @@ const Ordenes = (() => {
       return;
     }
 
+    // Se reconstruye el tbody: el panel se va con el, asi que la bandera
+    // tiene que acompanar o quedan atajos activos sin panel a la vista.
+    ui.panelAbierto = false;
+
     tbody.innerHTML = orden.items.map(it => {
       const dias = it.dias_sin_stock_6m || 0;
       const diasCls = dias === 0 ? 'ord-dias-ok' : dias <= 5 ? 'ord-dias-warn' : 'ord-dias-crit';
@@ -604,10 +609,13 @@ const Ordenes = (() => {
           <td class="${diasCls}">${dias}</td>
           <td><input class="ord-cell-input ord-cell-input-text" type="text"
             value="${esc(it.notas || '')}" placeholder="—"></td>
-          <td style="white-space:nowrap">
+          <td class="ord-acciones-cell" style="white-space:nowrap">
             <button class="ord-btn-edit-cant" data-cambiar-prov="${esc(it.id)}"
               data-prod="${esc(it.producto_id)}" data-nombre="${esc(it.producto_nombre || '')}"
               title="Cambiar el proveedor de este producto">🏭</button>
+            <button class="ord-btn-edit-cant" data-sustituto="${esc(it.id)}"
+              data-prod="${esc(it.producto_id)}" data-nombre="${esc(it.producto_nombre || '')}"
+              title="Asociar un sustituto a este producto">⇄</button>
             <button class="ord-btn-del" data-del="${esc(it.id)}" aria-label="Eliminar" title="Eliminar">×</button>
           </td>
         </tr>`;
@@ -669,6 +677,12 @@ const Ordenes = (() => {
       });
     });
 
+    tbody.querySelectorAll('[data-sustituto]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        openSustitutoOverlay(btn.dataset.sustituto, btn.dataset.prod, btn.dataset.nombre);
+      });
+    });
+
     // Eliminar item
     tbody.querySelectorAll('[data-del]').forEach(btn =>
       btn.addEventListener('click', () => {
@@ -681,6 +695,273 @@ const Ordenes = (() => {
   }
 
   // ── OVERLAY: EDITAR CANTIDAD ──────────────────────────────────────────────────
+
+  // ── Panel de acciones de la fila ───────────────────────────────────────────
+  //
+  // Las tres primeras teclas solo valen con el panel abierto. Con el panel
+  // cerrado, cualquier letra sigue yendo al campo Notas de la fila, que es como
+  // funcionaba hasta ahora y se usa seguido: si las acciones tuvieran letra
+  // suelta, escribir una nota seria imposible.
+  const PANEL_ACCIONES = [
+    { key: 'P',      tecla: 'P',     label: 'Cambiar proveedor', accion: 'prov' },
+    { key: 'S',      tecla: 'S',     label: 'Asociar sustituto', accion: 'sust' },
+    { key: 'Enter',  tecla: 'Enter', label: 'Editar cantidad',   accion: 'cant' },
+    { key: 'Delete', tecla: 'Supr',  label: 'Quitar',            accion: 'del', peligro: true },
+  ];
+
+  function cerrarPanelFila() {
+    ge('ord-items-tbody')?.querySelector('.ord-panel-fila')?.remove();
+    ui.panelAbierto = false;
+  }
+
+  function abrirPanelFila() {
+    cerrarPanelFila();
+    if (!ui.focusedItemId) return;
+    const celda = ge('ord-items-tbody')
+      ?.querySelector(`tr[data-item-id="${ui.focusedItemId}"] .ord-acciones-cell`);
+    if (!celda) return;   // orden ya confirmada: la fila no es editable
+
+    const div = document.createElement('div');
+    div.className = 'ord-panel-fila';
+    div.setAttribute('role', 'group');
+    div.setAttribute('aria-label', 'Acciones del producto');
+    div.innerHTML = PANEL_ACCIONES.map((a, i) =>
+      (i === 2 ? '<span class="ord-panel-sep"></span>' : '') +
+      `<button class="ord-panel-acc${a.peligro ? ' peligro' : ''}" data-panel-acc="${a.accion}">` +
+        `<span class="ord-panel-tecla">${esc(a.tecla)}</span>${esc(a.label)}</button>`
+    ).join('');
+
+    div.querySelectorAll('[data-panel-acc]').forEach(b =>
+      b.addEventListener('click', () => ejecutarAccionPanel(b.dataset.panelAcc))
+    );
+    celda.appendChild(div);
+    ui.panelAbierto = true;
+  }
+
+  // Cada accion delega en el boton que ya existe en la fila, para no tener dos
+  // caminos distintos que hagan lo mismo.
+  function ejecutarAccionPanel(accion) {
+    const row = ge('ord-items-tbody')
+      ?.querySelector(`tr[data-item-id="${ui.focusedItemId}"]`);
+    cerrarPanelFila();
+    const sel = { prov: '[data-cambiar-prov]', sust: '[data-sustituto]',
+                  cant: '[data-edit-cant]',    del:  '[data-del]' }[accion];
+    if (sel) row?.querySelector(sel)?.click();
+  }
+
+  // ── Asociar sustituto ──────────────────────────────────────────────────────
+
+  /** Miembros del grupo de sustitutos al que pertenece un producto (vacio si no tiene). */
+  function miembrosDelGrupo(prodId) {
+    const ref = db().query(
+      `SELECT referencia_id FROM producto_sustitutos
+       WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1`,
+      [prodId]
+    )[0];
+    if (!ref) return [];
+    return db().query(`
+      SELECT DISTINCT ps.producto_id AS id, p.nombre
+      FROM producto_sustitutos ps
+      JOIN productos p ON p.id = ps.producto_id
+      WHERE ps.referencia_id = ?
+      ORDER BY p.nombre COLLATE NOCASE ASC
+    `, [ref.referencia_id]);
+  }
+
+  /**
+   * Deja a dos productos en el mismo grupo, con la referencia elegida.
+   *
+   * Si alguno ya pertenecia a un grupo, ese grupo entero se repunta a la nueva
+   * referencia — misma logica que setReferencia() en el editor de producto.
+   */
+  function asociarAlGrupo(prodA, prodB, refId) {
+    const fecha = window.SGA_Utils.formatISODate(new Date());
+    const ts    = now();
+
+    const viejas = db().query(
+      `SELECT DISTINCT referencia_id FROM producto_sustitutos
+       WHERE producto_id IN (?, ?) AND referencia_id IS NOT NULL`,
+      [prodA, prodB]
+    ).map(r => r.referencia_id).filter(r => r && r !== refId);
+
+    for (const vieja of viejas) {
+      db().run(
+        `UPDATE producto_sustitutos SET referencia_id = ?, sustituto_id = ?
+         WHERE referencia_id = ?`,
+        [refId, refId, vieja]
+      );
+    }
+
+    for (const pid of [prodA, prodB, refId]) {
+      db().run(
+        `INSERT OR REPLACE INTO producto_sustitutos
+           (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion)
+         VALUES (?, ?, ?, 1, ?)`,
+        [pid, refId, refId, fecha]
+      );
+    }
+
+    // El grupo viaja embebido en el documento de cada producto (ver
+    // applyProductoFull en sync.js), asi que hay que marcarlos pendientes uno
+    // por uno: sin esto el agrupamiento se queda en esta maquina.
+    const miembros = db().query(
+      `SELECT DISTINCT producto_id FROM producto_sustitutos WHERE referencia_id = ?`,
+      [refId]
+    ).map(r => r.producto_id);
+
+    for (const pid of new Set([...miembros, prodA, prodB, refId])) {
+      db().run(
+        `UPDATE productos SET sync_status = 'pending', updated_at = ? WHERE id = ?`,
+        [ts, pid]
+      );
+    }
+  }
+
+  /**
+   * Asocia un sustituto sin salir de la revision de la orden.
+   *
+   * Al asociar, el grupo pasa a pedirse a traves de una sola referencia y su
+   * stock efectivo es la suma del grupo. Por eso, si este producto deja de ser
+   * la referencia —o si el stock del grupo ya cubre el minimo— sale de la orden:
+   * es exactamente el criterio con que se genero.
+   */
+  function openSustitutoOverlay(itemId, productoId, productoNombre) {
+    const overlay = ge('ord-sustituto-overlay');
+    if (!overlay) return;
+
+    const search   = ge('ord-sust-search');
+    const results  = ge('ord-sust-results');
+    const confirm_ = ge('ord-sust-confirm');
+    const selRef   = ge('ord-sust-ref');
+    const aviso    = ge('ord-sust-aviso');
+    const btnOk    = ge('ord-sust-ok');
+
+    let elegido = null;   // { id, nombre }
+
+    const grupo = miembrosDelGrupo(productoId);
+    ge('ord-sust-producto').textContent = productoNombre || 'Producto';
+    ge('ord-sust-grupo').textContent = grupo.length
+      ? 'Ya está agrupado con: ' + grupo.filter(m => m.id !== productoId)
+          .map(m => m.nombre).join(', ')
+      : 'Todavía no pertenece a ningún grupo de sustitutos.';
+
+    search.value = '';
+    results.innerHTML = '';
+    confirm_.style.display = 'none';
+    btnOk.disabled = true;
+
+    const pintarAviso = () => {
+      const refId = selRef.value;
+      aviso.textContent = refId === productoId
+        ? `Se sigue pidiendo ${productoNombre}, y su stock ahora suma el del grupo. ` +
+          'Si con eso ya supera el mínimo, sale de esta orden.'
+        : `El grupo pasa a pedirse a través de ${selRef.selectedOptions[0]?.textContent || 'la referencia'}, ` +
+          `así que ${productoNombre} sale de esta orden.`;
+    };
+
+    const elegir = (id, nombre) => {
+      elegido = { id, nombre };
+      const opciones = [];
+      const vistos = new Set();
+      for (const m of [...grupo, ...miembrosDelGrupo(id),
+                       { id: productoId, nombre: productoNombre }, { id, nombre }]) {
+        if (m.id && !vistos.has(m.id)) { vistos.add(m.id); opciones.push(m); }
+      }
+      const refActual = grupo.length
+        ? db().query(`SELECT referencia_id FROM producto_sustitutos
+                      WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1`,
+                     [productoId])[0]?.referencia_id
+        : null;
+      // Por defecto, el producto que acabas de buscar: lo normal es marcar que
+      // el de la orden ya esta cubierto por ese otro.
+      const porDefecto = refActual || id;
+      selRef.innerHTML = opciones
+        .map(o => `<option value="${esc(o.id)}"${o.id === porDefecto ? ' selected' : ''}>${esc(o.nombre)}</option>`)
+        .join('');
+      confirm_.style.display = '';
+      btnOk.disabled = false;
+      pintarAviso();
+    };
+
+    const buscar = (q) => {
+      if (!q.trim()) { results.innerHTML = ''; return; }
+      const vars = Buscador.variantesCodigo(q);
+      const res = db().query(`
+        SELECT DISTINCT p.id, p.nombre, COALESCE(st.cantidad, 0) AS stock
+        FROM productos p
+        LEFT JOIN stock st ON st.producto_id = p.id AND st.sucursal_id = ?
+        LEFT JOIN codigos_barras cb ON cb.producto_id = p.id
+        WHERE p.activo = 1 AND p.id != ?
+          AND (p.nombre LIKE ? OR cb.codigo IN (${vars.map(() => '?').join(',') || "''"}))
+        LIMIT 20
+      `, [ui.user.sucursal_id, productoId, `%${q}%`, ...vars]);
+
+      results.innerHTML = res.length
+        ? res.map(p => `
+            <div class="ord-search-result" data-sust-pick="${esc(p.id)}" data-nom="${esc(p.nombre)}">
+              <span style="font-weight:600">${esc(p.nombre)}</span>
+              <span style="color:#607080;font-size:11px">Stock: ${fmtN(p.stock)}</span>
+            </div>`).join('')
+        : '<p style="color:#8090a0;padding:8px 0">Sin resultados.</p>';
+
+      results.querySelectorAll('[data-sust-pick]').forEach(el =>
+        el.addEventListener('click', () => {
+          results.querySelectorAll('.ord-search-result')
+                 .forEach(r => r.classList.toggle('highlighted', r === el));
+          elegir(el.dataset.sustPick, el.dataset.nom);
+        })
+      );
+    };
+
+    const cerrar = () => { overlay.style.display = 'none'; };
+
+    const guardar = () => {
+      if (!elegido) return;
+      const refId = selRef.value;
+      asociarAlGrupo(productoId, elegido.id, refId);
+
+      const stockGrupo = stockEfectivo(refId, ui.user.sucursal_id);
+      const item = db().query(
+        `SELECT stock_minimo FROM orden_compra_items WHERE id = ?`, [itemId]
+      )[0] || {};
+      const min = item.stock_minimo || 0;
+
+      cerrar();
+
+      // Sale de la orden si ya no es la referencia (el grupo se pide por ella)
+      // o si el stock sumado del grupo ya cubre el minimo.
+      const yaNoEsReferencia = refId !== productoId;
+      const stockAlcanza     = stockGrupo - min > 0;
+
+      if (yaNoEsReferencia || stockAlcanza) {
+        eliminarItem(itemId);
+        ui.focusedItemId = null;
+        renderOrden();
+        renderTabs();
+        showToast(yaNoEsReferencia
+          ? `Agrupado. La orden ahora le pide a ${elegido.nombre}`
+          : 'Agrupado. Con el stock del grupo ya no hace falta pedirlo', 'success');
+        return;
+      }
+
+      // Sigue haciendo falta: al menos que la fila muestre el stock real del grupo.
+      db().run(`UPDATE orden_compra_items SET stock_actual = ? WHERE id = ?`,
+               [stockGrupo, itemId]);
+      marcarOrdenPendiente(ui.ordenActiva);
+      renderOrden();
+      showToast('Agrupado. Sigue haciendo falta pedirlo', 'success');
+    };
+
+    overlay.style.display = 'flex';
+    setTimeout(() => search.focus(), 60);
+
+    search.oninput   = () => buscar(search.value);
+    selRef.onchange  = pintarAviso;
+    btnOk.onclick    = guardar;
+    ge('ord-sust-cancel').onclick = cerrar;
+    ge('ord-sust-close').onclick  = cerrar;
+    search.onkeydown = e => { if (e.key === 'Escape') cerrar(); };
+  }
 
   /**
    * Cambia el proveedor de un producto desde la revision de una orden.
@@ -978,9 +1259,10 @@ const Ordenes = (() => {
       }
 
       // Si hay overlays abiertos, no interceptar más teclas (cada overlay maneja las suyas)
-      const editOpen    = ge('ord-edit-cant-overlay')?.style.display === 'flex';
-      const agregarOpen = ge('ord-agregar-overlay')?.style.display === 'flex';
-      if (editOpen || agregarOpen) return;
+      const overlayAbierto = ['ord-edit-cant-overlay', 'ord-agregar-overlay',
+                              'ord-cambiar-prov-overlay', 'ord-sustituto-overlay']
+        .some(id => ge(id)?.style.display === 'flex');
+      if (overlayAbierto) return;
 
       const tag     = document.activeElement?.tagName?.toLowerCase();
       const inInput = tag === 'input' || tag === 'select' || tag === 'textarea';
@@ -998,13 +1280,27 @@ const Ordenes = (() => {
         const next = e.key === 'ArrowDown'
           ? Math.min(ids.length - 1, idx === -1 ? 0 : idx + 1)
           : Math.max(0, idx === -1 ? 0 : idx - 1);
+        cerrarPanelFila();
         setRowFocus(ids[next]);
+        return;
+      }
+
+      // → abre el panel de acciones de la fila; ← / Esc lo cierran
+      if (e.key === 'ArrowRight' && !inInput && ui.focusedItemId && !ui.panelAbierto) {
+        e.preventDefault();
+        abrirPanelFila();
+        return;
+      }
+      if ((e.key === 'ArrowLeft' || e.key === 'Escape') && !inInput && ui.panelAbierto) {
+        e.preventDefault();
+        cerrarPanelFila();
         return;
       }
 
       // Enter — abrir overlay de editar cantidad para la fila seleccionada
       if (e.key === 'Enter' && !inInput && ui.focusedItemId) {
         e.preventDefault();
+        cerrarPanelFila();
         const row = ge('ord-items-tbody')?.querySelector(`tr[data-item-id="${ui.focusedItemId}"]`);
         row?.querySelector('[data-edit-cant]')?.click();
         return;
@@ -1013,6 +1309,7 @@ const Ordenes = (() => {
       // Supr — eliminar fila seleccionada
       if (e.key === 'Delete' && !inInput && ui.focusedItemId) {
         e.preventDefault();
+        cerrarPanelFila();
         if (!confirm('¿Eliminar este producto de la orden?')) return;
         const nextIds  = getItemIds();
         const delIdx   = nextIds.indexOf(ui.focusedItemId);
@@ -1025,6 +1322,17 @@ const Ordenes = (() => {
           .map(r => r.dataset.itemId);
         if (afterIds.length) setRowFocus(afterIds[Math.min(delIdx, afterIds.length - 1)]);
         return;
+      }
+
+      // Con el panel abierto, las letras ejecutan la accion. Va antes del bloque
+      // de Notas a proposito: si no, la "P" se escribiria en el campo.
+      if (ui.panelAbierto && !inInput && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        const acc = PANEL_ACCIONES.find(a => a.key === e.key.toUpperCase());
+        if (acc) {
+          e.preventDefault();
+          ejecutarAccionPanel(acc.accion);
+          return;
+        }
       }
 
       // Carácter imprimible → focus al campo Notas de la fila seleccionada
