@@ -5,6 +5,7 @@
 // abierta desde antes del deploy tuviera el codigo nuevo con el bootstrap
 // viejo, y el wizard no se abriera nunca sin decir nada.
 import Familia from './familia.js';
+import Buscador from './buscador_productos.js';
 
 const ComprasV2 = (() => {
 
@@ -1274,12 +1275,8 @@ const ComprasV2 = (() => {
     const it = state.items[idx];
     if (!it) return;
 
-    const row = db().query(`
-      SELECT p.* FROM codigos_barras cb
-      JOIN productos p ON p.id = cb.producto_id
-      WHERE cb.codigo = ? AND p.activo = 1
-      LIMIT 1
-    `, [codigo])[0];
+    // Motor unico: tolera las diferencias de ceros entre la base y el lector.
+    const row = Buscador.porCodigo(codigo);
 
     if (!row) {
       mostrarOpcionesCodigoNoReconocido(idx, codigo);

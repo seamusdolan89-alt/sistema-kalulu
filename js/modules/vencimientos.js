@@ -1,3 +1,5 @@
+
+import Buscador from './buscador_productos.js';
 'use strict';
 
 const Vencimientos = (() => {
@@ -29,18 +31,10 @@ const Vencimientos = (() => {
     `, [sucursalId, `%${q}%`, q]);
   }
 
+  // Motor unico (buscador_productos.js): tolera las diferencias de ceros a la
+  // izquierda entre lo que guarda la base y lo que manda el lector.
   function getProductoByBarcode(q) {
-    const rows = db().query(`
-      SELECT p.id, p.nombre, p.costo, p.precio_venta, p.unidad_venta,
-             cb.codigo,
-             COALESCE(s.cantidad, 0) AS stock
-      FROM productos p
-      LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?
-      LEFT JOIN codigos_barras cb ON cb.producto_id = p.id
-      WHERE p.activo = 1 AND cb.codigo = ?
-      LIMIT 1
-    `, [sucursalId, q]);
-    return rows[0] || null;
+    return Buscador.porCodigo(q, { sucursalId });
   }
 
   function renderDropdown(results) {
