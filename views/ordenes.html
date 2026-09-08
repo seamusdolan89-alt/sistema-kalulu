@@ -316,10 +316,12 @@
   .ord-row-focus td:first-child { border-left: 3px solid #667eea; }
 
   /* ── Aviso de que la fila tiene menu ──
-     Solo aparece en la fila activa (y bajo el mouse, para que siga siendo
-     alcanzable con el puntero). La flecha va dibujada como tecla a proposito:
-     asi se lee como atajo de teclado y no como un boton mas para clickear.
-     visibility en vez de display para que la columna no cambie de ancho. */
+     Solo en la fila activa. Con hover tambien se encendia en cualquier fila
+     por la que pasara el mouse camino a otra cosa, y se leia como parpadeo.
+     Con el puntero igual se llega: al hacer clic la fila toma el foco.
+     La flecha va dibujada como tecla a proposito: asi se lee como atajo de
+     teclado y no como un boton mas para clickear. visibility en vez de
+     display para que la columna no cambie de ancho al moverse. */
   .ord-mas-opciones {
     display: inline-flex; align-items: center; gap: 6px;
     background: transparent; border: 1px solid transparent; border-radius: 6px;
@@ -327,7 +329,6 @@
     padding: 3px 7px; cursor: pointer; white-space: nowrap;
     visibility: hidden;
   }
-  #ord-items-tbody tr:hover .ord-mas-opciones,
   .ord-row-focus .ord-mas-opciones { visibility: visible; }
   .ord-row-focus .ord-mas-opciones { color: #667eea; }
   .ord-mas-opciones:hover { background: #f0f4ff; border-color: #d8dfef; }
@@ -535,7 +536,7 @@
 </div>
 
 <div id="ord-sustituto-overlay" class="ord-overlay" style="display:none">
-  <div class="ord-overlay-box">
+  <div class="ord-overlay-box" style="width:480px;max-width:95vw;max-height:80vh">
     <div class="ord-overlay-header">
       <span>Asociar sustituto</span>
       <button class="ord-overlay-close" id="ord-sust-close" aria-label="Cerrar" title="Cerrar">×</button>
@@ -545,7 +546,7 @@
       <div id="ord-sust-grupo" style="margin:6px 0 12px;font-size:12px;color:#607080;line-height:1.5"></div>
       <input type="text" id="ord-sust-search" class="ord-search-input"
              placeholder="Buscar el producto que lo reemplaza…">
-      <div id="ord-sust-results"></div>
+      <div id="ord-sust-results" style="max-height:250px;overflow-y:auto"></div>
       <div id="ord-sust-confirm" style="display:none;margin-top:14px;padding-top:12px;border-top:1px solid #e0e6ee">
         <div style="font-size:12px;font-weight:600;color:#43526a;margin-bottom:6px">Se le pide siempre a:</div>
         <select id="ord-sust-ref" class="ord-editcant-select" style="width:100%"></select>
