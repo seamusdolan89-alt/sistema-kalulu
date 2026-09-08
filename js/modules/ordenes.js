@@ -102,11 +102,17 @@ const Ordenes = (() => {
     for (const refId of refIds) {
       const prod = db().query(`
         SELECT id, nombre, stock_minimo, cant_pedido, unidad_medida,
-               pedido_unidad, pedido_unidades_por_paquete
+               pedido_unidad, pedido_unidades_por_paquete,
+               pausa_reposicion, pausa_reposicion_hasta
         FROM productos WHERE id = ? AND activo = 1
       `, [refId])[0];
 
       if (!prod) continue;  // referencia inactiva o no existe
+
+      // Reposicion pausada a proposito. La fecha se evalua aca, al generar: si
+      // ya vencio, el producto vuelve a sugerirse solo, sin que nada tenga que
+      // haber corrido antes a limpiar la bandera.
+      if (db().pausaVigente(prod)) continue;
 
       const stockAct  = stockEfectivo(refId, sucursalId);
       const stockMin  = prod.stock_minimo || 0;
@@ -691,6 +697,7 @@ const Ordenes = (() => {
   const PANEL_ACCIONES = [
     { key: 'P',      tecla: 'P',     label: 'Cambiar proveedor', accion: 'prov' },
     { key: 'S',      tecla: 'S',     label: 'Asociar sustituto', accion: 'sust' },
+    { key: 'X',      tecla: 'X',     label: 'Pausar reposición', accion: 'pausa' },
     { key: 'Enter',  tecla: 'Enter', label: 'Editar cantidad',   accion: 'cant' },
     { key: 'Delete', tecla: 'Supr',  label: 'Quitar',            accion: 'del', peligro: true },
   ];
@@ -739,7 +746,9 @@ const Ordenes = (() => {
     div.setAttribute('role', 'group');
     div.setAttribute('aria-label', 'Acciones del producto');
     div.innerHTML = PANEL_ACCIONES.map((a, i) =>
-      (i === 2 ? '<span class="ord-panel-sep"></span>' : '') +
+      // El separador divide lo que se agrego (proveedor, sustituto, pausa) de
+      // lo que la fila ya hacia (editar cantidad, quitar).
+      (i === 3 ? '<span class="ord-panel-sep"></span>' : '') +
       `<button class="ord-panel-acc${a.peligro ? ' peligro' : ''}" data-panel-acc="${a.accion}">` +
         `<span class="ord-panel-tecla">${esc(a.tecla)}</span>${esc(a.label)}</button>`
     ).join('');
@@ -761,8 +770,9 @@ const Ordenes = (() => {
     const nombre = row.dataset.nombre;
     cerrarPanelFila();
 
-    if (accion === 'prov')      openCambiarProvOverlay(itemId, prodId, nombre);
-    else if (accion === 'sust') openSustitutoOverlay(itemId, prodId, nombre);
+    if (accion === 'prov')       openCambiarProvOverlay(itemId, prodId, nombre);
+    else if (accion === 'sust')  openSustitutoOverlay(itemId, prodId, nombre);
+    else if (accion === 'pausa') openPausaOverlay(itemId, prodId, nombre);
     else if (accion === 'del')  quitarItemConConfirm(itemId);
     // Editar cantidad sigue teniendo su propio boton en la columna "A pedir",
     // asi que ahi si conviene reusarlo y no duplicar la lectura de la fila.
@@ -789,6 +799,33 @@ const Ordenes = (() => {
   }
 
   /**
+   * Pasa todo un grupo de sustitutos a una referencia nueva.
+   *
+   * La orden de compra le pide siempre a la referencia del grupo, asi que
+   * cambiarla es la unica forma de que el grupo se siga pidiendo cuando la
+   * referencia anterior queda fuera de juego (pausada, o reasignada a otro
+   * proveedor). Marca a los miembros para que el cambio viaje: el grupo va
+   * embebido en el documento de cada producto.
+   */
+  function repuntarReferencia(refViejo, refNuevo) {
+    if (!refViejo || !refNuevo || refViejo === refNuevo) return;
+    db().run(
+      `UPDATE producto_sustitutos SET referencia_id = ?, sustituto_id = ?
+       WHERE referencia_id = ?`,
+      [refNuevo, refNuevo, refViejo]
+    );
+    const ts = now();
+    const miembros = db().query(
+      `SELECT DISTINCT producto_id FROM producto_sustitutos WHERE referencia_id = ?`,
+      [refNuevo]
+    ).map(r => r.producto_id);
+    for (const pid of new Set([...miembros, refViejo, refNuevo])) {
+      db().run(`UPDATE productos SET sync_status = 'pending', updated_at = ? WHERE id = ?`,
+               [ts, pid]);
+    }
+  }
+
+  /**
    * Deja a dos productos en el mismo grupo, con la referencia elegida.
    *
    * Si alguno ya pertenecia a un grupo, ese grupo entero se repunta a la nueva
@@ -804,13 +841,7 @@ const Ordenes = (() => {
       [prodA, prodB]
     ).map(r => r.referencia_id).filter(r => r && r !== refId);
 
-    for (const vieja of viejas) {
-      db().run(
-        `UPDATE producto_sustitutos SET referencia_id = ?, sustituto_id = ?
-         WHERE referencia_id = ?`,
-        [refId, refId, vieja]
-      );
-    }
+    for (const vieja of viejas) repuntarReferencia(vieja, refId);
 
     for (const pid of [prodA, prodB, refId]) {
       db().run(
@@ -835,6 +866,196 @@ const Ordenes = (() => {
         [ts, pid]
       );
     }
+  }
+
+  /** Referencia del grupo de sustitutos de un producto (null si no tiene grupo). */
+  function referenciaDe(prodId) {
+    return db().query(
+      `SELECT referencia_id FROM producto_sustitutos
+       WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1`,
+      [prodId]
+    )[0]?.referencia_id || null;
+  }
+
+  /**
+   * Pausa la reposicion de un producto desde la revision de la orden.
+   *
+   * Pausar NO es lo mismo que dar de baja: el producto se sigue vendiendo y su
+   * stock queda intacto. Lo unico que cambia es que deja de sugerirse al
+   * generar ordenes.
+   *
+   * Lo delicado son los grupos de sustitutos. La orden le pide siempre a la
+   * referencia del grupo, asi que pausar la referencia dejaria al grupo entero
+   * sin pedirse aunque los demas miembros sigan activos. Por eso, si se pausa
+   * la referencia y queda algun miembro sin pausar, hay que elegir a cual se le
+   * pide de ahora en mas — y esa eleccion es del usuario, porque es decidir a
+   * quien comprarle, no un detalle tecnico.
+   */
+  function openPausaOverlay(itemId, productoId, productoNombre) {
+    const overlay = ge('ord-pausa-overlay');
+    if (!overlay) return;
+
+    const selMotivo  = ge('ord-pausa-motivo');
+    const inpOtro    = ge('ord-pausa-motivo-otro');
+    const inpFecha   = ge('ord-pausa-fecha');
+    const refWrap    = ge('ord-pausa-ref-wrap');
+    const selRef     = ge('ord-pausa-ref');
+    const grupoWrap  = ge('ord-pausa-grupo-wrap');
+    const grupoCont  = ge('ord-pausa-grupo');
+    const aviso      = ge('ord-pausa-aviso');
+
+    let modo = 'indef';
+
+    const grupo    = miembrosDelGrupo(productoId);
+    const refGrupo = referenciaDe(productoId);
+    const enGrupo  = grupo.length > 1;
+
+    ge('ord-pausa-producto').textContent = productoNombre || 'Producto';
+
+    // Familia: informativo. La generacion de ordenes no mira producto_madre_id y
+    // la familia solo propaga costo y precio, asi que la pausa no la afecta —
+    // pero conviene decirlo, porque no es obvio.
+    const hijos = db().query(
+      `SELECT COUNT(*) AS n FROM productos WHERE producto_madre_id = ?`, [productoId]
+    )[0]?.n || 0;
+    const madreId = db().query(
+      `SELECT producto_madre_id FROM productos WHERE id = ?`, [productoId]
+    )[0]?.producto_madre_id;
+
+    const infos = [];
+    if (hijos)   infos.push(`Es madre de ${hijos} producto${hijos > 1 ? 's' : ''}. La pausa no los afecta: la familia solo comparte costo y precio.`);
+    if (madreId) infos.push('Pertenece a una familia. La pausa no afecta al resto: la familia solo comparte costo y precio.');
+    if (!enGrupo && !infos.length) infos.push('No tiene sustitutos ni familia: la pausa afecta solo a este producto.');
+    ge('ord-pausa-info').textContent = infos.join(' ');
+
+    // ── miembros del grupo ──
+    if (enGrupo) {
+      grupoWrap.style.display = '';
+      grupoCont.innerHTML = grupo.map(m => `
+        <label class="ord-pausa-miembro">
+          <input type="checkbox" data-miembro="${esc(m.id)}"
+                 ${m.id === productoId ? 'checked' : ''}>
+          <span style="flex:1">${esc(m.nombre)}</span>
+          ${m.id === refGrupo ? '<span class="ref">se le pide a este</span>' : ''}
+        </label>`).join('');
+      grupoCont.querySelectorAll('[data-miembro]').forEach(chk =>
+        chk.addEventListener('change', recalcular)
+      );
+    } else {
+      grupoWrap.style.display = 'none';
+      grupoCont.innerHTML = '';
+    }
+
+    const elegidos = () => enGrupo
+      ? Array.from(grupoCont.querySelectorAll('[data-miembro]:checked')).map(c => c.dataset.miembro)
+      : [productoId];
+
+    function recalcular() {
+      const sel = elegidos();
+      const quedan = grupo.filter(m => !sel.includes(m.id));
+      const pausaLaReferencia = enGrupo && refGrupo && sel.includes(refGrupo);
+
+      if (pausaLaReferencia && quedan.length) {
+        refWrap.style.display = '';
+        selRef.innerHTML = quedan
+          .map(m => `<option value="${esc(m.id)}">${esc(m.nombre)}</option>`).join('');
+      } else {
+        refWrap.style.display = 'none';
+      }
+
+      const partes = [];
+      if (!sel.length) partes.push('Elegí al menos un producto.');
+      else if (enGrupo && !quedan.length) {
+        partes.push('Se pausa el grupo completo: no se va a pedir ninguno de estos productos.');
+      } else if (pausaLaReferencia && quedan.length) {
+        partes.push('El grupo pasa a pedirse a través del producto que elijas acá arriba. ' +
+                    'El cambio es permanente: al despausar no vuelve solo, se cambia desde el editor del producto.');
+      }
+      aviso.textContent = partes.join(' ');
+    }
+
+    // ── motivo y plazo ──
+    selMotivo.value = selMotivo.options[0].value;
+    inpOtro.value = '';
+    inpOtro.style.display = 'none';
+    selMotivo.onchange = () => {
+      const otro = selMotivo.value === '__otro';
+      inpOtro.style.display = otro ? '' : 'none';
+      if (otro) inpOtro.focus();
+    };
+
+    modo = 'indef';
+    inpFecha.value = '';
+    inpFecha.style.display = 'none';
+    overlay.querySelectorAll('.ord-pausa-radio').forEach(btn => {
+      btn.classList.toggle('activo', btn.dataset.modo === 'indef');
+      btn.onclick = () => {
+        modo = btn.dataset.modo;
+        overlay.querySelectorAll('.ord-pausa-radio')
+          .forEach(b => b.classList.toggle('activo', b === btn));
+        inpFecha.style.display = modo === 'fecha' ? '' : 'none';
+        if (modo === 'fecha') inpFecha.focus();
+      };
+    });
+
+    recalcular();
+
+    const cerrar = () => { overlay.style.display = 'none'; };
+
+    const guardar = () => {
+      const motivo = selMotivo.value === '__otro' ? inpOtro.value.trim() : selMotivo.value;
+      if (!motivo) { showToast('Escribí el motivo', 'error'); return; }
+
+      const hasta = modo === 'fecha' ? inpFecha.value : null;
+      if (modo === 'fecha' && !hasta) { showToast('Elegí hasta qué fecha', 'error'); return; }
+
+      const sel = elegidos();
+      if (!sel.length) { showToast('Elegí al menos un producto', 'error'); return; }
+
+      const desde = window.SGA_Utils.formatISODate(new Date());
+      const ts    = now();
+      for (const pid of sel) {
+        db().run(
+          `UPDATE productos SET pausa_reposicion = 1, pausa_reposicion_hasta = ?,
+             pausa_reposicion_motivo = ?, pausa_reposicion_desde = ?,
+             sync_status = 'pending', updated_at = ? WHERE id = ?`,
+          [hasta, motivo, desde, ts, pid]
+        );
+      }
+
+      // Si se pauso la referencia y quedan miembros activos, el grupo tiene que
+      // pasar a pedirle a otro o dejaria de pedirse entero.
+      if (refWrap.style.display !== 'none' && selRef.value) {
+        repuntarReferencia(refGrupo, selRef.value);
+      }
+
+      cerrar();
+
+      // El producto pausado ya no corresponde en esta orden.
+      const salgo = sel.includes(productoId);
+      if (salgo) { eliminarItem(itemId); ui.focusedItemId = null; }
+      renderOrden();
+      renderTabs();
+
+      const cuantos = sel.length;
+      showToast(
+        (cuantos > 1 ? `${cuantos} productos pausados` : 'Producto pausado') +
+        (hasta ? ` hasta el ${hasta.split('-').reverse().join('/')}` : '') +
+        '. Se sigue vendiendo.',
+        'success'
+      );
+    };
+
+    overlay.style.display = 'flex';
+    setTimeout(() => selMotivo.focus(), 60);
+
+    ge('ord-pausa-ok').onclick     = guardar;
+    ge('ord-pausa-cancel').onclick = cerrar;
+    ge('ord-pausa-close').onclick  = cerrar;
+    overlay.onclick   = e => { if (e.target === overlay) cerrar(); };
+    overlay.onkeydown = e => {
+      if (e.key === 'Escape') { e.stopPropagation(); cerrar(); }
+    };
   }
 
   /**
@@ -1319,7 +1540,8 @@ const Ordenes = (() => {
 
       // Si hay overlays abiertos, no interceptar más teclas (cada overlay maneja las suyas)
       const overlayAbierto = ['ord-edit-cant-overlay', 'ord-agregar-overlay',
-                              'ord-cambiar-prov-overlay', 'ord-sustituto-overlay']
+                              'ord-cambiar-prov-overlay', 'ord-sustituto-overlay',
+                              'ord-pausa-overlay']
         .some(id => ge(id)?.style.display === 'flex');
       if (overlayAbierto) return;
 

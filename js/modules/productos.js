@@ -20,6 +20,7 @@
       soloMadres: false,
       activo: '',
       // advanced filters
+      pausa: '',
       proveedor: '',
       tipo: '',
       precioMin: null,
@@ -229,6 +230,15 @@
       filtered = filtered.filter(p => String(p.proveedor_principal_id) === String(state.filters.proveedor));
     }
 
+    // Pausados: se pregunta por pausaVigente y no por la columna, para que un
+    // producto cuya pausa ya venció aparezca como lo que es, activo.
+    if (state.filters.pausa) {
+      const pausado = p => window.SGA_DB.pausaVigente(p);
+      filtered = state.filters.pausa === 'pausados'
+        ? filtered.filter(pausado)
+        : filtered.filter(p => !pausado(p));
+    }
+
     if (state.filters.tipo) {
       filtered = filtered.filter(p => {
         const esMadre = p.es_madre === 1 || p.es_madre === '1';
@@ -297,6 +307,74 @@
   };
 
 
+  /**
+   * Detalle de una pausa de reposición, con sus dos salidas.
+   *
+   * Reanudar la devuelve al circuito normal de las órdenes. Discontinuar es
+   * otra cosa: marca el producto inactivo, y eso lo saca también del POS, o sea
+   * que deja de poder venderse. Por eso el diálogo dice cuánto stock queda
+   * antes de ofrecerlo — discontinuar con mercadería en la góndola es tirarla.
+   */
+  const openPausaDetalle = (productoId) => {
+    const p = window.SGA_DB.query('SELECT * FROM productos WHERE id = ?', [productoId])[0];
+    const modal = getElement('pausa-detalle-modal');
+    if (!p || !modal) return;
+
+    const suc = window.SGA_Auth?.getCurrentUser?.()?.sucursal_id || null;
+    const stock = suc
+      ? (window.SGA_DB.query(
+          'SELECT COALESCE(cantidad, 0) AS qty FROM stock WHERE producto_id = ? AND sucursal_id = ?',
+          [productoId, suc])[0]?.qty || 0)
+      : 0;
+
+    const fecha = (f) => f ? String(f).split('-').reverse().join('/') : null;
+    getElement('pausa-detalle-producto').textContent = p.nombre || 'Producto';
+    getElement('pausa-detalle-datos').innerHTML = [
+      `<b>Motivo:</b> ${p.pausa_reposicion_motivo || '—'}`,
+      `<b>Pausado el:</b> ${fecha(p.pausa_reposicion_desde) || '—'}`,
+      `<b>Hasta:</b> ${fecha(p.pausa_reposicion_hasta) || 'que lo reanudes'}`,
+      `<b>Stock actual:</b> ${stock}`,
+    ].join('<br>');
+
+    getElement('pausa-detalle-aviso').textContent = stock > 0
+      ? `Discontinuar lo marca inactivo y lo saca también del POS, así que no vas a poder vender las ${stock} unidades que quedan. Conviene esperar a que se agoten.`
+      : 'Ya no queda stock, así que discontinuarlo no deja nada sin vender.';
+
+    modal.classList.remove('hidden');
+    const cerrar = () => modal.classList.add('hidden');
+    getElement('btn-close-pausa-detalle').onclick = cerrar;
+
+    getElement('btn-pausa-reanudar').onclick = () => {
+      window.SGA_DB.run(
+        `UPDATE productos SET pausa_reposicion = 0, pausa_reposicion_hasta = NULL,
+           pausa_reposicion_motivo = NULL, pausa_reposicion_desde = NULL,
+           sync_status = 'pending', updated_at = ? WHERE id = ?`,
+        [new Date().toISOString(), productoId]
+      );
+      cerrar();
+      loadProductos();
+      alert(`"${p.nombre}" vuelve a sugerirse al generar órdenes de compra.`);
+    };
+
+    getElement('btn-pausa-discontinuar').onclick = () => {
+      const extra = stock > 0
+        ? `
+
+OJO: quedan ${stock} unidades en stock y no vas a poder venderlas.`
+        : '';
+      if (!confirm(`¿Discontinuar "${p.nombre}"?
+
+Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
+      window.SGA_DB.run(
+        `UPDATE productos SET activo = 0, sync_status = 'pending', updated_at = ? WHERE id = ?`,
+        [new Date().toISOString(), productoId]
+      );
+      cerrar();
+      loadProductos();
+      alert(`"${p.nombre}" quedó discontinuado.`);
+    };
+  };
+
   const renderProductosTable = (items, total) => {
     const tbody = getElement('productos-tbody');
     const info = getElement('pagination-info');
@@ -319,6 +397,11 @@
 
       const estadoLabel  = producto.activo == 1 ? '<span style="color:#388E3C">Activo</span>' : '<span style="color:#d32f2f">Inactivo</span>';
       const ofertaBadge  = producto.es_oferta ? '<span style="display:inline-block;background:#e53935;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle">OFERTA</span>' : '';
+      // El distintivo va en la fila y no solo detrás del filtro: si la pausa
+      // solo se viera filtrando, nadie se enteraría de que existe.
+      const pausaBadge = window.SGA_DB.pausaVigente(producto)
+        ? `<span class="btn-ver-pausa" data-pausa="${producto.id}" title="Reposición pausada — clic para ver o reanudar" style="display:inline-block;background:#ef6c00;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;cursor:pointer">PAUSADO</span>`
+        : '';
 
       // Costo y margen revelan el margen de ganancia — solo se muestran con
       // el permiso can_ver_costos (ver auth.js). El precio de venta sigue
@@ -338,7 +421,7 @@
       return `
         <tr data-id="${producto.id}">
           <td>${producto.codigo_barras || ''}</td>
-          <td>${producto.nombre || ''}${ofertaBadge}</td>
+          <td>${producto.nombre || ''}${ofertaBadge}${pausaBadge}</td>
           <td>${categoria}</td>
           <td>${costoCell}</td>
           <td>${formatCurrency(producto.precio_venta || 0)}</td>
@@ -365,6 +448,13 @@
 
 
   const attachTableActions = () => {
+    document.querySelectorAll('.btn-ver-pausa').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openPausaDetalle(el.dataset.pausa);
+      });
+    });
+
     document.querySelectorAll('.btn-edit-product').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -1549,6 +1639,7 @@
     const set = (id, val) => { const el = getElement(id); if (el) el.value = val ?? ''; };
     const setChk = (id, val) => { const el = getElement(id); if (el) el.checked = !!val; };
     set('adv-tipo',       state.filters.tipo);
+    set('adv-pausa',      state.filters.pausa);
     set('adv-precio-min', state.filters.precioMin ?? '');
     set('adv-precio-max', state.filters.precioMax ?? '');
     set('adv-costo-min',  state.filters.costoMin  ?? '');
@@ -1572,6 +1663,7 @@
     const num = (id) => { const v = getElement(id)?.value; return v !== '' && v != null ? parseFloat(v) : null; };
     state.filters.proveedor     = getElement('adv-proveedor')?.value || '';
     state.filters.tipo          = getElement('adv-tipo')?.value || '';
+    state.filters.pausa         = getElement('adv-pausa')?.value || '';
     state.filters.precioMin     = num('adv-precio-min');
     state.filters.precioMax     = num('adv-precio-max');
     state.filters.costoMin      = num('adv-costo-min');
@@ -1590,6 +1682,7 @@
   const clearAdvancedFilters = () => {
     state.filters.proveedor = '';
     state.filters.tipo = '';
+    state.filters.pausa = '';
     state.filters.precioMin = null;
     state.filters.precioMax = null;
     state.filters.costoMin  = null;
@@ -1599,7 +1692,7 @@
     state.filters.stockMin  = null;
     state.filters.stockMax  = null;
     state.filters.soloBajoMinimo = false;
-    ['adv-proveedor','adv-tipo','adv-precio-min','adv-precio-max',
+    ['adv-proveedor','adv-tipo','adv-pausa','adv-precio-min','adv-precio-max',
      'adv-costo-min','adv-costo-max','adv-margen-min','adv-margen-max',
      'adv-stock-min','adv-stock-max'].forEach(id => { const el = getElement(id); if (el) el.value = ''; });
     const chk = getElement('adv-solo-bajo-minimo');
