@@ -315,6 +315,31 @@
   .ord-row-focus td { background: #eef2ff !important; }
   .ord-row-focus td:first-child { border-left: 3px solid #667eea; }
 
+  /* ── Aviso de que la fila tiene menu ──
+     Solo aparece en la fila activa (y bajo el mouse, para que siga siendo
+     alcanzable con el puntero). La flecha va dibujada como tecla a proposito:
+     asi se lee como atajo de teclado y no como un boton mas para clickear.
+     visibility en vez de display para que la columna no cambie de ancho. */
+  .ord-mas-opciones {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: transparent; border: 1px solid transparent; border-radius: 6px;
+    color: #8090a0; font: inherit; font-size: 12px;
+    padding: 3px 7px; cursor: pointer; white-space: nowrap;
+    visibility: hidden;
+  }
+  #ord-items-tbody tr:hover .ord-mas-opciones,
+  .ord-row-focus .ord-mas-opciones { visibility: visible; }
+  .ord-row-focus .ord-mas-opciones { color: #667eea; }
+  .ord-mas-opciones:hover { background: #f0f4ff; border-color: #d8dfef; }
+  .ord-mas-opciones:focus-visible { outline: 2px solid #667eea; outline-offset: 1px; }
+  .ord-tecla-inline {
+    font-family: ui-monospace, Consolas, monospace; font-size: 11px; font-weight: 700;
+    background: #eef1f6; border: 1px solid #c3ccd8; border-bottom-width: 2px;
+    border-radius: 4px; padding: 0 5px; line-height: 1.4; color: #43526a;
+  }
+  .ord-row-focus .ord-tecla-inline { border-color: #667eea; color: #667eea; }
+  .ord-panel-open .ord-mas-opciones { visibility: hidden; }
+
   /* ── Panel de acciones sobre la fila (se abre con →) ── */
   .ord-acciones-cell { position: relative; }
   .ord-panel-fila {
