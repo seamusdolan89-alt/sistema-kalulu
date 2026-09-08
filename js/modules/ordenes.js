@@ -857,6 +857,7 @@ const Ordenes = (() => {
     const btnOk    = ge('ord-sust-ok');
 
     let elegido = null;   // { id, nombre }
+    let hl = -1;          // resultado resaltado con las flechas
 
     const grupo = miembrosDelGrupo(productoId);
     ge('ord-sust-producto').textContent = productoNombre || 'Producto';
@@ -901,9 +902,12 @@ const Ordenes = (() => {
       confirm_.style.display = '';
       btnOk.disabled = false;
       pintarAviso();
+      // Elegido el producto, lo que sigue es decidir a cual se le pide.
+      setTimeout(() => selRef.focus(), 0);
     };
 
     const buscar = (q) => {
+      hl = -1;
       if (!q.trim()) { results.innerHTML = ''; return; }
       const vars = Buscador.variantesCodigo(q);
       const res = db().query(`
@@ -972,15 +976,50 @@ const Ordenes = (() => {
       showToast('Agrupado. Sigue haciendo falta pedirlo', 'success');
     };
 
+    // Navegacion de la lista con el teclado, igual que el buscador de "Agregar
+    // producto": las flechas mueven el resaltado y Enter elige.
+    const resultados = () => results.querySelectorAll('[data-sust-pick]');
+    const resaltar = (i) => {
+      const els = resultados();
+      hl = Math.max(-1, Math.min(i, els.length - 1));
+      els.forEach((el, n) => el.classList.toggle('highlighted', n === hl));
+      if (hl >= 0) els[hl].scrollIntoView({ block: 'nearest' });
+    };
+
     overlay.style.display = 'flex';
     setTimeout(() => search.focus(), 60);
 
-    search.oninput   = () => buscar(search.value);
-    selRef.onchange  = pintarAviso;
-    btnOk.onclick    = guardar;
+    search.oninput  = () => buscar(search.value);
+    selRef.onchange = pintarAviso;
+    btnOk.onclick   = guardar;
     ge('ord-sust-cancel').onclick = cerrar;
     ge('ord-sust-close').onclick  = cerrar;
-    search.onkeydown = e => { if (e.key === 'Escape') cerrar(); };
+
+    // Clic fuera del cuadro cierra, como en los demas dialogos de la pantalla.
+    overlay.onclick = e => { if (e.target === overlay) cerrar(); };
+
+    // Escape desde cualquier parte del dialogo, no solo desde el buscador: si
+    // el foco estaba en la lista o en el selector, antes no habia forma de salir
+    // con el teclado. stopPropagation para no disparar tambien el de la tabla.
+    overlay.onkeydown = e => {
+      if (e.key === 'Escape') { e.stopPropagation(); cerrar(); }
+    };
+
+    search.onkeydown = e => {
+      const els = resultados();
+      if (e.key === 'ArrowDown') { e.preventDefault(); if (els.length) resaltar(hl + 1); return; }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); resaltar(hl - 1); return; }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (hl >= 0 && els[hl]) els[hl].click();
+        else if (elegido) guardar();
+      }
+    };
+
+    // Con el producto ya elegido, Enter sobre el selector confirma.
+    selRef.onkeydown = e => {
+      if (e.key === 'Enter') { e.preventDefault(); guardar(); }
+    };
   }
 
   /**
