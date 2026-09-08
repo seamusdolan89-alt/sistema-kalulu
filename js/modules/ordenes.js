@@ -589,7 +589,10 @@ const Ordenes = (() => {
       const unidad    = it.unidad_pedida || it.prod_pedido_unidad || 'unidad';
 
       if (editable) {
-        return `<tr data-item-id="${esc(it.id)}">
+        // producto_id y nombre viajan en el <tr> porque el panel los necesita
+        // y ya no hay botones por accion de donde leerlos.
+        return `<tr data-item-id="${esc(it.id)}" data-prod="${esc(it.producto_id)}"
+                    data-nombre="${esc(it.producto_nombre || '')}">
           <td><input class="ord-cell-input ord-cell-input-cod" type="text"
             value="${esc(it.codigo_proveedor || '')}" placeholder="—"
             style="width:80px;text-align:left"></td>
@@ -609,14 +612,9 @@ const Ordenes = (() => {
           <td class="${diasCls}">${dias}</td>
           <td><input class="ord-cell-input ord-cell-input-text" type="text"
             value="${esc(it.notas || '')}" placeholder="—"></td>
-          <td class="ord-acciones-cell" style="white-space:nowrap">
-            <button class="ord-btn-edit-cant" data-cambiar-prov="${esc(it.id)}"
-              data-prod="${esc(it.producto_id)}" data-nombre="${esc(it.producto_nombre || '')}"
-              title="Cambiar el proveedor de este producto">🏭</button>
-            <button class="ord-btn-edit-cant" data-sustituto="${esc(it.id)}"
-              data-prod="${esc(it.producto_id)}" data-nombre="${esc(it.producto_nombre || '')}"
-              title="Asociar un sustituto a este producto">⇄</button>
-            <button class="ord-btn-del" data-del="${esc(it.id)}" aria-label="Eliminar" title="Eliminar">×</button>
+          <td class="ord-acciones-cell" style="white-space:nowrap;text-align:right">
+            <button class="ord-mas-opciones" data-mas-opciones="${esc(it.id)}"
+              title="Más opciones — flecha derecha">Más opciones <span class="ord-tecla-inline">→</span></button>
           </td>
         </tr>`;
       } else {
@@ -671,27 +669,15 @@ const Ordenes = (() => {
       });
     });
 
-    tbody.querySelectorAll('[data-cambiar-prov]').forEach(btn => {
+    tbody.querySelectorAll('[data-mas-opciones]').forEach(btn => {
       btn.addEventListener('click', () => {
-        openCambiarProvOverlay(btn.dataset.cambiarProv, btn.dataset.prod, btn.dataset.nombre);
-      });
-    });
-
-    tbody.querySelectorAll('[data-sustituto]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        openSustitutoOverlay(btn.dataset.sustituto, btn.dataset.prod, btn.dataset.nombre);
+        setRowFocus(btn.dataset.masOpciones);
+        abrirPanelFila();
       });
     });
 
     // Eliminar item
-    tbody.querySelectorAll('[data-del]').forEach(btn =>
-      btn.addEventListener('click', () => {
-        if (!confirm('¿Eliminar este producto de la orden?')) return;
-        eliminarItem(btn.dataset.del);
-        renderOrden();
-        renderTabs();
-      })
-    );
+
   }
 
   // ── OVERLAY: EDITAR CANTIDAD ──────────────────────────────────────────────────
@@ -709,8 +695,35 @@ const Ordenes = (() => {
     { key: 'Delete', tecla: 'Supr',  label: 'Quitar',            accion: 'del', peligro: true },
   ];
 
+  /**
+   * Quita un item de la orden, con confirmacion, y deja el foco en el que sigue.
+   *
+   * Vive en un solo lugar porque ahora la piden dos caminos: la tecla Supr y la
+   * accion "Quitar" del panel.
+   */
+  function quitarItemConConfirm(itemId) {
+    if (!itemId) return;
+    if (!confirm('¿Eliminar este producto de la orden?')) return;
+
+    const antes = Array.from(ge('ord-items-tbody')?.querySelectorAll('tr[data-item-id]') || [])
+      .map(r => r.dataset.itemId);
+    const pos = antes.indexOf(itemId);
+
+    eliminarItem(itemId);
+    ui.focusedItemId = null;
+    renderOrden();
+    renderTabs();
+
+    const quedan = Array.from(ge('ord-items-tbody')?.querySelectorAll('tr[data-item-id]') || [])
+      .map(r => r.dataset.itemId);
+    if (quedan.length) setRowFocus(quedan[Math.min(Math.max(pos, 0), quedan.length - 1)]);
+  }
+
   function cerrarPanelFila() {
-    ge('ord-items-tbody')?.querySelector('.ord-panel-fila')?.remove();
+    const tbody = ge('ord-items-tbody');
+    tbody?.querySelector('.ord-panel-fila')?.remove();
+    tbody?.querySelectorAll('.ord-panel-open')
+      .forEach(c => c.classList.remove('ord-panel-open'));
     ui.panelAbierto = false;
   }
 
@@ -735,18 +748,25 @@ const Ordenes = (() => {
       b.addEventListener('click', () => ejecutarAccionPanel(b.dataset.panelAcc))
     );
     celda.appendChild(div);
+    // El panel tapa la celda: el "Mas opciones" ya no aplica mientras esta abierto.
+    celda.classList.add('ord-panel-open');
     ui.panelAbierto = true;
   }
 
-  // Cada accion delega en el boton que ya existe en la fila, para no tener dos
-  // caminos distintos que hagan lo mismo.
   function ejecutarAccionPanel(accion) {
-    const row = ge('ord-items-tbody')
-      ?.querySelector(`tr[data-item-id="${ui.focusedItemId}"]`);
+    const itemId = ui.focusedItemId;
+    const row = ge('ord-items-tbody')?.querySelector(`tr[data-item-id="${itemId}"]`);
+    if (!row) return;
+    const prodId = row.dataset.prod;
+    const nombre = row.dataset.nombre;
     cerrarPanelFila();
-    const sel = { prov: '[data-cambiar-prov]', sust: '[data-sustituto]',
-                  cant: '[data-edit-cant]',    del:  '[data-del]' }[accion];
-    if (sel) row?.querySelector(sel)?.click();
+
+    if (accion === 'prov')      openCambiarProvOverlay(itemId, prodId, nombre);
+    else if (accion === 'sust') openSustitutoOverlay(itemId, prodId, nombre);
+    else if (accion === 'del')  quitarItemConConfirm(itemId);
+    // Editar cantidad sigue teniendo su propio boton en la columna "A pedir",
+    // asi que ahi si conviene reusarlo y no duplicar la lectura de la fila.
+    else if (accion === 'cant') row.querySelector('[data-edit-cant]')?.click();
   }
 
   // ── Asociar sustituto ──────────────────────────────────────────────────────
@@ -1310,17 +1330,7 @@ const Ordenes = (() => {
       if (e.key === 'Delete' && !inInput && ui.focusedItemId) {
         e.preventDefault();
         cerrarPanelFila();
-        if (!confirm('¿Eliminar este producto de la orden?')) return;
-        const nextIds  = getItemIds();
-        const delIdx   = nextIds.indexOf(ui.focusedItemId);
-        eliminarItem(ui.focusedItemId);
-        ui.focusedItemId = null;
-        renderOrden();
-        renderTabs();
-        // Mover foco al item siguiente (o anterior si era el último)
-        const afterIds = Array.from(ge('ord-items-tbody')?.querySelectorAll('tr[data-item-id]') || [])
-          .map(r => r.dataset.itemId);
-        if (afterIds.length) setRowFocus(afterIds[Math.min(delIdx, afterIds.length - 1)]);
+        quitarItemConConfirm(ui.focusedItemId);
         return;
       }
 
