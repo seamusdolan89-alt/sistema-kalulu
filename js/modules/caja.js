@@ -148,10 +148,27 @@ const Caja = (() => {
       [sesionId]
     )[0] || {}).t || 0;
 
+    // Solo el efectivo cuenta para el arqueo: es lo único que está en el cajón.
+    // Las filas viejas no tienen medio y eran efectivo por definición —la
+    // columna no existía y su total ya se sumaba acá—, de ahí el NULL.
     const ingresos = (window.SGA_DB.query(
-      `SELECT COALESCE(SUM(monto), 0) AS t FROM ingresos_caja WHERE sesion_caja_id = ?`,
+      `SELECT COALESCE(SUM(monto), 0) AS t FROM ingresos_caja
+       WHERE sesion_caja_id = ? AND (medio IS NULL OR medio = 'efectivo')`,
       [sesionId]
     )[0] || {}).t || 0;
+
+    // Cobros de cuenta corriente, por medio. Van aparte de totPagos, que es de
+    // ventas: mezclarlos rompería el cuadre contra el total vendido, pero
+    // igual son plata que entró hoy y tiene que verse.
+    const cobrosCC = window.SGA_DB.query(
+      `SELECT COALESCE(medio, 'efectivo') AS medio, SUM(monto) AS total
+       FROM ingresos_caja
+       WHERE sesion_caja_id = ? AND tipo = 'cobro_cliente'
+       GROUP BY COALESCE(medio, 'efectivo')`,
+      [sesionId]
+    );
+    const totCobrosCC = {};
+    for (const r of cobrosCC) totCobrosCC[r.medio] = r.total;
 
     const nVentas = (window.SGA_DB.query(
       `SELECT COUNT(*) AS n FROM ventas WHERE sesion_caja_id = ? AND estado = 'completada'`,
@@ -165,7 +182,8 @@ const Caja = (() => {
     const efectivo = parseFloat(totPagos['efectivo'] || 0);
     const saldoEsperado = saldoInicial + efectivo - parseFloat(egresos) + parseFloat(ingresos);
 
-    return { totPagos, totalVentas, egresos, ingresos, nVentas, saldoInicial, saldoEsperado };
+    return { totPagos, totCobrosCC, totalVentas, egresos, ingresos,
+             nVentas, saldoInicial, saldoEsperado };
   }
 
   function getMovimientos(sesionId) {
@@ -211,12 +229,15 @@ const Caja = (() => {
        WHERE e.sesion_caja_id = ? ORDER BY e.fecha DESC`,
       [sesionId]
     ) : [];
-    const ingresos = medio === 'efectivo' ? window.SGA_DB.query(
-      `SELECT i.id, i.fecha, i.monto, i.descripcion, u.nombre AS usuario
+    // Los ingresos ya no son solo de la caja de efectivo: un cobro de cuenta
+    // corriente por MercadoPago tiene que aparecer en el detalle de ese medio.
+    const ingresos = window.SGA_DB.query(
+      `SELECT i.id, i.fecha, i.monto, i.descripcion, i.tipo, u.nombre AS usuario
        FROM ingresos_caja i LEFT JOIN usuarios u ON u.id = i.usuario_id
-       WHERE i.sesion_caja_id = ? ORDER BY i.fecha DESC`,
-      [sesionId]
-    ) : [];
+       WHERE i.sesion_caja_id = ? AND COALESCE(i.medio, 'efectivo') = ?
+       ORDER BY i.fecha DESC`,
+      [sesionId, medio]
+    );
 
     const items = [
       ...ventas.map(v => ({
@@ -236,9 +257,11 @@ const Caja = (() => {
       ...ingresos.map(i => ({
         tipo: 'ingreso', id: i.id, fecha: i.fecha,
         monto: parseFloat(i.monto) || 0,
-        descripcion: i.descripcion || 'Ingreso extra',
+        descripcion: i.descripcion
+          || (i.tipo === 'cobro_cliente' ? 'Cobro de cuenta corriente' : 'Ingreso extra'),
+        subtipo: i.tipo,
         usuario: i.usuario,
-        medios: ['efectivo'],
+        medios: [medio],
       })),
     ];
     items.sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
@@ -715,6 +738,20 @@ case 'egresos':     renderEgresosIngresos(content);   break;
         </div>
       `).join('');
 
+    // Los cobros de cuenta corriente van en su propio bloque: son plata que
+    // entro hoy, pero no son ventas de hoy —ya se vendieron fiadas antes—, asi
+    // que sumarlos arriba descuadraria el total contra lo vendido.
+    const cobrosCC = tot.totCobrosCC || {};
+    const cobrosRows = Object.keys(cobrosCC)
+      .filter(m => (cobrosCC[m] || 0) > 0)
+      .map(m => `
+        <div class="caja-stat-row">
+          <span>${esc(getMedioLabel(m))}</span>
+          <span>${fmtPeso(cobrosCC[m])}</span>
+        </div>
+      `).join('');
+    const totalCC = Object.values(cobrosCC).reduce((a, b) => a + (parseFloat(b) || 0), 0);
+
     openModal(`
       <button class="caja-modal-close" id="btn-close-medios" aria-label="Cerrar" title="Cerrar">✕</button>
       <h3>Cobranzas por medio de pago</h3>
@@ -725,6 +762,13 @@ case 'egresos':     renderEgresosIngresos(content);   break;
             <span>${fmtPeso(tot.totalVentas)}</span>
           </div>`
         : '<p class="caja-empty">Sin ventas registradas en esta sesión.</p>'}
+      ${cobrosRows ? `
+        <h3 style="margin-top:18px">Cobros de cuenta corriente</h3>
+        ${cobrosRows}
+        <div class="caja-stat-row total-row" style="margin-top:8px">
+          <span>Total cobrado</span>
+          <span>${fmtPeso(totalCC)}</span>
+        </div>` : ''}
       <div class="caja-modal-footer">
         <button class="btn btn-outline" id="btn-close-medios2">Cerrar</button>
       </div>

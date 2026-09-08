@@ -576,10 +576,14 @@
     const now = new Date().toISOString();
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO ingresos_caja
-        (id, sesion_caja_id, monto, descripcion, fecha, usuario_id, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,'synced',?)`,
+        (id, sesion_caja_id, monto, descripcion, fecha, usuario_id,
+         medio, tipo, cliente_id, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.sesion_caja_id || null, data.monto || 0,
        data.descripcion || null, data.fecha || null, data.usuario_id || null,
+       // Sin medio, del otro lado un cobro con tarjeta se contaba como
+       // efectivo y descuadraba el arqueo de esa caja.
+       data.medio || null, data.tipo || null, data.cliente_id || null,
        data.updated_at || now]
     );
   }
@@ -589,11 +593,14 @@
     const now = new Date().toISOString();
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO cuenta_corriente
-        (id, cliente_id, sucursal_id, tipo, monto, venta_id, descripcion, fecha, usuario_id, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,'synced',?)`,
+        (id, cliente_id, sucursal_id, tipo, monto, venta_id, descripcion, fecha,
+         usuario_id, medio_pago, sesion_caja_id, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.cliente_id, data.sucursal_id || null, data.tipo,
        data.monto, data.venta_id || null, data.descripcion || null,
-       data.fecha, data.usuario_id || null, data.updated_at || now]
+       data.fecha, data.usuario_id || null,
+       data.medio_pago || null, data.sesion_caja_id || null,
+       data.updated_at || now]
     );
   }
 

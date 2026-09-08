@@ -861,6 +861,18 @@
       "ALTER TABLE productos ADD COLUMN pausa_reposicion_hasta TEXT",
       "ALTER TABLE productos ADD COLUMN pausa_reposicion_motivo TEXT",
       "ALTER TABLE productos ADD COLUMN pausa_reposicion_desde TEXT",
+      // Cobros de cuenta corriente: con qué medio se cobró y en qué caja entró.
+      // Antes el cobro solo bajaba la deuda del cliente y esa plata no figuraba
+      // en ninguna caja, así que se perdía del arqueo.
+      "ALTER TABLE cuenta_corriente ADD COLUMN medio_pago TEXT",
+      "ALTER TABLE cuenta_corriente ADD COLUMN sesion_caja_id TEXT",
+      // ingresos_caja nació asumiendo efectivo: su total entero se suma al
+      // saldo esperado del arqueo. Con 'medio', un cobro por MercadoPago queda
+      // registrado en el día sin inflar el efectivo que se cuenta a mano.
+      // 'tipo' y 'cliente_id' son para distinguirlo de un ingreso suelto.
+      "ALTER TABLE ingresos_caja ADD COLUMN medio TEXT",
+      "ALTER TABLE ingresos_caja ADD COLUMN tipo TEXT",
+      "ALTER TABLE ingresos_caja ADD COLUMN cliente_id TEXT",
     ];
     // es_madre: dejarla en 1 para todo producto que tenga hijos apuntandole.
     // Nada del sistema depende de esta bandera —todos los lugares que la miran
