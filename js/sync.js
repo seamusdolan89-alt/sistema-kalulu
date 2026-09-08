@@ -903,8 +903,9 @@
          hereda_costo, hereda_precio, es_oferta, oferta_desde, oferta_hasta,
          activo, fecha_alta, iva, imagen, fecha_modificacion,
          pedido_unidades_por_paquete, ultima_impresion_etiqueta, ultima_modificacion_precio,
+         pausa_reposicion, pausa_reposicion_hasta, pausa_reposicion_motivo, pausa_reposicion_desde,
          sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.nombre || '?', data.descripcion || null,
        data.categoria_id || null, data.proveedor_principal_id || null, data.proveedor_alternativo_id || null,
        data.producto_madre_id || null, data.es_madre ? 1 : 0, data.precio_independiente ? 1 : 0,
@@ -924,6 +925,12 @@
        // ultima_modificacion_precio alimenta las etiquetas sugeridas: sin ella,
        // la maquina que recibe no se entera de que hay que reimprimir.
        data.ultima_modificacion_precio || null,
+       // Sin estas cuatro, pausabas un producto en el local y en la otra
+       // maquina seguia apareciendo en las ordenes de compra.
+       data.pausa_reposicion ? 1 : 0,
+       data.pausa_reposicion_hasta || null,
+       data.pausa_reposicion_motivo || null,
+       data.pausa_reposicion_desde || null,
        data.updated_at || null]
     );
 

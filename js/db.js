@@ -285,6 +285,10 @@
         oferta_hasta TEXT,
         imagen TEXT,
         activo INTEGER DEFAULT 1,
+        pausa_reposicion INTEGER DEFAULT 0,
+        pausa_reposicion_hasta TEXT,
+        pausa_reposicion_motivo TEXT,
+        pausa_reposicion_desde TEXT,
         fecha_alta TEXT,
         fecha_modificacion TEXT,
         sync_status TEXT DEFAULT 'pending',
@@ -849,6 +853,14 @@
       // Un pago a proveedor puede imputarse contra una compra o contra un gasto
       // de servicios cargado como "queda a pagar" (ver cuenta corriente).
       "ALTER TABLE imputaciones_pagos ADD COLUMN gasto_id TEXT",
+      // Pausar reposicion: el producto deja de sugerirse al generar ordenes de
+      // compra, pero se sigue vendiendo y su stock no se toca. Es distinto de
+      // activo = 0, que ademas lo saca del POS. 'hasta' vacio significa hasta
+      // que alguien lo despause; con fecha, se reanuda solo.
+      "ALTER TABLE productos ADD COLUMN pausa_reposicion INTEGER DEFAULT 0",
+      "ALTER TABLE productos ADD COLUMN pausa_reposicion_hasta TEXT",
+      "ALTER TABLE productos ADD COLUMN pausa_reposicion_motivo TEXT",
+      "ALTER TABLE productos ADD COLUMN pausa_reposicion_desde TEXT",
     ];
     // es_madre: dejarla en 1 para todo producto que tenga hijos apuntandole.
     // Nada del sistema depende de esta bandera —todos los lugares que la miran
@@ -1559,6 +1571,24 @@
     });
   }
 
+  /**
+   * ¿La pausa de reposición de este producto sigue vigente hoy?
+   *
+   * Se evalúa acá, en el momento de preguntar, y no hay ningún proceso que
+   * limpie la bandera cuando vence la fecha. Así el producto se reanuda solo el
+   * día que corresponde aunque la máquina haya estado apagada toda esa semana,
+   * y queda registro de hasta cuándo había estado pausado.
+   *
+   * @param {object} prod fila de productos (o cualquier objeto con esas columnas)
+   */
+  function pausaVigente(prod) {
+    if (!prod || !prod.pausa_reposicion) return false;
+    const hasta = prod.pausa_reposicion_hasta;
+    if (!hasta) return true;   // sin fecha: hasta que alguien la saque
+    // Ambas en YYYY-MM-DD, así que alcanza con comparar como texto.
+    return hasta >= new Date().toISOString().slice(0, 10);
+  }
+
   // Export functions
   window.SGA_DB = {
     initialize,
@@ -1571,6 +1601,7 @@
     registrarEliminacion,
     aplicarEliminacion,
     fueEliminado,
+    pausaVigente,
     isInitialized: () => db.isInitialized,
     usingOPFS: () => db.usingOPFS,
     useFeature: () => db.useFeature,

@@ -341,6 +341,42 @@
   .ord-row-focus .ord-tecla-inline { border-color: #667eea; color: #667eea; }
   .ord-panel-open .ord-mas-opciones { visibility: hidden; }
 
+  /* ── Diálogo de pausar reposición ── */
+  .ord-pausa-nota {
+    font-size: 12px; color: #2e7d32; background: #f1f8e9;
+    border: 1px solid #dcedc8; border-radius: 6px;
+    padding: 8px 10px; margin: 8px 0 4px; line-height: 1.45;
+  }
+  .ord-pausa-info {
+    font-size: 12px; color: #607080; line-height: 1.5; margin: 8px 0;
+  }
+  .ord-pausa-label {
+    font-size: 12px; font-weight: 700; color: #43526a;
+    margin: 14px 0 5px;
+  }
+  .ord-pausa-radios { display: flex; gap: 8px; }
+  .ord-pausa-radio {
+    flex: 1; padding: 9px 11px; border-radius: 6px; cursor: pointer;
+    border: 1px solid #d0d7e3; background: #f7f9fb; color: #43526a;
+    font: inherit; font-size: 13px;
+  }
+  .ord-pausa-radio.activo {
+    border-color: #667eea; background: #eef2ff; color: #4553c8; font-weight: 700;
+  }
+  .ord-pausa-miembro {
+    display: flex; align-items: center; gap: 9px;
+    padding: 8px 10px; border: 1px solid #e0e6ee; border-radius: 6px;
+    margin-bottom: 5px; font-size: 13px; cursor: pointer;
+  }
+  .ord-pausa-miembro input { width: 16px; height: 16px; cursor: pointer; flex-shrink: 0; }
+  .ord-pausa-miembro .ref { font-size: 11px; color: #667eea; font-weight: 700; }
+  .ord-pausa-aviso {
+    margin-top: 12px; font-size: 12px; line-height: 1.5;
+    color: #7a4b00; background: #fff8e1; border: 1px solid #ffe0a3;
+    border-radius: 6px; padding: 9px 11px;
+  }
+  .ord-pausa-aviso:empty { display: none; }
+
   /* ── Panel de acciones sobre la fila (se abre con →) ── */
   .ord-acciones-cell { position: relative; }
   .ord-panel-fila {
@@ -531,6 +567,58 @@
     <div class="ord-overlay-footer">
       <button class="ord-btn-cancel" id="ord-editcant-cancel">Cancelar</button>
       <button class="ord-btn-action ord-btn-confirmar" id="ord-editcant-ok">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<div id="ord-pausa-overlay" class="ord-overlay" style="display:none">
+  <div class="ord-overlay-box" style="width:520px;max-width:95vw;max-height:85vh">
+    <div class="ord-overlay-header">
+      <span>Pausar reposición</span>
+      <button class="ord-overlay-close" id="ord-pausa-close" aria-label="Cerrar" title="Cerrar">×</button>
+    </div>
+    <div class="ord-overlay-body">
+      <div class="ord-editcant-label" id="ord-pausa-producto">—</div>
+      <div class="ord-pausa-nota">
+        Se sigue vendiendo normalmente y el stock no se toca. Lo único que cambia
+        es que deja de aparecer al generar órdenes de compra.
+      </div>
+      <div class="ord-pausa-info" id="ord-pausa-info"></div>
+
+      <div id="ord-pausa-grupo-wrap" style="display:none">
+        <div class="ord-pausa-label">¿Cuáles pausás?</div>
+        <div id="ord-pausa-grupo"></div>
+      </div>
+
+      <div class="ord-pausa-label" for="ord-pausa-motivo">Motivo</div>
+      <select id="ord-pausa-motivo" class="ord-editcant-select" style="width:100%">
+        <option>No rota — evaluando discontinuar</option>
+        <option>Producto de temporada</option>
+        <option>El proveedor no lo tiene</option>
+        <option>Reemplazado por un sustituto</option>
+        <option value="__otro">Otro (escribir abajo)</option>
+      </select>
+      <input type="text" id="ord-pausa-motivo-otro" class="ord-search-input"
+             style="display:none;margin-top:8px" placeholder="Escribí el motivo">
+
+      <div class="ord-pausa-label">Hasta cuándo</div>
+      <div class="ord-pausa-radios">
+        <button type="button" class="ord-pausa-radio activo" data-modo="indef">Hasta que lo despause</button>
+        <button type="button" class="ord-pausa-radio" data-modo="fecha">Hasta una fecha</button>
+      </div>
+      <input type="date" id="ord-pausa-fecha" class="ord-search-input"
+             style="display:none;margin-top:8px">
+
+      <div id="ord-pausa-ref-wrap" style="display:none">
+        <div class="ord-pausa-label">La orden le pide a este producto. ¿A cuál le pide de ahora en más?</div>
+        <select id="ord-pausa-ref" class="ord-editcant-select" style="width:100%"></select>
+      </div>
+
+      <div class="ord-pausa-aviso" id="ord-pausa-aviso"></div>
+    </div>
+    <div class="ord-overlay-footer">
+      <button class="ord-btn-cancel" id="ord-pausa-cancel">Cancelar</button>
+      <button class="ord-btn-action ord-btn-confirmar" id="ord-pausa-ok">Pausar</button>
     </div>
   </div>
 </div>
