@@ -57,6 +57,21 @@
 
   const getElement = (id) => document.getElementById(id);
 
+  /**
+   * ¿Este producto tiene la reposición pausada hoy?
+   *
+   * pausaVigente vive en db.js, que se cachea con ?v=N a mano. Si el navegador
+   * quedó con una versión anterior, la función no existe: mejor no mostrar el
+   * distintivo que romper toda la pantalla de Productos en pleno mostrador.
+   */
+  const estaPausado = (p) => {
+    if (typeof window.SGA_DB?.pausaVigente !== 'function') {
+      console.warn('db.js desactualizado: recargá con Ctrl+F5 para ver los productos pausados');
+      return false;
+    }
+    return window.SGA_DB.pausaVigente(p);
+  };
+
 
   const loadCategorias = () => {
     try {
@@ -233,7 +248,7 @@
     // Pausados: se pregunta por pausaVigente y no por la columna, para que un
     // producto cuya pausa ya venció aparezca como lo que es, activo.
     if (state.filters.pausa) {
-      const pausado = p => window.SGA_DB.pausaVigente(p);
+      const pausado = estaPausado;
       filtered = state.filters.pausa === 'pausados'
         ? filtered.filter(pausado)
         : filtered.filter(p => !pausado(p));
@@ -399,7 +414,7 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
       const ofertaBadge  = producto.es_oferta ? '<span style="display:inline-block;background:#e53935;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle">OFERTA</span>' : '';
       // El distintivo va en la fila y no solo detrás del filtro: si la pausa
       // solo se viera filtrando, nadie se enteraría de que existe.
-      const pausaBadge = window.SGA_DB.pausaVigente(producto)
+      const pausaBadge = estaPausado(producto)
         ? `<span class="btn-ver-pausa" data-pausa="${producto.id}" title="Reposición pausada — clic para ver o reanudar" style="display:inline-block;background:#ef6c00;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;cursor:pointer">PAUSADO</span>`
         : '';
 
