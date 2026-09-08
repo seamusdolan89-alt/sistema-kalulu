@@ -745,7 +745,14 @@ export const POS = (() => {
       const addedIdx = state.cart.findIndex(i => i.productoId === producto.id);
       if (addedIdx >= 0) {
         const qtyInp = document.querySelector(`.qty-input[data-idx="${addedIdx}"]`);
-        if (qtyInp) { qtyInp.select(); qtyInp.focus(); }
+        if (qtyInp) {
+          qtyInp.select();
+          qtyInp.focus();
+          // El focus() ya deberia hacer scroll, pero con muchos items (mas de
+          // ~7) no siempre alcanzaba a mostrar la fila agregada dentro de
+          // .cart-scroll — forzamos el scroll explicitamente sobre la fila.
+          qtyInp.closest('tr')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        }
       }
       const si = ge('pos-search-input');
       if (si) si.value = '';

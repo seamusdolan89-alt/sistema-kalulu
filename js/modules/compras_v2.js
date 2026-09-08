@@ -935,6 +935,10 @@ const ComprasV2 = (() => {
     const cantInp = document.querySelector(`.cv2-cart-row[data-idx="${targetIdx}"] input[data-field="cantidad"]`);
     if (cantInp) { cantInp.select(); cantInp.focus(); }
     else ge('cv2-search')?.focus();
+    // Carritos largos (mas de ~7 items) dejaban la fila recien agregada
+    // tapada debajo del scroll de .cv2-cart-section sin avisar — forzamos
+    // que quede visible.
+    document.querySelector(`.cv2-cart-row[data-idx="${targetIdx}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 
   // Muestra gratis: línea aparte para un producto que YA está (o puede estar)
@@ -965,6 +969,7 @@ const ComprasV2 = (() => {
     const costoInp = document.querySelector(`.cv2-cart-row[data-idx="${targetIdx}"] input[data-field="costoNuevo"]`);
     if (costoInp) { costoInp.select(); costoInp.focus(); }
     else ge('cv2-search')?.focus();
+    document.querySelector(`.cv2-cart-row[data-idx="${targetIdx}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 
   // Envío / descuento (ej. pronto pago): línea de ajuste sin producto real,
@@ -983,6 +988,7 @@ const ComprasV2 = (() => {
 
     const montoInp = document.querySelector(`.cv2-cart-row[data-idx="${targetIdx}"] input[data-field="monto"]`);
     if (montoInp) { montoInp.select(); montoInp.focus(); }
+    document.querySelector(`.cv2-cart-row[data-idx="${targetIdx}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 
   // Refleja state.modoMuestra en el botón "+ Muestra" y en el buscador, para
