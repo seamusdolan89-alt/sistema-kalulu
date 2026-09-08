@@ -494,18 +494,34 @@ const Caja = (() => {
     let pagos = [];
     let total = 0;
     try {
+      // Dos fuentes: las ventas cobradas con este medio y los cobros de cuenta
+      // corriente. Antes solo miraba venta_pagos, asi que cobrarle la deuda a
+      // un cliente por MercadoPago no aparecia por ningun lado en esta caja.
       pagos = window.SGA_DB.query(`
-        SELECT vp.monto, vp.referencia, v.fecha,
+        SELECT vp.monto AS monto, vp.referencia AS referencia, v.fecha AS fecha,
                COALESCE(c.nombre, 'Consumidor final') AS cliente,
-               v.sesion_caja_id
+               'venta' AS origen
         FROM venta_pagos vp
         JOIN ventas v ON v.id = vp.venta_id
         LEFT JOIN clientes c ON c.id = v.cliente_id
         WHERE vp.medio = ?
           AND v.estado = 'completada'
           AND DATE(v.fecha) = ?
-        ORDER BY v.fecha DESC
-      `, [medio, todayISO]);
+
+        UNION ALL
+
+        SELECT i.monto AS monto, NULL AS referencia, i.fecha AS fecha,
+               COALESCE(NULLIF(TRIM(cl.nombre || ' ' || COALESCE(cl.apellido, '')), ''),
+                        'Cliente') AS cliente,
+               'cta_cte' AS origen
+        FROM ingresos_caja i
+        LEFT JOIN clientes cl ON cl.id = i.cliente_id
+        WHERE COALESCE(i.medio, 'efectivo') = ?
+          AND i.tipo = 'cobro_cliente'
+          AND DATE(i.fecha) = ?
+
+        ORDER BY fecha DESC
+      `, [medio, todayISO, medio, todayISO]);
       total = pagos.reduce((s, p) => s + (parseFloat(p.monto) || 0), 0);
     } catch(e) {}
 
@@ -516,13 +532,23 @@ const Caja = (() => {
     if (sesionActiva) {
       try {
         const rows = window.SGA_DB.query(`
-          SELECT COALESCE(SUM(vp.monto), 0) AS total, COUNT(*) AS n
-          FROM venta_pagos vp
-          JOIN ventas v ON v.id = vp.venta_id
-          WHERE vp.medio = ?
-            AND v.sesion_caja_id = ?
-            AND v.estado = 'completada'
-        `, [medio, sesionActiva.id]);
+          SELECT COALESCE(SUM(monto), 0) AS total, COUNT(*) AS n FROM (
+            SELECT vp.monto AS monto
+            FROM venta_pagos vp
+            JOIN ventas v ON v.id = vp.venta_id
+            WHERE vp.medio = ?
+              AND v.sesion_caja_id = ?
+              AND v.estado = 'completada'
+
+            UNION ALL
+
+            SELECT i.monto AS monto
+            FROM ingresos_caja i
+            WHERE COALESCE(i.medio, 'efectivo') = ?
+              AND i.tipo = 'cobro_cliente'
+              AND i.sesion_caja_id = ?
+          )
+        `, [medio, sesionActiva.id, medio, sesionActiva.id]);
         totalSesion = parseFloat(rows[0]?.total) || 0;
         countSesion = parseInt(rows[0]?.n) || 0;
       } catch(e) {}
@@ -534,7 +560,9 @@ const Caja = (() => {
             <td style="padding:10px 8px;font-size:13px">${fmtHora(p.fecha)}</td>
             <td style="padding:10px 8px;font-size:13px">${esc(p.cliente)}</td>
             <td style="padding:10px 8px;font-size:13px;text-align:right;font-weight:600">${fmtPeso(p.monto)}</td>
-            <td style="padding:10px 8px;font-size:12px;color:#999">${esc(p.referencia || '')}</td>
+            <td style="padding:10px 8px;font-size:12px;color:#999">${
+              p.origen === 'cta_cte' ? 'Cuenta corriente' : esc(p.referencia || '')
+            }</td>
           </tr>`).join('')
       : `<tr><td colspan="4" style="padding:24px;text-align:center;color:#aaa;font-size:13px">Sin cobros registrados hoy</td></tr>`;
 
