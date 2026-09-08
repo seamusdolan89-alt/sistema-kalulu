@@ -279,18 +279,70 @@ const SGA_Clientes = (() => {
     return { success: true };
   }
 
-  function registrarPago(clienteId, monto, descripcion, usuarioId) {
-    if (!monto || monto <= 0) throw new Error('Monto inválido');
+  /** Caja abierta de la sucursal, o null. */
+  function sesionAbierta(sucursalId) {
+    if (!sucursalId) return null;
+    return db().query(
+      `SELECT id FROM sesiones_caja WHERE sucursal_id = ? AND estado = 'abierta' LIMIT 1`,
+      [sucursalId]
+    )[0] || null;
+  }
+
+  /**
+   * Registra un cobro de cuenta corriente.
+   *
+   * Además de bajar la deuda, la plata tiene que entrar a algún lado. Hasta acá
+   * esto solo escribía en cuenta_corriente: la deuda del cliente bajaba y ese
+   * dinero no aparecía en ninguna caja, así que se perdía del arqueo.
+   *
+   * En efectivo exige caja abierta, porque es plata que entra al cajón y hay
+   * que contarla al cierre. Con otro medio no hace falta —no pasa por el
+   * cajón—, pero si hay una caja abierta el cobro queda asociado al día para
+   * figurar en el detalle de ese medio.
+   *
+   * El medio es obligatorio a propósito: sin él no se sabe dónde entró la
+   * plata, que es exactamente lo que fallaba antes.
+   */
+  function registrarPago(clienteId, opciones) {
+    const { monto, medio, descripcion, usuarioId, sesionCajaId } = opciones || {};
+    if (!monto || monto <= 0)  throw new Error('Monto inválido');
+    if (!medio)                throw new Error('Falta el medio de pago');
+    if (medio === 'efectivo' && !sesionCajaId) {
+      throw new Error('Para cobrar en efectivo tiene que haber una caja abierta');
+    }
+
     const n = now();
+    const desc = descripcion || 'Pago';
+
     db().run(`
       INSERT INTO cuenta_corriente
-        (id, cliente_id, tipo, monto, descripcion, fecha, usuario_id, sync_status, updated_at)
-      VALUES (?,?,'pago',?,?,?,?,'pending',?)
-    `, [uid(), clienteId, -Math.abs(monto), descripcion || 'Pago', n, usuarioId || null, n]);
+        (id, cliente_id, tipo, monto, descripcion, fecha, usuario_id,
+         medio_pago, sesion_caja_id, sync_status, updated_at)
+      VALUES (?,?,'pago',?,?,?,?,?,?,'pending',?)
+    `, [uid(), clienteId, -Math.abs(monto), desc, n, usuarioId || null,
+        medio, sesionCajaId || null, n]);
+
+    // El espejo en la caja. Sin esta parte la deuda bajaba y la plata no
+    // entraba a ningún lado.
+    if (sesionCajaId) {
+      const c = db().query(
+        `SELECT nombre, apellido FROM clientes WHERE id = ?`, [clienteId]
+      )[0];
+      const quien = c ? `${c.nombre} ${c.apellido || ''}`.trim() : 'cliente';
+      db().run(`
+        INSERT INTO ingresos_caja
+          (id, sesion_caja_id, monto, descripcion, fecha, usuario_id,
+           medio, tipo, cliente_id, sync_status, updated_at)
+        VALUES (?,?,?,?,?,?,?,'cobro_cliente',?,'pending',?)
+      `, [uid(), sesionCajaId, Math.abs(monto), `Cobro cta. cte. — ${quien}`,
+          n, usuarioId || null, medio, clienteId, n]);
+    }
+
     db().run(
       `UPDATE clientes SET ultima_visita = ?, updated_at = ?, sync_status = 'pending' WHERE id = ?`,
       [n, n, clienteId]
     );
+    return { success: true };
   }
 
   function getMovimientos(clienteId, { limit = 50, tipo = '', desde = '', hasta = '' } = {}) {
@@ -329,7 +381,7 @@ const SGA_Clientes = (() => {
   return {
     getAll, getById, search, crear, actualizar,
     getTopeDisponible, getSaldoActual, getSaldoLote,
-    registrarPago, getMovimientos, getVentas,
+    registrarPago, sesionAbierta, getMovimientos, getVentas,
   };
 })();
 
@@ -1298,18 +1350,121 @@ const ClientesUI = (() => {
     ge('modal-tope-config').classList.add('open');
   }
 
-  // ── PAGO RÁPIDO (from list) ────────────────────────────────────────────────
-  function pagoRapido(clienteId) {
-    const c = window.SGA_DB.query(`SELECT nombre, apellido FROM clientes WHERE id = ?`, [clienteId]);
-    const nombre = c.length ? `${c[0].nombre} ${c[0].apellido || ''}`.trim() : 'Cliente';
-    const montoStr = prompt(`Registrar pago para ${nombre}\nMonto $:`);
-    if (!montoStr) return;
-    const monto = parseFloat(montoStr);
-    if (!monto || monto <= 0) { alert('Monto inválido'); return; }
-    const desc = prompt('Descripción (opcional):') || 'Pago';
+  // ── COBRO DE CUENTA CORRIENTE ──────────────────────────────────────────────
+  //
+  // Un solo diálogo para los dos accesos: el botón de la ficha y el de la
+  // lista, que antes abría dos prompt() encadenados y tampoco pedía medio.
+
+  let cobroCtx = null;   // { clienteId, onSaved, medio, sesionId }
+
+  function abrirDialogoCobro(clienteId, onSaved) {
+    const ov = ge('cc-pago-ov');
+    if (!ov) return;
+
+    const c = window.SGA_DB.query(
+      `SELECT nombre, apellido FROM clientes WHERE id = ?`, [clienteId]
+    )[0];
+    const nombre = c ? `${c.nombre} ${c.apellido || ''}`.trim() : 'Cliente';
+    const deuda = SGA_Clientes.getSaldoActual(clienteId);
+
     const u = user();
-    SGA_Clientes.registrarPago(clienteId, monto, desc, u ? u.id : null);
-    renderList();
+    const sesion = SGA_Clientes.sesionAbierta(u?.sucursal_id);
+    cobroCtx = { clienteId, onSaved, medio: null, sesionId: sesion?.id || null };
+
+    ge('cc-pago-deuda').innerHTML = deuda > 0
+      ? `${nombre} debe<b>${fmt(deuda)}</b>`
+      : `${nombre} no tiene deuda. Lo que cobres queda como saldo a favor.`;
+
+    ge('cc-monto-pago').value = '';
+    ge('cc-desc-pago').value = '';
+
+    // Efectivo sin caja abierta queda deshabilitado: es plata que entra al
+    // cajón y no habría dónde registrarla ni con qué contarla al cierre.
+    const medios = window.SGA_DB.query(
+      `SELECT id, nombre, icono FROM medios_cobro WHERE activo = 1
+       ORDER BY orden ASC, nombre ASC`
+    );
+    const lista = medios.length ? medios : [{ id: 'efectivo', nombre: 'Efectivo', icono: '💵' }];
+    ge('cc-medios').innerHTML = lista.map(m => {
+      const bloqueado = m.id === 'efectivo' && !sesion;
+      return `<button type="button" class="cc-medio" data-medio="${m.id}"
+        ${bloqueado ? 'disabled title="No hay caja abierta"' : ''}>
+        <span>${m.icono || '💳'}</span><span>${m.nombre}</span></button>`;
+    }).join('');
+    ge('cc-medios').querySelectorAll('[data-medio]').forEach(b =>
+      b.addEventListener('click', () => elegirMedio(b.dataset.medio))
+    );
+
+    pintarAvisoCobro();
+    ov.classList.add('open');
+    setTimeout(() => ge('cc-monto-pago')?.focus(), 60);
+  }
+
+  function elegirMedio(medio) {
+    if (!cobroCtx) return;
+    cobroCtx.medio = medio;
+    ge('cc-medios').querySelectorAll('[data-medio]').forEach(b =>
+      b.classList.toggle('sel', b.dataset.medio === medio)
+    );
+    pintarAvisoCobro();
+  }
+
+  function pintarAvisoCobro() {
+    const av = ge('cc-pago-aviso');
+    if (!av || !cobroCtx) return;
+    const { medio, sesionId } = cobroCtx;
+    if (!medio) {
+      av.className = 'cc-pago-aviso warn';
+      av.textContent = sesionId
+        ? 'Elegí con qué te pagó para saber a qué caja entra la plata.'
+        : 'No hay caja abierta. Podés cobrar por otros medios, pero no en efectivo.';
+      return;
+    }
+    if (medio === 'efectivo') {
+      av.className = 'cc-pago-aviso ok';
+      av.textContent = 'Entra a la caja abierta y se suma al efectivo del arqueo.';
+    } else if (sesionId) {
+      av.className = 'cc-pago-aviso ok';
+      av.textContent = 'Queda registrado en la caja del día, en el detalle de ese medio. ' +
+                       'No se suma al efectivo, porque no pasa por el cajón.';
+    } else {
+      av.className = 'cc-pago-aviso warn';
+      av.textContent = 'Se descuenta de la deuda, pero sin caja abierta no queda ' +
+                       'asociado a ningún día. Si querés que figure, abrí la caja primero.';
+    }
+  }
+
+  function cerrarDialogoCobro() {
+    ge('cc-pago-ov')?.classList.remove('open');
+    cobroCtx = null;
+  }
+
+  function confirmarCobro() {
+    if (!cobroCtx) return;
+    const monto = parseFloat(ge('cc-monto-pago').value);
+    if (!monto || monto <= 0) { alert('Ingresá un monto válido'); return; }
+    if (!cobroCtx.medio)      { alert('Elegí el medio de pago'); return; }
+
+    const u = user();
+    try {
+      SGA_Clientes.registrarPago(cobroCtx.clienteId, {
+        monto,
+        medio: cobroCtx.medio,
+        descripcion: ge('cc-desc-pago').value.trim(),
+        usuarioId: u ? u.id : null,
+        sesionCajaId: cobroCtx.sesionId,
+      });
+    } catch (e) {
+      alert(e.message);
+      return;
+    }
+    const seguir = cobroCtx.onSaved;
+    cerrarDialogoCobro();
+    if (seguir) seguir();
+  }
+
+  function pagoRapido(clienteId) {
+    abrirDialogoCobro(clienteId, renderList);
   }
 
   // ── INIT ───────────────────────────────────────────────────────────────────
@@ -1437,24 +1592,19 @@ const ClientesUI = (() => {
       } catch(e) { alert(e.message); }
     });
 
-    // CC — Registrar pago
+    // CC — Registrar cobro
     ge('btn-registrar-pago')?.addEventListener('click', () => {
-      ge('cc-pago-form').classList.toggle('open');
-      ge('cc-monto-pago').focus();
+      abrirDialogoCobro(currentClienteId, loadFichaData);
     });
-    ge('btn-cc-pago-cancel')?.addEventListener('click', () => {
-      ge('cc-pago-form').classList.remove('open');
+    ge('btn-cc-pago-cancel')?.addEventListener('click', cerrarDialogoCobro);
+    ge('btn-cc-pago-close')?.addEventListener('click', cerrarDialogoCobro);
+    ge('btn-cc-pago-confirm')?.addEventListener('click', confirmarCobro);
+    ge('cc-pago-ov')?.addEventListener('click', (e) => {
+      if (e.target === ge('cc-pago-ov')) cerrarDialogoCobro();
     });
-    ge('btn-cc-pago-confirm')?.addEventListener('click', () => {
-      const monto = parseFloat(ge('cc-monto-pago').value);
-      if (!monto || monto <= 0) { alert('Ingresá un monto válido'); return; }
-      const desc = ge('cc-desc-pago').value.trim() || 'Pago';
-      const u = user();
-      SGA_Clientes.registrarPago(currentClienteId, monto, desc, u ? u.id : null);
-      ge('cc-pago-form').classList.remove('open');
-      ge('cc-monto-pago').value = '';
-      ge('cc-desc-pago').value = '';
-      loadFichaData();
+    ge('cc-pago-ov')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); cerrarDialogoCobro(); }
+      if (e.key === 'Enter' && e.target.id === 'cc-monto-pago') e.preventDefault();
     });
 
     ge('btn-cc-filter')?.addEventListener('click', () => {

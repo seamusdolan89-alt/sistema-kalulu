@@ -120,13 +120,42 @@
     .cc-balance-amount.neutro { color: #888; }
     .cc-balance-label { font-size: 0.82em; color: #888; margin-top: 2px; }
 
-    .cc-pago-form { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px;
-      padding: 14px; margin-bottom: 16px; display: none; }
-    .cc-pago-form.open { display: block; }
-    .cc-pago-row { display: flex; gap: 10px; align-items: flex-end; margin-top: 8px; flex-wrap: wrap; }
-    .cc-pago-row input { flex: 1; min-width: 120px; padding: 8px 10px;
-      border: 1px solid #ddd; border-radius: 6px; font-size: 0.9em; outline: none; }
-    .cc-pago-row input:focus { border-color: #667eea; }
+    /* Diálogo de cobro de cuenta corriente */
+    .cc-pago-ov { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 400;
+      display: none; align-items: center; justify-content: center; padding: 20px; }
+    .cc-pago-ov.open { display: flex; }
+    .cc-pago-box { background: #fff; border-radius: 12px; width: 460px; max-width: 95vw;
+      max-height: 90vh; display: flex; flex-direction: column; overflow: hidden;
+      box-shadow: 0 8px 32px rgba(0,0,0,.25); }
+    .cc-pago-head { display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px; border-bottom: 1px solid #e0e6ee; font-weight: 700; color: #1a2e4a; }
+    .cc-pago-head button { background: none; border: none; font-size: 22px; color: #8090a0;
+      cursor: pointer; line-height: 1; }
+    .cc-pago-body { padding: 16px 18px; overflow-y: auto; }
+    .cc-pago-deuda { background: #fff5f5; border: 1px solid #ffd6d6; border-radius: 8px;
+      padding: 10px 12px; margin-bottom: 14px; font-size: .88em; color: #666; }
+    .cc-pago-deuda b { display: block; font-size: 1.5em; color: #d32f2f; margin-top: 2px; }
+    .cc-pago-lbl { font-size: .78em; font-weight: 700; color: #43526a; text-transform: uppercase;
+      letter-spacing: .04em; margin: 14px 0 6px; }
+    .cc-pago-lbl:first-child { margin-top: 0; }
+    .cc-pago-body input[type=number], .cc-pago-body input[type=text] {
+      width: 100%; padding: 10px 12px; border: 1px solid #d0d7e3; border-radius: 6px;
+      font-size: 1em; outline: none; box-sizing: border-box; }
+    .cc-pago-body input:focus { border-color: #667eea; }
+    #cc-monto-pago { font-size: 1.3em; font-weight: 700; }
+    .cc-medios { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+    .cc-medio { display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+      border: 1px solid #d0d7e3; border-radius: 8px; background: #f7f9fb; cursor: pointer;
+      font-size: .9em; color: #43526a; text-align: left; }
+    .cc-medio:hover:not(:disabled) { border-color: #667eea; }
+    .cc-medio.sel { border-color: #667eea; background: #eef2ff; color: #4553c8; font-weight: 700; }
+    .cc-medio:disabled { opacity: .45; cursor: not-allowed; }
+    .cc-pago-aviso { margin-top: 14px; font-size: .82em; line-height: 1.5; border-radius: 6px;
+      padding: 9px 11px; }
+    .cc-pago-aviso.ok   { color: #2e7d32; background: #f1f8e9; border: 1px solid #dcedc8; }
+    .cc-pago-aviso.warn { color: #7a4b00; background: #fff8e1; border: 1px solid #ffe0a3; }
+    .cc-pago-foot { padding: 12px 18px; border-top: 1px solid #e0e6ee;
+      display: flex; justify-content: flex-end; gap: 10px; }
 
     /* Movimientos table */
     .mov-table { width: 100%; border-collapse: collapse; font-size: 0.84em; background: #fff;
@@ -390,15 +419,7 @@
         <div class="flex-row mb-12">
           <button class="btn btn-primary btn-sm" id="btn-registrar-pago">+ Registrar pago</button>
         </div>
-        <div class="cc-pago-form" id="cc-pago-form">
-          <div style="font-weight:600; font-size:0.9em; margin-bottom:8px;">Registrar pago</div>
-          <div class="cc-pago-row">
-            <input type="number" id="cc-monto-pago" placeholder="Monto $" min="0.01" step="0.01">
-            <input type="text" id="cc-desc-pago" placeholder="Descripción (opcional)" style="flex:2">
-            <button class="btn btn-primary btn-sm" id="btn-cc-pago-confirm">Confirmar</button>
-            <button class="btn btn-secondary btn-sm" id="btn-cc-pago-cancel">Cancelar</button>
-          </div>
-        </div>
+
 
         <div class="filter-row mt-8">
           <select id="cc-filter-tipo">
@@ -585,6 +606,33 @@
       <button class="btn btn-secondary" id="btn-cl-import-back" style="display:none">← Volver</button>
       <button class="btn btn-primary"   id="btn-cl-import-confirm" style="display:none">Importar</button>
       <button class="btn btn-primary"   id="btn-cl-import-done"    style="display:none">Listo</button>
+    </div>
+  </div>
+</div>
+
+<div class="cc-pago-ov" id="cc-pago-ov">
+  <div class="cc-pago-box">
+    <div class="cc-pago-head">
+      <span>&#128176; Registrar cobro</span>
+      <button id="btn-cc-pago-close" aria-label="Cerrar" title="Cerrar">&times;</button>
+    </div>
+    <div class="cc-pago-body">
+      <div class="cc-pago-deuda" id="cc-pago-deuda"></div>
+
+      <div class="cc-pago-lbl">Monto</div>
+      <input type="number" id="cc-monto-pago" placeholder="0,00" min="0.01" step="0.01">
+
+      <div class="cc-pago-lbl">Medio de pago</div>
+      <div class="cc-medios" id="cc-medios"></div>
+
+      <div class="cc-pago-lbl">Descripci&oacute;n (opcional)</div>
+      <input type="text" id="cc-desc-pago" placeholder="Ej: entrega parcial">
+
+      <div class="cc-pago-aviso" id="cc-pago-aviso"></div>
+    </div>
+    <div class="cc-pago-foot">
+      <button class="btn btn-secondary btn-sm" id="btn-cc-pago-cancel">Cancelar</button>
+      <button class="btn btn-primary btn-sm" id="btn-cc-pago-confirm">Confirmar cobro</button>
     </div>
   </div>
 </div>
