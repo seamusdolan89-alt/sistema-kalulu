@@ -354,6 +354,11 @@
   .cv2-item-count { font-size: 12px; color: #8090a0; white-space: nowrap; }
   .cv2-summary-totals {
     display: flex; align-items: baseline; gap: 20px; flex: 1; justify-content: flex-end;
+    /* Los items van con nowrap, y un flex item no baja de su contenido salvo
+       que se le permita: sin min-width:0 la fila de totales empujaba el boton
+       "Siguiente" fuera de la pantalla y solo se alcanzaba con zoom out.
+       Si algun dia vuelven a sobrar totales, ahora scrollean ellos. */
+    min-width: 0; overflow-x: auto;
   }
   .cv2-summary-item { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
   .cv2-summary-item .cv2-sum-label {
@@ -365,7 +370,7 @@
   .cv2-total-detalle { font-size: 11px; color: #8090a0; }
   .cv2-saldo-desc { color: #1565c0; }
   .cv2-total-bruto { text-decoration: line-through; }
-  .cv2-sum-adelanto { color: #2e7d32; }
+
 
   .cv2-btn-confirmar {
     background: linear-gradient(135deg, #1565c0, #1976d2);
@@ -1501,15 +1506,6 @@
         <div class="cv2-summary-item cv2-summary-total-main">
           <span class="cv2-sum-label">Total Compra</span>
           <span class="cv2-sum-value" id="cv2-sum-total-factura">$ 0,00</span>
-        </div>
-        <div class="cv2-summary-item" id="cv2-adelanto-wrap" style="display:none"
-             title="Adelanto del proveedor que se aplica a esta compra">
-          <span class="cv2-sum-label">Adelanto aplicado</span>
-          <span class="cv2-sum-value cv2-sum-adelanto" id="cv2-sum-adelanto">$ 0,00</span>
-        </div>
-        <div class="cv2-summary-item cv2-summary-total-main" id="cv2-apagar-wrap" style="display:none">
-          <span class="cv2-sum-label">A pagar</span>
-          <span class="cv2-sum-value" id="cv2-total">$ 0,00</span>
         </div>
       </div>
       <button class="cv2-btn-confirmar" id="cv2-btn-confirmar" disabled>
