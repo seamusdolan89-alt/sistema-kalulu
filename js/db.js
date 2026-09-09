@@ -874,6 +874,31 @@
       "ALTER TABLE ingresos_caja ADD COLUMN tipo TEXT",
       "ALTER TABLE ingresos_caja ADD COLUMN cliente_id TEXT",
     ];
+    // La referencia de un grupo de sustitutos tiene que tener su propia fila.
+    // La importacion crea una fila por cada miembro apuntando a la referencia,
+    // pero ninguna para la referencia misma, y entonces queda siendo referencia
+    // de un grupo al que "no pertenece": las pantallas que preguntan por
+    // producto_id no la encuentran, y —peor— stockEfectivo suma el stock de los
+    // miembros sin contar el de ella, asi que un producto con mercaderia en
+    // gondola se sigue sugiriendo para reponer.
+    //
+    // Solo completa las que faltan del todo: si la referencia ya tiene una fila
+    // (aunque apunte a otro grupo) no se toca, para no dejarla con dos y que el
+    // LIMIT 1 de las consultas devuelva cualquiera.
+    try {
+      database.run(`
+        INSERT OR IGNORE INTO producto_sustitutos
+          (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion)
+        SELECT DISTINCT ps.referencia_id, ps.referencia_id, ps.referencia_id, 1, ?
+        FROM producto_sustitutos ps
+        WHERE ps.referencia_id IS NOT NULL
+          AND EXISTS (SELECT 1 FROM productos p WHERE p.id = ps.referencia_id)
+          AND NOT EXISTS (
+            SELECT 1 FROM producto_sustitutos s WHERE s.producto_id = ps.referencia_id
+          )
+      `, [new Date().toISOString().slice(0, 10)]);
+    } catch (e) { console.warn('autocompletar referencia de sustitutos:', e.message); }
+
     // es_madre: dejarla en 1 para todo producto que tenga hijos apuntandole.
     // Nada del sistema depende de esta bandera —todos los lugares que la miran
     // la combinan con los hijos reales— pero verla en 0 en un producto con

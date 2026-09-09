@@ -1579,6 +1579,13 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
         'INSERT OR REPLACE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion) VALUES (?, ?, ?, 1, ?)',
         [s.producto_id, referencia_id, referencia_id, now]
       );
+      // La referencia también necesita su fila: sin ella queda como referencia
+      // de un grupo al que no pertenece, y su propio stock no cuenta para el
+      // total del grupo.
+      window.SGA_DB.run(
+        'INSERT OR IGNORE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion) VALUES (?, ?, ?, 1, ?)',
+        [referencia_id, referencia_id, referencia_id, now]
+      );
       results.sustitutosResueltos++;
     }
 

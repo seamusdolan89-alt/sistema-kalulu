@@ -781,21 +781,35 @@ const Ordenes = (() => {
 
   // ── Asociar sustituto ──────────────────────────────────────────────────────
 
-  /** Miembros del grupo de sustitutos al que pertenece un producto (vacio si no tiene). */
+  /**
+   * Miembros del grupo de sustitutos de un producto (vacio si no tiene grupo).
+   *
+   * Hay que mirar las dos direcciones. Un producto pertenece a un grupo si
+   * apunta a una referencia, PERO tambien si otros le apuntan a el: la
+   * referencia puede no tener fila propia —los grupos que vienen de la
+   * importacion nacen asi— y mirando una sola direccion parecia estar suelta
+   * aunque el editor la mostrara como referencia de varios productos.
+   */
   function miembrosDelGrupo(prodId) {
-    const ref = db().query(
-      `SELECT referencia_id FROM producto_sustitutos
-       WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1`,
-      [prodId]
-    )[0];
-    if (!ref) return [];
-    return db().query(`
+    const refId = referenciaDe(prodId);
+    if (!refId) return [];
+
+    const filas = db().query(`
       SELECT DISTINCT ps.producto_id AS id, p.nombre
       FROM producto_sustitutos ps
       JOIN productos p ON p.id = ps.producto_id
       WHERE ps.referencia_id = ?
-      ORDER BY p.nombre COLLATE NOCASE ASC
-    `, [ref.referencia_id]);
+    `, [refId]);
+
+    // Si la referencia no tiene fila propia, igual es parte del grupo.
+    if (!filas.some(f => f.id === refId)) {
+      const propia = db().query(`SELECT id, nombre FROM productos WHERE id = ?`, [refId])[0];
+      if (propia) filas.push(propia);
+    }
+
+    return filas.sort((a, b) =>
+      String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' })
+    );
   }
 
   /**
@@ -868,13 +882,27 @@ const Ordenes = (() => {
     }
   }
 
-  /** Referencia del grupo de sustitutos de un producto (null si no tiene grupo). */
+  /**
+   * Referencia del grupo de sustitutos de un producto (null si no tiene grupo).
+   *
+   * Segunda direccion incluida a proposito: si nadie figura como su referencia
+   * pero otros productos le apuntan a el, entonces el es la referencia — aunque
+   * no tenga fila propia en producto_sustitutos.
+   */
   function referenciaDe(prodId) {
-    return db().query(
+    const propia = db().query(
       `SELECT referencia_id FROM producto_sustitutos
        WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1`,
       [prodId]
-    )[0]?.referencia_id || null;
+    )[0];
+    if (propia) return propia.referencia_id;
+
+    const leApuntan = db().query(
+      `SELECT 1 FROM producto_sustitutos
+       WHERE referencia_id = ? AND producto_id != ? LIMIT 1`,
+      [prodId, prodId]
+    )[0];
+    return leApuntan ? prodId : null;
   }
 
   /**
