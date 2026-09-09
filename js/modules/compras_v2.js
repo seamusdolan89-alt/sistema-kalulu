@@ -235,6 +235,20 @@ const ComprasV2 = (() => {
   // perfectas, y un aviso que salta siempre se deja de mirar.
   const TOLERANCIA_CONTROL = 10;
 
+  /**
+   * Lo que suma el carrito, que es lo que crece al cargar productos.
+   *
+   * Distinto de calcMontoFactura(), que devuelve el total DECLARADO en la
+   * cabecera. En Factura A los costos se cargan sin IVA, asi que hay que
+   * sumarselo para poder compararlo contra el total de la factura impresa; en
+   * B y C el costo ya viene con IVA adentro.
+   */
+  function calcTotalCarrito() {
+    const neto = calcTotal();
+    if (!isFacturaA()) return neto;
+    return neto + calcIvaCalc('10.5') + calcIvaCalc('21');
+  }
+
   function calcMontoFactura() {
     return state.totalFactura > 0 ? state.totalFactura : calcTotal();
   }
@@ -421,10 +435,14 @@ const ComprasV2 = (() => {
         <span class="cv2-col-label">Total Factura</span>
         <span class="cv2-col-value">${esc(total)}</span>
       </div>
+      <div class="cv2-col-sep"></div>
+      <div class="cv2-col-field" id="cv2-col-control" style="display:none"></div>
       <button class="cv2-col-edit" id="cv2-col-edit-btn">Editar Cabecera</button>
     `;
     el.style.display = 'flex';
     ge('cv2-col-edit-btn')?.addEventListener('click', showCabecera);
+    // La tira se rearma entera, asi que hay que volver a pintar el control.
+    renderControlCabecera();
   }
 
   function showCabecera() {
@@ -497,8 +515,10 @@ const ComprasV2 = (() => {
     // Summary bar: hide monetary totals in remito mode
     const summaryTotals = document.querySelector('.cv2-summary-totals');
     if (summaryTotals) summaryTotals.style.display = state.modoRemito ? 'none' : '';
-    const controlLine = ge('cv2-control-line');
-    if (controlLine && state.modoRemito) controlLine.style.display = 'none';
+    // El control contra el carrito vive ahora en la tira de cabecera; en modo
+    // remito no hay importes, asi que tampoco corresponde.
+    const controlCab = ge('cv2-col-control');
+    if (controlCab && state.modoRemito) controlCab.style.display = 'none';
 
     // Confirm button label
     const confirmBtn = ge('cv2-btn-confirmar');
@@ -634,7 +654,7 @@ const ComprasV2 = (() => {
   function renderTotals() {
     const gross          = calcGross();
     const descuento      = calcDescuentoTotal();
-    const montoFactura   = calcMontoFactura();   // total real (con IVA incluido en Factura A)
+    const totalCarrito   = calcTotalCarrito();   // lo que suman los items cargados
 
     const countEl = ge('cv2-item-count');
     if (countEl) countEl.textContent = `${state.items.length} producto${state.items.length !== 1 ? 's' : ''}`;
@@ -667,17 +687,14 @@ const ComprasV2 = (() => {
       }
     }
 
-    // "Total Compra" es lo que vale la factura y punto. Antes cv2-total mostraba
-    // el monto ADEUDADO bajo ese rotulo: una compra cubierta por un adelanto se
-    // leia como "Total Compra $0,00" y parecia que el sistema habia perdido la
-    // factura entera.
-    //
-    // El adelanto aplicado y lo que queda a pagar salieron de esta barra: con
-    // los dos puestos, la fila de totales empujaba el boton "Siguiente" fuera
-    // de la pantalla. El dato no se pierde — el panel de adelanto, arriba,
-    // muestra cuanto hay sin aplicar y cuanto se aplica a esta compra.
+    // "Total Compra" es lo que suma el carrito: acompaña lo que vas cargando.
+    // Antes mostraba el total declarado en la cabecera, que no se mueve al
+    // agregar productos — ese dato vive arriba, en la tira de cabecera, junto
+    // al control contra el carrito.
     const totalFacturaEl = ge('cv2-sum-total-factura');
-    if (totalFacturaEl) totalFacturaEl.textContent = fmt$(montoFactura);
+    if (totalFacturaEl) totalFacturaEl.textContent = fmt$(totalCarrito);
+
+    renderControlCabecera();
 
     // La linea chica de "Total s/saldo … Saldo aplicado" queda redundante con
     // las filas de arriba.
@@ -785,21 +802,34 @@ const ComprasV2 = (() => {
     const mismatch = control > 0.001 && Math.abs(control - neto) > TOLERANCIA_CONTROL && neto > 0.001;
     btn.classList.toggle('cv2-btn-confirmar-alert', mismatch && !btn.disabled);
 
-    // Update control line in summary bar
-    const controlLine = ge('cv2-control-line');
-    if (controlLine) {
-      if (control > 0.001 && neto > 0.001) {
-        const label = isFacturaA() ? 'Subtotal Neto' : 'Total Factura';
-        controlLine.style.display = 'flex';
-        controlLine.innerHTML = `
-          <span class="cv2-control-label">${label}:</span>
-          <span class="cv2-control-value ${mismatch ? 'cv2-control-bad' : ''}">${formatARS(control)}</span>
-          <span class="cv2-control-badge ${mismatch ? 'cv2-control-badge-bad' : 'cv2-control-badge-ok'}">${mismatch ? '≠ carrito' : '= carrito'}</span>
-        `;
-      } else {
-        controlLine.style.display = 'none';
-      }
-    }
+  }
+
+  /**
+   * El importe declarado en la cabecera y si coincide con el carrito.
+   *
+   * Vive en la tira de cabecera y no en la barra de abajo: es un dato de la
+   * factura, no del carrito, y abajo competia por lugar con los totales que si
+   * van cambiando. Se redibuja tanto al cambiar el carrito como al redibujar la
+   * tira, porque la tira se rearma entera cuando se edita la cabecera.
+   */
+  function renderControlCabecera() {
+    const cont = ge('cv2-col-control');
+    if (!cont) return;
+
+    const neto    = calcTotal();
+    const control = isFacturaA() ? state.subtotalNeto : state.totalFactura;
+
+    if (!(control > 0.001 && neto > 0.001)) { cont.style.display = 'none'; return; }
+
+    const mismatch = Math.abs(control - neto) > TOLERANCIA_CONTROL;
+    cont.style.display = '';
+    cont.innerHTML = `
+      <span class="cv2-col-label">${isFacturaA() ? 'Subtotal Neto' : 'Total Factura'}</span>
+      <span class="cv2-col-value">
+        ${formatARS(control)}
+        <span class="cv2-control-badge ${mismatch ? 'cv2-control-badge-bad' : 'cv2-control-badge-ok'}"
+              >${mismatch ? '≠ carrito' : '= carrito'}</span>
+      </span>`;
   }
 
   // ── Product search ───────────────────────────────────────────────────────────
