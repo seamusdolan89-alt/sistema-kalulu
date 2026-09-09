@@ -1593,7 +1593,10 @@ const Ordenes = (() => {
 
       const canvas = await window.html2canvas(target, {
         backgroundColor: '#ffffff',
-        scale: 2,
+        // scale:2 quedaba borroso al reenviar la imagen por WhatsApp (recomprime
+        // agresivo en imagenes chicas) o al hacer zoom para leerla. scale:3 la
+        // deja bastante mas nitida a costa de un archivo un poco mas pesado.
+        scale: 3,
         useCORS: true,
         logging: false,
       });
