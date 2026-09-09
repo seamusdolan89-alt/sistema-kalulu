@@ -28,6 +28,8 @@ const mod = {
       sugeridasFocusIdx: -1,
       sugeridasFiltros: { categorias: new Set(), proveedores: new Set() },
       soloConStock: false,
+      // Ultima tanda impresa, para poder deshacer (ver _print)
+      ultimaImpresion: null,
     };
     this._loadPending();
     this._loadSugeridas();
@@ -58,6 +60,51 @@ const mod = {
     });
   },
 
+  /**
+   * Aviso de la ultima tanda impresa, con la opcion de recuperarla.
+   *
+   * El carrito se vacia al imprimir para no reimprimir sin querer, pero la
+   * impresion puede fallar despues (popup bloqueado, impresora sin papel) y en
+   * ese momento la seleccion ya no esta. Este aviso es la red.
+   */
+  _buildAvisoImpresion() {
+    const u = this._state.ultimaImpresion;
+    if (!u) return '';
+    const n = u.etiquetas;
+    return `
+      <div id="etiq-aviso-impresion" style="display:flex;align-items:center;gap:12px;
+        flex-wrap:wrap;background:#f1f8e9;border:1px solid #dcedc8;border-radius:8px;
+        padding:10px 14px;margin-bottom:12px;font-size:0.86rem;color:#33691e">
+        <span>Se ${n === 1 ? 'imprimió' : 'imprimieron'} <strong>${n}</strong>
+          ${n === 1 ? 'etiqueta' : 'etiquetas'} y se vació la lista.</span>
+        <button id="etiq-btn-deshacer" style="background:#fff;border:1px solid #aed581;
+          color:#33691e;border-radius:6px;padding:5px 12px;font-size:0.82rem;
+          cursor:pointer;font-weight:600">¿Salió mal? Volver a cargarlas</button>
+        <button id="etiq-btn-aviso-cerrar" aria-label="Cerrar aviso" title="Cerrar"
+          style="margin-left:auto;background:none;border:none;color:#7cb342;
+          font-size:1.1rem;cursor:pointer;line-height:1">&times;</button>
+      </div>`;
+  },
+
+  /** Devuelve la ultima tanda al carrito y deshace sus marcas de impresion. */
+  _deshacerImpresion() {
+    const u = this._state.ultimaImpresion;
+    if (!u) return;
+    const ts = new Date().toISOString();
+    for (const m of u.marcasPrevias) {
+      window.SGA_DB.run(
+        `UPDATE productos SET ultima_impresion_etiqueta = ?,
+           sync_status = 'pending', updated_at = ? WHERE id = ?`,
+        [m.anterior, ts, m.id]
+      );
+    }
+    this._state.items = u.items.map(i => ({ ...i }));
+    this._state.ultimaImpresion = null;
+    this._loadSugeridas();
+    this._render();
+    this._bind();
+  },
+
   // ── Render ─────────────────────────────────────────────────────────────
   _render() {
     const el = document.getElementById('app-content');
@@ -68,6 +115,7 @@ const mod = {
 
     el.innerHTML = `
       <div class="etiq-root">
+        ${this._buildAvisoImpresion()}
         <div class="etiq-header">
           <h2>🏷️ Etiquetas de Precio</h2>
           <div class="etiq-header-actions">
@@ -217,10 +265,16 @@ const mod = {
 
       // Buttons
       if (e.target.id === 'etiq-btn-imprimir') { this._print(); return; }
+      if (e.target.id === 'etiq-btn-deshacer') { this._deshacerImpresion(); return; }
+      if (e.target.id === 'etiq-btn-aviso-cerrar') {
+        this._state.ultimaImpresion = null;
+        this._render(); this._bind(); return;
+      }
       if (e.target.id === 'etiq-btn-limpiar' || e.target.id === 'etiq-sug-limpiar') {
         if (!document.contains(e.target)) return;
         this._state.items = [];
         this._state.sugeridasFocusIdx = -1;
+        this._state.ultimaImpresion = null;
         this._render(); this._bind(); return;
       }
 
@@ -751,6 +805,16 @@ ${labelsHTML}
     // sugerido. Recien al dia siguiente ganaba la parte de la fecha.
     const printedAt = new Date().toISOString();
     const printedIds = [...new Set(items.map(i => i.id))];
+    // Marca anterior de cada uno, para que deshacer deje todo como estaba y no
+    // solo devuelva la seleccion: si la impresion fallo, esos productos tienen
+    // que volver a figurar como pendientes de imprimir.
+    const marcasPrevias = printedIds.map(id => ({
+      id,
+      anterior: window.SGA_DB.query(
+        `SELECT ultima_impresion_etiqueta AS m FROM productos WHERE id = ?`, [id]
+      )[0]?.m || null,
+    }));
+
     printedIds.forEach(id => {
       // sync_status para que la marca viaje: sin esto, imprimir en ADMIN no
       // callaba la sugerencia en el POS y las etiquetas se reimprimian alla.
@@ -760,8 +824,19 @@ ${labelsHTML}
         [printedAt, printedAt, id]
       );
     });
+
+    // Se vacia el carrito: dejarlo cargado hacia que al agregar la tanda
+    // siguiente el boton dijera "Imprimir (85)" y volviera a sacar las 73 ya
+    // impresas. Queda el aviso por si la impresion salio mal.
+    this._state.ultimaImpresion = {
+      items: items.map(i => ({ ...i })),
+      marcasPrevias,
+      etiquetas: items.reduce((t, i) => t + (i.cantidad || 0), 0),
+    };
+    this._state.items = [];
     this._loadSugeridas();
-    this._renderSugeridas();
+    this._render();
+    this._bind();
     // Revoke after 2 minutes
     setTimeout(() => URL.revokeObjectURL(url), 120_000);
   },
