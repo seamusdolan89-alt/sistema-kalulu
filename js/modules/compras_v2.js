@@ -635,8 +635,6 @@ const ComprasV2 = (() => {
     const gross          = calcGross();
     const descuento      = calcDescuentoTotal();
     const montoFactura   = calcMontoFactura();   // total real (con IVA incluido en Factura A)
-    const saldoAplicado  = calcSaldoAplicado();
-    const montoAdeudado  = calcMontoAdeudado();  // lo que efectivamente queda a deber/pagar
 
     const countEl = ge('cv2-item-count');
     if (countEl) countEl.textContent = `${state.items.length} producto${state.items.length !== 1 ? 's' : ''}`;
@@ -669,27 +667,17 @@ const ComprasV2 = (() => {
       }
     }
 
-    // "Total Compra" es lo que vale la factura y punto. El adelanto del
-    // proveedor y lo que queda a pagar van en lineas propias, porque antes
-    // cv2-total mostraba el monto ADEUDADO bajo el rotulo "Total Compra": una
-    // compra cubierta por un adelanto se leia como "Total Compra $0,00" y
-    // parecia que el sistema habia perdido la factura entera.
-    const hayAdelanto = saldoAplicado > 0.01;
-
+    // "Total Compra" es lo que vale la factura y punto. Antes cv2-total mostraba
+    // el monto ADEUDADO bajo ese rotulo: una compra cubierta por un adelanto se
+    // leia como "Total Compra $0,00" y parecia que el sistema habia perdido la
+    // factura entera.
+    //
+    // El adelanto aplicado y lo que queda a pagar salieron de esta barra: con
+    // los dos puestos, la fila de totales empujaba el boton "Siguiente" fuera
+    // de la pantalla. El dato no se pierde — el panel de adelanto, arriba,
+    // muestra cuanto hay sin aplicar y cuanto se aplica a esta compra.
     const totalFacturaEl = ge('cv2-sum-total-factura');
     if (totalFacturaEl) totalFacturaEl.textContent = fmt$(montoFactura);
-
-    const adelantoEl   = ge('cv2-sum-adelanto');
-    const adelantoWrap = ge('cv2-adelanto-wrap');
-    if (adelantoEl)   adelantoEl.textContent = '−' + fmt$(saldoAplicado);
-    if (adelantoWrap) adelantoWrap.style.display = hayAdelanto ? '' : 'none';
-
-    // "A pagar" solo aparece cuando difiere del total; sin adelanto seria
-    // repetir el mismo numero dos veces.
-    const totalEl    = ge('cv2-total');
-    const apagarWrap = ge('cv2-apagar-wrap');
-    if (totalEl)    totalEl.textContent = fmt$(montoAdeudado);
-    if (apagarWrap) apagarWrap.style.display = hayAdelanto ? '' : 'none';
 
     // La linea chica de "Total s/saldo … Saldo aplicado" queda redundante con
     // las filas de arriba.
