@@ -54,6 +54,9 @@
     { key: 'can_operaciones_stock',    label: 'Operaciones de stock (recuentos, ajustes)', grupo: 'Stock', riesgo: 'bajo',  tipo: 'bool', default: false },
     { key: 'can_roturas_vencimientos', label: 'Dar de baja por rotura o vencimiento',      grupo: 'Stock', riesgo: 'medio', tipo: 'bool', default: false },
     { key: 'can_consumo_interno',      label: 'Registrar consumo interno',                 grupo: 'Stock', riesgo: 'medio', tipo: 'bool', default: false },
+    // Riesgo alto: descuenta stock sin respaldo de una venta, una rotura ni un
+    // vencimiento — es el que mas se presta a tapar un faltante.
+    { key: 'can_ajuste_stock',         label: 'Ajustar stock (egreso)',                    grupo: 'Stock', riesgo: 'alto',  tipo: 'bool', default: false },
 
     // ── OTROS ─────────────────────────────────────────────────────────────
     { key: 'can_clientes',     label: 'Gestionar clientes',    grupo: 'Otros', riesgo: 'bajo',  tipo: 'bool', default: false },
@@ -81,6 +84,7 @@
       permisos: {
         can_ver_productos: true, can_editar_productos: true, can_ver_costos: true,
         can_operaciones_stock: true, can_roturas_vencimientos: true, can_consumo_interno: true,
+        can_ajuste_stock: true,
         can_proveedores: true,
       },
     },
@@ -95,6 +99,7 @@
         can_ver_productos: true, can_editar_productos: true, can_ver_costos: true,
         can_compras: true, can_ordenes: true, can_proveedores: true,
         can_operaciones_stock: true, can_roturas_vencimientos: true, can_consumo_interno: true,
+        can_ajuste_stock: true,
         can_clientes: true, can_promociones: true, can_informes: true, can_etiquetas: true,
       },
     },

@@ -476,6 +476,9 @@ const OperacionesStock = (() => {
         case 'roturas':
           window.location.hash = '#roturas';
           break;
+        case 'ajuste_stock':
+          window.location.hash = '#ajuste_stock';
+          break;
         default:
           break;
       }
