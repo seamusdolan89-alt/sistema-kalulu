@@ -874,6 +874,19 @@
       "ALTER TABLE ingresos_caja ADD COLUMN tipo TEXT",
       "ALTER TABLE ingresos_caja ADD COLUMN cliente_id TEXT",
     ];
+    // Las marcas de impresion de etiquetas se guardaban con un espacio donde va
+    // la T ("2026-09-08 14:30:00"), mientras que ultima_modificacion_precio usa
+    // toISOString(). Como se comparan como texto y ' ' < 'T', esas marcas viejas
+    // pierden siempre contra un cambio de precio del mismo dia y el producto
+    // sigue apareciendo como pendiente de imprimir.
+    try {
+      database.run(`
+        UPDATE productos
+        SET ultima_impresion_etiqueta = REPLACE(ultima_impresion_etiqueta, ' ', 'T')
+        WHERE ultima_impresion_etiqueta LIKE '% %'
+      `);
+    } catch (e) { console.warn('normalizar ultima_impresion_etiqueta:', e.message); }
+
     // La referencia de un grupo de sustitutos tiene que tener su propia fila.
     // La importacion crea una fila por cada miembro apuntando a la referencia,
     // pero ninguna para la referencia misma, y entonces queda siendo referencia

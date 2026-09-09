@@ -480,7 +480,10 @@ const mod = {
       LEFT JOIN stock st ON st.producto_id = p.id AND st.sucursal_id = ?
       WHERE p.activo = 1
         AND (p.ultima_impresion_etiqueta IS NULL
-             OR p.ultima_modificacion_precio > p.ultima_impresion_etiqueta)
+             -- El REPLACE es por las marcas viejas, guardadas con un espacio en
+             -- lugar de la T: sin normalizar, comparan mal contra el precio.
+             OR p.ultima_modificacion_precio >
+                REPLACE(p.ultima_impresion_etiqueta, ' ', 'T'))
       ORDER BY p.nombre
     `, [sucursalId]) || [];
     this._state.sugeridas = rows;
@@ -741,10 +744,21 @@ ${labelsHTML}
     if (!win) {
       alert('El navegador bloqueó la ventana emergente. Permití los popups para esta página e intentá de nuevo.');
     }
-    const printedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    // Mismo formato con el que se guarda ultima_modificacion_precio
+    // (toISOString). Antes se guardaba con la T reemplazada por un espacio y,
+    // como la comparacion es de texto, ' ' < 'T': un precio cambiado el mismo
+    // dia siempre resultaba posterior a la impresion y el producto seguia
+    // sugerido. Recien al dia siguiente ganaba la parte de la fecha.
+    const printedAt = new Date().toISOString();
     const printedIds = [...new Set(items.map(i => i.id))];
     printedIds.forEach(id => {
-      window.SGA_DB.run(`UPDATE productos SET ultima_impresion_etiqueta=? WHERE id=?`, [printedAt, id]);
+      // sync_status para que la marca viaje: sin esto, imprimir en ADMIN no
+      // callaba la sugerencia en el POS y las etiquetas se reimprimian alla.
+      window.SGA_DB.run(
+        `UPDATE productos SET ultima_impresion_etiqueta = ?,
+           sync_status = 'pending', updated_at = ? WHERE id = ?`,
+        [printedAt, printedAt, id]
+      );
     });
     this._loadSugeridas();
     this._renderSugeridas();
