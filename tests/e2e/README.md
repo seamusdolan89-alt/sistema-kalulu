@@ -93,6 +93,7 @@ sale "vacío" inesperadamente.
 | `test_pos_buscador_sugerencia_fantasma.py` | POS: al escanear un código de barras rápido (lector real), el dropdown del buscador ya no vuelve a aparecer solo con el producto recién agregado (race condition entre el debounce de 180ms y el Enter del lector) ni sobrevive a la venta siguiente |
 | `test_pos_carrito_autoscroll.py` | POS: con el carrito lleno (más de ~7 ítems), agregar un producto nuevo hace autoscroll para que la fila quede visible sin scrollear a mano |
 | `test_compras_carrito_autoscroll.py` | Compras (admin-pos): mismo autoscroll que en el POS, aplicado al carrito de una compra |
+| `test_ordenes_agregar_orden_insercion.py` | Órdenes de Compra (admin-pos): agregar un producto manualmente a una orden lo deja al final del listado (orden de inserción), en vez de reordenar todo alfabéticamente por nombre |
 | `test_clientes_cuenta_corriente.py` | Clientes: saldo deudor correcto en la lista y en la ficha; registrar un pago desde la ficha descuenta el saldo y queda en el historial de movimientos |
 | `test_promociones.py` | Crear una promoción (10% sobre un producto) y verificar que se aplica automáticamente al agregarlo al carrito en el POS |
 | `test_consumo_interno.py` | Consumo interno atribuido a otro usuario: pide contraseña, rechaza vacía/incorrecta, guarda con la correcta; el registro queda `usuario_id`=atribuido / `registrado_por_usuario_id`=quien operaba; stock se descuenta |
