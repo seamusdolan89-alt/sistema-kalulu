@@ -247,7 +247,7 @@ const Ordenes = (() => {
       LEFT JOIN productos pr ON pr.id = oi.producto_id
       LEFT JOIN codigos_barras cb ON cb.producto_id = oi.producto_id AND cb.es_principal = 1
       WHERE oi.orden_id = ?
-      ORDER BY pr.nombre
+      ORDER BY oi.rowid
     `, [ordenId]);
 
     return orden;
