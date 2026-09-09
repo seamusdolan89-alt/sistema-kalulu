@@ -357,6 +357,50 @@ const Ordenes = (() => {
     return true;
   }
 
+  /**
+   * Reordena los items de una orden alfabéticamente por nombre de producto,
+   * de forma persistente (no es un sort de UI que se pierde al recargar).
+   *
+   * getOrden() lee ORDER BY oi.rowid (orden de inserción, ver [[project_pos_bugs]]
+   * / commit "agregar un producto lo deja al final") para que los productos
+   * agregados manualmente aparezcan al final en vez de reordenarse solos. Este
+   * botón es la salida manual para el caso opuesto: antes de mandarle la orden
+   * al proveedor, conviene que esté alfabética para que le sea más fácil de
+   * recorrer.
+   *
+   * No hace falta una columna nueva ni migración: reasigna el rowid de cada
+   * item (el mismo mecanismo que ya determina el orden) permutando el propio
+   * conjunto de rowids que ya usan los items de ESTA orden — nunca pisa el
+   * rowid de una fila de otra orden. La reasignación se hace en dos pasadas
+   * (primero a valores negativos temporales, después a los definitivos) para
+   * no pisar en el camino un rowid que todavía ocupa otra fila de la misma
+   * orden que se está por mover.
+   */
+  function reordenarAlfabetico(ordenId) {
+    const rows = db().query(`
+      SELECT oi.id, oi.rowid AS rid
+      FROM orden_compra_items oi
+      LEFT JOIN productos pr ON pr.id = oi.producto_id
+      WHERE oi.orden_id = ?
+      ORDER BY pr.nombre COLLATE NOCASE ASC
+    `, [ordenId]);
+    if (rows.length < 2) return; // nada que reordenar
+
+    const slots = rows.map(r => r.rid).sort((a, b) => a - b);
+
+    rows.forEach((r, i) => {
+      db().run(`UPDATE orden_compra_items SET rowid = ? WHERE id = ?`, [-(i + 1), r.id]);
+    });
+    rows.forEach((r, i) => {
+      db().run(`UPDATE orden_compra_items SET rowid = ? WHERE id = ?`, [slots[i], r.id]);
+    });
+
+    db().run(
+      `UPDATE ordenes_compra SET sync_status = 'pending', updated_at = ? WHERE id = ?`,
+      [now(), ordenId]
+    );
+  }
+
   // ── UI STATE ─────────────────────────────────────────────────────────────────
 
   const ui = {
@@ -582,7 +626,13 @@ const Ordenes = (() => {
     if (editable) {
       thead.innerHTML = `<tr>
         <th style="text-align:left;min-width:90px">Cód. prov.</th>
-        <th style="text-align:left">Descripción</th>
+        <th style="text-align:left">
+          <span style="display:inline-flex;align-items:center;gap:6px">
+            Descripción
+            <button id="ord-btn-sort-az" class="ord-btn-sort-az" type="button"
+              title="Reordenar alfabéticamente (útil antes de enviarle la orden al proveedor)">A→Z</button>
+          </span>
+        </th>
         <th>Stock act.</th>
         <th>Stock mín.</th>
         <th style="min-width:120px">A pedir</th>
@@ -592,6 +642,11 @@ const Ordenes = (() => {
         <th style="text-align:left;min-width:140px">Notas</th>
         <th></th>
       </tr>`;
+      ge('ord-btn-sort-az')?.addEventListener('click', () => {
+        reordenarAlfabetico(orden.id);
+        renderOrden();
+        showToast('Productos reordenados alfabéticamente');
+      });
     } else {
       thead.innerHTML = `<tr>
         <th style="text-align:left;min-width:90px">Cód. prov.</th>
