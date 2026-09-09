@@ -52,6 +52,30 @@ const mod = {
     } catch (_) {}
   },
 
+  /**
+   * ¿Este producto tiene la reposición pausada hoy?
+   *
+   * pausaVigente vive en db.js, que se cachea con ?v=N a mano: si el navegador
+   * quedó con una versión anterior no existe, y conviene mostrar de más antes
+   * que romper la pantalla.
+   */
+  _pausado(r) {
+    if (typeof window.SGA_DB?.pausaVigente !== 'function') return false;
+    return window.SGA_DB.pausaVigente(r);
+  },
+
+  /**
+   * Un pausado sin stock no vuelve a la góndola: no hay etiqueta que imprimir.
+   *
+   * El pausado CON stock se queda a propósito. Pausar no es dejar de vender —
+   * se sigue vendiendo lo que hay— y si le cambiaron el precio, la góndola
+   * tiene que decir el precio nuevo o se cobra distinto de lo que dice el
+   * cartel. Ese aparece marcado, para que decidas vos.
+   */
+  _fueraPorPausa(r) {
+    return this._pausado(r) && (parseFloat(r.stock_actual) || 0) <= 0;
+  },
+
   // ── Formatting ─────────────────────────────────────────────────────────
   _fmt(price) {
     return '$ ' + Number(price).toLocaleString('es-AR', {
@@ -524,6 +548,7 @@ const mod = {
     const sucursalId = window.SGA_Auth?.getCurrentUser()?.sucursal_id || '1';
     const rows = this._db().query(`
       SELECT p.id, p.nombre, p.precio_venta, p.ultima_modificacion_precio,
+        p.pausa_reposicion, p.pausa_reposicion_hasta,
         p.categoria_id, c.nombre AS categoria_nombre,
         p.proveedor_principal_id, pv.razon_social AS proveedor_nombre,
         COALESCE(st.cantidad, 0) AS stock_actual,
@@ -545,7 +570,7 @@ const mod = {
 
   _getFilteredSugeridas() {
     const { sugeridas, sugeridasFiltros } = this._state;
-    let list = sugeridas;
+    let list = sugeridas.filter(r => !this._fueraPorPausa(r));
     if (sugeridasFiltros.categorias.size > 0)
       list = list.filter(r => sugeridasFiltros.categorias.has(r.categoria_id || '__none__'));
     if (sugeridasFiltros.proveedores.size > 0)
@@ -603,12 +628,21 @@ const mod = {
     const ocultosPorStock = this._state.soloConStock
       ? 0
       : visible.filter(r => (parseFloat(r.stock_actual) || 0) <= 0).length;
+    // Se avisa cuantos se ocultaron por pausa: esconder cosas sin decirlo hace
+    // que despues nadie entienda por que falta un producto en la lista.
+    const ocultosPorPausa = sugeridas.filter(r => this._fueraPorPausa(r)).length;
     const itemIds = new Set(this._state.items.map(i => i.id));
     const allChecked = visible.length > 0 && visible.every(r => itemIds.has(r.id));
     const rows = visible.map((r, i) => `
       <div class="etiq-sug-row" tabindex="0" data-idx="${i}" data-id="${r.id}">
         <input type="checkbox" class="etiq-sug-chk" data-id="${r.id}" ${itemIds.has(r.id) ? 'checked' : ''}>
-        <div class="etiq-sug-nombre">${this._esc(r.nombre)}</div>
+        <div class="etiq-sug-nombre">${this._esc(r.nombre)}${
+          this._pausado(r)
+            ? ' <span title="Reposición pausada — se sigue vendiendo el stock que queda" ' +
+              'style="display:inline-block;background:#fff3e0;color:#e65100;font-size:9px;' +
+              'font-weight:700;padding:1px 5px;border-radius:3px;vertical-align:middle">PAUSADO</span>'
+            : ''
+        }</div>
         <div class="etiq-sug-precio">${this._fmt(r.precio_venta)}</div>
         <div class="etiq-sug-fecha">${r.ultima_modificacion_precio ? r.ultima_modificacion_precio.slice(0, 10) : '—'}</div>
       </div>
@@ -628,6 +662,9 @@ const mod = {
           <input type="checkbox" id="etiq-sug-chk-stock" ${this._state.soloConStock ? 'checked' : ''}>
           Solo con stock${ocultosPorStock > 0 ? ` <span class="etiq-sug-stock-count">(${ocultosPorStock} sin stock)</span>` : ''}
         </label>
+        ${ocultosPorPausa > 0 ? `<span class="etiq-sug-stock-count"
+          title="Con la reposición pausada y sin stock: no vuelven a la góndola"
+          >${ocultosPorPausa} pausado${ocultosPorPausa > 1 ? 's' : ''} sin stock, oculto${ocultosPorPausa > 1 ? 's' : ''}</span>` : ''}
         ${this._state.items.length > 0 ? `<button id="etiq-sug-limpiar" class="etiq-sug-clear-btn">Limpiar todo</button>` : ''}
       </div>
       <div class="etiq-sug-main">
