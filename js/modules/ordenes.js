@@ -1479,6 +1479,8 @@ const Ordenes = (() => {
     }
     if (!editable) {
       btns.push(`<button class="ord-btn-action ord-btn-exportar" id="ord-btn-exportar">📷 Exportar imagen</button>`);
+      btns.push(`<button class="ord-btn-action ord-btn-exportar-pdf" id="ord-btn-exportar-pdf"
+        title="WhatsApp comprime cualquier imagen enviada como Foto — el PDF llega siempre sin pérdida de calidad">🖨 Exportar PDF</button>`);
     }
 
     cont.innerHTML = btns.join('');
@@ -1512,9 +1514,98 @@ const Ordenes = (() => {
     });
 
     ge('ord-btn-exportar')?.addEventListener('click', () => exportarImagen(orden));
+    ge('ord-btn-exportar-pdf')?.addEventListener('click', () => exportarPDF(orden));
   }
 
-  // ── EXPORTAR IMAGEN ───────────────────────────────────────────────────────────
+  // ── EXPORTAR IMAGEN / PDF ────────────────────────────────────────────────────
+
+  /**
+   * Tabla Descripción/Pedido compartida entre "Exportar imagen" (html2canvas,
+   * termina en un PNG) y "Exportar PDF" (impresión nativa del navegador). Se
+   * factoriza para que ambos exports muestren siempre lo mismo.
+   */
+  function construirTablaOrdenHtml(orden) {
+    return `
+      <table style="
+        width: auto; border-collapse: collapse;
+        font-size: 13px; color: #000; white-space: nowrap;
+      ">
+        <thead>
+          <tr style="background: #1a2e4a;">
+            <th style="
+              padding: 9px 12px; text-align: left; color: #fff;
+              font-weight: 700; font-size: 12px; text-transform: uppercase;
+              letter-spacing: 0.04em; border: 1px solid #1a2e4a;
+            ">Descripción</th>
+            <th style="
+              padding: 9px 12px; text-align: right; color: #fff;
+              font-weight: 700; font-size: 12px; text-transform: uppercase;
+              letter-spacing: 0.04em; border: 1px solid #1a2e4a;
+            ">Pedido</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${orden.items.map((it, i) => {
+            const cantFinal = it.cantidad_final != null ? it.cantidad_final : it.cantidad_sugerida;
+            const unidad    = it.unidad_pedida || it.prod_pedido_unidad || 'unidad';
+            const bg = i % 2 === 0 ? '#fff' : '#f4f6f9';
+            return `<tr style="background:${bg}">
+              <td style="padding: 8px 12px; border: 1px solid #d0d7e3; color: #000;">${esc(it.producto_nombre || '—')}</td>
+              <td style="padding: 8px 12px; border: 1px solid #d0d7e3; color: #000; text-align: right; font-weight: 600;">${esc(labelApedir(cantFinal, unidad))}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+  }
+
+  /**
+   * Genera un PDF real (vector, no una imagen rasterizada) vía el diálogo de
+   * impresión nativo del navegador — sin depender de ninguna librería externa
+   * (jsPDF, etc.), mismo patrón que ya usa `etiquetas.js` para imprimir
+   * etiquetas: arma un HTML standalone, lo abre en una pestaña nueva vía Blob
+   * URL, y dispara window.print() solo. El usuario elige "Guardar como PDF"
+   * en ese diálogo.
+   *
+   * Por qué esto existe además de "Exportar imagen": WhatsApp recomprime
+   * cualquier imagen que se envíe como "Foto" (JPEG con pérdida, y la achica)
+   * — eso pasa siempre, no depende de la resolución de origen. Un PDF, en
+   * cambio, WhatsApp lo manda siempre como documento (nunca por la vía de
+   * "foto"), así que llega sin ninguna pérdida de calidad — y al ser texto
+   * vectorial, ni siquiera hay una imagen de por medio que perder.
+   */
+  function exportarPDF(orden) {
+    const fecha = (orden.fecha_creacion || '').slice(0, 10);
+    const prov  = orden.proveedor_nombre || '—';
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Orden ${esc(prov)} ${esc(fecha)}</title>
+<style>
+  @page { margin: 14mm; }
+  body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
+  .ord-pdf-titulo { font-size: 20px; font-weight: 800; color: #000; margin-bottom: 4px; }
+  .ord-pdf-fecha { font-size: 13px; color: #444; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+  <div class="ord-pdf-titulo">${esc(prov)}</div>
+  <div class="ord-pdf-fecha">${esc(fecha)}</div>
+  ${construirTablaOrdenHtml(orden)}
+  <script>window.onload = () => setTimeout(() => window.print(), 300);<\/script>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url, '_blank');
+    if (!win) {
+      showToast('El navegador bloqueó la ventana emergente. Permití los popups e intentá de nuevo.', 'error');
+      return;
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 15000);
+  }
 
   async function exportarImagen(orden) {
     if (!window.html2canvas) {
@@ -1530,16 +1621,6 @@ const Ordenes = (() => {
       const fecha = (orden.fecha_creacion || '').slice(0, 10);
       const prov  = orden.proveedor_nombre || '—';
 
-      // Construir tabla limpia para exportar
-      const filas = orden.items.map(it => {
-        const cantFinal = it.cantidad_final != null ? it.cantidad_final : it.cantidad_sugerida;
-        const unidad    = it.unidad_pedida || it.prod_pedido_unidad || 'unidad';
-        return `<tr>
-          <td>${esc(it.producto_nombre || '—')}</td>
-          <td>${esc(labelApedir(cantFinal, unidad))}</td>
-        </tr>`;
-      }).join('');
-
       const html = `
         <div id="ord-export-wrap" style="
           font-family: Arial, sans-serif;
@@ -1552,36 +1633,7 @@ const Ordenes = (() => {
             <div style="font-size: 20px; font-weight: 800; color: #000; margin-bottom: 4px;">${esc(prov)}</div>
             <div style="font-size: 13px; color: #444;">${fecha}</div>
           </div>
-          <table style="
-            width: auto; border-collapse: collapse;
-            font-size: 13px; color: #000; white-space: nowrap;
-          ">
-            <thead>
-              <tr style="background: #1a2e4a;">
-                <th style="
-                  padding: 9px 12px; text-align: left; color: #fff;
-                  font-weight: 700; font-size: 12px; text-transform: uppercase;
-                  letter-spacing: 0.04em; border: 1px solid #1a2e4a;
-                ">Descripción</th>
-                <th style="
-                  padding: 9px 12px; text-align: right; color: #fff;
-                  font-weight: 700; font-size: 12px; text-transform: uppercase;
-                  letter-spacing: 0.04em; border: 1px solid #1a2e4a;
-                ">Pedido</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${orden.items.map((it, i) => {
-                const cantFinal = it.cantidad_final != null ? it.cantidad_final : it.cantidad_sugerida;
-                const unidad    = it.unidad_pedida || it.prod_pedido_unidad || 'unidad';
-                const bg = i % 2 === 0 ? '#fff' : '#f4f6f9';
-                return `<tr style="background:${bg}">
-                  <td style="padding: 8px 12px; border: 1px solid #d0d7e3; color: #000;">${esc(it.producto_nombre || '—')}</td>
-                  <td style="padding: 8px 12px; border: 1px solid #d0d7e3; color: #000; text-align: right; font-weight: 600;">${esc(labelApedir(cantFinal, unidad))}</td>
-                </tr>`;
-              }).join('')}
-            </tbody>
-          </table>
+          ${construirTablaOrdenHtml(orden)}
         </div>`;
 
       // Insertar en DOM oculto, capturar, eliminar
