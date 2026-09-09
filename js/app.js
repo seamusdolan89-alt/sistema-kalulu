@@ -31,6 +31,7 @@
     'caja': () => import('./modules/caja.js').then(m => m.default),
     'compras_v2': () => import('./modules/compras_v2.js').then(m => m.default),
     'operaciones_stock': () => import('./modules/operaciones_stock.js').then(m => m.default),
+    'ajuste_stock': () => import('./modules/ajuste_stock.js').then(m => m.default),
     'ordenes': () => import('./modules/ordenes.js').then(m => m.default),
     'proveedores': () => import('./modules/proveedores.js').then(m => m.default),
     'promociones': () => import('./modules/promociones.js').then(m => m.default),
@@ -175,7 +176,7 @@
   }
 
   // Módulos del admin-pos (panel remoto): siempre completo
-  const ADMIN_POS_MODULES = ['pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'adelanto_pago', 'caja_admin', 'configuracion', 'flujo'];
+  const ADMIN_POS_MODULES = ['pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'ajuste_stock', 'adelanto_pago', 'caja_admin', 'configuracion', 'flujo'];
 
   function getAllowedModules() {
     if (window.ADMIN_MODE) return ADMIN_POS_MODULES;
@@ -194,6 +195,7 @@
     if (P.can('can_cta_cte_proveedores')) allowed.push('cuenta_corriente_proveedores');
     if (P.can('can_operaciones_stock')) allowed.push('operaciones_stock');
     if (P.can('can_consumo_interno'))   allowed.push('consumo_interno');
+    if (P.can('can_ajuste_stock'))      allowed.push('ajuste_stock');
     if (P.can('can_promociones'))       allowed.push('promociones');
     if (P.can('can_informes'))          allowed.push('informes');
     if (P.can('can_gastos'))            allowed.push('gastos');
@@ -234,6 +236,7 @@
     roturas:                       'can_roturas_vencimientos',
     vencimientos:                  'can_roturas_vencimientos',
     consumo_interno:               'can_consumo_interno',
+    ajuste_stock:                  'can_ajuste_stock',
     promociones:                   'can_promociones',
     informes:                      'can_informes',
     gastos:                        'can_gastos',
