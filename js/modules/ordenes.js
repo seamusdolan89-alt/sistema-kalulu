@@ -91,22 +91,29 @@ const Ordenes = (() => {
              ON ps.producto_id = p.id AND ps.referencia_id IS NOT NULL
       WHERE (p.proveedor_principal_id = ? OR p.proveedor_alternativo_id = ?)
         AND p.activo = 1
+      ORDER BY p.nombre COLLATE NOCASE ASC
     `, [proveedorId, proveedorId]);
 
-    // 2. Deduplicar por ref_id — un solo item por producto/grupo
-    const refIds = [...new Set(candidatos.map(c => c.ref_id))];
+    // 2. Un solo item por grupo de sustitutos, pero guardando cuales de sus
+    //    miembros le corresponden a ESTE proveedor.
+    const porGrupo = new Map();
+    for (const c of candidatos) {
+      if (!porGrupo.has(c.ref_id)) porGrupo.set(c.ref_id, []);
+      porGrupo.get(c.ref_id).push(c.id);
+    }
 
-    // 3. Para cada referencia, evaluar si necesita reposición
+    // 3. Para cada grupo, evaluar si necesita reposición
     const items = [];
 
-    for (const refId of refIds) {
-      const prod = db().query(`
-        SELECT id, nombre, stock_minimo, cant_pedido, unidad_medida,
-               pedido_unidad, pedido_unidades_por_paquete,
-               pausa_reposicion, pausa_reposicion_hasta
-        FROM productos WHERE id = ? AND activo = 1
-      `, [refId])[0];
+    const datosDe = (id) => db().query(`
+      SELECT id, nombre, stock_minimo, cant_pedido, unidad_medida,
+             pedido_unidad, pedido_unidades_por_paquete,
+             pausa_reposicion, pausa_reposicion_hasta
+      FROM productos WHERE id = ? AND activo = 1
+    `, [id])[0];
 
+    for (const [refId, delProveedor] of porGrupo) {
+      const prod = datosDe(refId);
       if (!prod) continue;  // referencia inactiva o no existe
 
       // Reposicion pausada a proposito. La fecha se evalua aca, al generar: si
@@ -114,18 +121,34 @@ const Ordenes = (() => {
       // haber corrido antes a limpiar la bandera.
       if (db().pausaVigente(prod)) continue;
 
-      const stockAct  = stockEfectivo(refId, sucursalId);
-      const stockMin  = prod.stock_minimo || 0;
-      const cantPedido = prod.cant_pedido || 0;
+      // El stock y el minimo son del grupo entero: da igual cual de los
+      // sustitutos tengas en la gondola, cubren la misma necesidad.
+      const stockAct = stockEfectivo(refId, sucursalId);
+      const stockMin = prod.stock_minimo || 0;
 
       if (stockAct - stockMin > 0) continue;  // stock suficiente, no pedir
 
-      const v30d    = ventasUltimos(refId, 30);
-      const v6m     = ventasUltimos(refId, 180);
-      const diasSS  = db().calcularDiasSinStock6m(refId, sucursalId);
+      // A cual se le pide: la referencia si es de este proveedor y, si no, el
+      // producto del grupo que este proveedor si vende. Antes se pedia siempre
+      // la referencia, asi que un grupo repartido entre dos proveedores le
+      // pedia a uno algo que no vende, y lo que si vende no aparecia nunca.
+      const pedidoId = delProveedor.includes(refId) ? refId : delProveedor[0];
+      const aPedir = pedidoId === refId ? prod : datosDe(pedidoId);
+      if (!aPedir) continue;
+
+      // Ese miembro en particular puede estar pausado aunque el grupo no lo este.
+      if (pedidoId !== refId && db().pausaVigente(aPedir)) continue;
+
+      // Las ventas y los dias sin stock se miran sobre la referencia: son la
+      // demanda del grupo, que es lo que justifica el pedido.
+      const v30d   = ventasUltimos(refId, 30);
+      const v6m    = ventasUltimos(refId, 180);
+      const diasSS = db().calcularDiasSinStock6m(refId, sucursalId);
+
+      const cantPedido = aPedir.cant_pedido || 0;
 
       items.push({
-        productoId:       refId,
+        productoId:       pedidoId,
         cantidadPedida:   cantPedido,
         stockActual:      stockAct,
         stockMinimo:      stockMin,
@@ -134,7 +157,7 @@ const Ordenes = (() => {
         ventasProm6m:     Math.round((v6m / 6) * 100) / 100,
         diasSinStock6m:   diasSS,
         cantidadSugerida: cantPedido,
-        unidadPedida:     prod.pedido_unidad || 'unidad',
+        unidadPedida:     aPedir.pedido_unidad || 'unidad',
       });
     }
 
