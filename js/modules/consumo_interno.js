@@ -200,10 +200,30 @@ const ConsumoInterno = (() => {
     }
 
     if (!ge('ci-password')) {
+      // Mientras sea type="password", Chrome lo trata como credencial: lo
+      // empareja con el buscador de productos y al navegar ofrece guardar el
+      // par (llego a proponer "coca cola" como nombre de usuario). Como esto no
+      // es un login sino la autorizacion de otra persona, y tiene que
+      // escribirse cada vez, el campo deja de ser una contraseña para el
+      // navegador: texto comun enmascarado por CSS.
+      //
+      // Si el navegador no soporta el enmascarado se vuelve a type="password":
+      // preferible el cartel de Chrome antes que la clave a la vista.
+      const puedeEnmascarar = typeof CSS !== 'undefined' && CSS.supports
+        && (CSS.supports('-webkit-text-security', 'disc')
+            || CSS.supports('text-security', 'disc'));
+
+      const campo = puedeEnmascarar
+        ? `<input type="text" id="ci-password" class="ci-select"
+                  autocomplete="off" autocorrect="off" autocapitalize="off"
+                  spellcheck="false" placeholder="Contraseña"
+                  style="-webkit-text-security:disc;text-security:disc">`
+        : `<input type="password" id="ci-password" class="ci-select"
+                  autocomplete="new-password" placeholder="Contraseña">`;
+
       wrap.innerHTML = `
         <div class="ci-sec-title">Contraseña de esa persona (para confirmar)</div>
-        <input type="password" id="ci-password" class="ci-select"
-               autocomplete="new-password" placeholder="Contraseña">
+        ${campo}
         <div id="ci-password-error"
              style="display:none;color:#c62828;font-size:0.85em;margin-top:4px;"></div>`;
     }
