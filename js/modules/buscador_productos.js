@@ -100,7 +100,57 @@ const SGA_Buscador = (() => {
     `, [sucursalId, '%' + texto.toLowerCase() + '%', ...variantes]) || [];
   }
 
-  return { variantesCodigo, porCodigo, porTexto };
+  /**
+   * Dibuja los resultados en el dropdown de un carrito.
+   *
+   * Estaba duplicada byte a byte en los cinco modulos de carrito, con el mismo
+   * bug en las cinco copias: mostraban productos.unidad_venta al lado del
+   * stock. Esa columna es texto libre y en los datos reales trae cualquier
+   * cosa —hay productos con "3550" cargado ahi—, asi que se leia
+   * "Stock: 1 3550". El numero solo alcanza; es la misma correccion que el POS
+   * ya habia hecho por su lado.
+   *
+   * @param {HTMLElement} dd        contenedor del dropdown
+   * @param {Array}       resultados
+   * @param {Function}    alElegir  que hacer con el producto elegido
+   * @param {{importe?: Function}} opciones  importe a mostrar a la derecha;
+   *        por defecto el costo (compras muestra el precio de venta).
+   */
+  function pintarDropdown(dd, resultados, alElegir, { importe } = {}) {
+    if (!dd) return;
+    if (!resultados || !resultados.length) { dd.style.display = 'none'; return; }
+
+    const esc = (s) => String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const plata = (n) => window.SGA_Utils.formatCurrency(n || 0);
+
+    dd.innerHTML = resultados.map(p => {
+      const qty = parseFloat(p.stock) || 0;
+      const stock = qty <= 0
+        ? '<div class="sri-stock-warn">Sin stock</div>'
+        : `<div class="sri-codigo">Stock: ${qty.toLocaleString('es-AR', { maximumFractionDigits: 2 })}</div>`;
+      return `
+        <div class="sri" data-id="${esc(p.id)}">
+          <div class="sri-left">
+            <div class="sri-nombre">${esc(p.nombre)}</div>
+            ${p.codigo ? `<div class="sri-codigo">${esc(p.codigo)}</div>` : ''}
+            ${stock}
+          </div>
+          <div class="sri-costo">${importe ? importe(p) : plata(p.costo)}</div>
+        </div>`;
+    }).join('');
+
+    dd.style.display = 'block';
+
+    dd.querySelectorAll('.sri').forEach(el => {
+      el.addEventListener('click', () => {
+        const p = resultados.find(x => String(x.id) === el.dataset.id);
+        if (p) alElegir(p);
+      });
+    });
+  }
+
+  return { variantesCodigo, porCodigo, porTexto, pintarDropdown };
 })();
 
 window.SGA_Buscador = SGA_Buscador;
