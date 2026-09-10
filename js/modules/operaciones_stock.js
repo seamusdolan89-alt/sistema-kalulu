@@ -479,6 +479,9 @@ const OperacionesStock = (() => {
         case 'ajuste_stock':
           window.location.hash = '#ajuste_stock';
           break;
+        case 'ajuste_stock_positivo':
+          window.location.hash = '#ajuste_stock_positivo';
+          break;
         default:
           break;
       }
