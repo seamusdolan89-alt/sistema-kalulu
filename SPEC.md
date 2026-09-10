@@ -1,11 +1,11 @@
-# ⚠️ ARCHIVO LEGACY — NO USAR DIRECTAMENTE
+# ⚠️ ARCHIVO LEGACY — REFERENCIA HISTÓRICA, NO AUTORITATIVO
 
-Este archivo contiene la especificación completa original del sistema.
+Este archivo es la especificación de visión original del sistema (marzo 2026), escrita antes de que existiera la mayor parte del código actual. **No refleja el sistema real de hoy** — arquitectura, módulos, roles y schema de base de datos cambiaron sustancialmente desde entonces.
 
 IMPORTANTE:
-- No usar este archivo como contexto completo en prompts
-- Usar la carpeta /spec modular en su lugar
-- Este archivo es solo de referencia histórica
+- No usar este archivo (ni la carpeta `/SPEC`) como contexto para entender el estado actual del sistema — el código es la fuente de verdad.
+- Para arquitectura, workflow de git y convenciones vigentes, ver `CLAUDE.md` en la raíz del repo.
+- Se conserva solo como referencia histórica de las decisiones de diseño originales.
 
 
 # SPEC.md — Sistema de Gestión de Almacén (SGA)
@@ -1047,4 +1047,4 @@ Funcionalidades acordadas que aún no están en desarrollo activo. Ordenadas por
 
 ---
 
-*Este SPEC.md debe estar presente en la raíz del proyecto y ser referenciado al inicio de cada sesión de Claude Code.*
+*Este archivo es histórico — no se referencia al inicio de las sesiones de Claude Code. Ver `CLAUDE.md` para el contexto vigente.*
