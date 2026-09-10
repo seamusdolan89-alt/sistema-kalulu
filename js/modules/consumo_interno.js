@@ -174,14 +174,50 @@ const ConsumoInterno = (() => {
     togglePasswordField();
   }
 
+  /**
+   * Muestra el pedido de contraseña solo cuando el consumo se le atribuye a
+   * otra persona — y creando el input recien ahi.
+   *
+   * No alcanza con ocultarlo: mientras el <input type="password"> exista en la
+   * pagina, Chrome interpreta la pantalla como un formulario de login, toma el
+   * buscador de productos como campo de usuario y lo autocompleta con un mail.
+   * Al salir, encima, ofrece guardar la contraseña. Sacandolo del DOM no hay
+   * login que detectar.
+   *
+   * Cuando se crea va con autocomplete="new-password", que es lo que le dice a
+   * Chrome que no ofrezca credenciales guardadas: esta clave se escribe cada
+   * vez, a proposito, porque es la autorizacion de otra persona.
+   */
   function togglePasswordField() {
-    const user    = window.SGA_Auth.getCurrentUser();
-    const isOtro  = ge('ci-atribuido').value !== user.id;
-    ge('ci-password-wrap').style.display = isOtro ? '' : 'none';
+    const user   = window.SGA_Auth.getCurrentUser();
+    const wrap   = ge('ci-password-wrap');
+    const isOtro = ge('ci-atribuido').value !== user.id;
+
     if (!isOtro) {
-      ge('ci-password').value = '';
-      ge('ci-password-error').style.display = 'none';
+      wrap.innerHTML = '';           // se va del DOM, no solo de la vista
+      wrap.style.display = 'none';
+      return;
     }
+
+    if (!ge('ci-password')) {
+      wrap.innerHTML = `
+        <div class="ci-sec-title">Contraseña de esa persona (para confirmar)</div>
+        <input type="password" id="ci-password" class="ci-select"
+               autocomplete="new-password" placeholder="Contraseña">
+        <div id="ci-password-error"
+             style="display:none;color:#c62828;font-size:0.85em;margin-top:4px;"></div>`;
+    }
+    wrap.style.display = '';
+  }
+
+  /** Borra la contraseña apenas deja de hacer falta. */
+  function limpiarPassword() {
+    const wrap = ge('ci-password-wrap');
+    if (!wrap) return;
+    const inp = ge('ci-password');
+    if (inp) inp.value = '';
+    wrap.innerHTML = '';
+    wrap.style.display = 'none';
   }
 
   // ── Confirmar ─────────────────────────────────────────────────────────────
@@ -218,6 +254,9 @@ const ConsumoInterno = (() => {
         return;
       }
       errEl.style.display = 'none';
+      // Validada, no queda dando vueltas: un campo de contraseña con contenido
+      // al momento de navegar es lo que dispara el "¿guardar contraseña?".
+      limpiarPassword();
     }
 
     const btn = ge('ci-confirm');
