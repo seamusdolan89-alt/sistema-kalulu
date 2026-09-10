@@ -39,29 +39,13 @@ const Vencimientos = (() => {
 
   function renderDropdown(results) {
     const dd = ge('ci-search-dropdown');
+    // Con la lista vacia se oculta y no se toca lastResults: asi venia
+    // funcionando y la navegacion con flechas depende de eso.
     if (!results.length) { dd.style.display = 'none'; return; }
 
-    dd.innerHTML = results.map(p => `
-      <div class="sri" data-id="${p.id}">
-        <div class="sri-left">
-          <div class="sri-nombre">${p.nombre}</div>
-          ${p.codigo ? `<div class="sri-codigo">${p.codigo}</div>` : ''}
-          ${p.stock <= 0 ? `<div class="sri-stock-warn">Sin stock</div>` : `<div class="sri-codigo">Stock: ${p.stock} ${p.unidad_venta || ''}</div>`}
-        </div>
-        <div class="sri-costo">${fmt$(p.costo || 0)}</div>
-      </div>
-    `).join('');
-
-    dd.style.display = 'block';
-    lastResults  = results;
-    searchHlIdx  = -1;
-
-    dd.querySelectorAll('.sri').forEach(el => {
-      el.addEventListener('click', () => {
-        const p = results.find(x => x.id === el.dataset.id);
-        if (p) addToCart(p);
-      });
-    });
+    Buscador.pintarDropdown(dd, results, addToCart);
+    lastResults = results;
+    searchHlIdx = -1;
   }
 
   // ── Carrito ───────────────────────────────────────────────────────────────
