@@ -2557,7 +2557,10 @@ const ComprasV2 = (() => {
       // 2b. If vinculando: mark remito as facturado
       if (state.vinculandoRemitoId) {
         db().run(
-          `UPDATE remitos SET estado='facturado', compra_id=?, updated_at=? WHERE id=?`,
+          // sync_status para que el cambio viaje: el push selecciona por ahi. Sin
+          // esto, la otra maquina lo seguia ofreciendo como pendiente de factura.
+          `UPDATE remitos SET estado='facturado', compra_id=?,
+             sync_status='pending', updated_at=? WHERE id=?`,
           [compraId, ts, state.vinculandoRemitoId]
         );
       }

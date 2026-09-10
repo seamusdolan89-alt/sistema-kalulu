@@ -49,6 +49,9 @@
     { table: 'ingresos_caja',     collection: 'ingresos_caja',     pk: 'id',   denormalize: null },
     { table: 'gastos',            collection: 'gastos',            pk: 'id',   denormalize: null },
     { table: 'compras',           collection: 'compras',           pk: 'id',   denormalize: denormalizeCompra },
+    // Los remitos viajan con sus items adentro, igual que compras y ordenes:
+    // remito_items no tiene sync_status propio.
+    { table: 'remitos',           collection: 'remitos',           pk: 'id',   denormalize: denormalizeRemito },
     { table: 'ordenes_compra',    collection: 'ordenes_compra',    pk: 'id',   denormalize: denormalizeOrden },
     { table: 'pagos_proveedores', collection: 'pagos_proveedores', pk: 'id',   denormalize: denormalizePagoProveedor },
     { table: 'stock',             collection: 'stock',             pk: null,   compositeKey: ['producto_id', 'sucursal_id'], denormalize: denormalizeStock },
@@ -82,6 +85,7 @@
     { collection: 'usuarios',          applyFn: applyUsuarioFull },
     { collection: 'producto_codigo_proveedor', applyFn: applyCodigoProveedorFull },
     { collection: 'compras',           applyFn: applyCompra },
+    { collection: 'remitos',           applyFn: applyRemito },
     { collection: 'ordenes_compra',    applyFn: applyOrdenCompra },
     { collection: 'pagos_proveedores', applyFn: applyPagoProveedor },
     { collection: 'gastos',            applyFn: applyGasto },
@@ -402,6 +406,43 @@
       console.warn(`tienePendienteLocal(${tabla}):`, e.message);
     }
     return false;
+  }
+
+  /**
+   * Remito recibido de la otra maquina.
+   *
+   * Los items se reemplazan enteros, como en applyCompra: _items siempre trae
+   * el set completo y actual, asi que reconstruir desde cero es seguro y
+   * ademas hace que un item borrado del otro lado desaparezca de verdad.
+   */
+  function applyRemito(data) {
+    if (window.SGA_DB.fueEliminado('remitos', data.id)) return;
+    if (tienePendienteLocal('remitos', 'id = ?', [data.id])) return;
+    const now = new Date().toISOString();
+
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO remitos
+        (id, sucursal_id, proveedor_id, usuario_id, fecha, numero_remito,
+         estado, compra_id, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,'synced',?)`,
+      [data.id, data.sucursal_id || null, data.proveedor_id || null,
+       data.usuario_id || null, data.fecha || null, data.numero_remito || null,
+       // El estado es lo que decide si sigue apareciendo como pendiente de
+       // factura: sin el, un remito ya facturado volveria a ofrecerse.
+       data.estado || 'pendiente', data.compra_id || null,
+       data.updated_at || now]
+    );
+
+    window.SGA_DB.run(`DELETE FROM remito_items WHERE remito_id = ?`, [data.id]);
+    for (const item of (data._items || [])) {
+      window.SGA_DB.run(`
+        INSERT INTO remito_items
+          (id, remito_id, producto_id, cantidad, unidad_compra, unidades_por_paquete)
+        VALUES (?,?,?,?,?,?)`,
+        [item.id, data.id, item.producto_id || null, item.cantidad || 0,
+         item.unidad_compra || 'Unidad', item.unidades_por_paquete || 1]
+      );
+    }
   }
 
   function applyCompra(data) {
@@ -784,6 +825,24 @@
     return { ...compra, _items: items, proveedor_nombre: proveedor?.razon_social || null };
   }
 
+  /**
+   * Un remito viaja con sus items adentro: remito_items no tiene sync_status
+   * propio, asi que no se puede pushear por su cuenta.
+   */
+  function denormalizeRemito(remito) {
+    const items = window.SGA_DB.query(
+      `SELECT ri.*, p.nombre AS producto_nombre
+       FROM remito_items ri
+       LEFT JOIN productos p ON p.id = ri.producto_id
+       WHERE ri.remito_id = ?`,
+      [remito.id]
+    ) || [];
+    const proveedor = remito.proveedor_id
+      ? (window.SGA_DB.query(`SELECT razon_social FROM proveedores WHERE id = ?`, [remito.proveedor_id])[0] || null)
+      : null;
+    return { ...remito, _items: items, proveedor_nombre: proveedor?.razon_social || null };
+  }
+
   function denormalizeOrden(orden) {
     const items = window.SGA_DB.query(
       `SELECT oi.*, p.nombre AS producto_nombre
@@ -1160,6 +1219,7 @@
       { name: 'egresos_caja',      applyFn: applyEgresoCajaFull },
       { name: 'ventas',            applyFn: applyVentaFull },
       { name: 'compras',           applyFn: applyCompra },
+      { name: 'remitos',           applyFn: applyRemito },
       { name: 'ordenes_compra',    applyFn: applyOrdenCompra },
       { name: 'pagos_proveedores', applyFn: applyPagoProveedor },
       { name: 'gastos',            applyFn: applyGasto },
@@ -1288,6 +1348,7 @@
       { name: 'egresos_caja',      applyFn: applyEgresoCajaFull,   label: 'Egresos' },
       { name: 'ventas',            applyFn: applyVentaFull,        label: 'Ventas' },
       { name: 'compras',           applyFn: applyCompra,           label: 'Compras' },
+      { name: 'remitos',           applyFn: applyRemito,           label: 'Remitos' },
       { name: 'ordenes_compra',    applyFn: applyOrdenCompra,      label: 'Órdenes' },
       { name: 'gastos',            applyFn: applyGasto,            label: 'Gastos' },
       { name: 'promociones',       applyFn: applyPromocion,        label: 'Promociones' },
