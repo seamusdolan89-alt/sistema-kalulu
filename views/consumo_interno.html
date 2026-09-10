@@ -271,12 +271,11 @@ main#app { overflow: hidden; }
           <select id="ci-atribuido" class="ci-select"></select>
         </div>
 
-        <div id="ci-password-wrap" style="display:none;">
-          <div class="ci-sec-title">Contraseña de esa persona (para confirmar)</div>
-          <input type="password" id="ci-password" class="ci-select" autocomplete="off"
-                 placeholder="Contraseña">
-          <div id="ci-password-error" style="display:none;color:#c62828;font-size:0.85em;margin-top:4px;"></div>
-        </div>
+        <!-- El input de contraseña NO va acá: lo crea el módulo solo cuando se
+             atribuye el consumo a otra persona. Teniéndolo en el HTML, aunque
+             estuviera oculto, Chrome leía la pantalla como un login y
+             autocompletaba el buscador de productos con un usuario. -->
+        <div id="ci-password-wrap" style="display:none;"></div>
 
         <div>
           <div class="ci-sec-title">Motivo *</div>
