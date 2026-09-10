@@ -98,8 +98,8 @@ const AjusteStock = (() => {
     if (!cart.length) {
       tbody.innerHTML = `<tr><td colspan="6">
         <div class="ci-cart-empty">
-          <div class="ci-cart-empty-icon">💔</div>
-          Buscá los productos rotos o defectuosos para darlos de baja
+          <div class="ci-cart-empty-icon">📉</div>
+          Buscá los productos a los que les sobra stock en el sistema
         </div>
       </td></tr>`;
       ge('ci-confirm').disabled = true;
@@ -229,7 +229,7 @@ const AjusteStock = (() => {
       db().rollbackBatch();
       mostrarError('Error al guardar: ' + err.message);
       btn.disabled = false;
-      btn.textContent = 'Registrar rotura';
+      btn.textContent = 'Registrar ajuste';
     }
   }
 
