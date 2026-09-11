@@ -50,6 +50,12 @@ def main():
         page.wait_for_timeout(300)
         page.select_option("#cv2-condicion-compra", label="Remito")
         page.wait_for_timeout(200)
+        # Con cualquier condicion que no sea Factura A, el Total Factura se tipea
+        # directo (no se autocalcula) y el boton "Siguiente" del Carrito queda
+        # disabled sin esto (ver updateConfirmBtn en compras_v2.js).
+        page.fill("#cv2-total-factura", "300")
+        page.locator("#cv2-total-factura").blur()
+        page.wait_for_timeout(200)
         page.get_by_text("Continuar al Carrito", exact=False).click()
         page.wait_for_timeout(400)
         page.locator("#cv2-search").click()
@@ -81,14 +87,15 @@ def main():
         page.get_by_text("Pago a Proveedor", exact=False).click()
         page.wait_for_timeout(400)
 
-        page.select_option("#pp-proveedor", label="Pepsico SA")
+        page.select_option("#mp-proveedor", label="Pepsico SA")
         page.wait_for_timeout(400)
-        pendientes_text = page.locator("#pp-pendientes-info").inner_text()
+        pendientes_text = page.locator("#mp-imp-content").inner_text()
         assert "300,00" in pendientes_text, f"No se ve la deuda de $300 al seleccionar el proveedor: {pendientes_text!r}"
 
-        page.fill("#pp-monto", "150")
-        page.fill("#pp-obs", "Pago parcial desde caja")
-        page.locator("#btn-confirm-pagoprov").click()
+        page.check("#chk-efectivo")
+        page.fill("#mp-ef-monto", "150")
+        page.fill("#mp-obs", "Pago parcial desde caja")
+        page.get_by_text("Guardar pago", exact=False).click()
         page.wait_for_timeout(600)
         page.screenshot(path=os.path.join(SCREENSHOT_DIR, "caja_pago_proveedor.png"), full_page=True)
 

@@ -38,6 +38,12 @@ def completar_compra_pepsico(page, cantidad, costo):
     page.wait_for_timeout(300)
     page.select_option("#cv2-condicion-compra", label="Remito")
     page.wait_for_timeout(200)
+    # Con cualquier condicion que no sea Factura A, el Total Factura se tipea
+    # directo (no se autocalcula) y el boton "Siguiente" del Carrito queda
+    # disabled sin esto (ver updateConfirmBtn en compras_v2.js).
+    page.fill("#cv2-total-factura", str(cantidad * costo))
+    page.locator("#cv2-total-factura").blur()
+    page.wait_for_timeout(200)
     page.get_by_text("Continuar al Carrito", exact=False).click()
     page.wait_for_timeout(400)
 

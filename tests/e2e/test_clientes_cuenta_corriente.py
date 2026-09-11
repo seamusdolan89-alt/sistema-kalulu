@@ -15,7 +15,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 from playwright.sync_api import sync_playwright
-from helpers import block_firebase, enable_dev_mode, login_via_seed
+from helpers import block_firebase, enable_dev_mode, login_via_seed, abrir_caja_si_hace_falta
 
 SCREENSHOT_DIR = os.path.join(os.path.dirname(__file__), "screenshots")
 
@@ -36,6 +36,7 @@ def main():
 
         print("--- Login POS (sga.db) + seed ---")
         login_via_seed(page, admin_pos=False)
+        abrir_caja_si_hace_falta(page)
 
         print("--- Cliente con deuda existente ($45, venta_fiada) ---")
         page.evaluate("""
@@ -77,6 +78,9 @@ def main():
         print("--- Registrar pago parcial de $20 ---")
         page.locator("#btn-registrar-pago").click()
         page.wait_for_timeout(300)
+        # Sin elegir medio de pago, confirmarCobro() corta con un alert ("Elegí
+        # el medio de pago") y no llega a registrar nada — el saldo queda igual.
+        page.locator("#cc-medios [data-medio='efectivo']").click()
         page.fill("#cc-monto-pago", "20")
         page.fill("#cc-desc-pago", "Pago parcial test")
         page.locator("#btn-cc-pago-confirm").click()

@@ -54,6 +54,19 @@ def main():
         page.wait_for_timeout(300)
         page.select_option("#cv2-condicion-compra", label="Factura A")
         page.wait_for_timeout(200)
+
+        print("--- Cargar Subtotal Neto + IVA 21% de la factura en la cabecera ---")
+        # El boton "Siguiente" del Carrito queda disabled sin esto (ver
+        # updateConfirmBtn en compras_v2.js) -- en Factura A el Total Factura se
+        # autocalcula a partir de estos campos fiscales de la cabecera al perder
+        # el foco (blur), y solo son visibles/editables en este paso (Datos),
+        # antes de pasar al Carrito.
+        page.fill("#cv2-subtotal-neto", "270")
+        page.locator("#cv2-subtotal-neto").blur()
+        page.fill("#cv2-iva-21", "56,70")
+        page.locator("#cv2-iva-21").blur()
+        page.wait_for_timeout(200)
+
         page.get_by_text("Continuar al Carrito", exact=False).click()
         page.wait_for_timeout(400)
 
