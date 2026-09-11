@@ -2,7 +2,7 @@
 
 Sistema de gestión de almacén (punto de venta + administración) para un comercio real, en uso en producción. Vanilla JS — sin build, sin framework, sin npm — con SQLite local vía OPFS y sincronización opcional con Firebase Firestore.
 
-> Para arquitectura detallada, flujo de git y convenciones de trabajo, ver **[CLAUDE.md](CLAUDE.md)**. Para cómo sincronizar las dos computadoras (local + admin), ver **[PUESTA_EN_MARCHA.md](PUESTA_EN_MARCHA.md)**.
+> Para arquitectura detallada, flujo de git y convenciones de trabajo, ver **[CLAUDE.md](CLAUDE.md)**. Para cómo sincronizar las dos computadoras (local + admin), ver **[PUESTA_EN_MARCHA.md](PUESTA_EN_MARCHA.md)**. Para qué está pendiente, ver **[BACKLOG.md](BACKLOG.md)**.
 
 ## Las tres superficies
 
@@ -78,7 +78,7 @@ Abrir `http://127.0.0.1:8765/views/login.html` — al ser `localhost`, usa autom
 
 ## Tests
 
-Suite de Playwright en `tests/e2e/` — ver [tests/e2e/README.md](tests/e2e/README.md) para el detalle de qué cubre cada test y cómo correrlos.
+Suite de Playwright en `tests/e2e/` — ver [tests/e2e/README.md](tests/e2e/README.md) para el detalle de qué cubre cada test y cómo correrlos. Corre automáticamente en GitHub Actions con cada push a `dev`/`main` ([.github/workflows/e2e-tests.yml](.github/workflows/e2e-tests.yml)).
 
 ## Requisitos de navegador
 
