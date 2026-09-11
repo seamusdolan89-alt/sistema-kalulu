@@ -724,23 +724,15 @@
       database.run(`INSERT OR IGNORE INTO system_config VALUES ('tope_deuda_default', '10000', datetime('now'))`);
     } catch(e) { console.warn('system_config:', e.message); }
 
-    // cuenta_proveedor — accounts payable ledger per supplier
+    // cuenta_proveedor se elimina: era de un diseño anterior que llevaba el
+    // saldo del proveedor acumulado en su propia tabla. Hoy el saldo se calcula
+    // en vivo —compras + gastos menos lo pagado, ver getSaldoProveedor en
+    // cuenta_corriente_proveedores.js—, que ademas se corrige solo cuando se
+    // anula una compra. La tabla quedaba escribiendose sin que nadie la leyera,
+    // y mas de una vez hizo creer que el saldo vivia ahi.
     try {
-      database.run(`
-        CREATE TABLE IF NOT EXISTS cuenta_proveedor (
-          id TEXT PRIMARY KEY,
-          proveedor_id TEXT REFERENCES proveedores(id),
-          orden_id TEXT REFERENCES ordenes_compra(id),
-          tipo TEXT CHECK(tipo IN ('deuda','pago','ajuste')),
-          monto REAL,
-          descripcion TEXT,
-          fecha TEXT,
-          usuario_id TEXT,
-          sync_status TEXT DEFAULT 'pending',
-          updated_at TEXT
-        )
-      `);
-    } catch(e) { console.warn('cuenta_proveedor:', e.message); }
+      database.run(`DROP TABLE IF EXISTS cuenta_proveedor`);
+    } catch (e) { console.warn('DROP cuenta_proveedor:', e.message); }
 
     // Add new columns to existing databases (safe: fails silently if column exists)
     const columnAlterations = [
@@ -772,8 +764,6 @@
       "ALTER TABLE compras ADD COLUMN factura_pv TEXT",
       "ALTER TABLE compra_items ADD COLUMN unidad_compra TEXT DEFAULT 'Unidad'",
       "ALTER TABLE compra_items ADD COLUMN unidades_por_paquete REAL DEFAULT 1",
-      // Fix: compras_v2 inserts compra_id into cuenta_proveedor which was missing
-      "ALTER TABLE cuenta_proveedor ADD COLUMN compra_id TEXT REFERENCES compras(id)",
       // Fix: egresos_caja needs proveedor_id for pagos adelantados
       "ALTER TABLE egresos_caja ADD COLUMN proveedor_id TEXT REFERENCES proveedores(id)",
       // Clasificación de proveedor: mercaderia (default) o servicios

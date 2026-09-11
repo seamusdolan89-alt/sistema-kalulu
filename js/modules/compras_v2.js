@@ -90,11 +90,11 @@ const ComprasV2 = (() => {
 
   // ── DB helpers ───────────────────────────────────────────────────────────────
   // Saldo neto con el proveedor: positivo = le debemos, negativo = a favor.
-  // OJO: esto NO se calcula contra "cuenta_proveedor" (tabla vieja que solo
-  // este módulo escribía y que Cuentas Corrientes nunca leyó — quedaba
-  // desconectada de los pagos reales) — se calcula igual que en Cuentas
-  // Corrientes (cuenta_corriente_proveedores.js), contra compras y pagos
-  // reales, para que ambas pantallas siempre coincidan.
+  // Se calcula igual que en Cuentas Corrientes
+  // (cuenta_corriente_proveedores.js), contra las compras, los gastos y los
+  // pagos reales, para que las dos pantallas siempre coincidan. No hay ninguna
+  // tabla que guarde el saldo: se arma en el momento, asi anular una compra lo
+  // corrige solo.
   function getProveedorSaldo(proveedorId) {
     const deuda = db().query(
       `SELECT COALESCE(SUM(total), 0) AS total FROM compras
@@ -2581,15 +2581,11 @@ const ComprasV2 = (() => {
           `UPDATE sesiones_caja SET total_egresos=COALESCE(total_egresos,0)+?, sync_status='pending', updated_at=? WHERE id=?`,
           [neto, ts, sesion.id]
         );
-      } else if (state.condicionPago === 'pendiente') {
-        db().run(`
-          INSERT INTO cuenta_proveedor
-            (id, proveedor_id, compra_id, tipo, monto, descripcion, fecha, usuario_id, sync_status, updated_at)
-          VALUES (?, ?, ?, 'deuda', ?, ?, ?, ?, 'pending', ?)
-        `, [uuid(), state.proveedorId, compraId, neto,
-            `Compra ${(state.facturaPv && state.numeroFactura ? state.facturaPv + '-' + state.numeroFactura : state.numeroFactura || compraId.slice(-6).toUpperCase())}`,
-            ts, user.id, ts]);
       }
+      // Una compra en cuenta corriente no necesita anotarse en ningun lado: la
+      // deuda del proveedor se calcula sumando sus compras y gastos y restando
+      // lo pagado. Antes esto escribia una fila en cuenta_proveedor, tabla que
+      // nadie leia nunca.
 
       // 4. Saldo a favor aplicado → imputar contra los pagos/adelantos del
       // proveedor con crédito disponible (más viejos primero), igual que el
