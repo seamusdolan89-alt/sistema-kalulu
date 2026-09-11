@@ -21,6 +21,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Chequeo estático — tablas con sync_status registradas en sync.js
+        run: python tests/check_sync_tablas.py
+
       - name: Instalar Playwright + Chromium
         run: |
           pip install playwright
