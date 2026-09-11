@@ -57,6 +57,11 @@
     // vencimientos, consumo interno, los ajustes y las devoluciones del POS.
     { table: 'stock_ajustes',     collection: 'stock_ajustes',     pk: 'id',   denormalize: null },
     { table: 'gastos_pagos',      collection: 'gastos_pagos',      pk: 'id',   denormalize: null },
+    // Clave propia: system_config se indexa por 'key' y flujo_liquidar por fecha.
+    { table: 'system_config',     collection: 'system_config',     pk: 'key',  denormalize: null },
+    { table: 'flujo_forecast',    collection: 'flujo_forecast',    pk: 'id',   denormalize: null },
+    { table: 'flujo_liquidar',    collection: 'flujo_liquidar',    pk: 'fecha', denormalize: null },
+    { table: 'flujo_pagos_prov',  collection: 'flujo_pagos_prov',  pk: 'id',   denormalize: null },
     { table: 'ordenes_compra',    collection: 'ordenes_compra',    pk: 'id',   denormalize: denormalizeOrden },
     { table: 'pagos_proveedores', collection: 'pagos_proveedores', pk: 'id',   denormalize: denormalizePagoProveedor },
     { table: 'stock',             collection: 'stock',             pk: null,   compositeKey: ['producto_id', 'sucursal_id'], denormalize: denormalizeStock },
@@ -94,6 +99,10 @@
     { collection: 'devoluciones',      applyFn: applyDevolucion },
     { collection: 'stock_ajustes',     applyFn: applyStockAjuste },
     { collection: 'gastos_pagos',      applyFn: applyGastoPago },
+    { collection: 'system_config',     applyFn: applySystemConfig },
+    { collection: 'flujo_forecast',    applyFn: applyFlujoForecast },
+    { collection: 'flujo_liquidar',    applyFn: applyFlujoLiquidar },
+    { collection: 'flujo_pagos_prov',  applyFn: applyFlujoPagoProv },
     { collection: 'ordenes_compra',    applyFn: applyOrdenCompra },
     { collection: 'pagos_proveedores', applyFn: applyPagoProveedor },
     { collection: 'gastos',            applyFn: applyGasto },
@@ -475,6 +484,52 @@
   }
 
   /** Pago de un gasto. Los gastos ya viajaban; sus pagos no. */
+  /** Configuracion del negocio: tope de deuda por defecto, denominaciones. */
+  function applySystemConfig(data) {
+    if (!data.key) return;
+    if (tienePendienteLocal('system_config', 'key = ?', [data.key])) return;
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO system_config (key, value, sync_status, updated_at)
+      VALUES (?,?,'synced',?)`,
+      [data.key, data.value ?? null, data.updated_at || new Date().toISOString()]
+    );
+  }
+
+  // ── Flujo de fondos: planificacion del administrador ──────────────────────
+  // Viaja para que ADMIN POS muestre lo mismo abierto desde la compu o desde el
+  // telefono, que son bases distintas.
+
+  function applyFlujoForecast(data) {
+    if (tienePendienteLocal('flujo_forecast', 'id = ?', [data.id])) return;
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO flujo_forecast (id, fecha, tipo, monto, sync_status, updated_at)
+      VALUES (?,?,?,?,'synced',?)`,
+      [data.id, data.fecha || null, data.tipo || null, data.monto || 0,
+       data.updated_at || new Date().toISOString()]
+    );
+  }
+
+  function applyFlujoLiquidar(data) {
+    if (!data.fecha) return;
+    if (tienePendienteLocal('flujo_liquidar', 'fecha = ?', [data.fecha])) return;
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO flujo_liquidar (fecha, monto, sync_status, updated_at)
+      VALUES (?,?,'synced',?)`,
+      [data.fecha, data.monto || 0, data.updated_at || new Date().toISOString()]
+    );
+  }
+
+  function applyFlujoPagoProv(data) {
+    if (tienePendienteLocal('flujo_pagos_prov', 'id = ?', [data.id])) return;
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO flujo_pagos_prov
+        (id, proveedor_id, fecha, monto, es_estimado, sync_status, updated_at)
+      VALUES (?,?,?,?,?,'synced',?)`,
+      [data.id, data.proveedor_id || null, data.fecha || null, data.monto || 0,
+       data.es_estimado ? 1 : 0, data.updated_at || new Date().toISOString()]
+    );
+  }
+
   function applyGastoPago(data) {
     if (tienePendienteLocal('gastos_pagos', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
@@ -1327,6 +1382,10 @@
       { name: 'devoluciones',      applyFn: applyDevolucion },
       { name: 'stock_ajustes',     applyFn: applyStockAjuste },
       { name: 'gastos_pagos',      applyFn: applyGastoPago },
+      { name: 'system_config',     applyFn: applySystemConfig },
+      { name: 'flujo_forecast',    applyFn: applyFlujoForecast },
+      { name: 'flujo_liquidar',    applyFn: applyFlujoLiquidar },
+      { name: 'flujo_pagos_prov',  applyFn: applyFlujoPagoProv },
       { name: 'ordenes_compra',    applyFn: applyOrdenCompra },
       { name: 'pagos_proveedores', applyFn: applyPagoProveedor },
       { name: 'gastos',            applyFn: applyGasto },
@@ -1459,6 +1518,10 @@
       { name: 'devoluciones',      applyFn: applyDevolucion,       label: 'Devoluciones' },
       { name: 'stock_ajustes',     applyFn: applyStockAjuste,      label: 'Movimientos de stock' },
       { name: 'gastos_pagos',      applyFn: applyGastoPago,        label: 'Pagos de gastos' },
+      { name: 'system_config',     applyFn: applySystemConfig,     label: 'Configuración' },
+      { name: 'flujo_forecast',    applyFn: applyFlujoForecast,    label: 'Flujo — proyección' },
+      { name: 'flujo_liquidar',    applyFn: applyFlujoLiquidar,    label: 'Flujo — a liquidar' },
+      { name: 'flujo_pagos_prov',  applyFn: applyFlujoPagoProv,    label: 'Flujo — pagos a proveedores' },
       { name: 'ordenes_compra',    applyFn: applyOrdenCompra,      label: 'Órdenes' },
       { name: 'gastos',            applyFn: applyGasto,            label: 'Gastos' },
       { name: 'promociones',       applyFn: applyPromocion,        label: 'Promociones' },

@@ -861,6 +861,15 @@
       "ALTER TABLE productos ADD COLUMN pausa_reposicion_hasta TEXT",
       "ALTER TABLE productos ADD COLUMN pausa_reposicion_motivo TEXT",
       "ALTER TABLE productos ADD COLUMN pausa_reposicion_desde TEXT",
+      // Estas cuatro nacieron sin columnas de sync y por eso nunca viajaron.
+      // system_config guarda configuracion del negocio (tope de deuda por
+      // defecto, denominaciones del arqueo), no del equipo. Las de flujo son la
+      // planificacion del administrador, que tiene que estar tambien si abre
+      // ADMIN POS desde el telefono.
+      "ALTER TABLE system_config ADD COLUMN sync_status TEXT DEFAULT 'pending'",
+      "ALTER TABLE flujo_forecast ADD COLUMN sync_status TEXT DEFAULT 'pending'",
+      "ALTER TABLE flujo_liquidar ADD COLUMN sync_status TEXT DEFAULT 'pending'",
+      "ALTER TABLE flujo_pagos_prov ADD COLUMN sync_status TEXT DEFAULT 'pending'",
       // Cobros de cuenta corriente: con qué medio se cobró y en qué caja entró.
       // Antes el cobro solo bajaba la deuda del cliente y esa plata no figuraba
       // en ninguna caja, así que se perdía del arqueo.
