@@ -204,9 +204,6 @@ const ComprasV2 = (() => {
     return gross * (1 - disc / 100);
   }
 
-  function calcGross() {
-    return state.items.reduce((s, it) => s + itemGross(it), 0);
-  }
 
   function calcDescuentoTotal() {
     return state.items.reduce((s, it) => s + (itemGross(it) - itemSubtotal(it)), 0);
@@ -652,7 +649,6 @@ const ComprasV2 = (() => {
   }
 
   function renderTotals() {
-    const gross          = calcGross();
     const descuento      = calcDescuentoTotal();
     const totalCarrito   = calcTotalCarrito();   // lo que suman los items cargados
 
@@ -663,7 +659,11 @@ const ComprasV2 = (() => {
     if (itemsEl) itemsEl.textContent = state.items.length;
 
     const subtotalEl = ge('cv2-summary-subtotal');
-    if (subtotalEl) subtotalEl.textContent = fmt$(gross);
+    // El subtotal va NETO, o sea la suma de la columna Subtotal, que ya tiene
+    // aplicado el descuento de cada linea. Antes mostraba el bruto: no cerraba
+    // contra la columna de la tabla ni contra el subtotal de la factura del
+    // proveedor, que tambien viene con los descuentos adentro.
+    if (subtotalEl) subtotalEl.textContent = fmt$(calcTotal());
 
     const descEl = ge('cv2-summary-descuento');
     if (descEl) descEl.textContent = descuento > 0.001 ? `− ${fmt$(descuento)}` : fmt$(0);
