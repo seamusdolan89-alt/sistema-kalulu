@@ -3491,8 +3491,22 @@ const ComprasV2 = (() => {
     function markRowSaved(idx) {
       const actWrap = root.querySelector(`.cv2-post-tr[data-idx="${idx}"] .cv2-post-td-accion`);
       const input   = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
-      if (actWrap) actWrap.innerHTML = `<span class="cv2-post-badge-guardado">✓ Guardado</span>`;
-      if (input)   { input.disabled = true; input.style.opacity = '0.6'; }
+      const prodId  = items[idx]?.productoId || '';
+      if (input) {
+        // Se deja a la vista el precio que quedó guardado, no lo que hubiera
+        // tipeado antes de cancelar una correccion.
+        const guardado = parseFloat(items[idx]?.pvGuardado);
+        if (!isNaN(guardado)) input.value = guardado.toFixed(2);
+        input.disabled = true; input.style.opacity = '0.6';
+      }
+      // El ✎ es el mismo que ya usaban las filas "Al dia": si te equivocaste
+      // de precio, se corrige aca y no hay que ir al producto despues.
+      if (actWrap) actWrap.innerHTML = `
+        <div class="cv2-post-aldia-wrap">
+          <span class="cv2-post-badge-guardado">✓ Guardado</span>
+          <button class="cv2-post-editar-aldia-btn" data-idx="${idx}" data-prodid="${esc(prodId)}"
+                  data-volver="guardado" title="Corregir este precio">✎</button>
+        </div>`;
     }
 
     function markRowIgnorado(idx) {
@@ -3501,7 +3515,13 @@ const ComprasV2 = (() => {
       const tr       = root.querySelector(`.cv2-post-tr[data-idx="${idx}"]`);
       const pvActual = parseFloat(input?.dataset.pvactual) || 0;
       if (input)   { input.value = pvActual.toFixed(2); input.disabled = true; input.style.opacity = '0.5'; }
-      if (actWrap) actWrap.innerHTML = `<span class="cv2-post-badge-mantenido">Precio Mantenido</span>`;
+      if (actWrap) actWrap.innerHTML = `
+        <div class="cv2-post-aldia-wrap">
+          <span class="cv2-post-badge-mantenido">Precio Mantenido</span>
+          <button class="cv2-post-editar-aldia-btn" data-idx="${idx}"
+                  data-prodid="${esc(items[idx]?.productoId || '')}"
+                  data-volver="mantenido" title="Cambiar de opinión">✎</button>
+        </div>`;
       if (tr)      tr.classList.add('cv2-post-tr-ignorado');
       const warn = root.querySelector(`.cv2-post-bajo-costo-warn[data-idx="${idx}"]`);
       if (warn) warn.style.display = 'none';
@@ -3559,7 +3579,8 @@ const ComprasV2 = (() => {
     function aldiaWrapHtml(idx, prodId) {
       return `<div class="cv2-post-aldia-wrap">
         <span class="cv2-post-badge-aldia">✓ Al día</span>
-        <button class="cv2-post-editar-aldia-btn" data-idx="${idx}" data-prodid="${prodId}" title="Editar precio manualmente">✎</button>
+        <button class="cv2-post-editar-aldia-btn" data-idx="${idx}" data-prodid="${prodId}"
+                data-volver="aldia" title="Editar precio manualmente">✎</button>
       </div>`;
     }
 
@@ -3572,21 +3593,36 @@ const ComprasV2 = (() => {
         const prodId = editBtn.dataset.prodid;
         const actWrap = root.querySelector(`.cv2-post-tr[data-idx="${idx}"] .cv2-post-td-accion`);
         const input   = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
+        const tr      = root.querySelector(`.cv2-post-tr[data-idx="${idx}"]`);
         if (!actWrap) return;
+        // Las filas ya guardadas o mantenidas tienen el campo bloqueado.
+        if (input) { input.disabled = false; input.style.opacity = ''; }
+        tr?.classList.remove('cv2-post-tr-ignorado');
+        // De donde venia, para saber a que estado volver si cancela.
+        const volver = editBtn.dataset.volver || 'aldia';
         actWrap.innerHTML = `
           <div class="cv2-post-action-wrap">
             <button class="cv2-post-actualizar-btn" data-idx="${idx}" data-prodid="${prodId}">✓ Actualizar</button>
-            <button class="cv2-post-cancelar-aldia-btn" data-idx="${idx}" data-prodid="${prodId}">✕ Cancelar</button>
+            <button class="cv2-post-cancelar-aldia-btn" data-idx="${idx}" data-prodid="${prodId}"
+                    data-volver="${volver}">✕ Cancelar</button>
           </div>`;
         // Wire Actualizar directly (delegation doesn't cover doSaveRow)
         actWrap.querySelector('.cv2-post-actualizar-btn')
           .addEventListener('click', () => doSaveRow(idx, prodId));
         if (input) { input.focus(); input.select(); }
+        checkBajoCosto(idx);
       }
 
       if (cancelBtn) {
         const idx    = parseInt(cancelBtn.dataset.idx, 10);
         const prodId = cancelBtn.dataset.prodid;
+        const volver = cancelBtn.dataset.volver || 'aldia';
+
+        // Cancelar tiene que devolver la fila al estado en el que estaba, no
+        // dejarla siempre como "Al dia": una fila guardada sigue guardada.
+        if (volver === 'guardado')  { markRowSaved(idx);     return; }
+        if (volver === 'mantenido') { markRowIgnorado(idx);  return; }
+
         const actWrap = root.querySelector(`.cv2-post-tr[data-idx="${idx}"] .cv2-post-td-accion`);
         const input   = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
         if (input) input.value = parseFloat(input.dataset.pvactual).toFixed(2);
