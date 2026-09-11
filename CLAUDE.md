@@ -67,7 +67,7 @@ python tests/e2e/test_pos_smoke.py               # correr un test puntual
 - **IDs:** UUID v4 generado en cliente (`window.SGA_Utils.generateUUID()` / `crypto.randomUUID()`), nunca autoincrement.
 - **Fechas:** ISO 8601 UTC (`new Date().toISOString()`).
 - **Montos:** siempre `REAL`, nunca `INTEGER`.
-- **Sync:** toda tabla sincronizable tiene `sync_status` ('pending'|'synced') y `updated_at`; push/pull real vive en `js/sync.js`.
+- **Sync:** toda tabla sincronizable tiene `sync_status` ('pending'|'synced') y `updated_at`; push/pull real vive en `js/sync.js`. Si agregás una tabla nueva con estas columnas, **registrala en `js/sync.js`** (fuente propia en la lista principal, o embebida en el `denormalize()` de su tabla padre) — `tests/check_sync_tablas.py` corre en CI y falla si te olvidás (ya pasó 4 veces antes de que existiera este chequeo).
 - **Medios de pago (`medios_cobro`) son 100% dinámicos**, configurables desde Configuración — **nunca hardcodear una lista fija** (`['efectivo','mercadopago',...]`) en código nuevo. Ya causó pérdida de plata invisible en caja tres veces (CHECK de SQL, botón del POS, columnas de reportes) por listas fijas que no acompañaban un medio custom nuevo. Leer siempre de `medios_cobro` / el `MEDIOS` dinámico de cada módulo.
 - **Buscador de productos:** motor único en `js/modules/buscador_productos.js` (`window.SGA_Buscador`) — no duplicar lógica de búsqueda por código/nombre en cada pantalla.
 - Un módulo de `js/modules/` se importa con `?v=Date.now()` en cada navegación (ver arriba) — el router hace `destroy()` del módulo anterior antes de montar el nuevo; si agregás listeners a nivel `document`, guardalos para poder removerlos en `destroy()` o sobreviven a la navegación siguiente.
