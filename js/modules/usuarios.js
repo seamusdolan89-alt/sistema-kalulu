@@ -341,12 +341,16 @@ const UsuariosModule = (() => {
         if (password) {
           const hash = await window.SGA_Auth.hashPassword(password);
           window.SGA_DB.run(
-            `UPDATE usuarios SET nombre=?, username=?, password_hash=?, rol=?, activo=?, permisos_json=?, updated_at=? WHERE id=?`,
+            // sync_status: el push selecciona por ahi. Sin esto, dar o sacar
+            // un permiso desde casa no llegaba nunca al POS del local.
+            `UPDATE usuarios SET nombre=?, username=?, password_hash=?, rol=?, activo=?,
+               permisos_json=?, sync_status='pending', updated_at=? WHERE id=?`,
             [nombre, username, hash, rolDB, activo, permisos, now, id]
           );
         } else {
           window.SGA_DB.run(
-            `UPDATE usuarios SET nombre=?, username=?, rol=?, activo=?, permisos_json=?, updated_at=? WHERE id=?`,
+            `UPDATE usuarios SET nombre=?, username=?, rol=?, activo=?,
+               permisos_json=?, sync_status='pending', updated_at=? WHERE id=?`,
             [nombre, username, rolDB, activo, permisos, now, id]
           );
         }
