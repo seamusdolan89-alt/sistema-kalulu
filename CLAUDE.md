@@ -72,8 +72,13 @@ python tests/e2e/test_pos_smoke.py               # correr un test puntual
 - **Buscador de productos:** motor único en `js/modules/buscador_productos.js` (`window.SGA_Buscador`) — no duplicar lógica de búsqueda por código/nombre en cada pantalla.
 - Un módulo de `js/modules/` se importa con `?v=Date.now()` en cada navegación (ver arriba) — el router hace `destroy()` del módulo anterior antes de montar el nuevo; si agregás listeners a nivel `document`, guardalos para poder removerlos en `destroy()` o sobreviven a la navegación siguiente.
 
+## CI
+
+`.github/workflows/e2e-tests.yml` corre toda la suite de `tests/e2e/` en cada push a `dev`/`main` (GitHub Actions, ubuntu-latest). No bloquea el deploy de GitHub Pages (son mecanismos independientes) — es la red de seguridad para enterarse si algo se rompió, no un gate automático. Si un test falla ahí y no localmente, sospechar primero de diferencias Linux/Windows o de timing en CI antes de asumir que el fix está mal.
+
 ## Dónde mirar antes de asumir
 
 - `PUESTA_EN_MARCHA.md` — cómo se sincronizan las dos computadoras físicas, backups, límites del sync.
 - `tests/e2e/README.md` — qué cubre cada test existente (evita reescribir uno que ya existe).
+- `BACKLOG.md` — qué está pendiente a propósito (no roto, simplemente no hecho todavía).
 - El código mismo antes que `SPEC.md`/`/SPEC` — están desactualizados desde hace meses.

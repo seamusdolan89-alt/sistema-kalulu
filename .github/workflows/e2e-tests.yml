@@ -1,0 +1,56 @@
+name: E2E Tests
+
+# Corre la suite de Playwright (tests/e2e/) en cada push a dev o main, y a
+# demanda. No hay build ni deploy acá — GitHub Pages sirve `main` directo,
+# sin pasar por Actions — esto es solo la red de seguridad de tests antes
+# de confiar en un push. Ver tests/e2e/README.md para el detalle de cada test.
+
+on:
+  push:
+    branches: [dev, main]
+  workflow_dispatch: {}
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar Playwright + Chromium
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: Levantar servidor estático
+        run: |
+          python -m http.server 8765 --bind 127.0.0.1 &
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:8765/views/login.html > /dev/null && break
+            sleep 0.5
+          done
+
+      - name: Correr suite e2e
+        run: |
+          fail=0
+          for f in tests/e2e/test_*.py; do
+            echo "::group::$f"
+            if ! python "$f"; then
+              echo "❌ FALLÓ: $f"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $fail
+
+      - name: Subir screenshots (si algo falló)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: tests/e2e/screenshots/
+          if-no-files-found: ignore
