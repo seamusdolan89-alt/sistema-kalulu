@@ -2336,8 +2336,12 @@ const ComprasV2 = (() => {
     const revConfirmBtn = ge('cv2-rev-btn-confirmar');
     if (revConfirmBtn) revConfirmBtn.textContent = state.editandoCompraId ? '💾 Guardar Cambios · F10' : '✓ Confirmar Ingreso · F10';
 
-    const neto          = calcTotal();          // carrito pre-impuestos, para el chequeo contra la cabecera
-    const montoAdeudado = calcMontoAdeudado();  // total real (con IVA incluido en Factura A) — lo que se muestra y se debe
+    const neto        = calcTotal();          // carrito pre-impuestos, para el chequeo contra la cabecera
+    // Lo que VALE la compra, no lo que queda a pagar. Antes esto mostraba
+    // calcMontoAdeudado(), que descuenta el credito del proveedor aplicado: con
+    // un credito que cubria la compra, la pantalla de confirmacion decia
+    // "Total Compra $0,00" y parecia que se estaba ingresando mercaderia gratis.
+    const totalCompra = calcMontoFactura();
     const factStr = state.facturaPv && state.numeroFactura
       ? `${state.facturaPv}-${state.numeroFactura}`
       : (state.numeroFactura || state.facturaPv || '—');
@@ -2375,7 +2379,7 @@ const ComprasV2 = (() => {
         </div>
         <div class="cv2-rev-total-block">
           <div class="cv2-rev-total-label">Total Compra</div>
-          <div class="cv2-rev-total-value">${fmt$(montoAdeudado)}</div>
+          <div class="cv2-rev-total-value">${fmt$(totalCompra)}</div>
           ${mismatch ? `<div class="cv2-rev-mismatch">⚠ No coincide con ${isFacturaA() ? 'Subtotal Neto' : 'Total Factura'} (${fmt$(control)})</div>` : ''}
         </div>
       `;
@@ -2648,7 +2652,10 @@ const ComprasV2 = (() => {
       db().commitBatch();
 
       state.herenciaSincronizados = [];
-      showSuccessScreen({ compraId, total, neto, netoSubtotal, saldoAplicado, sesion });
+      // totalCompra es lo que vale la factura; neto es lo que se pago ahora.
+      // Son dos numeros distintos cuando hay un adelanto aplicado.
+      showSuccessScreen({ compraId, total, neto, netoSubtotal, saldoAplicado, sesion,
+                          totalCompra: montoFacturaCompleto });
       window.SGA_Sync?.pushPending?.();
 
     } catch (e) {
@@ -3124,7 +3131,10 @@ const ComprasV2 = (() => {
   }
 
   // ── Post-compra screen ───────────────────────────────────────────────────────
-  function showSuccessScreen({ compraId = null, total, neto, netoSubtotal = null, saldoAplicado, sesion, preEnrichedItems = null, snap = null }) {
+  function showSuccessScreen({ compraId = null, total, neto, netoSubtotal = null, saldoAplicado, sesion, preEnrichedItems = null, snap = null, totalCompra = null }) {
+    // Compras pausadas antes de este cambio no tienen totalCompra guardado: se
+    // cae a neto, que es lo que se mostraba hasta ahora.
+    const totalAMostrar = totalCompra != null ? totalCompra : neto;
     const root = ge('cv2-root');
     if (!root) return;
 
@@ -3278,7 +3288,7 @@ const ComprasV2 = (() => {
             <div class="${_cond === 'efectivo' ? 'cv2-post-chip-contado' : 'cv2-post-chip-cc'}">${esc(condStr)}</div>
           </div>
           <div class="cv2-post-total-block">
-            <div class="cv2-post-total-label">Total Compra: <span class="cv2-post-total-amount">${fmt$(neto)}</span></div>
+            <div class="cv2-post-total-label">Total Compra: <span class="cv2-post-total-amount">${fmt$(totalAMostrar)}</span></div>
             <div class="${verifyMismatch ? 'cv2-post-verify-warn' : 'cv2-post-verify-ok'}">
               ${verifyMismatch
                 ? `⚠ Advertencia: no coincide con ${controlLabel} (${fmt$(controlValue)})`
@@ -3605,6 +3615,7 @@ const ComprasV2 = (() => {
           neto,
           netoSubtotal,
           saldoAplicado,
+          totalCompra,
         }
       });
     }
@@ -3827,6 +3838,7 @@ const ComprasV2 = (() => {
           showSuccessScreen({
             total: saved.snap?.neto ?? 0,
             neto: saved.snap?.neto ?? 0,
+            totalCompra: saved.snap?.totalCompra ?? null,
             netoSubtotal: saved.snap?.netoSubtotal ?? null,
             saldoAplicado: saved.snap?.saldoAplicado ?? 0,
             sesion: null,
@@ -3981,6 +3993,7 @@ const ComprasV2 = (() => {
             showSuccessScreen({
               total:            saved.snap?.neto ?? 0,
               neto:             saved.snap?.neto ?? 0,
+              totalCompra:      saved.snap?.totalCompra ?? null,
               netoSubtotal:     saved.snap?.netoSubtotal ?? null,
               saldoAplicado:    saved.snap?.saldoAplicado ?? 0,
               sesion:           null,
