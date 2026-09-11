@@ -52,6 +52,11 @@
     // Los remitos viajan con sus items adentro, igual que compras y ordenes:
     // remito_items no tiene sync_status propio.
     { table: 'remitos',           collection: 'remitos',           pk: 'id',   denormalize: denormalizeRemito },
+    { table: 'devoluciones',      collection: 'devoluciones',      pk: 'id',   denormalize: denormalizeDevolucion },
+    // stock_ajustes es el historial de movimientos: lo escriben roturas,
+    // vencimientos, consumo interno, los ajustes y las devoluciones del POS.
+    { table: 'stock_ajustes',     collection: 'stock_ajustes',     pk: 'id',   denormalize: null },
+    { table: 'gastos_pagos',      collection: 'gastos_pagos',      pk: 'id',   denormalize: null },
     { table: 'ordenes_compra',    collection: 'ordenes_compra',    pk: 'id',   denormalize: denormalizeOrden },
     { table: 'pagos_proveedores', collection: 'pagos_proveedores', pk: 'id',   denormalize: denormalizePagoProveedor },
     { table: 'stock',             collection: 'stock',             pk: null,   compositeKey: ['producto_id', 'sucursal_id'], denormalize: denormalizeStock },
@@ -86,6 +91,9 @@
     { collection: 'producto_codigo_proveedor', applyFn: applyCodigoProveedorFull },
     { collection: 'compras',           applyFn: applyCompra },
     { collection: 'remitos',           applyFn: applyRemito },
+    { collection: 'devoluciones',      applyFn: applyDevolucion },
+    { collection: 'stock_ajustes',     applyFn: applyStockAjuste },
+    { collection: 'gastos_pagos',      applyFn: applyGastoPago },
     { collection: 'ordenes_compra',    applyFn: applyOrdenCompra },
     { collection: 'pagos_proveedores', applyFn: applyPagoProveedor },
     { collection: 'gastos',            applyFn: applyGasto },
@@ -415,6 +423,70 @@
    * el set completo y actual, asi que reconstruir desde cero es seguro y
    * ademas hace que un item borrado del otro lado desaparezca de verdad.
    */
+  function applyDevolucion(data) {
+    if (window.SGA_DB.fueEliminado('devoluciones', data.id)) return;
+    if (tienePendienteLocal('devoluciones', 'id = ?', [data.id])) return;
+    const now = new Date().toISOString();
+
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO devoluciones
+        (id, venta_id, sucursal_id, usuario_id, fecha, motivo, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,'synced',?)`,
+      [data.id, data.venta_id || null, data.sucursal_id || null,
+       data.usuario_id || null, data.fecha || null, data.motivo || null,
+       data.updated_at || now]
+    );
+
+    window.SGA_DB.run(`DELETE FROM devolucion_items WHERE devolucion_id = ?`, [data.id]);
+    for (const it of (data._items || [])) {
+      window.SGA_DB.run(`
+        INSERT INTO devolucion_items
+          (id, devolucion_id, producto_id, cantidad, precio_unitario)
+        VALUES (?,?,?,?,?)`,
+        [it.id, data.id, it.producto_id || null, it.cantidad || 0,
+         it.precio_unitario || 0]
+      );
+    }
+  }
+
+  /**
+   * Movimiento de stock (rotura, vencimiento, consumo, ajuste, devolucion).
+   *
+   * Es el historial que muestra el editor de producto y Operaciones de Stock.
+   * Sin esto, desde la otra maquina el historial de un producto salia
+   * incompleto: solo se veian los movimientos hechos en esa misma maquina.
+   */
+  function applyStockAjuste(data) {
+    if (tienePendienteLocal('stock_ajustes', 'id = ?', [data.id])) return;
+    const now = new Date().toISOString();
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO stock_ajustes
+        (id, producto_id, sucursal_id, tipo, cantidad, motivo, usuario_id, fecha,
+         estado, aprobado_por, fecha_aprobacion, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+      [data.id, data.producto_id || null, data.sucursal_id || null,
+       data.tipo || null, data.cantidad || 0, data.motivo || null,
+       data.usuario_id || null, data.fecha || null,
+       // estado distingue un ajuste aprobado de uno esperando aprobacion
+       // (las devoluciones por producto vencido o defectuoso quedan pendientes).
+       data.estado || 'aprobado', data.aprobado_por || null,
+       data.fecha_aprobacion || null, data.updated_at || now]
+    );
+  }
+
+  /** Pago de un gasto. Los gastos ya viajaban; sus pagos no. */
+  function applyGastoPago(data) {
+    if (tienePendienteLocal('gastos_pagos', 'id = ?', [data.id])) return;
+    const now = new Date().toISOString();
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO gastos_pagos
+        (id, gasto_id, fecha, metodo_pago, monto, sync_status, updated_at)
+      VALUES (?,?,?,?,?,'synced',?)`,
+      [data.id, data.gasto_id || null, data.fecha || null,
+       data.metodo_pago || null, data.monto || 0, data.updated_at || now]
+    );
+  }
+
   function applyRemito(data) {
     if (window.SGA_DB.fueEliminado('remitos', data.id)) return;
     if (tienePendienteLocal('remitos', 'id = ?', [data.id])) return;
@@ -804,8 +876,14 @@
       ? (window.SGA_DB.query(`SELECT nombre FROM usuarios WHERE id = ?`, [venta.usuario_id])[0] || null)
       : null;
 
+    // Las promociones aplicadas son parte de la venta, no una tabla suelta:
+    // viajan con ella igual que los items y los pagos. Sin esto, el conteo de
+    // uso de una promocion salia corto del otro lado.
+    const promos = window.SGA_DB.query(
+      `SELECT * FROM venta_promociones WHERE venta_id = ?`, [venta.id]
+    );
     return {
-      ...venta, items, pagos,
+      ...venta, items, pagos, promos,
       cliente_nombre: cliente ? `${cliente.nombre || ''} ${cliente.apellido || ''}`.trim() : null,
       usuario_nombre: usuario?.nombre || null,
     };
@@ -829,6 +907,18 @@
    * Un remito viaja con sus items adentro: remito_items no tiene sync_status
    * propio, asi que no se puede pushear por su cuenta.
    */
+  /** Una devolucion viaja con sus items: devolucion_items no tiene sync propio. */
+  function denormalizeDevolucion(dev) {
+    const items = window.SGA_DB.query(
+      `SELECT di.*, p.nombre AS producto_nombre
+       FROM devolucion_items di
+       LEFT JOIN productos p ON p.id = di.producto_id
+       WHERE di.devolucion_id = ?`,
+      [dev.id]
+    ) || [];
+    return { ...dev, _items: items };
+  }
+
   function denormalizeRemito(remito) {
     const items = window.SGA_DB.query(
       `SELECT ri.*, p.nombre AS producto_nombre
@@ -1205,6 +1295,20 @@
         );
       } catch (_) {}
     }
+
+    for (const promo of (data.promos || [])) {
+      try {
+        window.SGA_DB.run(`
+          INSERT OR REPLACE INTO venta_promociones
+            (id, venta_id, promocion_id, veces, descuento_aplicado, fecha,
+             sync_status, updated_at)
+          VALUES (?,?,?,?,?,?,'synced',?)`,
+          [promo.id, data.id, promo.promocion_id || null, promo.veces || 1,
+           promo.descuento_aplicado || 0, promo.fecha || null,
+           promo.updated_at || new Date().toISOString()]
+        );
+      } catch (_) {}
+    }
   }
 
   // ─── Sync incremental de datos de monitoreo (solo ADMIN_MODE) ────────────────
@@ -1220,6 +1324,9 @@
       { name: 'ventas',            applyFn: applyVentaFull },
       { name: 'compras',           applyFn: applyCompra },
       { name: 'remitos',           applyFn: applyRemito },
+      { name: 'devoluciones',      applyFn: applyDevolucion },
+      { name: 'stock_ajustes',     applyFn: applyStockAjuste },
+      { name: 'gastos_pagos',      applyFn: applyGastoPago },
       { name: 'ordenes_compra',    applyFn: applyOrdenCompra },
       { name: 'pagos_proveedores', applyFn: applyPagoProveedor },
       { name: 'gastos',            applyFn: applyGasto },
@@ -1349,6 +1456,9 @@
       { name: 'ventas',            applyFn: applyVentaFull,        label: 'Ventas' },
       { name: 'compras',           applyFn: applyCompra,           label: 'Compras' },
       { name: 'remitos',           applyFn: applyRemito,           label: 'Remitos' },
+      { name: 'devoluciones',      applyFn: applyDevolucion,       label: 'Devoluciones' },
+      { name: 'stock_ajustes',     applyFn: applyStockAjuste,      label: 'Movimientos de stock' },
+      { name: 'gastos_pagos',      applyFn: applyGastoPago,        label: 'Pagos de gastos' },
       { name: 'ordenes_compra',    applyFn: applyOrdenCompra,      label: 'Órdenes' },
       { name: 'gastos',            applyFn: applyGasto,            label: 'Gastos' },
       { name: 'promociones',       applyFn: applyPromocion,        label: 'Promociones' },
