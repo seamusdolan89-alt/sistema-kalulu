@@ -11,8 +11,9 @@ const LimpiezaPrueba = (() => {
   const ge = id => document.getElementById(id);
   const db = () => window.SGA_DB;
 
-  // Se conservan tal cual. Todo lo demás (incluida cuenta_proveedor, para
-  // que los proveedores conservados queden con saldo $0) se borra.
+  // Se conservan tal cual; todo lo demás se borra. Los proveedores que quedan
+  // arrancan con saldo $0 solo, porque el saldo se calcula desde sus compras,
+  // gastos y pagos — y esos sí se borran.
   const PRESERVE_TABLES = ['usuarios', 'sucursales', 'medios_cobro', 'system_config', 'proveedores'];
 
   function getWipeTables() {

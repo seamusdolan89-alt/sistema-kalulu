@@ -643,18 +643,9 @@
       }
     }
 
-    // Registrar deuda en cuenta_proveedor si corresponde
-    if (data._registrar_deuda && data.proveedor_id && data.total > 0) {
-      const deudaId = data._deuda_id || (`deuda_${data.id}`);
-      window.SGA_DB.run(`
-        INSERT OR IGNORE INTO cuenta_proveedor
-          (id, proveedor_id, compra_id, tipo, monto, descripcion, fecha, usuario_id, sync_status, updated_at)
-        VALUES (?,?,?,'deuda',?,?,?,?,'pending',?)`,
-        [deudaId, data.proveedor_id, data.id, data.total,
-         `Factura ${data.numero_factura || data.id}`, data.fecha,
-         data.usuario_id || null, now]
-      );
-    }
+    // La deuda del proveedor no se anota: se calcula desde la compra misma
+    // (ver getSaldoProveedor en cuenta_corriente_proveedores.js). Aca se
+    // escribia en cuenta_proveedor, tabla que nadie leia.
   }
 
   function applyOrdenCompra(data) {
