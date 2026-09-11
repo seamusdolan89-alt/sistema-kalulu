@@ -3223,10 +3223,29 @@ const ComprasV2 = (() => {
         ? 'cv2-post-tr cv2-post-tr-changed'
         : 'cv2-post-tr cv2-post-tr-unchanged cv2-post-tr-aldia';
 
-      const actionHtml = !hasPriceChange
+      // Si la compra se pauso despues de tocar esta fila, se vuelve a dibujar
+      // como quedo. Antes se dibujaba siempre "sin tocar", asi que al retomar
+      // habia que rehacer todos los precios ya actualizados.
+      const yaGuardada = it.pvGuardado != null;
+      const yaIgnorada = it.ignorado === true;
+
+      const actionHtml = yaGuardada
+        ? `<div class="cv2-post-aldia-wrap">
+             <span class="cv2-post-badge-guardado">✓ Guardado</span>
+             <button class="cv2-post-editar-aldia-btn" data-idx="${i}" data-prodid="${esc(it.productoId)}"
+                     data-volver="guardado" title="Corregir este precio">✎</button>
+           </div>`
+        : yaIgnorada
+        ? `<div class="cv2-post-aldia-wrap">
+             <span class="cv2-post-badge-mantenido">Precio Mantenido</span>
+             <button class="cv2-post-editar-aldia-btn" data-idx="${i}" data-prodid="${esc(it.productoId)}"
+                     data-volver="mantenido" title="Cambiar de opinión">✎</button>
+           </div>`
+        : !hasPriceChange
         ? `<div class="cv2-post-aldia-wrap">
              <span class="cv2-post-badge-aldia">✓ Al día</span>
-             <button class="cv2-post-editar-aldia-btn" data-idx="${i}" data-prodid="${esc(it.productoId)}" title="Editar precio manualmente">✎</button>
+             <button class="cv2-post-editar-aldia-btn" data-idx="${i}" data-prodid="${esc(it.productoId)}"
+                     data-volver="aldia" title="Editar precio manualmente">✎</button>
            </div>`
         : `<div class="cv2-post-action-wrap">
              <button class="cv2-post-actualizar-btn" data-idx="${i}" data-prodid="${esc(it.productoId)}">✓ Actualizar</button>
@@ -3247,7 +3266,10 @@ const ComprasV2 = (() => {
             <div class="cv2-post-precio-input-wrap">
               <input type="number" class="cv2-post-precio-input" data-idx="${i}"
                      data-sugerido="${pvSugFmt}" data-pvactual="${it.pvActual.toFixed(2)}"
-                     value="${pvSugFmt}" step="0.01" min="0">
+                     value="${yaGuardada ? Number(it.pvGuardado).toFixed(2)
+                            : yaIgnorada ? it.pvActual.toFixed(2) : pvSugFmt}"
+                     ${yaGuardada || yaIgnorada ? 'disabled' : ''}
+                     step="0.01" min="0">
               <button class="cv2-post-recalc-btn" data-idx="${i}" title="Recalcular precio sugerido">&#x21bb;</button>
             </div>
             <div class="cv2-post-bajo-costo-warn" data-idx="${i}" style="display:none">
@@ -3510,6 +3532,8 @@ const ComprasV2 = (() => {
     }
 
     function markRowIgnorado(idx) {
+      // Queda anotado en el item para que sobreviva a una pausa.
+      if (items[idx]) items[idx].ignorado = true;
       const actWrap  = root.querySelector(`.cv2-post-tr[data-idx="${idx}"] .cv2-post-td-accion`);
       const input    = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
       const tr       = root.querySelector(`.cv2-post-tr[data-idx="${idx}"]`);
@@ -3535,6 +3559,7 @@ const ComprasV2 = (() => {
       db().run(`UPDATE productos SET precio_venta=?, ultima_modificacion_precio=?, sync_status='pending', updated_at=? WHERE id=?`,
                [nuevoPrecio, nowISO(), nowISO(), prodId]);
       items[idx].pvGuardado = nuevoPrecio;
+      items[idx].ignorado   = false;
       const hasFam = checkHasFamily(prodId);
       if (hasFam) {
         showHerenciaModal({ prodId, prodNombre: item.nombre, nuevoCosto: item.costoNvo,
