@@ -275,13 +275,24 @@
 
   /* ── CIERRE BODY ─────────────────────────────────────────────────────────── */
   .cierre-resumen { background: var(--color-surface); border-radius: var(--radius-md); padding: 12px; }
-  .cierre-billetes-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .cierre-billetes-table th { padding: 6px 8px; text-align: left; font-size: 12px; color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border); }
-  .cierre-billetes-table td { padding: 5px 8px; border-bottom: 1px solid var(--color-border); }
-  .cierre-billetes-table tfoot td { font-weight: 700; padding-top: 8px; }
+  /* Recuento de dinero: se cuenta mirando de reojo mientras se atiende, asi que
+     los numeros van grandes. El ancho de los campos no cambia — el problema era
+     la fuente chica, no el espacio. tabular-nums alinea las columnas de
+     importes, que es lo que hace que un recuento se pueda leer de un vistazo. */
+  .cierre-billetes-table { width: 100%; border-collapse: collapse; font-size: 16px;
+    font-variant-numeric: tabular-nums; }
+  .cierre-billetes-table th { padding: 5px 8px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border); }
+  .cierre-billetes-table td { padding: 4px 8px; border-bottom: 1px solid var(--color-border); }
+  .cierre-billetes-table tbody td:first-child { font-weight: 600; }
+  .cierre-billetes-table tfoot td { font-weight: 700; font-size: 18px; padding-top: 10px; }
   .billete-input { width: 80px; max-width: 120px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 4px 8px; text-align: right; font-size: 13px; }
   .billete-input:focus { outline: 2px solid var(--color-primary); border-color: transparent; }
+  /* Solo el input del recuento: .billete-input la comparten el cierre de caja y
+     la pantalla de explicacion de diferencias, que no se tocan. */
+  .recuento-input { font-size: 18px; font-weight: 700; padding: 3px 8px;
+    font-variant-numeric: tabular-nums; }
   .billete-subtotal { font-size: 13px; text-align: right; }
+  .cierre-billetes-table .billete-subtotal { font-size: 16px; }
 
   /* ── CIERRE MODAL ─────────────────────────────────────────────────────────── */
   .cierre-section-title {
