@@ -3603,7 +3603,13 @@ export const POS = (() => {
     // ── INITIAL LOAD ───────────────────────────────────────────────
     checkSesion();
     enterDashboard();
-    if (_hasOrphanCart && !window.ADMIN_MODE) showRecoverBanner();
+    // enterDashboard() (arriba) borra pos_cart de sessionStorage. Eso esta
+    // bien en sus otros call sites —la venta termino, o la cajera eligio
+    // salir— pero aca corre ANTES de que ella haya decidido nada sobre la
+    // venta a medio hacer. Sin volver a persistirla, la recuperacion vive
+    // solo en state.cart y una segunda recarga (mismo corte o cuelgue que
+    // dejo el carrito huerfano en primer lugar) se la lleva para siempre.
+    if (_hasOrphanCart && !window.ADMIN_MODE) { saveCart(); showRecoverBanner(); }
     if (!state.sesionActiva && !window.ADMIN_MODE) showModalApertura();
 
     // Handle deep-link actions passed via URL (e.g. #pos/devolucion)
