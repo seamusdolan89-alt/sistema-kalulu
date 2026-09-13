@@ -1643,7 +1643,11 @@ export const POS = (() => {
     };
 
     const finalizeSaleAndGoDashboard = () => {
-      // Finaliza la venta luego del ticket y siempre vuelve al dashboard real de ventas.
+      // Finaliza la venta luego del ticket y vuelve al dashboard de Inicio
+      // (no al dashboard interno de ventas realizadas de pos.js) — pedido
+      // explícito del usuario. No hace falta enterDashboard()/loadDashboard()
+      // acá: navegar a #inicio desmonta este módulo entero (loadView hace
+      // innerHTML sobre #app), así que ese estado nunca llega a pintarse.
       hideModal('modal-ticket');
       closeDetailPanel();
       sessionStorage.removeItem('pos_cart');
@@ -1659,11 +1663,9 @@ export const POS = (() => {
       state.ccAplicarFavor = false;
       clearCliente();
       saveCart();
-      checkSesion();
-      enterDashboard();
-      loadDashboard();
-      updateHeaderStatus();
+      window.SGA_POS_ACTIVE_SALE = false;
       showToast('Venta registrada ✓');
+      window.location.hash = 'inicio';
     };
 
     const enterSaleMode = (retomar = false) => {
