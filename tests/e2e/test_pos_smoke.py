@@ -42,7 +42,12 @@ def main():
         page.on("console", lambda msg: print(f"[console:{msg.type}] {msg.text}") if msg.type == "error" else None)
 
         print("--- Login via seed (admin/kalulu123 + datos demo) ---")
-        login_via_seed(page)
+        login_via_seed(page)  # arranca en #inicio (dashboard) desde que existe esa vista
+
+        print("--- Ir al POS ---")
+        page.evaluate("window.location.hash = 'pos'")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(200)
 
         page.screenshot(path=os.path.join(SCREENSHOT_DIR, "pos_home.png"), full_page=True)
 

@@ -1146,7 +1146,7 @@ const CuentaCorrienteProveedores = (() => {
 
   // ── INIT ─────────────────────────────────────────────────────────────────────
 
-  const init = () => {
+  const init = (params) => {
     const root = ge('ccprov-root');
     if (!root) return;
 
@@ -1158,6 +1158,11 @@ const CuentaCorrienteProveedores = (() => {
     state.proveedorNombre = '';
 
     renderLista();
+
+    // Acceso rápido desde #cuenta_corriente_proveedores/nuevo-pago (botón
+    // "Pago a proveedor" de Inicio): abre el modal de pago general de una,
+    // sin obligar a buscar el botón en la lista.
+    if (params && params[0] === 'nuevo-pago') openModalPago(null, null);
   };
 
   return { init };

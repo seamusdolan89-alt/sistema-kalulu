@@ -3609,6 +3609,19 @@ export const POS = (() => {
     // Handle deep-link actions passed via URL (e.g. #pos/devolucion)
     if (params && params[0] === 'devolucion') {
       showModalDevolucion();
+    } else if (params && params[0] === 'nueva-venta') {
+      // Acceso rápido desde Inicio: entra directo al carrito en vez de dejar
+      // a la cajera en el dashboard de ventas realizadas. enterSaleMode() ya
+      // se cubre sola si no hay caja abierta (abre el modal de apertura) o si
+      // estamos en ADMIN_MODE (no hace nada — vender ahí sigue bloqueado).
+      //
+      // Si quedó un carrito huérfano (recarga/corte a mitad de venta), NO
+      // entrar directo: el confirm() de abajo en enterSaleMode() no protege
+      // este caso (SGA_POS_ACTIVE_SALE arranca en false en un load fresco,
+      // que es justo cuando _hasOrphanCart puede ser true) y entrar igual
+      // pisaría ese carrito con uno vacío sin preguntar. Se deja el banner
+      // de recuperación que ya se mostró arriba, y que decida la cajera.
+      if (!_hasOrphanCart) enterSaleMode();
     }
   }
 

@@ -55,7 +55,9 @@ def main():
         page.on("dialog", lambda d: d.accept())
 
         print("--- Login POS (sga.db) + seed + abrir caja ---")
-        login_via_seed(page, admin_pos=False)
+        login_via_seed(page, admin_pos=False)  # arranca en #inicio
+        page.evaluate("window.location.hash = 'pos'")
+        page.wait_for_load_state("networkidle")
 
         print("--- Asignar codigo de barras a Coca-Cola 2L ---")
         page.evaluate(f"""

@@ -25,6 +25,7 @@
 
   // Module registry
   const modules = {
+    'inicio': () => import('./modules/inicio.js').then(m => m.default),
     'productos': () => import('./modules/productos.js').then(m => m.default),
     'pos': () => import('./modules/pos.js').then(m => m.default),
     'clientes': () => import('./modules/clientes.js').then(m => m.default),
@@ -78,7 +79,7 @@
    * Router: parse URL hash and load corresponding view
    */
   async function router() {
-    const hash = window.location.hash.slice(1) || (window.ADMIN_MODE ? 'productos' : 'pos');
+    const hash = window.location.hash.slice(1) || (window.ADMIN_MODE ? 'productos' : 'inicio');
     const [route, ...params] = hash.split('/');
 
     app.currentRoute = route;
@@ -176,7 +177,9 @@
     }
   }
 
-  // Módulos del admin-pos (panel remoto): siempre completo
+  // Módulos del admin-pos (panel remoto): siempre completo. "inicio" queda
+  // afuera a propósito — es un dashboard del POS del local (ver inicio.js),
+  // no del panel del dueño.
   const ADMIN_POS_MODULES = ['pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'ajuste_stock', 'ajuste_stock_positivo', 'adelanto_pago', 'caja_admin', 'configuracion', 'flujo'];
 
   function getAllowedModules() {
@@ -184,10 +187,10 @@
     const u = window.SGA_Auth.getCurrentUser();
     if (!u) return [];
     // Admin: acceso total
-    if (u.rol === 'admin') return ['pos', 'cajas', 'productos', 'clientes', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'caja_admin', 'adelanto_pago'];
+    if (u.rol === 'admin') return ['inicio', 'pos', 'cajas', 'productos', 'clientes', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'caja_admin', 'adelanto_pago'];
     // Colaboradores: según permisos individuales
     const P = window.SGA_Permisos;
-    const allowed = ['pos', 'cajas']; // siempre visibles
+    const allowed = ['inicio', 'pos', 'cajas']; // siempre visibles
     if (P.can('can_ver_productos'))     allowed.push('productos');
     if (P.can('can_clientes'))          allowed.push('clientes');
     if (P.can('can_compras'))           allowed.push('compras_v2');
@@ -274,6 +277,10 @@
     // pasada a propósito.
     const ic = (name) => window.SGA_Icons ? window.SGA_Icons.get(name, { class: 'nav-icon' }) : '';
     const moduleList = [
+      // Dashboard del POS del local — visible para cualquier rol logueado
+      // ahí (cajera incluida, ver getAllowedModules). NO aparece en
+      // admin-pos: queda afuera de ADMIN_POS_MODULES a propósito.
+      { name: 'inicio', icon: 'store', text: 'Inicio' },
       { name: 'pos', icon: 'pos', text: 'Punto de Venta' },
       { name: 'productos', icon: 'productos', text: 'Productos' },
       { name: 'clientes', icon: 'clientes', text: 'Clientes' },
@@ -465,7 +472,7 @@
    * Handle navigation — with POS sale guard
    */
   window.addEventListener('hashchange', (e) => {
-    const newHash = window.location.hash.slice(1) || (window.ADMIN_MODE ? 'productos' : 'pos');
+    const newHash = window.location.hash.slice(1) || (window.ADMIN_MODE ? 'productos' : 'inicio');
     const [route] = newHash.split('/');
 
     // Navigation guard: if POS has an active sale with cart items, block and notify
@@ -587,11 +594,12 @@
       // Update header
       updateHeader();
 
-      // Los cajeros siempre arrancan en el POS; admin-pos arranca en productos
-      if (app.user?.rol === 'cajero' && !window.location.hash) {
-        window.location.hash = '#pos';
-      } else if (window.ADMIN_MODE && !window.location.hash) {
-        window.location.hash = '#productos';
+      // El POS del local (cualquier rol, cajera incluida) arranca en el
+      // dashboard de Inicio; admin-pos arranca en Productos.
+      if (window.ADMIN_MODE) {
+        if (!window.location.hash) window.location.hash = '#productos';
+      } else if (!window.location.hash) {
+        window.location.hash = '#inicio';
       }
 
       // Route to initial view

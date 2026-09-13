@@ -1,0 +1,172 @@
+<style>
+  /* ── INICIO (dashboard de accesos rápidos) ───────────────────────────────────
+     Nombrado "inicio" a propósito, no "dashboard": pos.js ya usa "dashboard"
+     para su pantalla de reposo interna (enterDashboard/finalizeSaleAndGoDashboard)
+     y son dos cosas sin relación. */
+  #inicio-root {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    padding: 24px 28px 40px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .inicio-header h2 {
+    margin: 0 0 2px;
+    font-size: 1.4rem;
+    font-weight: 700;
+  }
+  .inicio-header p {
+    margin: 0;
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+    text-transform: capitalize;
+  }
+
+  /* ── KPIs ─────────────────────────────────────────────────────────────────── */
+  .inicio-kpis {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .inicio-kpi {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 108px;
+    text-decoration: none;
+    color: inherit;
+    transition: box-shadow 0.15s, border-color 0.15s;
+  }
+  a.inicio-kpi:hover {
+    box-shadow: var(--shadow-md);
+    border-color: var(--color-border-dark);
+  }
+  .inicio-kpi-label {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .inicio-kpi-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    line-height: 1.15;
+  }
+  .inicio-kpi-value.inicio-kpi-muted {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+  }
+  .inicio-kpi-sub {
+    font-size: 0.78rem;
+    color: var(--color-text-light);
+  }
+  .inicio-kpi-lista {
+    list-style: none;
+    margin: 2px 0 0;
+    padding: 0;
+    font-size: 0.82rem;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .inicio-kpi-lista li {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--color-text);
+  }
+  .inicio-kpi-lista li span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .inicio-kpi-lista li span:last-child {
+    flex-shrink: 0;
+    color: var(--color-text-secondary);
+  }
+  .inicio-kpi-reponer .inicio-kpi-value { color: var(--color-warning-text); }
+  .inicio-kpi-reponer.inicio-kpi-ok .inicio-kpi-value { color: var(--color-success); }
+
+  /* ── Accesos rápidos ──────────────────────────────────────────────────────── */
+  .inicio-accesos h3 {
+    margin: 0 0 14px;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .inicio-botones-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 18px;
+  }
+  .inicio-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 140px;
+    border-radius: var(--radius-xl);
+    border: none;
+    cursor: pointer;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #fff;
+    background: var(--color-primary);
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.1s, box-shadow 0.15s, background 0.15s;
+  }
+  .inicio-btn:hover { background: var(--color-primary-dark); box-shadow: var(--shadow-md); }
+  .inicio-btn:active { transform: scale(0.98); }
+  .inicio-btn .inicio-btn-icon { font-size: 2.4rem; line-height: 1; }
+
+  .inicio-btn--secundario { background: var(--color-secondary); }
+  .inicio-btn--secundario:hover { background: var(--color-secondary-dark); }
+
+  .inicio-btn--terciario { background: #6a4fb3; }
+  .inicio-btn--terciario:hover { background: #573f96; }
+
+  .inicio-btn--placeholder {
+    background: transparent;
+    border: 2px dashed var(--color-border-dark);
+    color: var(--color-text-light);
+    box-shadow: none;
+    cursor: default;
+  }
+  .inicio-btn--placeholder:hover { background: transparent; box-shadow: none; }
+  .inicio-btn--placeholder .inicio-btn-icon { font-size: 2rem; opacity: 0.6; }
+
+  @media (max-width: 700px) {
+    .inicio-kpis { grid-template-columns: 1fr; }
+    .inicio-botones-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div id="inicio-root">
+  <div class="inicio-header">
+    <h2>🏪 Inicio</h2>
+    <p id="inicio-fecha"></p>
+  </div>
+
+  <div class="inicio-accesos">
+    <h3>Accesos rápidos</h3>
+    <div class="inicio-botones-grid" id="inicio-botones-grid">
+      <!-- Se completa desde inicio.js -->
+    </div>
+  </div>
+
+  <div class="inicio-kpis" id="inicio-kpis">
+    <!-- Se completa desde inicio.js -->
+  </div>
+</div>

@@ -40,7 +40,9 @@ def main():
         page.on("dialog", lambda d: d.accept())
 
         print("--- Login POS (sga.db) + seed ---")
-        login_via_seed(page, admin_pos=False)
+        login_via_seed(page, admin_pos=False)  # arranca en #inicio
+        page.evaluate("window.location.hash = 'pos'")
+        page.wait_for_load_state("networkidle")
 
         print("--- Insertar cliente de prueba (seed.js no crea clientes) ---")
         page.evaluate("""
