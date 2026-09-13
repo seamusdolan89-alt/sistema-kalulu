@@ -38,7 +38,9 @@ def main():
         page.on("dialog", lambda d: d.accept())
 
         print("--- Login POS (sga.db) + seed + abrir caja ---")
-        login_via_seed(page, admin_pos=False)
+        login_via_seed(page, admin_pos=False)  # arranca en #inicio
+        page.evaluate("window.location.hash = 'pos'")
+        page.wait_for_load_state("networkidle")
         abrir_caja_si_hace_falta(page)
         page.evaluate("window.location.hash = 'caja/efectivo'")
         page.wait_for_load_state("networkidle")

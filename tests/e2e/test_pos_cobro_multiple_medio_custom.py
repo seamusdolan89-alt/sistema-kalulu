@@ -67,6 +67,9 @@ def main():
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(300)
 
+        page.evaluate("window.location.hash = 'pos'")  # login/reload dejan en #inicio
+        page.wait_for_load_state("networkidle")
+
         abrir_caja_si_hace_falta(page)
         page.locator("#btn-nueva-venta").click()
         page.wait_for_timeout(400)

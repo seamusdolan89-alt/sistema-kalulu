@@ -34,7 +34,8 @@ Uso típico de un test (POS):
         context.route("**/*", block_firebase)
         enable_dev_mode(context)
         page = context.new_page()
-        login_via_seed(page)   # deja al usuario logueado en index.html#pos
+        login_via_seed(page)   # deja al usuario logueado en index.html#inicio
+        page.evaluate("window.location.hash = 'pos'")  # el POS ya no es el arranque, ver app.js
         ...
         browser.close()
 
@@ -128,7 +129,7 @@ def login_via_seed(page, wait_target=None, admin_pos=False):
         page.wait_for_timeout(200)
         return
 
-    wait_target = wait_target or "pos"
+    wait_target = wait_target or "inicio"
     page.goto(f"{BASE_URL}/views/login.html")
     page.wait_for_load_state("networkidle")
 
@@ -164,7 +165,9 @@ def login_direct(page, username=DEV_ADMIN_USER, password=DEV_ADMIN_PASS, wait_ta
     if admin_pos:
         login_url += "?returnTo=../admin-pos/"
     if wait_target is None:
-        wait_target = "productos" if admin_pos else "pos"
+        # El POS del local arranca en "inicio" (dashboard, cualquier rol);
+        # admin-pos sigue arrancando en "productos" — ver js/app.js.
+        wait_target = "productos" if admin_pos else "inicio"
 
     page.goto(login_url)
     page.wait_for_load_state("networkidle")

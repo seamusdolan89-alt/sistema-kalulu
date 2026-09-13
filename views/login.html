@@ -257,8 +257,10 @@
       // Inicializar auth (solo restaura sesión si ya existía)
       await window.SGA_Auth.initialize();
 
-      // URL de retorno (admin-pos pasa ?returnTo=../admin-pos/)
-      const returnTo = new URLSearchParams(location.search).get('returnTo') || '../index.html#pos';
+      // URL de retorno (admin-pos pasa ?returnTo=../admin-pos/). Sin ese
+      // param, el destino es el POS del local — arranca en el dashboard de
+      // Inicio (ver js/app.js), no directo en #pos.
+      const returnTo = new URLSearchParams(location.search).get('returnTo') || '../index.html#inicio';
 
       // Si ya hay sesión activa, redirigir directamente
       if (window.SGA_Auth.isAuthenticated()) {

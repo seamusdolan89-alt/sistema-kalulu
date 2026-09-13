@@ -35,7 +35,9 @@ def main():
         page.on("dialog", lambda d: d.accept())
 
         print("--- Login POS (sga.db) + seed ---")
-        login_via_seed(page, admin_pos=False)
+        login_via_seed(page, admin_pos=False)  # arranca en #inicio
+        page.evaluate("window.location.hash = 'pos'")
+        page.wait_for_load_state("networkidle")
         abrir_caja_si_hace_falta(page)
 
         print("--- Cliente con deuda existente ($45, venta_fiada) ---")

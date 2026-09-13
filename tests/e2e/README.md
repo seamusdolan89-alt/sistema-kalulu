@@ -59,7 +59,7 @@ Los screenshots quedan en `tests/e2e/screenshots/` (gitignored).
 |---|---|
 | `block_firebase(route)` | Handler para `context.route("**/*", ...)` — aborta llamadas a Firebase/GCP |
 | `enable_dev_mode(context)` | Activa `dev_mode` antes de que cargue la página |
-| `login_via_seed(page, wait_target="pos")` | Login completo con datos demo cargados (usar en el primer paso de cada test) |
+| `login_via_seed(page, wait_target="inicio")` | Login completo con datos demo cargados (usar en el primer paso de cada test). El POS arranca en `#inicio` (dashboard, ver `inicio.js`) — para tests que interactúan con el carrito/caja hay que navegar a `#pos` explícitamente después (`page.evaluate("window.location.hash = 'pos'")`) |
 | `login_direct(page, ...)` | Login sin re-seedear (reusar sesión/DB entre pasos) |
 
 ## Dos bases de datos locales — POS vs Admin-POS
@@ -85,6 +85,7 @@ sale "vacío" inesperadamente.
 | Archivo | Cubre |
 |---|---|
 | `test_pos_smoke.py` | Login → POS carga → sidebar completo → modal Apertura de Caja |
+| `test_inicio_dashboard.py` | Dashboard "Inicio" del POS del local (no Admin-POS): arranca ahí para cualquier rol, los 3 KPIs (turno/más vendidos/reponer en góndola) no rompen sin datos, los accesos rápidos navegan a donde corresponde ("Nueva venta" entra al flujo real, no al dashboard interno de ventas de pos.js), y Admin-POS sigue arrancando en `#productos` sin "Inicio" en el menú |
 | `test_compras_carrito_revision.py` | Compras (admin-pos): columna IVA en Factura A, subtotal con descuento en Carrito, y que coincida con Revisión (regresión del fix `compras-v2-descuento-iva`) |
 | `test_cuenta_corriente_proveedores.py` | Compras (admin-pos): completar una compra a crédito genera el saldo correcto en Cuentas Corrientes; registrar un pago parcial lo imputa automáticamente por antigüedad y descuenta el saldo |
 | `test_pos_multiples_medios_pago.py` | POS: venta con Cobro múltiple (split Efectivo + resto a Cta. Cte. del cliente) — regresión del bug `MPAY is not defined` que dejaba el botón Confirmar Venta permanentemente deshabilitado |
