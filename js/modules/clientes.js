@@ -1691,6 +1691,19 @@ const ClientesUI = (() => {
         loadFichaData();
       } catch (err) {
         alert(err.message);
+        return;
+      }
+      // admin-pos no empuja solo (ver syncNow en sync.js) — sin este push
+      // explícito, la corrección queda guardada localmente pero el POS del
+      // local nunca se entera hasta que alguien toque "Push POS" a mano.
+      // Mismo patrón que adelanto_pago.js.
+      if (window.ADMIN_MODE && window.SGA_Sync?.isInitialized?.()) {
+        window.SGA_Sync.pushToPos().catch(() => {
+          window.SGA_Utils?.showNotification?.(
+            '⚠️ No se pudo enviar al POS local automáticamente. Usá el botón "Push POS".',
+            'error', 4000
+          );
+        });
       }
     });
 
