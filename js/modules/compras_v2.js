@@ -4325,15 +4325,21 @@ const ComprasV2 = (() => {
             : state.searchQuerySaved;
         } else if (e.key === 'Enter') {
           e.preventDefault();
-          const val = searchInp.value.trim();
           if (state.searchHighlight >= 0 && results[state.searchHighlight]) {
             selectSearchResult(state.searchHighlight);
           } else if (results.length === 1) {
             selectSearchResult(0);
-          } else if (results.length === 0 && val.length > 0) {
-            showNewProductForm(val);
-            clearSearch();
           }
+          // Sin resultados: NO saltar solo a "Crear producto nuevo". Un
+          // lector de código de barras manda Enter automático apenas
+          // termina de tipear, así que este Enter también dispara con el
+          // código de un producto que ya existe pero no tiene ESE código
+          // cargado todavía — antes eso mandaba derecho a duplicar el
+          // producto en vez de dejar elegir "Vincular a producto
+          // existente". El dropdown ya renderiza las dos opciones en cada
+          // tecleo (renderSearchDropdown); acá alcanza con dejarlo abierto
+          // para que se elija con un click, sea que el código haya llegado
+          // tipeado o escaneado.
         } else if (e.key === 'Escape') {
           clearSearch();
         }
