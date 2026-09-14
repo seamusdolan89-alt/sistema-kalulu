@@ -65,7 +65,17 @@ const Caja = (() => {
     recuento: { billetes: {} },
     refreshTimer: null,
     user: null,
+    // Sesión de caja YA CERRADA que se está mirando desde el Historial —
+    // "como si fuera la caja actual" pero de solo lectura. Mientras esto
+    // tenga un valor, toma prioridad sobre `sesion` (la activa) en el render.
+    viewSesion: null,
   };
+
+  // sesionId efectivo para las pestañas Resumen/Egresos/Cobranzas: la
+  // histórica si se está viendo una, si no la activa.
+  function activeSesionId() {
+    return state.viewSesion ? state.viewSesion.id : (state.sesion ? state.sesion.id : null);
+  }
 
   const ge = (id) => document.getElementById(id);
   const esc = (s) =>
@@ -460,6 +470,10 @@ const Caja = (() => {
   // ── RENDER ROOT ───────────────────────────────────────────────────────────────
 
   function render() {
+    if (state.viewSesion) {
+      renderCajaHistorica();
+      return;
+    }
     if (state.activeMedio && state.activeMedio !== 'efectivo') {
       renderCajaDigital();
       return;
@@ -756,7 +770,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
   // ── OVERLAY: COBRANZAS POR MEDIO DE PAGO ─────────────────────────────────────
 
   function openMediosPagoOverlay() {
-    const tot = getTotalesSesion(state.sesion.id);
+    const tot = getTotalesSesion(activeSesionId());
     const mediosRows = Object.keys(tot.totPagos)
       .filter(m => (tot.totPagos[m] || 0) > 0)
       .map(m => `
@@ -810,12 +824,13 @@ case 'egresos':     renderEgresosIngresos(content);   break;
 
   function renderResumen(container) {
     const el = container || ge('caja-tab-content');
-    if (!el || !state.sesion) return;
-    const tot = getTotalesSesion(state.sesion.id);
+    const sesionId = activeSesionId();
+    if (!el || !sesionId) return;
+    const tot = getTotalesSesion(sesionId);
     state.totales = tot;
     const medio = state.activeMedio || 'efectivo';
 
-    const movimientos = getMovimientosDia(state.sesion.id, medio);
+    const movimientos = getMovimientosDia(sesionId, medio);
     const movsHtml = movimientos.length
       ? `<div style="max-height:340px;overflow-y:auto">
           <table class="caja-table mov-table">
@@ -900,8 +915,10 @@ case 'egresos':     renderEgresosIngresos(content);   break;
 
   function renderEgresosIngresos(container) {
     const el = container || ge('caja-tab-content');
-    if (!el || !state.sesion) return;
-    const { egresos, ingresos } = getEgresosIngresos(state.sesion.id);
+    const sesionId = activeSesionId();
+    if (!el || !sesionId) return;
+    const historico = !!state.viewSesion;
+    const { egresos, ingresos } = getEgresosIngresos(sesionId);
 
     const eHtml = egresos.length ? `
       <table class="caja-table">
@@ -944,17 +961,22 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       <div class="caja-ei-header">
         <h3>Egresos</h3>
         <div style="display:flex;gap:8px">
-          <button id="btn-pago-proveedor" class="btn btn-sm" style="background:#e3f2fd;color:#1565c0;border:1.5px solid #90caf9;font-weight:600">💳 Pago a Proveedor</button>
-          ${P.registrarEgreso() ? `<button id="btn-nuevo-egreso" class="btn btn-sm btn-danger">+ Egreso</button>` : ''}
+          ${!historico ? `<button id="btn-pago-proveedor" class="btn btn-sm" style="background:#e3f2fd;color:#1565c0;border:1.5px solid #90caf9;font-weight:600">💳 Pago a Proveedor</button>` : ''}
+          ${!historico && P.registrarEgreso() ? `<button id="btn-nuevo-egreso" class="btn btn-sm btn-danger">+ Egreso</button>` : ''}
         </div>
       </div>
       ${eHtml}
       <div class="caja-ei-header" style="margin-top:24px">
         <h3>Ingresos extra</h3>
-        ${P.registrarIngreso() ? `<button id="btn-nuevo-ingreso" class="btn btn-sm btn-success">+ Ingreso</button>` : ''}
+        ${!historico && P.registrarIngreso() ? `<button id="btn-nuevo-ingreso" class="btn btn-sm btn-success">+ Ingreso</button>` : ''}
       </div>
       ${iHtml}
     `;
+
+    // En modo histórico (sesión ya cerrada) no se ofrece ninguna acción de
+    // escritura — ni "Pago a Proveedor", que además imputaría el pago a la
+    // sesión activa, no a la que se está mirando.
+    if (historico) return;
 
     if (P.pagoProveedor()) ge('btn-pago-proveedor').addEventListener('click', openPagoProveedorModal);
     else ge('btn-pago-proveedor').style.display = 'none';
@@ -1015,7 +1037,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     `;
 
     el.querySelectorAll('.btn-ver-sesion').forEach(btn => {
-      btn.addEventListener('click', () => showSesionDetalle(btn.dataset.id));
+      btn.addEventListener('click', () => abrirSesionHistorica(btn.dataset.id));
     });
   }
 
@@ -2016,9 +2038,13 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     });
   }
 
-  // ── SESION DETALLE MODAL ──────────────────────────────────────────────────────
+  // ── SESIÓN HISTÓRICA (turno cerrado, "como si fuera la caja actual") ──────────
+  // Antes esto era un modal chico con 6 números y el detalle de billetes.
+  // Reusa exactamente el mismo shell de tabs que la caja activa (Resumen,
+  // Egresos e Ingresos, Cobranzas por medio) apuntando a la sesión cerrada
+  // en vez de a `state.sesion` — mismo nivel de detalle, solo lectura.
 
-  function showSesionDetalle(sesionId) {
+  function abrirSesionHistorica(sesionId) {
     const rows = window.SGA_DB.query(
       `SELECT s.*, u1.nombre AS nombre_apertura, u2.nombre AS nombre_cierre
        FROM sesiones_caja s
@@ -2028,16 +2054,20 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       [sesionId]
     );
     if (!rows.length) return;
-    const s = rows[0];
+    state.viewSesion = rows[0];
+    state.activeMedio = 'efectivo';
+    state.currentTab = 'resumen';
+    stopAutoRefresh();
+    render();
+  }
+
+  function renderCajaHistorica() {
+    const root = ge('caja-root');
+    if (!root) return;
+    const s = state.viewSesion;
 
     let billetes = {};
     try { billetes = JSON.parse(s.detalle_billetes || '{}'); } catch (e) { console.warn('parse detalle_billetes:', e); }
-
-    const totalVentas = ((window.SGA_DB.query(
-      `SELECT COALESCE(SUM(total), 0) AS t FROM ventas WHERE sesion_caja_id = ? AND estado = 'completada'`,
-      [sesionId]
-    )[0]) || {}).t || 0;
-
     const billetesHtml = Object.entries(billetes)
       .filter(([, n]) => parseFloat(n) > 0)
       .map(([d, n]) => `<div class="caja-stat-row"><span>${fmtPeso(d)} × ${n}</span><span>${fmtPeso(parseFloat(d) * parseFloat(n))}</span></div>`)
@@ -2046,27 +2076,55 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     const dif = parseFloat(s.diferencia) || 0;
     const difClass = dif > 0 ? 'text-success' : dif < 0 ? 'text-danger' : '';
 
-    openModal(`
-      <button class="caja-modal-close" id="btn-close-sesion" aria-label="Cerrar" title="Cerrar">✕</button>
-      <h3>Detalle de Sesión</h3>
-      <div class="caja-stat-row"><span>Apertura</span><span>${fmtFecha(s.fecha_apertura)}</span></div>
-      <div class="caja-stat-row"><span>Cierre</span><span>${fmtFecha(s.fecha_cierre)}</span></div>
-      <div class="caja-stat-row"><span>Abrió</span><span>${esc(s.nombre_apertura || '—')}</span></div>
-      <div class="caja-stat-row"><span>Cerró</span><span>${esc(s.nombre_cierre || '—')}</span></div>
-      <div class="caja-stat-row"><span>Total ventas</span><span>${fmtPeso(totalVentas)}</span></div>
-      <div class="caja-stat-row"><span>Saldo inicial</span><span>${fmtPeso(s.saldo_inicial)}</span></div>
-      <div class="caja-stat-row"><span>Saldo esperado</span><span>${fmtPeso(s.saldo_final_esperado)}</span></div>
-      <div class="caja-stat-row"><span>Saldo real (contado)</span><span>${fmtPeso(s.saldo_final_real)}</span></div>
-      <div class="caja-stat-row highlight-row"><span>Diferencia</span><span class="${difClass}">${dif >= 0 ? '+' : ''}${fmtPeso(dif)}</span></div>
-      <h4 style="margin:16px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.03em;color:#666">Detalle billetes</h4>
-      ${billetesHtml}
-      <div class="caja-modal-footer">
-        <button class="btn btn-outline" id="btn-close-sesion2">Cerrar</button>
-      </div>
-    `);
+    const tabsHtml = `
+      <button class="caja-tab ${state.currentTab === 'resumen' ? 'active' : ''}" data-tab="resumen">Resumen</button>
+      <button class="caja-tab ${state.currentTab === 'egresos' ? 'active' : ''}" data-tab="egresos">Egresos e Ingresos</button>
+      <button class="caja-tab" data-action="medios">Cobranzas por medio de pago</button>
+    `;
 
-    ge('btn-close-sesion').addEventListener('click', closeModal);
-    ge('btn-close-sesion2').addEventListener('click', closeModal);
+    root.innerHTML = `
+      <div class="caja-toolbar">
+        <div>
+          <h2>💰 Caja · Efectivo <span class="badge-cerrada">Cerrada</span></h2>
+          <small class="caja-apertura-info">
+            ${fmtFecha(s.fecha_apertura)} · abrió ${esc(s.nombre_apertura || '—')}
+            &nbsp;→&nbsp; ${fmtFecha(s.fecha_cierre)} · cerró ${esc(s.nombre_cierre || '—')}
+          </small>
+        </div>
+        <div class="caja-toolbar-right">
+          <button id="btn-volver-historial" class="btn btn-outline">← Volver al historial</button>
+        </div>
+      </div>
+
+      <div class="caja-medios-card" style="margin:16px 20px 0">
+        <h4>Cierre de este turno</h4>
+        <div class="caja-stat-row"><span>Saldo inicial</span><span>${fmtPeso(s.saldo_inicial)}</span></div>
+        <div class="caja-stat-row"><span>Saldo esperado</span><span>${fmtPeso(s.saldo_final_esperado)}</span></div>
+        <div class="caja-stat-row"><span>Saldo real (contado)</span><span>${fmtPeso(s.saldo_final_real)}</span></div>
+        <div class="caja-stat-row highlight-row"><span>Diferencia</span><span class="${difClass}">${dif >= 0 ? '+' : ''}${fmtPeso(dif)}</span></div>
+        <h4 style="margin-top:16px">Detalle de billetes contados</h4>
+        ${billetesHtml}
+      </div>
+
+      <div class="caja-tabs">${tabsHtml}</div>
+      <div id="caja-tab-content" class="caja-tab-content"></div>
+    `;
+
+    root.querySelectorAll('.caja-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.action === 'medios') { openMediosPagoOverlay(); return; }
+        switchTab(btn.dataset.tab);
+      });
+    });
+
+    ge('btn-volver-historial').addEventListener('click', () => {
+      state.viewSesion = null;
+      state.currentTab = 'historial';
+      render();
+      if (state.sesion) startAutoRefresh();
+    });
+
+    switchTab(state.currentTab);
   }
 
   // ── VENTA DETALLE MODAL ───────────────────────────────────────────────────────
@@ -2234,6 +2292,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
   const init = (params = []) => {
     state.user = window.SGA_Auth.getCurrentUser();
     if (!state.user) { window.location.hash = '#pos'; return; }
+    state.viewSesion = null; // arrancar siempre fuera del modo histórico
 
     const VALID_MEDIOS = getMediosDynamic().map(r => r.id);
     const medio = params[0];
