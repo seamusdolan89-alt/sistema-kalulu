@@ -1,11 +1,16 @@
 """
-tests/e2e/test_caja_historial_detalle.py — Historial de Caja: "Ver" sobre una
-sesion cerrada ahora abre el mismo nivel de detalle que la caja actual
-(Resumen con movimientos, Egresos e Ingresos, Cobranzas por medio de pago),
-de solo lectura, en vez del modal chico de antes con 6 numeros nada mas.
+tests/e2e/test_caja_historial_detalle.py — Historial de Caja: dos acciones
+distintas por sesion cerrada, no una sola.
+
+- "Resumen": el modal chico de siempre (6 numeros + detalle de billetes) —
+  no se perdio, sigue igual.
+- "Detalle": abre el mismo nivel de detalle que la caja actual (Resumen con
+  movimientos, Egresos e Ingresos, Cobranzas por medio de pago), de solo
+  lectura, para revisar movimientos puntuales de un turno pasado.
 
 Pedido real del usuario: desde Admin-POS poder ver cajas y turnos pasados
-"no solamente el resumen, sino todo, como si fuera la caja actual".
+"no solamente el resumen, sino todo, como si fuera la caja actual" — pero
+sin perder el resumen que ya tenia, porque son dos usos distintos.
 
 Correr (server ya levantado en :8765, ver README.md):
 
@@ -70,10 +75,21 @@ def main():
         page.locator("#btn-aceptar-resumen").click()
         page.wait_for_timeout(400)
 
-        print("--- Historial: 'Ver' sobre la sesion recien cerrada ---")
-        ver_btn = page.locator(".btn-ver-sesion").first
-        ver_btn.wait_for(state="visible", timeout=5000)
-        ver_btn.click()
+        print("--- Historial: 'Resumen' sigue siendo el modal chico de siempre ---")
+        resumen_btn = page.locator(".btn-resumen-sesion").first
+        resumen_btn.wait_for(state="visible", timeout=5000)
+        resumen_btn.click()
+        page.wait_for_timeout(300)
+        modal_text = page.locator("#app").inner_text()
+        assert "Resumen de Sesión" in modal_text, f"No se ve el modal de resumen: {modal_text[:300]!r}"
+        assert "Saldo esperado" in modal_text, "El modal de resumen deberia traer el saldo esperado"
+        page.locator("#btn-close-sesion2").click()
+        page.wait_for_timeout(200)
+
+        print("--- Historial: 'Detalle' abre la vista completa (Detalle != Resumen) ---")
+        detalle_btn = page.locator(".btn-detalle-sesion").first
+        detalle_btn.wait_for(state="visible", timeout=5000)
+        detalle_btn.click()
         page.wait_for_timeout(400)
         page.screenshot(path=os.path.join(SCREENSHOT_DIR, "caja_historial_detalle_resumen.png"), full_page=True)
 
@@ -81,7 +97,7 @@ def main():
         assert "Cerrada" in page_text, f"No se ve el badge de sesion cerrada: {page_text[:300]!r}"
         assert "Volver al historial" in page_text, "Falta el boton para volver al historial"
 
-        print("--- Resumen debe traer los mismos movimientos que la caja activa ---")
+        print("--- El detalle debe traer los mismos movimientos que la caja activa ---")
         assert "Compra de bolsas" in page_text, (
             f"El egreso de la sesion cerrada no aparece en el Resumen historico: {page_text[:500]!r}"
         )
@@ -125,11 +141,11 @@ def main():
         assert "Cajas anteriores" in back_text, (
             f"No volvio a la pantalla de apertura/historial: {back_text[:300]!r}"
         )
-        assert page.locator(".btn-ver-sesion").count() >= 1, "La sesion cerrada deberia seguir listada en Historial"
+        assert page.locator(".btn-detalle-sesion").count() >= 1, "La sesion cerrada deberia seguir listada en Historial"
 
         assert not errors, f"Errores JS no capturados en pagina: {errors}"
 
-        print("OK - Historial de Caja: 'Ver' abre el detalle completo (Resumen + Egresos/Ingresos + Cobranzas), de solo lectura.")
+        print("OK - Historial de Caja: 'Resumen' (modal chico) y 'Detalle' (vista completa, solo lectura) conviven sin pisarse.")
         print(f"Screenshots: {SCREENSHOT_DIR}")
 
         browser.close()

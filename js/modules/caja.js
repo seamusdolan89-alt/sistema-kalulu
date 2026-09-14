@@ -1028,7 +1028,10 @@ case 'egresos':     renderEgresosIngresos(content);   break;
                 <td>${fmtPeso(s.saldo_final_real)}</td>
                 <td class="${difClass}">${dif >= 0 ? '+' : ''}${fmtPeso(dif)}</td>
                 <td>${esc(s.nombre_apertura || '')}</td>
-                <td><button class="btn btn-xs btn-outline btn-ver-sesion" data-id="${esc(s.id)}">Ver</button></td>
+                <td style="white-space:nowrap">
+                  <button class="btn btn-xs btn-outline btn-resumen-sesion" data-id="${esc(s.id)}">Resumen</button>
+                  <button class="btn btn-xs btn-outline btn-detalle-sesion" data-id="${esc(s.id)}">Detalle</button>
+                </td>
               </tr>
             `;
           }).join('')}
@@ -1036,7 +1039,10 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       </table>
     `;
 
-    el.querySelectorAll('.btn-ver-sesion').forEach(btn => {
+    el.querySelectorAll('.btn-resumen-sesion').forEach(btn => {
+      btn.addEventListener('click', () => showSesionDetalle(btn.dataset.id));
+    });
+    el.querySelectorAll('.btn-detalle-sesion').forEach(btn => {
       btn.addEventListener('click', () => abrirSesionHistorica(btn.dataset.id));
     });
   }
@@ -2038,11 +2044,69 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     });
   }
 
+  // ── SESIÓN DETALLE MODAL (Historial > "Resumen") ──────────────────────────────
+  // Resumen rápido en un modal: los mismos números que ya se ven en la fila de
+  // Historial más quién abrió/cerró y el detalle de billetes contados. Para
+  // revisar movimiento por movimiento está "Detalle" (abrirSesionHistorica,
+  // debajo), que abre la sesión tal cual se ve la caja actual — son dos usos
+  // distintos, no había que perder este.
+
+  function showSesionDetalle(sesionId) {
+    const rows = window.SGA_DB.query(
+      `SELECT s.*, u1.nombre AS nombre_apertura, u2.nombre AS nombre_cierre
+       FROM sesiones_caja s
+       LEFT JOIN usuarios u1 ON u1.id = s.usuario_apertura_id
+       LEFT JOIN usuarios u2 ON u2.id = s.usuario_cierre_id
+       WHERE s.id = ?`,
+      [sesionId]
+    );
+    if (!rows.length) return;
+    const s = rows[0];
+
+    let billetes = {};
+    try { billetes = JSON.parse(s.detalle_billetes || '{}'); } catch (e) { console.warn('parse detalle_billetes:', e); }
+
+    const totalVentas = ((window.SGA_DB.query(
+      `SELECT COALESCE(SUM(total), 0) AS t FROM ventas WHERE sesion_caja_id = ? AND estado = 'completada'`,
+      [sesionId]
+    )[0]) || {}).t || 0;
+
+    const billetesHtml = Object.entries(billetes)
+      .filter(([, n]) => parseFloat(n) > 0)
+      .map(([d, n]) => `<div class="caja-stat-row"><span>${fmtPeso(d)} × ${n}</span><span>${fmtPeso(parseFloat(d) * parseFloat(n))}</span></div>`)
+      .join('') || '<p style="color:#999;font-size:13px">Sin detalle de billetes</p>';
+
+    const dif = parseFloat(s.diferencia) || 0;
+    const difClass = dif > 0 ? 'text-success' : dif < 0 ? 'text-danger' : '';
+
+    openModal(`
+      <button class="caja-modal-close" id="btn-close-sesion" aria-label="Cerrar" title="Cerrar">✕</button>
+      <h3>Resumen de Sesión</h3>
+      <div class="caja-stat-row"><span>Apertura</span><span>${fmtFecha(s.fecha_apertura)}</span></div>
+      <div class="caja-stat-row"><span>Cierre</span><span>${fmtFecha(s.fecha_cierre)}</span></div>
+      <div class="caja-stat-row"><span>Abrió</span><span>${esc(s.nombre_apertura || '—')}</span></div>
+      <div class="caja-stat-row"><span>Cerró</span><span>${esc(s.nombre_cierre || '—')}</span></div>
+      <div class="caja-stat-row"><span>Total ventas</span><span>${fmtPeso(totalVentas)}</span></div>
+      <div class="caja-stat-row"><span>Saldo inicial</span><span>${fmtPeso(s.saldo_inicial)}</span></div>
+      <div class="caja-stat-row"><span>Saldo esperado</span><span>${fmtPeso(s.saldo_final_esperado)}</span></div>
+      <div class="caja-stat-row"><span>Saldo real (contado)</span><span>${fmtPeso(s.saldo_final_real)}</span></div>
+      <div class="caja-stat-row highlight-row"><span>Diferencia</span><span class="${difClass}">${dif >= 0 ? '+' : ''}${fmtPeso(dif)}</span></div>
+      <h4 style="margin:16px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.03em;color:#666">Detalle billetes</h4>
+      ${billetesHtml}
+      <div class="caja-modal-footer">
+        <button class="btn btn-outline" id="btn-close-sesion2">Cerrar</button>
+      </div>
+    `);
+
+    ge('btn-close-sesion').addEventListener('click', closeModal);
+    ge('btn-close-sesion2').addEventListener('click', closeModal);
+  }
+
   // ── SESIÓN HISTÓRICA (turno cerrado, "como si fuera la caja actual") ──────────
-  // Antes esto era un modal chico con 6 números y el detalle de billetes.
-  // Reusa exactamente el mismo shell de tabs que la caja activa (Resumen,
-  // Egresos e Ingresos, Cobranzas por medio) apuntando a la sesión cerrada
-  // en vez de a `state.sesion` — mismo nivel de detalle, solo lectura.
+  // Para revisar movimiento por movimiento — Historial > "Detalle". Reusa
+  // exactamente el mismo shell de tabs que la caja activa (Resumen, Egresos e
+  // Ingresos, Cobranzas por medio) apuntando a la sesión cerrada en vez de a
+  // `state.sesion` — mismo nivel de detalle, solo lectura.
 
   function abrirSesionHistorica(sesionId) {
     const rows = window.SGA_DB.query(
