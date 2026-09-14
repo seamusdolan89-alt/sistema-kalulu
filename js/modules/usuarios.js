@@ -343,9 +343,13 @@ const UsuariosModule = (() => {
           window.SGA_DB.run(
             // sync_status: el push selecciona por ahi. Sin esto, dar o sacar
             // un permiso desde casa no llegaba nunca al POS del local.
-            `UPDATE usuarios SET nombre=?, username=?, password_hash=?, rol=?, activo=?,
+            // password_updated_at: solo se toca acá, cuando de verdad se
+            // cambia la contraseña — es lo que le permite a applyUsuarioFull
+            // (sync.js) distinguir "esto es un cambio de clave real" de
+            // "esto es el password_hash viejo que venía pegado en la fila".
+            `UPDATE usuarios SET nombre=?, username=?, password_hash=?, password_updated_at=?, rol=?, activo=?,
                permisos_json=?, sync_status='pending', updated_at=? WHERE id=?`,
-            [nombre, username, hash, rolDB, activo, permisos, now, id]
+            [nombre, username, hash, now, rolDB, activo, permisos, now, id]
           );
         } else {
           window.SGA_DB.run(
@@ -358,9 +362,9 @@ const UsuariosModule = (() => {
         const hash  = await window.SGA_Auth.hashPassword(password);
         const newId = window.SGA_Utils.generateUUID();
         window.SGA_DB.run(
-          `INSERT INTO usuarios (id, nombre, username, password_hash, rol, sucursal_id, activo, permisos_json, sync_status, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-          [newId, nombre, username, hash, rolDB, sucursal_id, activo, permisos, now]
+          `INSERT INTO usuarios (id, nombre, username, password_hash, password_updated_at, rol, sucursal_id, activo, permisos_json, sync_status, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+          [newId, nombre, username, hash, now, rolDB, sucursal_id, activo, permisos, now]
         );
       }
 

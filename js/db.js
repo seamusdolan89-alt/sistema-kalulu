@@ -1107,6 +1107,11 @@
       `ALTER TABLE usuarios ADD COLUMN username TEXT`,
       `ALTER TABLE usuarios ADD COLUMN password_hash TEXT`,
       `ALTER TABLE usuarios ADD COLUMN permisos_json TEXT`,
+      // Sello de "cuándo cambió la contraseña de verdad" (ver sync.js
+      // applyUsuarioFull) — sin esto, tocar cualquier otro campo del usuario
+      // desde la otra compu (ej. un permiso) repisaba la contraseña vigente
+      // con la copia local vieja que esa compu tenía guardada.
+      `ALTER TABLE usuarios ADD COLUMN password_updated_at TEXT`,
     ];
     for (const sql of usuariosMigrations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }
