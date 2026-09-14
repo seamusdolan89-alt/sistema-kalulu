@@ -1099,15 +1099,37 @@
 
   function applyUsuarioFull(data) {
     if (tienePendienteLocal('usuarios', 'id = ?', [data.id])) return;
+
+    // No pisar una contraseña vigente con una vieja: POS y admin-pos tienen
+    // cada uno su propia copia local de `usuarios`, y esta función aplica la
+    // fila ENTERA que llega de Firestore — incluido su password_hash, aunque
+    // el cambio que la disparó haya sido, por ejemplo, tocar un permiso desde
+    // la otra compu. Si esa otra compu tenía guardado un password_hash viejo
+    // (nunca se le canjeó por el vigente), lo terminaba re-subiendo y pisando
+    // la contraseña que sí funcionaba. password_updated_at solo se actualiza
+    // cuando de verdad se cambia la clave (ver usuarios.js): si lo que llega
+    // no trae uno, o el local es igual o más nuevo, se conserva la contraseña
+    // local tal cual.
+    const local = window.SGA_DB.query(
+      `SELECT password_hash, password_updated_at FROM usuarios WHERE id = ?`, [data.id]
+    )[0];
+
+    let passwordHash = data.password_hash || null;
+    let passwordUpdatedAt = data.password_updated_at || null;
+    if (local && !(passwordUpdatedAt && (!local.password_updated_at || passwordUpdatedAt > local.password_updated_at))) {
+      passwordHash = local.password_hash;
+      passwordUpdatedAt = local.password_updated_at;
+    }
+
     // firebase_uid queda fuera a propósito: es un campo vestigial (login es local,
     // no usa Firebase Auth) y evita choques de UNIQUE entre usuarios "demo" viejos.
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO usuarios
-        (id, nombre, rol, sucursal_id, activo, username, password_hash, permisos_json,
+        (id, nombre, rol, sucursal_id, activo, username, password_hash, password_updated_at, permisos_json,
          sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,'synced',?)`,
+      VALUES (?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.nombre || '?', data.rol || 'cajero', data.sucursal_id || null,
-       data.activo !== false ? 1 : 0, data.username || null, data.password_hash || null,
+       data.activo !== false ? 1 : 0, data.username || null, passwordHash, passwordUpdatedAt,
        data.permisos_json || null, data.updated_at || new Date().toISOString()]
     );
   }
@@ -1704,10 +1726,12 @@
     getFirestore: () => firestoreDb,
     isInitialized: () => initialized,
     getStatus: () => ({ initialized, lastSyncAt }),
-    // Expuesto para poder testear la guarda anti-pisada general
-    // (tienePendienteLocal) y la señal ultimoSkipPorPendiente que usan
-    // syncMonitoringData/pullFromFirestore para no dar por "entregado" un
-    // documento descartado.
+    // Expuesto para poder testear el merge de usuarios (guarda anti-pisada de
+    // password_hash) contra un doc simulado, sin necesitar Firestore real.
+    applyUsuarioFull,
+    // Idem para testear la guarda anti-pisada general (tienePendienteLocal) y
+    // la señal ultimoSkipPorPendiente que usan syncMonitoringData/
+    // pullFromFirestore para no dar por "entregado" un documento descartado.
     applyOrdenCompra,
     __testUltimoSkipPorPendiente: () => ultimoSkipPorPendiente,
     // Los loops reales resetean la señal a false antes de cada applyFn() (ver
