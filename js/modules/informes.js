@@ -92,7 +92,8 @@ const Informes = (() => {
     return window.SGA_DB.query(`
       SELECT
         p.id,
-        COALESCE(cb.codigo, '') AS codigo,
+        COALESCE((SELECT codigo FROM codigos_barras
+                  WHERE producto_id = p.id AND es_principal = 1 LIMIT 1), '') AS codigo,
         p.nombre,
         COALESCE(cat.nombre, '') AS categoria,
         COALESCE(pr.razon_social, '') AS proveedor,
@@ -114,7 +115,6 @@ const Informes = (() => {
         AND v.sucursal_id = ?
         AND v.fecha >= ? AND v.fecha < ?
       JOIN productos p ON vi.producto_id = p.id
-      LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
       LEFT JOIN categorias cat ON p.categoria_id = cat.id
       LEFT JOIN proveedores pr ON p.proveedor_principal_id = pr.id
       LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?
@@ -157,7 +157,8 @@ const Informes = (() => {
     return window.SGA_DB.query(`
       SELECT
         p.id,
-        COALESCE(cb.codigo, '') AS codigo,
+        COALESCE((SELECT codigo FROM codigos_barras
+                  WHERE producto_id = p.id AND es_principal = 1 LIMIT 1), '') AS codigo,
         p.nombre,
         COALESCE(pr.razon_social, '') AS proveedor,
         COALESCE(s.cantidad, 0) AS stock_actual,
@@ -183,7 +184,6 @@ const Informes = (() => {
         AND oc.fecha_creacion >= ? AND oc.fecha_creacion < ?
         AND oc.estado NOT IN ('borrador')
       JOIN productos p ON oci.producto_id = p.id
-      LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
       LEFT JOIN proveedores pr ON p.proveedor_principal_id = pr.id
       LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?
       GROUP BY p.id
@@ -319,7 +319,8 @@ const Informes = (() => {
     return window.SGA_DB.query(`
       SELECT
         p.id,
-        COALESCE(cb.codigo, '') AS codigo,
+        COALESCE((SELECT codigo FROM codigos_barras
+                  WHERE producto_id = p.id AND es_principal = 1 LIMIT 1), '') AS codigo,
         p.nombre,
         COALESCE(cat.nombre, '') AS categoria,
         COALESCE(pr.razon_social, '') AS proveedor,
@@ -328,7 +329,6 @@ const Informes = (() => {
         COALESCE(s.cantidad, 0) * p.costo AS costo_inmovilizado,
         MAX(v.fecha) AS ultima_venta
       FROM productos p
-      LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
       LEFT JOIN categorias cat ON p.categoria_id = cat.id
       LEFT JOIN proveedores pr ON p.proveedor_principal_id = pr.id
       LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?
