@@ -341,10 +341,17 @@
 
   // ─── PUSH manual desde admin-pos al POS ──────────────────────────────────────
 
+  // 'eliminaciones' es la que hace que un borrado hecho desde admin-pos (ej.
+  // "eliminar un cobro mal cargado" en clientes.js) viaje de verdad: sin ella
+  // acá, la marca de borrado quedaba 'pending' en la base local del admin
+  // para siempre — nunca llegaba a Firestore y el POS del local jamás se
+  // enteraba, aunque se tocara el botón "Push POS" mil veces. 'ingresos_caja'
+  // por el mismo motivo: si el cobro mal cargado había sumado efectivo a una
+  // caja, esa corrección también tiene que cruzar.
   const ADMIN_PUSH_TABLES = ['usuarios', 'productos', 'proveedores', 'clientes', 'compras',
                               'ordenes_compra', 'pagos_proveedores', 'gastos',
                               'promociones', 'stock', 'cuenta_corriente', 'producto_codigo_proveedor',
-                              'medios_cobro', 'sucursales'];
+                              'medios_cobro', 'sucursales', 'eliminaciones', 'ingresos_caja'];
 
   async function pushToPos() {
     if (!initialized || !firestoreDb) throw new Error('Firebase no conectado');

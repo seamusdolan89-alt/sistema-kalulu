@@ -21,12 +21,18 @@ Cubre:
 - SGA_Clientes.eliminarPago rechaza una fila que no sea tipo 'pago' (ej.
   una venta_fiada, que se corrige anulando la venta, no borrando la
   cuenta corriente sola).
+- 'eliminaciones' e 'ingresos_caja' estan en ADMIN_PUSH_TABLES (sync.js) y
+  el click dispara SGA_Sync.pushToPos() -- sin esto, lo que se borra desde
+  admin-pos queda 'pending' localmente para siempre y nunca le llega al
+  POS del local (bug real: el usuario corrigio un saldo y la correccion
+  no viajaba, ver el commit siguiente a este test).
 
 Correr (server ya levantado en :8765, ver README.md):
 
     python tests/e2e/test_clientes_eliminar_cobro.py
 """
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -37,10 +43,28 @@ from playwright.sync_api import sync_playwright
 from helpers import block_firebase, enable_dev_mode, login_via_seed
 
 SCREENSHOT_DIR = os.path.join(os.path.dirname(__file__), "screenshots")
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def check_admin_push_tables():
+    """ADMIN_PUSH_TABLES no se puede leer desde la pagina (const interna del
+    modulo, no expuesta) -- se verifica el source de sync.js directamente."""
+    sync_js_path = os.path.join(REPO_ROOT, "js", "sync.js")
+    with open(sync_js_path, encoding="utf-8") as f:
+        src = f.read()
+    m = re.search(r"ADMIN_PUSH_TABLES\s*=\s*\[(.*?)\];", src, re.DOTALL)
+    assert m, "No se encontro la declaracion de ADMIN_PUSH_TABLES en sync.js"
+    tabla_list = m.group(1)
+    for tabla in ("eliminaciones", "ingresos_caja"):
+        assert f"'{tabla}'" in tabla_list, (
+            f"BUG: '{tabla}' falta en ADMIN_PUSH_TABLES -- 'Push POS' nunca la va a enviar"
+        )
 
 
 def main():
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+    print("--- ADMIN_PUSH_TABLES incluye eliminaciones e ingresos_caja ---")
+    check_admin_push_tables()
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -114,9 +138,32 @@ def main():
         btn = page.locator('[data-eliminar-mov="cc-cobro-malo"]')
         assert btn.count() == 1, "Deberia haber un boton para eliminar el cobro en ADMIN POS"
 
-        print("--- Eliminar el cobro mal cargado ---")
+        print("--- Eliminar el cobro mal cargado (con SGA_Sync.pushToPos mockeado) ---")
+        # No se puede probar el push real (block_firebase corta todo, a
+        # proposito). Lo que SI hay que confirmar es que el click dispara el
+        # push hacia el POS del local -- sin esto, el borrado quedaba
+        # 'pending' en la base local del admin para siempre (bug real
+        # reportado por el usuario: la correccion nunca le llegaba a la
+        # cajera, aunque tocara "Push POS" a mano, porque 'eliminaciones' e
+        # 'ingresos_caja' faltaban en ADMIN_PUSH_TABLES).
+        page.evaluate("""
+          () => {
+            window.__pushToPosCalled = false;
+            window.SGA_Sync.isInitialized = () => true;
+            window.SGA_Sync.pushToPos = () => {
+              window.__pushToPosCalled = true;
+              return Promise.resolve(0);
+            };
+          }
+        """)
         btn.click()
         page.wait_for_timeout(400)
+
+        push_called = page.evaluate("() => window.__pushToPosCalled")
+        assert push_called, (
+            "BUG: eliminar un cobro no dispara SGA_Sync.pushToPos() -- la correccion "
+            "queda guardada solo localmente y nunca le llega al POS del local"
+        )
         page.screenshot(path=os.path.join(SCREENSHOT_DIR, "clientes_eliminar_cobro_despues.png"), full_page=True)
 
         saldo_despues = page.locator("#app").inner_text()
