@@ -7,6 +7,31 @@ const OperacionesStock = (() => {
   const fmt$ = n => window.SGA_Utils.formatCurrency(n);
   const db   = () => window.SGA_DB;
 
+  // Estado de pago REAL de una compra: compras.condicion_pago es un campo fijo
+  // que se carga una sola vez al confirmar la compra (siempre 'pendiente' hoy
+  // — compras_v2.js no tiene toggle para marcarla pagada en el momento, ver
+  // tests/e2e/README.md) y nunca se actualiza después, así que no sirve para
+  // saber si la deuda ya se saldó. Lo real está en imputaciones_pagos — el
+  // mismo cálculo que ya usa Cuentas Corrientes (_getPagadoDeCompra en
+  // cuenta_corriente_proveedores.js) para decidir qué compras siguen abiertas.
+  function estadoPagoCompra(total, pagado) {
+    total  = parseFloat(total)  || 0;
+    pagado = parseFloat(pagado) || 0;
+    const saldo = total - pagado;
+    if (saldo <= 0.01) return { texto: '✓ Pagada', color: '#27ae60' };
+    if (pagado > 0.01) return { texto: `◐ Parcial — debe ${fmt$(saldo)}`, color: '#e67e22' };
+    return { texto: '⏳ Pendiente', color: '#2980b9' };
+  }
+
+  const ESTADO_LABEL = {
+    borrador: 'Borrador', confirmada: 'Confirmada',
+    pendiente_pago: 'Pend. pago', anulada: 'Anulada',
+  };
+  const ESTADO_COLOR = {
+    borrador: '#e67e22', confirmada: '#27ae60',
+    pendiente_pago: '#2980b9', anulada: '#c0392b',
+  };
+
   // ── HISTORIAL DE COMPRAS ───────────────────────────────────────────────────
 
   function getHistorialCompras({ fechaDesde, fechaHasta } = {}) {
@@ -20,7 +45,9 @@ const OperacionesStock = (() => {
              c.sesion_caja_id,
              p.razon_social AS proveedor_nombre,
              (SELECT COUNT(*) FROM compra_items ci WHERE ci.compra_id = c.id) AS num_items,
-             (SELECT COUNT(*) FROM remitos r WHERE r.compra_id = c.id) AS de_remito
+             (SELECT COUNT(*) FROM remitos r WHERE r.compra_id = c.id) AS de_remito,
+             (SELECT COALESCE(SUM(monto_imputado), 0) FROM imputaciones_pagos
+              WHERE compra_id = c.id) AS pagado
       FROM compras c
       LEFT JOIN proveedores p ON p.id = c.proveedor_id
       WHERE ${where.join(' AND ')}
@@ -51,8 +78,12 @@ const OperacionesStock = (() => {
 
   function getDetalleCompra(compraId) {
     const compra = db().query(`
-      SELECT c.*, p.razon_social AS proveedor_nombre
-      FROM compras c LEFT JOIN proveedores p ON p.id = c.proveedor_id
+      SELECT c.*, p.razon_social AS proveedor_nombre, u.nombre AS usuario_nombre,
+             (SELECT COALESCE(SUM(monto_imputado), 0) FROM imputaciones_pagos
+              WHERE compra_id = c.id) AS pagado
+      FROM compras c
+      LEFT JOIN proveedores p ON p.id = c.proveedor_id
+      LEFT JOIN usuarios u ON u.id = c.usuario_id
       WHERE c.id = ?
     `, [compraId])[0];
     if (!compra) return null;
@@ -84,15 +115,6 @@ const OperacionesStock = (() => {
     const puedeEditarPos   = !window.ADMIN_MODE && !!window.SGA_Permisos?.can('can_editar_compras_caja');
     const sesionActualId   = puedeEditarPos ? getSesionActivaIdDeHoy() : null;
 
-    const ESTADO_LABEL = {
-      borrador: 'Borrador', confirmada: 'Confirmada',
-      pendiente_pago: 'Pend. pago', anulada: 'Anulada',
-    };
-    const ESTADO_COLOR = {
-      borrador: '#e67e22', confirmada: '#27ae60',
-      pendiente_pago: '#2980b9', anulada: '#c0392b',
-    };
-
     body.innerHTML = `
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead>
@@ -115,9 +137,7 @@ const OperacionesStock = (() => {
             const factRef = c.factura_pv && c.numero_factura
               ? `${esc(c.factura_pv)}-${esc(c.numero_factura)}`
               : esc(c.numero_factura || '—');
-            const pago  = c.condicion_pago === 'efectivo'  ? '✓ Efectivo'
-                        : c.condicion_pago === 'pendiente' ? '⏳ Pendiente'
-                        : esc(c.condicion_pago || '—');
+            const pago  = estadoPagoCompra(c.total, c.pagado);
             const fecha = c.fecha ? c.fecha.slice(0, 10) : '—';
             return `<tr style="border-bottom:1px solid #eef0f3">
               <td style="padding:8px 10px;color:#445566">${esc(fecha)}</td>
@@ -128,7 +148,7 @@ const OperacionesStock = (() => {
               <td style="padding:8px 10px;text-align:center">
                 <span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;background:${color}22;color:${color}">${esc(label)}</span>
               </td>
-              <td style="padding:8px 10px;text-align:center;font-size:12px;color:#607080">${pago}</td>
+              <td style="padding:8px 10px;text-align:center;font-size:12px;font-weight:600;color:${pago.color}">${esc(pago.texto)}</td>
               <td style="padding:8px 10px;text-align:center;white-space:nowrap">
                 <button style="padding:3px 12px;background:#2e7d32;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px" data-ver-compra="${esc(c.id)}">Ver</button>
                 ${estado !== 'anulada' && !c.de_remito && (puedeEditarAdmin || (puedeEditarPos && c.sesion_caja_id && c.sesion_caja_id === sesionActualId)) ? `
@@ -178,14 +198,46 @@ const OperacionesStock = (() => {
     // el sistema sugirió y se aceptaron sin chequear al confirmar la compra.
     const isAdmin = !!window.ADMIN_MODE;
 
+    const estadoCompra = compra.estado || 'confirmada';
+    const estadoColor  = ESTADO_COLOR[estadoCompra] || '#445566';
+    const estadoLabel  = ESTADO_LABEL[estadoCompra]  || estadoCompra;
+    const pagoInfo = estadoPagoCompra(compra.total, compra.pagado);
+
+    // Desglose impositivo: solo se pidió para ADMIN POS y solo tiene sentido
+    // mostrarlo si algo se cargó (compras a proveedores sin factura A, o
+    // cargadas antes de que existiera este desglose, quedan todo en cero).
+    const desglose = [];
+    if (parseFloat(compra.iva_105)        > 0) desglose.push(`IVA 10,5%: ${fmt$(compra.iva_105)}`);
+    if (parseFloat(compra.iva_21)         > 0) desglose.push(`IVA 21%: ${fmt$(compra.iva_21)}`);
+    if (parseFloat(compra.imp_interno)    > 0) desglose.push(`Imp. interno: ${fmt$(compra.imp_interno)}`);
+    if (parseFloat(compra.percepcion_iva) > 0) desglose.push(`Perc. IVA: ${fmt$(compra.percepcion_iva)}`);
+    if (parseFloat(compra.percepcion_iibb)> 0) desglose.push(`Perc. IIBB: ${fmt$(compra.percepcion_iibb)}`);
+    // total_factura es lo que dice la factura impresa; total es lo que quedó
+    // cargado (puede diferir por redondeo o porque se corrigió a mano) — vale
+    // la pena mostrar los dos si no coinciden, para poder detectar el desvío
+    // sin tener que ir a Editar.
+    const totalFactura = parseFloat(compra.total_factura) || 0;
+    const totalCargado = parseFloat(compra.total) || 0;
+    const difiereTotal  = totalFactura > 0 && Math.abs(totalFactura - totalCargado) > 0.5;
+
     body.innerHTML = `
-      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #e0e6ee">
-        <div style="font-weight:700;font-size:15px">${esc(compra.proveedor_nombre || '—')}</div>
-        <div style="color:#607080;font-size:13px">${esc(fecha)}</div>
-        ${factRef !== '—' ? `<div style="color:#607080;font-size:13px">Fact. ${factRef}</div>` : ''}
-        <div style="font-size:13px;color:${compra.condicion_pago === 'efectivo' ? '#27ae60' : '#2980b9'}">
-          ${compra.condicion_pago === 'efectivo' ? '✓ Efectivo' : '⏳ Pendiente'}
+      <div style="margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #e0e6ee">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+          <div style="font-weight:700;font-size:15px">${esc(compra.proveedor_nombre || '—')}</div>
+          <div style="color:#607080;font-size:13px">${esc(fecha)}</div>
+          ${factRef !== '—' ? `<div style="color:#607080;font-size:13px">Fact. ${factRef}</div>` : ''}
+          <span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;background:${estadoColor}22;color:${estadoColor}">${esc(estadoLabel)}</span>
+          <span style="font-size:13px;font-weight:600;color:${pagoInfo.color}">${esc(pagoInfo.texto)}</span>
         </div>
+        ${isAdmin ? `
+          <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:#607080;margin-top:10px">
+            <div>Total: <strong style="color:#1a2e4a">${fmt$(totalCargado)}</strong></div>
+            ${difiereTotal ? `<div>Total factura: <strong style="color:#c0392b">${fmt$(totalFactura)}</strong></div>` : ''}
+            ${desglose.length ? `<div>${esc(desglose.join(' · '))}</div>` : ''}
+            ${compra.condicion_compra ? `<div>Condición: ${esc(compra.condicion_compra)}</div>` : ''}
+            <div>Cargada por: <strong>${esc(compra.usuario_nombre || '—')}</strong></div>
+          </div>
+        ` : ''}
       </div>
       <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px">
