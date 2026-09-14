@@ -1030,7 +1030,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
                 <td>${esc(s.nombre_apertura || '')}</td>
                 <td style="white-space:nowrap">
                   <button class="btn btn-xs btn-outline btn-resumen-sesion" data-id="${esc(s.id)}">Resumen</button>
-                  <button class="btn btn-xs btn-outline btn-detalle-sesion" data-id="${esc(s.id)}">Detalle</button>
+                  ${window.ADMIN_MODE ? `<button class="btn btn-xs btn-outline btn-detalle-sesion" data-id="${esc(s.id)}">Detalle</button>` : ''}
                 </td>
               </tr>
             `;
@@ -2107,8 +2107,13 @@ case 'egresos':     renderEgresosIngresos(content);   break;
   // exactamente el mismo shell de tabs que la caja activa (Resumen, Egresos e
   // Ingresos, Cobranzas por medio) apuntando a la sesión cerrada en vez de a
   // `state.sesion` — mismo nivel de detalle, solo lectura.
+  //
+  // Exclusivo de admin-pos: en el POS del local el botón "Detalle" ni se
+  // renderiza (ver renderHistorial), esta guarda es solo cinturón y
+  // tiradores por si algo dispara la función de otra forma.
 
   function abrirSesionHistorica(sesionId) {
+    if (!window.ADMIN_MODE) return;
     const rows = window.SGA_DB.query(
       `SELECT s.*, u1.nombre AS nombre_apertura, u2.nombre AS nombre_cierre
        FROM sesiones_caja s
