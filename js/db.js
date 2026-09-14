@@ -1212,6 +1212,41 @@
       if (migrados > 0) console.log(`🔐 ${migrados} usuario(s) migrados a los permisos granulares nuevos`);
     } catch(e) { console.warn('permisos_json migration:', e.message); }
 
+    // Migración: un producto no debería tener más de un código de barras
+    // marcado es_principal=1 — nada en el schema lo impedía, y en el JOIN de
+    // Órdenes de Compra (y varios otros módulos que hacen el mismo JOIN) un
+    // producto así aparecía DOS VECES: misma fila de orden, mismo id,
+    // duplicada. Ademas de verse mal, eso trababa la navegación con flechas
+    // (mismo id repetido en la lista → el "siguiente" nunca avanzaba del
+    // par duplicado). Se conserva el más antiguo (menor rowid) y se le saca
+    // la marca a los demás — no se borran, siguen sirviendo como código
+    // alternativo.
+    try {
+      const dupStmt = database.prepare(`
+        SELECT producto_id FROM codigos_barras
+        WHERE es_principal = 1
+        GROUP BY producto_id
+        HAVING COUNT(*) > 1
+      `);
+      const dupProductos = [];
+      while (dupStmt.step()) dupProductos.push(dupStmt.getAsObject().producto_id);
+      dupStmt.free();
+
+      for (const productoId of dupProductos) {
+        database.run(`
+          UPDATE codigos_barras SET es_principal = 0
+          WHERE producto_id = ? AND es_principal = 1
+            AND rowid NOT IN (
+              SELECT MIN(rowid) FROM codigos_barras
+              WHERE producto_id = ? AND es_principal = 1
+            )
+        `, [productoId, productoId]);
+      }
+      if (dupProductos.length > 0) {
+        console.log(`🏷️ ${dupProductos.length} producto(s) tenían más de un código de barras "principal" — corregido`);
+      }
+    } catch(e) { console.warn('codigos_barras es_principal dedup migration:', e.message); }
+
     // ── Consumo Interno — tabla dedicada para mayor trazabilidad ──────────────
     try {
       database.run(`

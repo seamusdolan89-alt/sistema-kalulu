@@ -242,10 +242,10 @@ const Ordenes = (() => {
              pr.unidad_medida,
              pr.pedido_unidad AS prod_pedido_unidad,
              pr.pedido_unidades_por_paquete AS prod_pedido_upp,
-             cb.codigo AS codigo_barras
+             (SELECT codigo FROM codigos_barras
+              WHERE producto_id = oi.producto_id AND es_principal = 1 LIMIT 1) AS codigo_barras
       FROM orden_compra_items oi
       LEFT JOIN productos pr ON pr.id = oi.producto_id
-      LEFT JOIN codigos_barras cb ON cb.producto_id = oi.producto_id AND cb.es_principal = 1
       WHERE oi.orden_id = ?
       ORDER BY oi.rowid
     `, [ordenId]);
@@ -1709,9 +1709,15 @@ const Ordenes = (() => {
       const tag     = document.activeElement?.tagName?.toLowerCase();
       const inInput = tag === 'input' || tag === 'select' || tag === 'textarea';
 
+      // dedup defensivo: si por lo que sea el mismo item vuelve a aparecer dos
+      // veces en la tabla (ver el fix de fan-out en getOrden), un id repetido
+      // en este array hacia que indexOf() devolviera siempre la primera
+      // ocurrencia y la navegacion quedara trabada en ese par para siempre.
       const getItemIds = () =>
-        Array.from(ge('ord-items-tbody')?.querySelectorAll('tr[data-item-id]') || [])
-          .map(r => r.dataset.itemId);
+        [...new Set(
+          Array.from(ge('ord-items-tbody')?.querySelectorAll('tr[data-item-id]') || [])
+            .map(r => r.dataset.itemId)
+        )];
 
       // ArrowDown / ArrowUp — navegar filas (solo si no estamos dentro de un input)
       if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !inInput) {
@@ -1886,9 +1892,12 @@ const Ordenes = (() => {
       SELECT p.id, p.nombre, COALESCE(st.cantidad, 0) AS stock
       FROM productos p
       LEFT JOIN stock st ON st.producto_id = p.id AND st.sucursal_id = ?
-      LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
       WHERE p.activo = 1
-        AND (p.nombre LIKE ? OR cb.codigo IN (${Buscador.variantesCodigo(q).map(() => '?').join(',') || "''"}))
+        AND (p.nombre LIKE ? OR EXISTS (
+          SELECT 1 FROM codigos_barras
+          WHERE producto_id = p.id AND es_principal = 1
+            AND codigo IN (${Buscador.variantesCodigo(q).map(() => '?').join(',') || "''"})
+        ))
       LIMIT 20
     `, [ui.user.sucursal_id, `%${q}%`, ...Buscador.variantesCodigo(q)]);
 

@@ -2524,10 +2524,26 @@ const EditorProducto = (() => {
       return;
     }
 
+    // es_principal solo si de verdad no hay otro ya marcado. state.barcodes
+    // se carga al abrir el editor y puede haber quedado desactualizado (ej.
+    // llegó un código nuevo por sync mientras el editor estaba abierto) —
+    // por eso se reconfirma contra la base antes de marcar este como
+    // principal, no alcanza con mirar el array local. Sin esto, un producto
+    // podía terminar con dos códigos "principales" a la vez, y el JOIN que
+    // los busca (Órdenes de Compra y otros módulos) duplicaba la fila entera.
+    let esPrincipal = state.barcodes.length === 0 ? 1 : 0;
+    if (esPrincipal && state.productoId) {
+      const yaTienePrincipal = window.SGA_DB.query(
+        'SELECT 1 FROM codigos_barras WHERE producto_id = ? AND es_principal = 1 LIMIT 1',
+        [state.productoId]
+      ).length > 0;
+      if (yaTienePrincipal) esPrincipal = 0;
+    }
+
     state.barcodes.push({
       id: 'new-' + Date.now(),
       codigo,
-      es_principal: state.barcodes.length === 0 ? 1 : 0,
+      es_principal: esPrincipal,
       isNew: true,
     });
     if (input) input.value = '';
