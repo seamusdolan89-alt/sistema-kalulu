@@ -1504,6 +1504,8 @@
     clientes:       [],
     proveedores:    [],
     gastos:         [],
+    cuenta_corriente: [],
+    ingresos_caja:    [],
   };
 
   /**
