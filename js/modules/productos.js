@@ -417,6 +417,13 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
       const pausaBadge = estaPausado(producto)
         ? `<span class="btn-ver-pausa" data-pausa="${producto.id}" title="Reposición pausada — clic para ver o reanudar" style="display:inline-block;background:#ef6c00;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;cursor:pointer">PAUSADO</span>`
         : '';
+      // Repetido en la columna Estado (pedido del usuario): "pausado" es un
+      // estado del producto igual que Activo/Inactivo, y ahí es donde se lo
+      // busca con la mirada al revisar el listado — el badge junto al nombre
+      // (arriba) sigue estando para que no haga falta filtrar para notarlo.
+      const pausaEstadoLine = estaPausado(producto)
+        ? `<br><span class="btn-ver-pausa" data-pausa="${producto.id}" title="Reposición pausada — clic para ver o reanudar" style="color:#ef6c00;font-size:11px;font-weight:700;cursor:pointer">⏸ Pausado</span>`
+        : '';
 
       // Costo y margen revelan el margen de ganancia — solo se muestran con
       // el permiso can_ver_costos (ver auth.js). El precio de venta sigue
@@ -444,7 +451,7 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
           <td>${stock}</td>
           <td>${producto.stock_minimo || 0}</td>
           <td style="${madreStyle}">${madreDisplay}</td>
-          <td>${estadoLabel}</td>
+          <td>${estadoLabel}${pausaEstadoLine}</td>
           <td>
             ${accionesCell}
           </td>
