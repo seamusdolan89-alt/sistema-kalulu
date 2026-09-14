@@ -2130,16 +2130,10 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     if (!root) return;
     const s = state.viewSesion;
 
-    let billetes = {};
-    try { billetes = JSON.parse(s.detalle_billetes || '{}'); } catch (e) { console.warn('parse detalle_billetes:', e); }
-    const billetesHtml = Object.entries(billetes)
-      .filter(([, n]) => parseFloat(n) > 0)
-      .map(([d, n]) => `<div class="caja-stat-row"><span>${fmtPeso(d)} × ${n}</span><span>${fmtPeso(parseFloat(d) * parseFloat(n))}</span></div>`)
-      .join('') || '<p style="color:#999;font-size:13px">Sin detalle de billetes</p>';
-
-    const dif = parseFloat(s.diferencia) || 0;
-    const difClass = dif > 0 ? 'text-success' : dif < 0 ? 'text-danger' : '';
-
+    // El cierre del turno (saldos, diferencia, billetes) ya lo muestra
+    // "Resumen" en Historial — repetirlo acá arriba de las tabs era
+    // redundante, tapaba pantalla antes de llegar a lo que se viene a
+    // buscar en "Detalle": los movimientos.
     const tabsHtml = `
       <button class="caja-tab ${state.currentTab === 'resumen' ? 'active' : ''}" data-tab="resumen">Resumen</button>
       <button class="caja-tab ${state.currentTab === 'egresos' ? 'active' : ''}" data-tab="egresos">Egresos e Ingresos</button>
@@ -2158,16 +2152,6 @@ case 'egresos':     renderEgresosIngresos(content);   break;
         <div class="caja-toolbar-right">
           <button id="btn-volver-historial" class="btn btn-outline">← Volver al historial</button>
         </div>
-      </div>
-
-      <div class="caja-medios-card" style="margin:16px 20px 0">
-        <h4>Cierre de este turno</h4>
-        <div class="caja-stat-row"><span>Saldo inicial</span><span>${fmtPeso(s.saldo_inicial)}</span></div>
-        <div class="caja-stat-row"><span>Saldo esperado</span><span>${fmtPeso(s.saldo_final_esperado)}</span></div>
-        <div class="caja-stat-row"><span>Saldo real (contado)</span><span>${fmtPeso(s.saldo_final_real)}</span></div>
-        <div class="caja-stat-row highlight-row"><span>Diferencia</span><span class="${difClass}">${dif >= 0 ? '+' : ''}${fmtPeso(dif)}</span></div>
-        <h4 style="margin-top:16px">Detalle de billetes contados</h4>
-        ${billetesHtml}
       </div>
 
       <div class="caja-tabs">${tabsHtml}</div>
