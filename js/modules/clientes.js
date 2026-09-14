@@ -345,6 +345,49 @@ const SGA_Clientes = (() => {
     return { success: true };
   }
 
+  /**
+   * Deshace un cobro cargado mal (monto equivocado): borra el movimiento de
+   * cuenta_corriente y, si existía, su espejo en ingresos_caja — sin esto la
+   * plata mal cargada seguía sumando al arqueo de esa caja aunque el saldo
+   * del cliente ya se hubiera corregido a mano.
+   *
+   * Solo admite tipo='pago' (lo que crea registrarPago). Una 'venta_fiada' es
+   * el reflejo de una venta real — se corrige anulando la venta, no borrando
+   * la cuenta corriente sola, o quedarían desincronizadas. Un 'ajuste' es una
+   * corrección manual aparte, no un cobro mal cargado.
+   *
+   * El espejo en ingresos_caja no tiene FK directa a este registro (nunca se
+   * guardó — hueco real del diseño original), así que se lo busca por
+   * cliente_id + fecha + monto: registrarPago sella las dos filas con el
+   * mismo timestamp exacto, así que ese trío alcanza en la práctica.
+   */
+  function eliminarPago(cuentaCorrienteId) {
+    const mov = db().query(
+      `SELECT * FROM cuenta_corriente WHERE id = ?`, [cuentaCorrienteId]
+    )[0];
+    if (!mov) throw new Error('Movimiento no encontrado');
+    if (mov.tipo !== 'pago') {
+      throw new Error('Solo se puede eliminar un cobro (tipo "pago") desde acá.');
+    }
+
+    const ingreso = db().query(
+      `SELECT id FROM ingresos_caja
+       WHERE cliente_id = ? AND tipo = 'cobro_cliente' AND fecha = ? AND monto = ?
+       LIMIT 1`,
+      [mov.cliente_id, mov.fecha, Math.abs(mov.monto)]
+    )[0];
+
+    db().run(`DELETE FROM cuenta_corriente WHERE id = ?`, [cuentaCorrienteId]);
+    db().registrarEliminacion('cuenta_corriente', cuentaCorrienteId);
+
+    if (ingreso) {
+      db().run(`DELETE FROM ingresos_caja WHERE id = ?`, [ingreso.id]);
+      db().registrarEliminacion('ingresos_caja', ingreso.id);
+    }
+
+    return { success: true, ingresoCajaEliminado: !!ingreso };
+  }
+
   function getMovimientos(clienteId, { limit = 50, tipo = '', desde = '', hasta = '' } = {}) {
     const conds = [`cc.cliente_id = ?`];
     const params = [clienteId];
@@ -381,7 +424,7 @@ const SGA_Clientes = (() => {
   return {
     getAll, getById, search, crear, actualizar,
     getTopeDisponible, getSaldoActual, getSaldoLote,
-    registrarPago, sesionAbierta, getMovimientos, getVentas,
+    registrarPago, eliminarPago, sesionAbierta, getMovimientos, getVentas,
   };
 })();
 
@@ -591,6 +634,12 @@ const ClientesUI = (() => {
     if (empty) empty.style.display = 'none';
     ge('cc-mov-table').style.display = '';
 
+    // Eliminar un cobro mal cargado (monto equivocado) es solo de admin-pos —
+    // corrige a la vez el saldo del cliente y la caja que lo recibió, y no
+    // hay forma de deshacerlo después. Solo tiene sentido en 'pago': una
+    // venta_fiada se corrige anulando la venta, un ajuste es otra cosa.
+    const puedeEliminarPago = !!window.ADMIN_MODE;
+
     let saldoAcum = 0;
     tbody.innerHTML = movs.map(m => {
       saldoAcum += m.monto;
@@ -600,6 +649,9 @@ const ClientesUI = (() => {
         ? `<span class="mov-link" data-venta="${m.venta_id}">#${m.venta_id.slice(-6)}</span>`
         : '';
       const desc = esc(m.descripcion || '') + (ventaLink ? ` ${ventaLink}` : '');
+      const accion = puedeEliminarPago && m.tipo === 'pago'
+        ? `<button class="btn-eliminar-mov" data-eliminar-mov="${esc(m.id)}" title="Eliminar este cobro (corrige el saldo del cliente y la caja)">🗑️</button>`
+        : '';
       return `<tr>
         <td>${fmtDate(m.fecha)}</td>
         <td><span class="tipo-b ${m.tipo}">${m.tipo.replace('_',' ')}</span></td>
@@ -607,8 +659,19 @@ const ClientesUI = (() => {
         <td style="text-align:right; color:#c62828">${debe}</td>
         <td style="text-align:right; color:#2e7d32">${haber}</td>
         <td style="text-align:right; font-weight:600; color:${saldoAcum > 0 ? '#c62828' : saldoAcum < 0 ? '#2e7d32' : '#888'}">${fmt(Math.abs(saldoAcum))}</td>
+        ${puedeEliminarPago ? `<td style="text-align:center">${accion}</td>` : ''}
       </tr>`;
     }).join('');
+
+    const theadRow = document.querySelector('#cc-mov-table thead tr');
+    if (theadRow) {
+      const yaTieneCol = theadRow.children.length === 7;
+      if (puedeEliminarPago && !yaTieneCol) {
+        theadRow.insertAdjacentHTML('beforeend', '<th></th>');
+      } else if (!puedeEliminarPago && yaTieneCol) {
+        theadRow.removeChild(theadRow.lastElementChild);
+      }
+    }
   }
 
   function renderComprasSection(c) {
@@ -1613,6 +1676,22 @@ const ClientesUI = (() => {
         desde: ge('cc-filter-desde').value,
         hasta: ge('cc-filter-hasta').value,
       });
+    });
+
+    // CC — Eliminar un cobro mal cargado (admin-pos, ver renderMovimientos).
+    // Delegado sobre el tbody (no se re-crea entre renders, solo su innerHTML)
+    // para no tener que reengancharlo cada vez que se filtra o se recarga.
+    ge('cc-mov-tbody')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-eliminar-mov]');
+      if (!btn) return;
+      const id = btn.dataset.eliminarMov;
+      if (!confirm('¿Eliminar este cobro? Se corrige el saldo del cliente y, si sumó efectivo a alguna caja, también se descuenta de ahí. No se puede deshacer.')) return;
+      try {
+        SGA_Clientes.eliminarPago(id);
+        loadFichaData();
+      } catch (err) {
+        alert(err.message);
+      }
     });
 
     ge('btn-compras-filter')?.addEventListener('click', () => {

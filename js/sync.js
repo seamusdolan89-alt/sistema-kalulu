@@ -731,6 +731,7 @@
   }
 
   function applyIngresoCaja(data) {
+    if (window.SGA_DB.fueEliminado('ingresos_caja', data.id)) return;
     if (tienePendienteLocal('ingresos_caja', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
     window.SGA_DB.run(`
@@ -748,6 +749,7 @@
   }
 
   function applyCuentaCorriente(data) {
+    if (window.SGA_DB.fueEliminado('cuenta_corriente', data.id)) return;
     if (tienePendienteLocal('cuenta_corriente', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
     window.SGA_DB.run(`
