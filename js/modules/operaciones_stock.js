@@ -499,7 +499,7 @@ const OperacionesStock = (() => {
           break;
         case 'retomar':
           sessionStorage.setItem('compras_v2_retomar', '1');
-          window.location.hash = '#compras';
+          window.location.hash = '#compras_v2';
           break;
         case 'descartar-pendiente':
           if (!confirm('¿Descartás el ajuste de precios pendiente? Esta acción no se puede deshacer.')) return;
