@@ -164,13 +164,13 @@ const Inicio = (() => {
         </a>`);
     }
 
-    // Cuarto botón: todavía sin definir. Se deja preparado visualmente (grilla
-    // de a 4) para cuando el usuario decida qué va acá.
-    botones.push(`
-      <div class="inicio-btn inicio-btn--placeholder">
-        <span class="inicio-btn-icon">➕</span>
-        Próximamente
-      </div>`);
+    if (puedeAcceder('can_ordenes')) {
+      botones.push(`
+        <a class="inicio-btn inicio-btn--cuaternario" href="#ordenes">
+          <span class="inicio-btn-icon">📋</span>
+          Órdenes de Compra
+        </a>`);
+    }
 
     return botones.join('');
   }
