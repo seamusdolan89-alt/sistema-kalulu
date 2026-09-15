@@ -22,7 +22,7 @@ Cubre:
   "Nueva venta" -> entra de una al flujo real de venta (carrito si hay caja
   abierta, o el modal de Apertura de Caja si no) en vez de dejar a la
   cajera en el dashboard interno de ventas realizadas de pos.js.
-- El 4to botón (placeholder, todavía sin definir) está presente pero inerte.
+- El 4to botón, "Órdenes de Compra", navega a #ordenes.
 
 Correr (server ya levantado en :8765, ver README.md):
 
@@ -89,7 +89,7 @@ def run():
         print("OK - son texto plano, no links")
 
         print("--- Botones grandes ---")
-        for label in ["Nueva venta", "Pago a proveedor", "Ingresar Compra", "Próximamente"]:
+        for label in ["Nueva venta", "Pago a proveedor", "Ingresar Compra", "Órdenes de Compra"]:
             assert page.get_by_text(label).count() > 0, f"Falta el boton '{label}'"
         print("OK - los 4 espacios de la grilla estan presentes")
 
@@ -116,7 +116,18 @@ def run():
         assert "#compras_v2" in page.url, f"Deberia estar en #compras_v2, quedo en: {page.url}"
         print(f"OK - {page.url}")
 
+        print("--- volver a Inicio, Órdenes de Compra -> #ordenes ---")
+        page.evaluate("window.location.hash = 'inicio'")
+        page.wait_for_timeout(400)
+        page.get_by_text("Órdenes de Compra").click()
+        page.wait_for_timeout(500)
+        assert "#ordenes" in page.url, f"Deberia estar en #ordenes, quedo en: {page.url}"
+        print(f"OK - {page.url}")
+
         print("--- volver a Inicio, Pago a proveedor -> modal de pago ---")
+        # Ultimo antes de cerrar esta pagina: el modal que abre queda tapando
+        # la pantalla y no tiene boton de cerrar en este flujo, asi que
+        # cualquier chequeo posterior sobre "page" chocaria contra el overlay.
         page.evaluate("window.location.hash = 'inicio'")
         page.wait_for_timeout(400)
         page.get_by_text("Pago a proveedor").click()
