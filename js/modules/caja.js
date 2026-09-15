@@ -1443,6 +1443,21 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       </div>
     `;
 
+    // Autoguardado: sin esto, lo tipeado vivía solo en state.recuento (memoria
+    // del módulo) — se perdía al navegar a otra pantalla (el router hace
+    // destroy() y monta una instancia nueva, con state limpio) o al cerrar
+    // sesión, y solo sobrevivía si te acordabas de tocar "Guardar recuento".
+    // Debounced para no pegarle una escritura a OPFS por cada tecla.
+    const autoguardarRecuento = window.SGA_Utils.debounce(() => {
+      try {
+        window.SGA_DB.run(
+          `UPDATE sesiones_caja SET detalle_billetes = ?, updated_at = ? WHERE id = ?`,
+          [JSON.stringify({ billetes: state.recuento.billetes }),
+           window.SGA_Utils.formatISODate(new Date()), state.sesion.id]
+        );
+      } catch (e) { /* se reintenta solo con el proximo tecleo */ }
+    }, 400);
+
     el.querySelectorAll('.recuento-input').forEach(inp => {
       inp.addEventListener('focus', () => inp.select());
       inp.addEventListener('input', () => {
@@ -1462,6 +1477,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
           difEl.textContent = (dif >= 0 ? '+' : '') + fmtPeso(dif);
           difEl.className = dif > 0.005 ? 'text-success' : dif < -0.005 ? 'text-danger' : '';
         }
+        autoguardarRecuento();
       });
     });
 
