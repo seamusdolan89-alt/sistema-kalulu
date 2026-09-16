@@ -67,12 +67,46 @@ para no terminar con dos lugares donde se vende y que uno quede atrás del otro.
 
 ### Admin-POS responsive — para usar desde el celular
 
-**Estado: sin implementar. Relevado el 2026-09-16 para que la sesión que lo
-encare arranque informada, sin tener que redescubrir esto.**
+**Estado al 16/9/2026: navegación, Productos e Inicio ya hechos (en `dev`,
+falta pasar a `main`). Quedan pendientes Órdenes, Proveedores/cuenta
+corriente e Informes — alcanzables desde la barra inferior, pero esas
+pantallas en sí todavía no tienen tratamiento responsive (tablas fijas,
+sin scroll horizontal).**
 
-El pedido: poder usar Admin-POS desde el teléfono. Hoy no se puede — no es que
-se vea mal, es que **la navegación desaparece por completo** en una pantalla
-angosta (ver primer punto).
+**Ya hecho:**
+- **Navegación**: barra inferior fija para Admin-POS en `<768px` (Inicio /
+  Productos / Órdenes / Proveedores / Informes), gateada con
+  `body.admin-pos` — ver nota nueva en CLAUDE.md, sección "Las tres
+  superficies". El POS del local sigue con hamburguesa + drawer (mismo CSS
+  compartido, sin gate — el usuario pidió explícitamente no aislar el CSS
+  más de lo necesario).
+- **Productos**: lista pasa a cards en mobile (Nombre/Stock/Costo/Precio,
+  badge "Bajo mín."), toolbar sin Descargar Plantilla/Importar
+  Excel/Nuevo Producto (`views/productos.html`, `js/modules/productos.js`).
+  Tocar la card abre el editor (ya funcionaba así, sin cambios).
+- **Inicio**: dashboard nuevo para Admin-POS (`js/modules/inicio.js`,
+  branch por `window.ADMIN_MODE`) — saldo por caja/medio, ventas de hoy,
+  ticket promedio. Sin "Nueva venta" entre los accesos rápidos (no aplica
+  remoto). Admin-POS sigue arrancando en `#productos` en escritorio —
+  Inicio es alcanzable (agregado a `ADMIN_POS_MODULES`), no el arranque por
+  defecto. `test_inicio_dashboard.py` actualizado.
+- De yapa: se encontró y arregló un bug real de login en dispositivo nuevo
+  — `views/login.html` siempre abría `sga.db` (la del POS) sin importar
+  `returnTo`, así que nadie podía entrar a Admin-POS con su contraseña real
+  desde un dispositivo que nunca había entrado antes (solo con el admin por
+  defecto). Ver la nota en CLAUDE.md, sección Firebase.
+
+**Pendiente:** Órdenes de Compra, Proveedores (cuenta corriente + pagos) e
+Informes (recortado a "Ventas por Vendedor") — ver tabla de alcance más
+abajo. La navegación ya los apunta bien (`#ordenes`,
+`#cuenta_corriente_proveedores`, `#informes`), pero esas pantallas siguen
+con las tablas de escritorio sin adaptar.
+
+---
+
+El pedido original: poder usar Admin-POS desde el teléfono. Al empezar, no
+se podía — no era que se viera mal, era que **la navegación desaparecía por
+completo** en una pantalla angosta (ver primer punto, ya resuelto arriba).
 
 **Lo que ya está, verificado:**
 
@@ -81,24 +115,20 @@ angosta (ver primer punto).
 
 **Lo que hace que esto sea más que "agregar un par de media queries":**
 
-1. **El sidebar desaparece sin reemplazo por debajo de 768px.** Ya existe un
-   único `@media (max-width: 768px)` en `css/layout.css` (~línea 243) que hace
-   `aside.sidebar { display: none; }` — pero no agrega ninguna navegación en su
-   lugar (nada de hamburguesa, drawer, bottom nav). Confirmado por grep: no
-   existe ningún "hamburger"/"toggle"/"mobile-nav" en toda la base. El sidebar
-   es la ÚNICA navegación entre módulos que existe hoy — sin él, entrar desde
-   un celular deja a cualquiera de las dos superficies sin forma de moverse
-   entre pantallas. Esto es lo primero que hay que resolver, antes que
-   cualquier otra cosa.
-2. **El CSS es compartido entre POS y Admin-POS** (ver CLAUDE.md, sección "Las
-   tres superficies") — los mismos 4 archivos, sin ninguna marca en el DOM que
-   distinga una superficie de la otra para CSS (JS sí tiene
-   `window.ADMIN_MODE`; CSS no tiene equivalente). Cualquier regla nueva en
-   `css/layout.css`/`components.css` pega en POS también. Si se quiere
-   responsive exclusivo de Admin-POS sin arriesgar el layout del POS real (una
-   compu fija del local, sin necesidad obvia de ser mobile), conviene agregar
-   algo como `document.body.classList.add('admin-pos')` en
-   `admin-pos/index.html` — no existe ese gancho todavía.
+1. ~~**El sidebar desaparece sin reemplazo por debajo de 768px.**~~ **✅
+   Resuelto.** Antes había un único `@media (max-width: 768px)` en
+   `css/layout.css` que hacía `aside.sidebar { display: none; }` sin agregar
+   ninguna navegación en su lugar. Ahora: hamburguesa + drawer para el POS
+   (`.nav-toggle-btn`, `aside.sidebar.mobile-open`), barra inferior fija
+   para Admin-POS (`.admin-tabbar`, gateada con `body.admin-pos`).
+2. ~~**El CSS es compartido entre POS y Admin-POS sin marca en el DOM.**~~
+   **✅ Resuelto** (parcialmente — el gancho existe, no se usó para aislar
+   *todo*). `js/app.js` agrega `body.classList.add('admin-pos')` cuando
+   `window.ADMIN_MODE` es true. La barra inferior lo usa para no
+   imponérsela al POS; el resto de las reglas de "Admin-POS responsive"
+   siguen siendo compartidas a propósito (pedido explícito del usuario:
+   "si este trabajo hace que POS también empiece a ser responsive,
+   bienvenido").
 3. **~22 módulos propios de Admin-POS en total** (ver `ADMIN_POS_MODULES` en
    `js/app.js`) — contexto general del patrón del código, no el alcance real
    (ver más abajo: son solo 5 áreas). De 28 vistas totales, 24 traen su propio
@@ -126,38 +156,27 @@ pantallas para esto salvo que el usuario lo pida aparte.
 
 | Área | Qué necesita ver/hacer | Prioridad | Dónde vive hoy |
 |---|---|---|---|
-| **Productos** | Consultar: stock, precio, costo | Alta | `js/modules/productos.js` (la lista — NO `editor-producto.js`, ver [[project_editor_producto]] en memoria) |
-| Productos | Ver sustitutos y familia | Media | Hoy son tabs dentro de `editor-producto.js` (`renderSustitutos`/`renderFamilia`, la página completa) — decidir si se reusa esa página responsive o se arma una vista de solo-consulta más liviana |
-| **Órdenes de Compra** | Consultar OC generadas | Alta | `js/modules/ordenes.js` — lista + detalle de una orden |
-| Órdenes de Compra | Generar una OC nueva | Media | `js/modules/ordenes.js` — flujo "Generar Orden" (`generarOrdenCompra`, modal `ord-btn-generar`) |
-| **Proveedores** | Cargar pagos | Alta | `js/modules/cuenta_corriente_proveedores.js` + `pago_proveedor_wizard.js` (mismo wizard que ya usa el botón "Pago a proveedor" del dashboard Inicio del POS — ver `js/modules/inicio.js`) |
-| Proveedores | Ver cuenta corriente | Alta | `js/modules/cuenta_corriente_proveedores.js` — `getLedger`/`getLedgerAgrupado`, la vista de detalle por proveedor |
-| **Informes** | Solo "Ventas por Vendedor" — ningún otro reporte | Alta | `js/modules/informes.js`, `id: 'ventas_vendedor'` (reporte #5). El resto de los 8 reportes no hace falta en mobile |
-| **Cajas** | KPI de saldo actual por caja/medio de pago | Alta | `js/modules/caja.js`, `renderOverview()` — el grid `.caja-overview-grid` ya usa `auto-fit`/`minmax`, es de los pocos lugares que ya reflowea razonablemente bien |
+| **Productos** | Consultar: stock, precio, costo | ✅ Hecho | Cards en mobile, `views/productos.html` + `js/modules/productos.js` |
+| Productos | Ver sustitutos y familia | Media — pendiente | Hoy son tabs dentro de `editor-producto.js` (`renderSustitutos`/`renderFamilia`, la página completa) — decidir si se reusa esa página responsive o se arma una vista de solo-consulta más liviana |
+| **Órdenes de Compra** | Consultar OC generadas | Alta — pendiente | `js/modules/ordenes.js` — lista + detalle de una orden. Alcanzable desde la barra inferior (`#ordenes`), la pantalla en sí no está adaptada todavía |
+| Órdenes de Compra | Generar una OC nueva | Media — pendiente | `js/modules/ordenes.js` — flujo "Generar Orden" (`generarOrdenCompra`, modal `ord-btn-generar`) |
+| **Proveedores** | Cargar pagos | Alta — pendiente | `js/modules/cuenta_corriente_proveedores.js` + `pago_proveedor_wizard.js` (mismo wizard que ya usa el botón "Pago a proveedor" del dashboard Inicio del POS — ver `js/modules/inicio.js`). Alcanzable desde la barra inferior (`#cuenta_corriente_proveedores`), pantalla sin adaptar |
+| Proveedores | Ver cuenta corriente | Alta — pendiente | `js/modules/cuenta_corriente_proveedores.js` — `getLedger`/`getLedgerAgrupado`, la vista de detalle por proveedor |
+| **Informes** | Solo "Ventas por Vendedor" — ningún otro reporte | Alta — pendiente | `js/modules/informes.js`, `id: 'ventas_vendedor'` (reporte #5). Alcanzable desde la barra inferior (`#informes`), pero hoy muestra el selector completo de 9 reportes + filtros de escritorio, no una vista recortada |
+| **Cajas** | KPI de saldo actual por caja/medio de pago | ✅ Hecho | Terminó siendo parte del dashboard "Inicio" nuevo, ver abajo |
 
-**El KPI de Cajas es en realidad un pedido más grande: un dashboard "Inicio"
-propio para Admin-POS**, con saldo por caja + **Ticket promedio** + **Cantidad
-de ventas** del día — el mismo espíritu que `js/modules/inicio.js` (dashboard
-que ya existe, pero solo para POS; Admin-POS hoy arranca en `#productos` y no
-tiene "Inicio" en el menú — confirmado por `test_inicio_dashboard.py`, que
-además **assertea explícitamente que no lo tenga**, hay que actualizar ese
-test si esto cambia el arranque de escritorio también). Los cálculos de
-"ticket promedio" y "cantidad de ventas" no son nuevos: ya existen como
-`num_ventas` y `total_neto/num_ventas` en el reporte "Ventas por Vendedor" y
-en "Resumen Diario de Caja" (`js/modules/informes.js`) — es cuestión de
-reempaquetarlos en un KPI para "hoy", no de inventar la cuenta.
-
-**Decisión pendiente puntual sobre ese dashboard:** ¿arranca Admin-POS ahí
-siempre (cambiando el comportamiento actual también en escritorio), o el
-dashboard nuevo es *solo* la landing mobile (por debajo de cierto ancho),
-dejando el arranque en `#productos` intacto en desktop? Ver el test citado
-arriba antes de decidir — hoy garantiza lo segundo.
-
-**Sobre las decisiones técnicas ya no abiertas (siguen valiendo del
-relevamiento original):** el problema de navegación (sidebar sin reemplazo) y
-el CSS compartido sin marca que distinga Admin-POS del POS siguen siendo
-los primeros dos obstáculos a resolver, ahora acotados a estas 5 áreas en vez
-de las 22.
+**El KPI de Cajas terminó siendo, como se preveía, parte de algo más
+grande: un dashboard "Inicio" propio para Admin-POS** (`js/modules/inicio.js`,
+`views/inicio.html`, branch por `window.ADMIN_MODE`) — saldo por caja/medio,
+ventas de hoy y ticket promedio, reusando los cálculos que ya existían en
+`caja.js` (`getSesionActiva`/`getTotalesSesion`) y la fórmula de "neto" de
+`informes.js` (`ventas_vendedor`). Sin accesos rápidos que no aplican remoto
+(“Nueva venta” se saca cuando `ADMIN_MODE`). "Inicio" ya está en
+`ADMIN_POS_MODULES` (visible en el menú de escritorio también) pero Admin-POS
+sigue arrancando en `#productos` — no se tocó el arranque por defecto,
+solo se sumó el acceso. `test_inicio_dashboard.py` actualizado para cubrir
+ambos sets de KPIs (POS vs Admin-POS) en vez de asumir que Admin-POS no
+tiene Inicio.
 
 ---
 
