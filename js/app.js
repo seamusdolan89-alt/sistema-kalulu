@@ -114,6 +114,12 @@
         }
       }
     });
+
+    // Update active tab in the Admin-POS mobile bottom bar (ver admin-pos/index.html)
+    document.querySelectorAll('.admin-tabbar .tab').forEach(tab => {
+      tab.classList.toggle('active', tab.dataset.tab === route);
+    });
+
     // Load view
     await loadView(route, params);
   }
@@ -180,7 +186,7 @@
   // Módulos del admin-pos (panel remoto): siempre completo. "inicio" queda
   // afuera a propósito — es un dashboard del POS del local (ver inicio.js),
   // no del panel del dueño.
-  const ADMIN_POS_MODULES = ['pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'ajuste_stock', 'ajuste_stock_positivo', 'adelanto_pago', 'caja_admin', 'configuracion', 'flujo'];
+  const ADMIN_POS_MODULES = ['inicio', 'pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'ajuste_stock', 'ajuste_stock_positivo', 'adelanto_pago', 'caja_admin', 'configuracion', 'flujo'];
 
   function getAllowedModules() {
     if (window.ADMIN_MODE) return ADMIN_POS_MODULES;
@@ -386,6 +392,43 @@
   }
 
   /**
+   * Mobile nav drawer — hamburguesa en el header abre/cierra aside.sidebar
+   * como off-canvas (ver css/layout.css, @media max-width:768px). El botón y
+   * el overlay viven fuera de <aside>, así que sobreviven a los reset de
+   * `aside.innerHTML` que hace router() al salir de editor-producto — un solo
+   * listener alcanza, no hace falta re-bindearlo en cada navegación.
+   */
+  function initMobileNav() {
+    const toggleBtn = document.getElementById('nav-toggle-btn');
+    const aside = document.querySelector('aside.sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    if (!toggleBtn || !aside || !overlay) return;
+
+    const closeDrawer = () => {
+      aside.classList.remove('mobile-open');
+      overlay.classList.remove('open');
+      toggleBtn.setAttribute('aria-expanded', 'false');
+    };
+    const openDrawer = () => {
+      aside.classList.add('mobile-open');
+      overlay.classList.add('open');
+      toggleBtn.setAttribute('aria-expanded', 'true');
+    };
+
+    toggleBtn.addEventListener('click', () => {
+      if (aside.classList.contains('mobile-open')) closeDrawer();
+      else openDrawer();
+    });
+    overlay.addEventListener('click', closeDrawer);
+    // Delegación sobre aside (persiste entre navegaciones): cerrar el drawer
+    // al tocar cualquier link, tanto de la nav normal como de editor-mode.
+    aside.addEventListener('click', (e) => {
+      if (e.target.closest('a')) closeDrawer();
+    });
+    window.addEventListener('hashchange', closeDrawer);
+  }
+
+  /**
    * Update header with user info
    */
   function updateHeader() {
@@ -505,6 +548,13 @@
     // Initialize globals before any module loads
     window.SGA_POS_ACTIVE_SALE = false;
 
+    // Marca body.admin-pos — único gancho en el DOM que distingue Admin-POS
+    // del POS para CSS (JS ya tenía window.ADMIN_MODE). Hace falta porque la
+    // barra inferior de navegación mobile es contenido propio de Admin-POS
+    // (5 accesos curados), no algo que tenga sentido imponerle al POS del
+    // local — ver css/layout.css, body.admin-pos .admin-tabbar.
+    if (window.ADMIN_MODE) document.body.classList.add('admin-pos');
+
     try {
       // Initialize database
       console.log('🔄 Initializing database...');
@@ -593,6 +643,9 @@
 
       // Update header
       updateHeader();
+
+      // Mobile nav drawer (hamburguesa)
+      initMobileNav();
 
       // El POS del local (cualquier rol, cajera incluida) arranca en el
       // dashboard de Inicio; admin-pos arranca en Productos.

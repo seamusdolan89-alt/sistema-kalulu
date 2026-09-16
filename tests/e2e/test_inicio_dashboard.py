@@ -4,15 +4,22 @@ rápidos) del POS del local: es el arranque por defecto de CUALQUIER rol que
 loguee ahí (cajera incluida) desde que existe, así que un test propio evita
 que una navegación futura la rompa en silencio.
 
-Es un dashboard del POS, NO de Admin-POS — este test también deja constancia
-de que Admin-POS sigue arrancando en #productos y no muestra "Inicio" en su
-menú, para que un futuro cambio en app.js no vuelva a mezclar los dos.
+Este mismo módulo también vive en Admin-POS (BACKLOG.md, "Admin-POS
+responsive" — primer acceso de la barra inferior mobile), pero con KPIs
+distintos: ahí no hay nadie parado en el mostrador, así que en vez de "Venta
+del turno"/"Más vendidos hoy" se muestran KPIs de gestión remota (saldo por
+caja, ventas de hoy, ticket promedio) y no se muestra "Nueva venta" entre los
+accesos rápidos. Admin-POS sigue arrancando en #productos en escritorio —
+este test deja constancia de que eso no cambió, aunque "Inicio" ya sea
+alcanzable desde el menú.
 
 Cubre:
 - El POS arranca en #inicio (cualquier rol; acá se prueba con el admin
   seedeado por login_via_seed, que en el POS local NO tiene arranque
   especial propio — ver app.js).
-- Admin-POS sigue arrancando en #productos, sin "Inicio" en el menú.
+- Admin-POS sigue arrancando en #productos, con "Inicio" ahora sí en el menú
+  y sus propios KPIs (saldo por caja, ventas de hoy, ticket promedio),
+  sin "Nueva venta" entre los accesos rápidos.
 - Los KPIs renderizan sin romper la página, incluso sin caja abierta ni
   ventas hoy (deben avisar del estado vacío, no tirar un error).
 - "Más vendidos hoy" y "Reponer en góndola" son solo texto — no navegan a
@@ -139,15 +146,32 @@ def run():
         assert "hidden" not in (overlay.get_attribute("class") or "")
         print(f"OK - {page.url} y el modal de pago se abrio solo")
 
-        print("--- Admin-POS: sigue arrancando en #productos, sin 'Inicio' en el menu ---")
+        print("--- Admin-POS: sigue arrancando en #productos, pero 'Inicio' ya esta en el menu ---")
         # Pagina nueva: la sesion del POS ya autenticada haria que login.html
         # redirija de una sin mostrar el formulario (ver login.html ~linea 264).
         page2 = context.new_page()
         login_via_seed(page2, admin_pos=True)
         assert "#productos" in page2.url, f"Admin-POS deberia arrancar en #productos, quedo en: {page2.url}"
         nav_texts = " ".join(page2.locator("aside.sidebar nav").inner_text().split())
-        assert "Inicio" not in nav_texts, "Inicio no deberia aparecer en el menu de Admin-POS"
-        print(f"OK - Admin-POS arranca en {page2.url}, sin 'Inicio' en el menu")
+        assert "Inicio" in nav_texts, "Inicio deberia aparecer en el menu de Admin-POS"
+        print(f"OK - Admin-POS arranca en {page2.url}, con 'Inicio' en el menu")
+
+        print("--- Admin-POS #inicio: KPIs propios, sin los del POS ni 'Nueva venta' ---")
+        page2.evaluate("window.location.hash = 'inicio'")
+        page2.wait_for_timeout(400)
+        for label in ["Saldo por caja", "Ventas de hoy", "Ticket promedio"]:
+            assert page2.get_by_text(label).count() > 0, f"Falta el KPI de Admin-POS '{label}'"
+        assert page2.get_by_text("Sin caja abierta").count() > 0, \
+            "Sin sesion de caja activa, el KPI de saldo deberia decir 'Sin caja abierta'"
+        assert page2.get_by_text("Sin ventas hoy").count() >= 1, \
+            "Sin ventas hoy, los KPIs de ventas/ticket deberian avisarlo en vez de mostrar un numero"
+        assert page2.get_by_text("Venta del turno").count() == 0, \
+            "El KPI operativo del POS ('Venta del turno') no deberia aparecer en Admin-POS"
+        assert page2.get_by_text("Nueva venta").count() == 0, \
+            "'Nueva venta' no deberia estar entre los accesos rapidos de Admin-POS (vender es cosa del POS fisico)"
+        for label in ["Pago a proveedor", "Ingresar Compra", "Órdenes de Compra"]:
+            assert page2.get_by_text(label).count() > 0, f"Falta el acceso rapido '{label}' en Admin-POS"
+        print("OK - Admin-POS muestra sus propios KPIs y accesos, sin mezclar con el POS")
         page2.close()
 
         browser.close()

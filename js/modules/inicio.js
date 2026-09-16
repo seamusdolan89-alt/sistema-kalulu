@@ -6,9 +6,18 @@
  * finalizeSaleAndGoDashboard) y no tiene relación con esta vista.
  *
  * Landing page del POS del local (ver app.js) — cualquier rol logueado ahí
- * arranca acá, cajera incluida. NO vive en admin-pos: queda afuera de
- * ADMIN_POS_MODULES a propósito (es un panel operativo del día a día del
- * mostrador, no de gestión remota).
+ * arranca acá, cajera incluida.
+ *
+ * También vive en Admin-POS (agregado a ADMIN_POS_MODULES en app.js) como
+ * primer acceso de la barra inferior mobile (BACKLOG.md, "Admin-POS
+ * responsive") — pero con un contenido distinto: acá los KPIs operativos del
+ * mostrador (venta del turno, más vendidos, reponer en góndola) no aplican
+ * porque no hay nadie parado en la caja. window.ADMIN_MODE decide qué set de
+ * KPIs renderizar (ver renderKpisAdmin más abajo) y saca "Nueva venta" de
+ * los accesos rápidos (pos.js bloquea igual enterSaleMode() en ADMIN_MODE:
+ * vender es cosa del POS físico). Admin-POS sigue arrancando en #productos
+ * en escritorio — este módulo solo se volvió alcanzable, no es el arranque
+ * por defecto ahí (ver router() en app.js).
  */
 
 const Inicio = (() => {
@@ -135,18 +144,20 @@ const Inicio = (() => {
   function renderBotones() {
     const botones = [];
 
-    // Siempre visible: vender no tiene permiso propio (ver ROUTE_PERMISSION en
-    // app.js). El param "nueva-venta" hace que pos.js llame a enterSaleMode()
-    // directo (mismo mecanismo que "#pos/devolucion") en vez de dejar al
-    // usuario en el dashboard de ventas realizadas, que es donde arranca
-    // #pos por default. En Admin-POS esto no abre una venta igual — pos.js
-    // bloquea enterSaleMode() en ADMIN_MODE a propósito (vender es cosa del
-    // POS físico) y se queda en el dashboard de solo lectura, sin romper nada.
-    botones.push(`
-      <a class="inicio-btn" href="#pos/nueva-venta">
-        <span class="inicio-btn-icon">🧾</span>
-        Nueva venta
-      </a>`);
+    // "Nueva venta" solo en el POS del local: no tiene permiso propio (ver
+    // ROUTE_PERMISSION en app.js) y el param "nueva-venta" hace que pos.js
+    // llame a enterSaleMode() directo (mismo mecanismo que "#pos/devolucion")
+    // en vez de dejar al usuario en el dashboard de ventas realizadas, que es
+    // donde arranca #pos por default. En Admin-POS pos.js bloquea
+    // enterSaleMode() a propósito (vender es cosa del POS físico) — un botón
+    // que no lleva a ningún lado real, así que directamente no se muestra ahí.
+    if (!window.ADMIN_MODE) {
+      botones.push(`
+        <a class="inicio-btn" href="#pos/nueva-venta">
+          <span class="inicio-btn-icon">🧾</span>
+          Nueva venta
+        </a>`);
+    }
 
     if (puedeAcceder('can_cta_cte_proveedores')) {
       botones.push(`
@@ -175,6 +186,89 @@ const Inicio = (() => {
     return botones.join('');
   }
 
+  // ── KPIs de Admin-POS (gestión remota, no operativo de mostrador) ───────────
+  // BACKLOG.md, "Admin-POS responsive": saldo por caja/medio + ticket
+  // promedio + cantidad de ventas de hoy — el mismo espíritu que los KPIs de
+  // arriba, pero pensado para alguien que NO está parado en el local.
+
+  // Saldo por caja: misma fuente que caja.js renderOverview() (sesión activa
+  // sincronizada desde el POS físico) — reutiliza getSesionActiva/
+  // getTotalesSesion ya expuestos en window.SGA_Caja en vez de duplicar la
+  // lógica de saldoEsperado/totPagos.
+  function renderKpiSaldoPorCaja(sucursalId) {
+    const sesion = window.SGA_Caja.getSesionActiva(sucursalId);
+    if (!sesion) {
+      return `
+        <div class="inicio-kpi">
+          <div class="inicio-kpi-label">💰 Saldo por caja</div>
+          <div class="inicio-kpi-value inicio-kpi-muted">Sin caja abierta</div>
+          <div class="inicio-kpi-sub">No hay sesión activa en el local</div>
+        </div>`;
+    }
+    const tot = window.SGA_Caja.getTotalesSesion(sesion.id);
+    // Medios de cobro 100% dinámicos (ver CLAUDE.md) — misma query que usa
+    // app.js para el grupo "Cajas" del menú, nunca una lista fija.
+    let medios = [];
+    try {
+      medios = db().query(
+        `SELECT id, nombre, icono FROM medios_cobro WHERE activo = 1 ORDER BY orden ASC, nombre ASC`
+      );
+    } catch (_) {}
+    const items = medios.map(m => ({
+      label: `${m.icono || ''} ${m.nombre}`.trim(),
+      value: m.id === 'efectivo' ? tot.saldoEsperado : (tot.totPagos[m.id] || 0),
+    }));
+    return `
+      <div class="inicio-kpi">
+        <div class="inicio-kpi-label">💰 Saldo por caja</div>
+        <ul class="inicio-kpi-lista">
+          ${items.map(i => `<li><span>${esc(i.label)}</span><span>${fmtPeso(i.value)}</span></li>`).join('')}
+        </ul>
+        <div class="inicio-kpi-sub">Sesión abierta desde ${fmtHora(sesion.fecha_apertura)}</div>
+      </div>`;
+  }
+
+  // Ventas de hoy + ticket promedio: misma fórmula que "Ventas por Vendedor"
+  // en informes.js (total - devuelto = neto) para no tener dos definiciones
+  // de "neto" flotando por la app — ver queryVentasVendedor().
+  function queryResumenVentasHoyAdmin(sucursalId) {
+    const hoy = new Date();
+    const desde = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()).toISOString();
+    const hasta = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + 1).toISOString();
+
+    const v = db().query(`
+      SELECT COUNT(DISTINCT v.id) AS num_ventas, SUM(v.total) AS total_ventas
+      FROM ventas v
+      WHERE v.estado = 'completada' AND v.sucursal_id = ? AND v.fecha >= ? AND v.fecha < ?
+    `, [sucursalId, desde, hasta])[0] || {};
+
+    const d = db().query(`
+      SELECT SUM(di.cantidad * di.precio_unitario) AS total_devuelto
+      FROM devoluciones d
+      JOIN devolucion_items di ON di.devolucion_id = d.id
+      WHERE d.fecha >= ? AND d.fecha < ? AND d.sucursal_id = ?
+    `, [desde, hasta, sucursalId])[0] || {};
+
+    const numVentas  = v.num_ventas || 0;
+    const totalNeto  = (v.total_ventas || 0) - (d.total_devuelto || 0);
+    const ticketProm = numVentas > 0 ? totalNeto / numVentas : 0;
+    return { numVentas, totalNeto, ticketProm };
+  }
+
+  function renderKpisVentasHoyAdmin(sucursalId) {
+    const r = queryResumenVentasHoyAdmin(sucursalId);
+    return `
+      <div class="inicio-kpi">
+        <div class="inicio-kpi-label">🧾 Ventas de hoy</div>
+        <div class="inicio-kpi-value${r.numVentas ? '' : ' inicio-kpi-muted'}">${r.numVentas ? fmtNum(r.numVentas) : 'Sin ventas hoy'}</div>
+        <div class="inicio-kpi-sub">${r.numVentas ? fmtPeso(r.totalNeto) + ' neto' : ''}</div>
+      </div>
+      <div class="inicio-kpi">
+        <div class="inicio-kpi-label">🎟️ Ticket promedio</div>
+        <div class="inicio-kpi-value${r.numVentas ? '' : ' inicio-kpi-muted'}">${r.numVentas ? fmtPeso(r.ticketProm) : 'Sin ventas hoy'}</div>
+      </div>`;
+  }
+
   // ── INIT ─────────────────────────────────────────────────────────────────────
 
   function init() {
@@ -195,10 +289,15 @@ const Inicio = (() => {
 
     const kpisEl = ge('inicio-kpis');
     if (kpisEl) {
-      kpisEl.innerHTML = [
-        renderKpiTurno(sucursalId),
-        renderMasVendidosYReponer(sucursalId),
-      ].filter(Boolean).join('');
+      kpisEl.innerHTML = window.ADMIN_MODE
+        ? [
+            renderKpiSaldoPorCaja(sucursalId),
+            renderKpisVentasHoyAdmin(sucursalId),
+          ].filter(Boolean).join('')
+        : [
+            renderKpiTurno(sucursalId),
+            renderMasVendidosYReponer(sucursalId),
+          ].filter(Boolean).join('');
     }
   }
 

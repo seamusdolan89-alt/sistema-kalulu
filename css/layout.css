@@ -239,17 +239,140 @@ body.ficha-open main#app {
   padding: 0;
 }
 
-/* Responsive: collapse sidebar on mobile */
+/* ── Hamburger toggle (header) — oculto en desktop, ver media query abajo ── */
+.nav-toggle-btn {
+  display: none;
+  background: none;
+  border: none;
+  color: inherit;
+  padding: 6px;
+  margin-right: var(--spacing-sm);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.nav-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* ── Overlay detrás del drawer — oculto salvo cuando está abierto (mobile) ── */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+}
+.sidebar-overlay.open {
+  display: block;
+}
+
+/* ── Admin-POS: barra inferior de navegación en mobile ──────────────────────
+   Reemplaza a la hamburguesa/drawer solo ahí (ver body.admin-pos en el media
+   query de abajo) — son 5 accesos curados (BACKLOG.md, "Admin-POS
+   responsive"), no los 22 módulos de escritorio, así que no tiene sentido
+   compartirla con el POS del local. Oculta por default; se muestra en mobile
+   más abajo. */
+.admin-tabbar {
+  display: none;
+}
+.admin-tabbar .tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 2px;
+  color: var(--color-text-light);
+  text-decoration: none;
+  font-size: 0.66rem;
+  font-weight: 600;
+}
+.admin-tabbar .tab svg {
+  width: 21px;
+  height: 21px;
+}
+.admin-tabbar .tab.active {
+  color: #1a5c2e; /* mismo verde del header de admin-pos/index.html */
+}
+
+/* Responsive: sidebar pasa a ser un drawer off-canvas, con hamburguesa en el
+   header para abrirlo — antes simplemente desaparecía (display:none) sin
+   ningún reemplazo, dejando la app sin forma de navegar entre pantallas por
+   debajo de 768px. */
 @media (max-width: 768px) {
   body {
     grid-template-columns: 1fr;
   }
-  
-  aside.sidebar {
-    display: none;
+
+  header {
+    flex-wrap: wrap;
+    row-gap: var(--spacing-sm);
+    padding: var(--spacing-md);
   }
-  
+
+  header h1 {
+    font-size: var(--font-size-lg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  .header-user {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: var(--spacing-sm);
+    width: 100%;
+  }
+
+  .nav-toggle-btn {
+    display: inline-flex;
+  }
+
+  aside.sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    width: min(280px, 82vw);
+    max-width: 82vw;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    z-index: 1000;
+    overflow-y: auto;
+    box-shadow: var(--shadow-md);
+    display: block;
+  }
+
+  aside.sidebar.mobile-open {
+    transform: translateX(0);
+  }
+
   main#app {
     grid-column: 1;
+  }
+
+  /* Admin-POS: barra inferior en vez de hamburguesa/drawer — ver nota arriba
+     de .admin-tabbar. */
+  body.admin-pos .nav-toggle-btn {
+    display: none;
+  }
+  body.admin-pos .admin-tabbar {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--color-background);
+    border-top: 1px solid var(--color-border);
+    box-shadow: var(--shadow-md);
+    padding: 6px 2px calc(6px + env(safe-area-inset-bottom, 0px));
+    z-index: 900;
+  }
+  body.admin-pos main#app {
+    padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
   }
 }
