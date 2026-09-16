@@ -6,6 +6,7 @@
  */
 
 import Familia from './familia.js';
+import GruposSustitutos from './grupos_sustitutos.js';
 
 const EditorProducto = (() => {
   'use strict';
@@ -1121,6 +1122,7 @@ const EditorProducto = (() => {
           'UPDATE producto_sustitutos SET activo = ? WHERE producto_id = ? AND referencia_id IS NOT NULL',
           [chk.checked ? 1 : 0, chk.dataset.id]
         );
+        GruposSustitutos.marcarPendientesSync([chk.dataset.id]);
         showToast(chk.checked ? 'Miembro activado' : 'Miembro desactivado');
       });
     });
@@ -1143,6 +1145,7 @@ const EditorProducto = (() => {
         'DELETE FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL',
         [state.productoId]
       );
+      GruposSustitutos.marcarPendientesSync([state.productoId]);
       renderSustitutos();
       showToast('Producto quitado del grupo');
     });
@@ -1189,11 +1192,12 @@ const EditorProducto = (() => {
           if (refHl >= 0 && dd) {
             const items = dd.querySelectorAll('.ed-search-result-item[data-id]');
             if (items[refHl]) {
-              setReferencia(items[refHl].dataset.id);
-              refSearch.value = '';
-              const wrap = ge('ed-ref-search-wrap');
-              if (wrap) wrap.style.display = 'none';
-              dd.style.display = 'none';
+              if (setReferencia(items[refHl].dataset.id)) {
+                refSearch.value = '';
+                const wrap = ge('ed-ref-search-wrap');
+                if (wrap) wrap.style.display = 'none';
+                dd.style.display = 'none';
+              }
               refHl = -1;
             }
           }
@@ -1288,27 +1292,41 @@ const EditorProducto = (() => {
   };
 
   // Set (or change) the referencia for this product's group.
-  // Also updates any existing group members that shared the old referencia.
+  //
+  // Resuelve la cadena en las dos direcciones antes de escribir nada (ver
+  // grupos_sustitutos.js): si el producto elegido ya pertenece el mismo a
+  // otro grupo, ofrece usar la referencia real en su lugar; si otros
+  // productos ya apuntaban a ESTE producto como su referencia, avisa que
+  // tambien se van a actualizar. Si el usuario cancela cualquiera de los
+  // dos avisos, no se escribe nada. Devuelve true si se aplico el cambio.
+  const nombreProducto = (id) =>
+    window.SGA_DB.query('SELECT nombre FROM productos WHERE id = ?', [id])[0]?.nombre || 'ese producto';
+
   const setReferencia = (newRefId) => {
-    const now = window.SGA_Utils.formatISODate(new Date());
-    const oldRef = window.SGA_DB.query(
-      'SELECT referencia_id FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1',
-      [state.productoId]
-    );
-    if (oldRef.length) {
-      // Update every member that shared the old referencia
-      window.SGA_DB.run(
-        'UPDATE producto_sustitutos SET referencia_id = ?, sustituto_id = ? WHERE referencia_id = ?',
-        [newRefId, newRefId, oldRef[0].referencia_id]
+    const refReal = GruposSustitutos.referenciaRealDe(newRefId);
+    let refFinal = newRefId;
+    if (refReal && refReal !== newRefId) {
+      const usarReal = confirm(
+        `"${nombreProducto(newRefId)}" ya pertenece a otro grupo: su referencia real es "${nombreProducto(refReal)}".\n\n` +
+        `¿Usar "${nombreProducto(refReal)}" como referencia de este grupo en su lugar?`
       );
+      if (!usarReal) return false;
+      refFinal = refReal;
     }
-    // Upsert this product's own membership row
-    window.SGA_DB.run(
-      'INSERT OR REPLACE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion) VALUES (?, ?, ?, 1, ?)',
-      [state.productoId, newRefId, newRefId, now]
-    );
+
+    const seguidores = GruposSustitutos.seguidoresDe(state.productoId);
+    if (seguidores.length) {
+      const continuar = confirm(
+        `Los siguientes productos ya apuntan a este producto como su referencia: ${seguidores.map(s => s.nombre).join(', ')}.\n\n` +
+        `Al confirmar, también se van a actualizar para apuntar a "${nombreProducto(refFinal)}". ¿Confirmás?`
+      );
+      if (!continuar) return false;
+    }
+
+    GruposSustitutos.aplicarCambioReferencia(state.productoId, refFinal);
     renderSustitutos();
     showToast('Referencia del grupo actualizada');
+    return true;
   };
 
   // Add a new product to the current group (or bootstrap the group with this product as reference).
@@ -1326,6 +1344,7 @@ const EditorProducto = (() => {
       'INSERT OR REPLACE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion) VALUES (?, ?, ?, 1, ?)',
       [miembroId, refId, refId, now]
     );
+    GruposSustitutos.marcarPendientesSync([state.productoId, miembroId, refId]);
     renderSustitutos();
     showToast('Miembro agregado al grupo');
   };
@@ -1358,12 +1377,13 @@ const EditorProducto = (() => {
     dropdown.style.display = '';
     dropdown.querySelectorAll('.ed-search-result-item[data-id]').forEach(item => {
       item.addEventListener('click', () => {
-        setReferencia(item.dataset.id);
-        const ri = ge('ed-ref-search');
-        if (ri) { ri.value = ''; }
-        const wrap = ge('ed-ref-search-wrap');
-        if (wrap) wrap.style.display = 'none';
-        dropdown.style.display = 'none';
+        if (setReferencia(item.dataset.id)) {
+          const ri = ge('ed-ref-search');
+          if (ri) { ri.value = ''; }
+          const wrap = ge('ed-ref-search-wrap');
+          if (wrap) wrap.style.display = 'none';
+          dropdown.style.display = 'none';
+        }
       });
     });
   };
