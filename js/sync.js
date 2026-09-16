@@ -10,11 +10,26 @@
  *   Registros escritos desde el panel admin (con _pulled: false) se aplican
  *   al SQLite local cada 5 min automáticamente y se marcan _pulled: true en Firestore.
  *
- * ADMIN-POS (panel de administración, uso manual):
- *   "⬇ Pull" trae los cambios hechos en el POS (por fecha, no por _pulled).
- *   "⬆ Push POS" manda los cambios pendientes del admin hacia el POS
- *   (marcándolos _pulled: false para que el POS los levante en su próximo ciclo).
- *   Ninguno de los dos corre solo — son a propósito manuales.
+ * ADMIN-POS (panel de administración):
+ *   Sincroniza solo (pull + push en un mismo ciclo, "⬇⬆ Sincronizar" o
+ *   automático cada 5 min, igual cadencia que el POS) desde 16/9/2026 —
+ *   antes pull y push eran dos botones separados y manuales, así que un
+ *   cambio hecho en Admin-POS podía quedar horas sin subir, ampliando la
+ *   ventana en la que un pull entrante chocaba contra él (ver guarda
+ *   anti-pisada más abajo) y se perdía en silencio.
+ *   El pull de admin-pos trae por fecha (_synced_at > cursor), no por
+ *   _pulled como el del POS — journal aparte por colección
+ *   (admin_monitor_sync_at:<tabla> en localStorage).
+ *
+ * GUARDA ANTI-PISADA Y SU RIESGO (fix 16/9/2026):
+ *   Si al aplicar un documento entrante la copia local tiene un cambio
+ *   propio sin subir, se descarta ese documento (gana lo local, que sale en
+ *   el próximo push) — pero antes el cursor/marca de "ya lo traje" avanzaba
+ *   igual, así que ese documento quedaba perdido para siempre en vez de
+ *   reintentarse. Ahora ultimoSkipPorPendiente (seteado por
+ *   tienePendienteLocal) hace que ni el cursor de syncMonitoringData ni el
+ *   _pulled de pullFromFirestore avancen sobre un documento descartado —
+ *   se vuelve a pedir en el próximo ciclo hasta que el cambio local se suba.
  *
  * USUARIOS: sincroniza igual que el resto (login/permisos), pero el login en sí
  *   siempre valida contra la base LOCAL — un dispositivo nuevo sin ningún usuario
@@ -33,8 +48,16 @@
   let initialized = false;
   let lastSyncAt = null;
 
-  const PULL_INTERVAL_MS  = 5 * 60 * 1000;  // 5 min — POS pull automático
-  const ADMIN_INTERVAL_MS = 30 * 1000;       // 30 s  — admin monitoring
+  // Seteado por tienePendienteLocal() cuando descarta un documento entrante
+  // porque la copia local todavia tiene un cambio propio sin subir. Los dos
+  // loops de pull (syncMonitoringData / pullFromFirestore) lo leen justo
+  // despues de cada applyFn() para decidir si avanzan el cursor / marcan
+  // _pulled: true, o si dejan el documento "sin resolver" para reintentarlo
+  // en el proximo ciclo -- sin esto, un documento descartado por choque se
+  // daba por "entregado" igual y se perdia para siempre (ver fix 16/9/2026).
+  let ultimoSkipPorPendiente = false;
+
+  const PULL_INTERVAL_MS  = 5 * 60 * 1000;  // 5 min — pull/push automático (POS y admin-pos)
   const BATCH_LIMIT = 50;
 
   // ─── PUSH: tablas SQLite → Firestore ─────────────────────────────────────────
@@ -181,6 +204,17 @@
             .then(n => { if (n > 0) { console.log(`⬇️  Pull auto: ${n} registros`); updateSyncBadge('ok'); } })
             .catch(() => {});
           pushPending().catch(() => {});
+        }, PULL_INTERVAL_MS);
+      } else {
+        // Admin-pos: mismo respaldo automático que el POS, misma cadencia.
+        // Antes esto era 100% manual (botones Pull / Push POS) — un cambio
+        // hecho acá podía quedar horas sin subir si nadie apretaba el botón,
+        // ampliando la ventana en la que un pull entrante lo pisaba (ver
+        // guarda anti-pisada). No fuerza recarga de pantalla — eso sigue
+        // siendo cosa del botón manual, para no interrumpir a quien esté
+        // editando algo en medio del intervalo.
+        syncIntervalId = setInterval(() => {
+          syncNow().catch(() => {});
         }, PULL_INTERVAL_MS);
       }
     } catch (err) {
@@ -385,15 +419,28 @@
           batchCount = snap.size;
           if (batchCount === 0) break;
 
+          let algunoAplicado = false;
           for (const doc of snap.docs) {
             try {
+              ultimoSkipPorPendiente = false;
               applyFn(doc.data());
+              if (ultimoSkipPorPendiente) {
+                // Choco con un cambio local sin subir: NO se marca _pulled,
+                // para volver a pedirlo en el proximo ciclo en vez de darlo
+                // por entregado y perderlo si nunca se llega a aplicar.
+                continue;
+              }
               await doc.ref.update({ _pulled: true, _pulled_at: new Date().toISOString() });
               total++;
+              algunoAplicado = true;
             } catch (err) {
               console.warn(`Pull apply error (${collection} ${doc.id}):`, err.message);
             }
           }
+          // Si nada de esta tanda se pudo marcar, repetir la misma consulta
+          // traeria los mismos documentos de nuevo sin avanzar -- cortar acá
+          // y reintentar en el proximo ciclo (cada 5 min) en vez de loopear.
+          if (!algunoAplicado) break;
         } while (batchCount >= 50);
       } catch (err) {
         // Índice faltante u otro error: no interrumpir el ciclo
@@ -424,6 +471,7 @@
       )[0];
       if (row && row.sync_status === 'pending') {
         console.log(`⏭️  Pull: se conserva ${tabla} local con cambios sin sincronizar`, params);
+        ultimoSkipPorPendiente = true;
         return true;
       }
     } catch (e) {
@@ -1400,12 +1448,19 @@
       { name: 'cuenta_corriente',  applyFn: applyCuentaCorriente },
     ];
 
-    const lastSync = localStorage.getItem('admin_monitor_sync_at');
+    // Cursor propio por coleccion (antes era uno solo compartido, pisado a
+    // "ahora" al final de CADA corrida sin importar si algun documento se
+    // habia descartado por choque local -- eso invalidaba en el acto la
+    // proteccion de mas abajo: el proximo ciclo ya arrancaba despues de ese
+    // documento y no volvia a pedirlo nunca mas. Con fallback al valor viejo
+    // compartido para no re-traer 90 dias de golpe en el primer uso post-fix.
+    const cursorViejoCompartido = localStorage.getItem('admin_monitor_sync_at');
     let total = 0;
 
     for (const { name, applyFn } of MONITOR_SOURCES) {
+      const cursorKey = `admin_monitor_sync_at:${name}`;
       try {
-        let cursor = lastSync;
+        let cursor = localStorage.getItem(cursorKey) || cursorViejoCompartido;
         if (!cursor) {
           // Primera vez: últimos 90 días
           const desde = new Date();
@@ -1429,18 +1484,31 @@
           batchSize = snap.size;
           if (batchSize === 0) break;
 
+          const cursorAntes = cursor;
           for (const doc of snap.docs) {
-            try { applyFn(doc.data()); total++; }
+            try {
+              ultimoSkipPorPendiente = false;
+              applyFn(doc.data());
+              total++;
+              // Si choco con un cambio local sin subir, NO se avanza el
+              // cursor mas alla de este punto -- se vuelve a pedir en el
+              // proximo ciclo hasta que el cambio local se suba. Los
+              // documentos mas nuevos de esta misma tanda igual se aplican
+              // ahora (reaplicarlos despues es inofensivo, INSERT OR REPLACE).
+              if (!ultimoSkipPorPendiente) cursor = doc.data()._synced_at;
+            }
             catch (err) { console.warn(`Monitor apply error (${name}):`, err.message); }
           }
-          cursor = snap.docs[snap.docs.length - 1].data()._synced_at;
+          localStorage.setItem(cursorKey, cursor);
+          // Si nada avanzo, repetir la misma consulta trae la misma tanda de
+          // nuevo sin progreso -- cortar para no loopear dentro de esta corrida.
+          if (cursor === cursorAntes) break;
         } while (batchSize >= 200);
       } catch (err) {
         console.warn(`Monitor sync skip (${name}):`, err.message);
       }
     }
 
-    localStorage.setItem('admin_monitor_sync_at', new Date().toISOString());
     if (total > 0) console.log(`📡 Monitor sync: ${total} registros actualizados`);
 
     // Cerrar sesiones fantasma: abiertas localmente sin ventas, cuando otra sesión abierta sí tiene ventas
@@ -1636,6 +1704,17 @@
     getFirestore: () => firestoreDb,
     isInitialized: () => initialized,
     getStatus: () => ({ initialized, lastSyncAt }),
+    // Expuesto para poder testear la guarda anti-pisada general
+    // (tienePendienteLocal) y la señal ultimoSkipPorPendiente que usan
+    // syncMonitoringData/pullFromFirestore para no dar por "entregado" un
+    // documento descartado.
+    applyOrdenCompra,
+    __testUltimoSkipPorPendiente: () => ultimoSkipPorPendiente,
+    // Los loops reales resetean la señal a false antes de cada applyFn() (ver
+    // syncMonitoringData/pullFromFirestore) -- un test que llama applyOrdenCompra
+    // directo, sin pasar por el loop, necesita el mismo reset para no arrastrar
+    // el resultado de la llamada anterior.
+    __testResetUltimoSkipPorPendiente: () => { ultimoSkipPorPendiente = false; },
     queueChange:     async () => {},
     syncPending:     syncNow,
     resolveConflict: (local) => local,

@@ -378,7 +378,7 @@ body.ficha-open main#app {
 
   /* Admin-POS: header mobile compacto — pedido del usuario tras probarlo en
      el celular real (el header en dos filas ocupaba demasiado). Sin usuario
-     logueado ni backup (no se usan desde ahí), Pull/Push quedan solo con el
+     logueado ni backup (no se usan desde ahí), Sincronizar queda solo con el
      ícono — el texto sigue viajando en .btn-label para no duplicar el botón
      entero por ancho de pantalla, y JS lo restaura tal cual al terminar
      cada acción (ver admin-pos/index.html). */
@@ -386,12 +386,10 @@ body.ficha-open main#app {
   body.admin-pos #backup-menu {
     display: none;
   }
-  body.admin-pos #pull-btn .btn-label,
-  body.admin-pos #push-pos-btn .btn-label {
+  body.admin-pos #sync-btn .btn-label {
     display: none;
   }
-  body.admin-pos #pull-btn,
-  body.admin-pos #push-pos-btn {
+  body.admin-pos #sync-btn {
     min-width: auto !important;
     padding: 6px 10px !important;
   }
