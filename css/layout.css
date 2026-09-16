@@ -375,4 +375,40 @@ body.ficha-open main#app {
   body.admin-pos main#app {
     padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
   }
+
+  /* Admin-POS: header mobile compacto — pedido del usuario tras probarlo en
+     el celular real (el header en dos filas ocupaba demasiado). Sin usuario
+     logueado ni backup (no se usan desde ahí), Pull/Push quedan solo con el
+     ícono — el texto sigue viajando en .btn-label para no duplicar el botón
+     entero por ancho de pantalla, y JS lo restaura tal cual al terminar
+     cada acción (ver admin-pos/index.html). */
+  body.admin-pos #user-name,
+  body.admin-pos #backup-menu {
+    display: none;
+  }
+  body.admin-pos #pull-btn .btn-label,
+  body.admin-pos #push-pos-btn .btn-label {
+    display: none;
+  }
+  body.admin-pos #pull-btn,
+  body.admin-pos #push-pos-btn {
+    min-width: auto !important;
+    padding: 6px 10px !important;
+  }
+  /* Ya no hace falta que .header-user baje a su propia fila: sin usuario ni
+     backup entran junto al título en una sola línea. */
+  body.admin-pos .header-user {
+    width: auto;
+    flex-wrap: nowrap;
+  }
+
+  /* Sub-nav interno "🏢 Proveedores / 📋 Órdenes / 📒 Cuentas Corrientes"
+     (.prov-section-tabs, repetido igual en proveedores.html/ordenes.html/
+     cuenta_corriente_proveedores.html/caja_admin.html/adelanto_pago.html) —
+     en mobile desborda (3 tabs nowrap no entran en 390px, "Cuentas
+     C…" se corta) y además es redundante con la barra inferior de
+     Admin-POS, que ya lleva a Órdenes y a Cuentas Corrientes. */
+  body.admin-pos .prov-section-tabs {
+    display: none;
+  }
 }
