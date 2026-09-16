@@ -20,7 +20,7 @@ Esto también vale para el **CSS global** (`css/reset.css`, `variables.css`, `la
 
 `js/app.js` importa cada módulo dinámicamente con `?v=${Date.now()}` en cada navegación (`loadView()`) — así que **`js/modules/*.js` y `views/*.html` nunca quedan cacheados**, ni falta hacer nada especial para verlos actualizados (ni siquiera F5).
 
-La excepción son 5 archivos que se cargan con `<script src="...?v=N">` fijo en `index.html` y `admin-pos/index.html`: **`utils.js`, `db.js`, `auth.js`, `sync.js`, `firebase-config.js`**. Si tocás alguno de estos, subí el número `?v=N` en AMBOS `index.html` (commit tipo `chore: bump cache version (vN)`), o el cambio no se ve para nadie hasta que le limpien la caché a mano.
+La excepción son 5 archivos que se cargan con `<script src="...?v=N">` fijo en **tres** entradas — `index.html`, `admin-pos/index.html` y `views/login.html` (login también los carga, para poder abrir la base antes de loguear) —: **`utils.js`, `db.js`, `auth.js`, `sync.js`, `firebase-config.js`**. Si tocás alguno de estos, subí el número `?v=N` en LAS TRES (commit tipo `chore: bump cache version (vN)`), o el cambio no se ve para nadie hasta que le limpien la caché a mano.
 
 ## Firebase: producción vs dev automático
 
