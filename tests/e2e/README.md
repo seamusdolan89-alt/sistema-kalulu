@@ -111,6 +111,7 @@ sale "vacío" inesperadamente.
 | `test_informes.py` | Los 8 reportes de Informes (Ventas por Producto, Análisis de Productos, Ventas por Transacción, Quiebres de Stock, Ventas por Vendedor, Aging CC, Resumen Diario de Caja, Stock sin Movimiento) — verifica los números exactos, no solo que rendericen |
 | `test_informes_sustitutos_grupos.py` | Informes → "Grupos de Sustitutos": audita `producto_sustitutos` y detecta cadenas rotas (un producto apunta como referencia a otro que ya se unió a otro grupo distinto) |
 | `test_editor_producto.py` | Editor de Producto (página completa, no confundir con la lista de `productos.js`): crear producto nuevo, editar uno existente, y que el margen se recalcule automáticamente al cambiar el precio |
+| `test_editor_producto_sustitutos_cadena.py` | Sustitutos: elegir como referencia un producto que ya pertenece a otro grupo (o cambiar de grupo a uno al que otros ya apuntaban) avisa antes de escribir la cadena, se puede cancelar, y al confirmar repunta a todos los afectados sin dejar huérfanos — además marca sync_status='pending' en los productos que realmente cambiaron |
 
 Nota: toda compra en este sistema queda "Cta. Cte." — la condición de pago
 está fija en `compras_v2.js` (`state.condicionPago = 'pendiente'`, sin
