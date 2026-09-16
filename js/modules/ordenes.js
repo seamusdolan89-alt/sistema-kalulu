@@ -487,7 +487,7 @@ const Ordenes = (() => {
 
     tbody.innerHTML = ordenes.map(o => {
       const fecha = o.fecha_creacion ? o.fecha_creacion.slice(0, 10) : '—';
-      return `<tr>
+      return `<tr data-abrir-fila="${esc(o.id)}">
         <td>${esc(fecha)}</td>
         <td style="font-weight:600">${esc(o.proveedor_nombre || '—')}</td>
         <td style="text-align:center">${o.num_items || 0}</td>
@@ -502,6 +502,15 @@ const Ordenes = (() => {
 
     tbody.querySelectorAll('[data-abrir]').forEach(btn =>
       btn.addEventListener('click', () => abrirOrden(btn.dataset.abrir))
+    );
+
+    // Tocar la card entera abre la orden — en mobile el botón "Ver" queda
+    // oculto (redundante, ver CSS), así que hace falta este camino.
+    tbody.querySelectorAll('tr[data-abrir-fila]').forEach(row =>
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return;
+        abrirOrden(row.dataset.abrirFila);
+      })
     );
 
     tbody.querySelectorAll('[data-eliminar]').forEach(btn =>
@@ -622,6 +631,11 @@ const Ordenes = (() => {
   function renderItems(orden, editable) {
     const tbody = ge('ord-items-tbody');
     const thead = ge('ord-items-thead');
+    // Marca la tabla de solo-consulta (confirmada+) para el CSS mobile de
+    // ord-items-table — sin esto, las reglas nth-child de la versión
+    // recortada (5 columnas) pisarían mal a la editable (10 columnas,
+    // "armar/editar la orden sigue siendo cosa de la compu", ver BACKLOG.md).
+    thead.closest('table')?.classList.toggle('ord-items-readonly', !editable);
 
     if (editable) {
       thead.innerHTML = `<tr>
@@ -651,9 +665,9 @@ const Ordenes = (() => {
       thead.innerHTML = `<tr>
         <th style="text-align:left;min-width:90px">Cód. prov.</th>
         <th style="text-align:left">Descripción</th>
+        <th>Stock act.</th>
         <th style="min-width:120px">A pedir</th>
         <th style="text-align:left;min-width:140px">Notas</th>
-        <th></th>
       </tr>`;
     }
 
@@ -705,9 +719,9 @@ const Ordenes = (() => {
         return `<tr>
           <td>${esc(it.codigo_proveedor || '—')}</td>
           <td>${esc(it.producto_nombre || '—')}</td>
+          <td>${fmtN(it.stock_actual)}</td>
           <td style="font-weight:700">${esc(labelApedir(cantFinal, unidad))}</td>
           <td>${esc(it.notas || '—')}</td>
-          <td></td>
         </tr>`;
       }
     }).join('');
