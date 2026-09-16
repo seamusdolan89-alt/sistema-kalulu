@@ -850,6 +850,111 @@
   text-align: center;
 }
 
+/* ── Mobile (<=768px): tabla de 11 columnas -> cards con solo lo que se
+   consulta desde el celular. Decisión del usuario: nombre, stock, costo y
+   precio de un pantallazo alcanza — el resto (categoría, margen, mínimo,
+   madre, código, estado, acciones) sigue estando, un toque adentro, en el
+   modal de edición (tocar la card ya abre ese modal, ver productos.js
+   ~línea 2177). Los botones de Plantilla/Excel/Nuevo Producto tampoco se
+   usan desde ahí — altas y carga masiva siguen siendo cosa de la compu. */
+@media (max-width: 768px) {
+  /* Selector reforzado (no ".toolbar-buttons" a secas): más abajo en este
+     mismo archivo hay una segunda regla ".toolbar-buttons{display:flex}"
+     (bajo "IMPORT EXCEL STYLES", línea ~1345) que por orden de cascada le
+     gana a una regla de igual especificidad aunque esté afuera de cualquier
+     media query — con esto, la de acá gana siempre. */
+  .productos-container .toolbar-buttons {
+    display: none;
+  }
+
+  .products-table-wrapper {
+    overflow-x: visible;
+    border: none;
+    border-radius: 0;
+    margin-bottom: 0;
+  }
+
+  .productos-table thead {
+    display: none;
+  }
+  .productos-table,
+  .productos-table tbody {
+    display: block;
+    width: 100%;
+  }
+  .productos-table tbody tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    position: relative;
+    background: #fff;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+  .productos-table tbody tr.bajo-minimo {
+    border-color: var(--color-warning-border);
+  }
+  .productos-table tbody tr.bajo-minimo::after {
+    content: "Bajo mín.";
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    font-size: 0.66rem;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: var(--radius-full);
+    background: var(--color-warning-bg);
+    color: var(--color-warning-text);
+    border: 1px solid var(--color-warning-border);
+  }
+  .productos-table td {
+    display: none;
+    padding: 0;
+    border: none;
+  }
+  /* Nombre — fila completa arriba de todo */
+  .productos-table td:nth-child(2) {
+    display: block;
+    order: 1;
+    flex: 1 0 100%;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--color-text);
+    padding-right: 64px;
+    margin-bottom: 6px;
+  }
+  /* Stock, Costo, Precio — en ese orden, debajo del nombre */
+  .productos-table td:nth-child(7),
+  .productos-table td:nth-child(4),
+  .productos-table td:nth-child(5) {
+    display: block;
+    margin-right: 18px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+  }
+  .productos-table td:nth-child(7) { order: 2; }
+  .productos-table td:nth-child(4) { order: 3; }
+  .productos-table td:nth-child(5) { order: 4; }
+  .productos-table td:nth-child(7)::before,
+  .productos-table td:nth-child(4)::before,
+  .productos-table td:nth-child(5)::before {
+    display: block;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-light);
+    margin-bottom: 1px;
+  }
+  .productos-table td:nth-child(7)::before { content: "Stock"; }
+  .productos-table td:nth-child(4)::before { content: "Costo"; }
+  .productos-table td:nth-child(5)::before { content: "Precio"; }
+}
+
 /* Modal Styles */
 .modal {
   position: fixed;

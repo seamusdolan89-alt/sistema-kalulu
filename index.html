@@ -19,7 +19,12 @@
 <body>
   <!-- Header -->
   <header>
-    <h1 style="display:flex;align-items:center;gap:9px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5l1.2-5.5h15.6l1.2 5.5"/><path d="M3 9.5a2.2 2.2 0 0 0 4.4 0 2.2 2.2 0 0 0 4.4 0 2.2 2.2 0 0 0 4.4 0 2.2 2.2 0 0 0 4.4 0"/><path d="M5 9.5V20h14V9.5"/><path d="M9.5 20v-6.5h5V20"/></svg>Sistema Kalulu</h1>
+    <div style="display:flex;align-items:center;min-width:0">
+      <button id="nav-toggle-btn" class="nav-toggle-btn" aria-label="Abrir menú" aria-expanded="false" aria-controls="app-sidebar">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <h1 style="display:flex;align-items:center;gap:9px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5l1.2-5.5h15.6l1.2 5.5"/><path d="M3 9.5a2.2 2.2 0 0 0 4.4 0 2.2 2.2 0 0 0 4.4 0 2.2 2.2 0 0 0 4.4 0 2.2 2.2 0 0 0 4.4 0"/><path d="M5 9.5V20h14V9.5"/><path d="M9.5 20v-6.5h5V20"/></svg>Sistema Kalulu</h1>
+    </div>
     <div class="header-user">
       <span id="user-name">Usuario</span>
       <span id="sync-badge" title="Firebase Sync" style="font-size:12px;cursor:default;user-select:none;">⚫</span>
@@ -39,13 +44,16 @@
   </header>
 
   <!-- Sidebar Navigation -->
-  <aside class="sidebar">
+  <aside class="sidebar" id="app-sidebar">
     <nav>
       <ul>
         <!-- Navigation links will be populated by app.js -->
       </ul>
     </nav>
   </aside>
+
+  <!-- Overlay del drawer mobile del sidebar (ver css/layout.css, .sidebar-overlay) -->
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
   <!-- Main Application Container -->
   <main id="app">

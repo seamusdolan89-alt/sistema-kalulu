@@ -402,6 +402,10 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
       const categoria = producto.categoria_nombre || '-';
       const stock = producto.stock_actual != null ? producto.stock_actual : 0;
       const margen = producto.precio_venta > 0 ? ((producto.precio_venta - producto.costo) / producto.precio_venta * 100).toFixed(2) : '0.00';
+      // Usado solo para el badge "Bajo mín." de la vista en cards de mobile
+      // (ver views/productos.html, .productos-table tr.bajo-minimo) — el
+      // filtro "⚠️ Bajo Mínimo" del toolbar ya hace este mismo cálculo aparte.
+      const bajoMinimo = (producto.stock_minimo || 0) > 0 && stock <= producto.stock_minimo;
 
       // FIX 4: Madre column — show mother's name if child, own name if madre/independent
       const esMadrePorId = !!producto.producto_madre_id;
@@ -441,7 +445,7 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
           ` : '<span style="color:#bbb;font-size:12px">Solo lectura</span>';
 
       return `
-        <tr data-id="${producto.id}">
+        <tr data-id="${producto.id}" class="${bajoMinimo ? 'bajo-minimo' : ''}">
           <td>${producto.codigo_barras || ''}</td>
           <td>${producto.nombre || ''}${ofertaBadge}${pausaBadge}</td>
           <td>${categoria}</td>
