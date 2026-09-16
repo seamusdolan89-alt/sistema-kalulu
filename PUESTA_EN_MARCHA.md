@@ -8,7 +8,7 @@ Instrucciones para alinear las dos computadoras y empezar a trabajar de forma re
   Lo usan las cajeras en el local, para vender.
 - **Admin-POS** — https://seamusdolan89-alt.github.io/sistema-kalulu/views/login.html?returnTo=../admin-pos/
   Lo usás vos, desde tu casa, para gestión (productos, compras, proveedores, informes, usuarios). No se vende desde acá.
-- Ambos son la misma app, se sincronizan entre sí a través de Firebase — pero **no todo sincroniza igual**: hay pasos manuales y otros automáticos (ver abajo).
+- Ambos son la misma app, se sincronizan entre sí a través de Firebase de forma **automática cada 5 minutos en los dos sentidos** (más un botón **"⬇⬆ Sincronizar"** en admin-pos para forzarlo ya — ver abajo).
 
 ## Paso 1 — Alinear las dos computadoras (una sola vez)
 
@@ -22,22 +22,27 @@ Hoy cada compu tiene su propio usuario "admin" con contraseña distinta, porque 
 ## Paso 2 — Crear las cuentas de las cajeras
 
 - Andá al módulo **Usuarios** (podés hacerlo desde el local directamente, ya que vas a estar ahí para el Paso 1).
-- Si en algún momento creás o editás un usuario **desde admin-pos** (tu casa), no se sube solo: tenés que apretar el botón **"⬆ Push POS"** (arriba a la derecha en admin-pos) para que le llegue al local.
+- Si en algún momento creás o editás un usuario **desde admin-pos** (tu casa), se sube solo en unos minutos (automático); si querés que le llegue al local ya, apretá el botón **"⬇⬆ Sincronizar"** (arriba a la derecha en admin-pos).
 
 ## Cómo funciona la sincronización, de acá en adelante
 
 | Acción | ¿Cuándo pasa? |
 |---|---|
-| **Admin-POS → Firestore → POS** (productos, precios, proveedores, clientes, stock, usuarios, compras, gastos, promociones, **cajas y medios de pago**, etc. que cargues desde tu casa) | **Manual.** Rutina sugerida: entrar a admin-pos → apretar **⬇ Pull** (trae lo que pasó en el local) → trabajar → apretar **⬆ Push POS** (manda tus cambios al local). Si trajo algo nuevo, la página se recarga sola. |
-| **POS → Firestore → Admin-POS** (ventas, stock, caja, ingresos de caja, compras/gastos, **consumo interno/roturas/vencimientos, cuenta corriente de clientes** cargados en el local) | **100% automático.** La cajera no tiene que hacer nada — sube apenas se completa cada acción, más un respaldo cada 5 minutos. Vos lo ves en admin-pos apretando **⬇ Pull** cuando quieras revisarlo (si trajo algo nuevo, también se recarga sola). |
-| **Cuenta corriente de clientes** (fiado) | Bidireccional: lo que se carga en POS (ventas fiadas, pagos) llega a admin-pos por Pull; si vos registrás algo desde admin-pos, llega al POS con Push POS — igual que productos/clientes. |
+| **Admin-POS → Firestore → POS** (productos, precios, proveedores, clientes, stock, usuarios, compras, gastos, promociones, **cajas y medios de pago**, etc. que cargues desde tu casa) | **Automático cada 5 minutos** (desde 16/9/2026 — antes era manual). El botón **"⬇⬆ Sincronizar"** en admin-pos hace lo mismo al toque, para no esperar: trae lo que pasó en el local Y manda tus cambios, en un solo click. Si trajo algo nuevo, la página se recarga sola (solo con el botón — el ciclo automático de fondo no recarga la pantalla, para no interrumpirte si estás cargando algo). |
+| **POS → Firestore → Admin-POS** (ventas, stock, caja, ingresos de caja, compras/gastos, **consumo interno/roturas/vencimientos, cuenta corriente de clientes** cargados en el local) | **100% automático.** La cajera no tiene que hacer nada — sube apenas se completa cada acción, más un respaldo cada 5 minutos. Vos lo ves en admin-pos apretando **"⬇⬆ Sincronizar"** cuando quieras revisarlo ya (si trajo algo nuevo, también se recarga sola). |
+| **Cuenta corriente de clientes** (fiado) | Bidireccional, igual que productos/clientes: automático cada 5 min en los dos sentidos, o al toque con "Sincronizar". |
 | **Usuarios / contraseñas** | Sincronizan igual que el resto, pero con un límite: una compu **sin ningún usuario local todavía** no puede loguearse para arrancar el sync sola — siempre hace falta restaurar un backup primero en una compu nueva/vacía (ver Paso 1). Una vez que esa compu ya tiene al menos un usuario y pudo loguearse, el resto de los datos (incluidas cajas y medios de pago) se completan solos desde Firestore. |
+
+Si justo edita lo mismo desde las dos puntas casi al mismo tiempo, gana la
+copia que todavía no se subió — el otro cambio no se pierde, se reintenta
+solo en el próximo ciclo (cada 5 min) hasta que se resuelve. No hace falta
+ningún paso manual para eso.
 
 **Cargas masivas** (ej. importar cientos de productos de una vez desde Excel): el sync ya está preparado para vaciar la cola completa en un solo ciclo, no se corta a mitad de camino como pasaba antes.
 
 ## Si necesitás resetear la contraseña de una cajera
 
-Entrá como admin **en la misma computadora donde vive ese usuario** (hoy: el local) → módulo Usuarios → editar → poner nueva contraseña (no hace falta la anterior). No se puede hacer a distancia desde admin-pos salvo que antes hayas sincronizado ese usuario (Pull) o restaurado un backup.
+Entrá como admin **en la misma computadora donde vive ese usuario** (hoy: el local) → módulo Usuarios → editar → poner nueva contraseña (no hace falta la anterior). No se puede hacer a distancia desde admin-pos salvo que antes hayas sincronizado ese usuario (Sincronizar) o restaurado un backup.
 
 ## Backups — por qué conviene el hábito
 
