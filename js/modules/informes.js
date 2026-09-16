@@ -15,6 +15,7 @@ const Informes = (() => {
     { id: 'resumen_diario',     label: 'Resumen Diario de Caja' },
     { id: 'stock_muerto',       label: 'Stock sin Movimiento' },
     { id: 'salidas_stock',      label: 'Salidas de Stock (no venta)' },
+    { id: 'sustitutos_grupos',  label: 'Grupos de Sustitutos' },
   ];
 
   const TIPO_SALIDA_LABEL = {
@@ -515,7 +516,7 @@ const Informes = (() => {
     state.desde   = ge('inf-desde')?.value       || state.desde;
     state.hasta   = ge('inf-hasta')?.value        || state.hasta;
 
-    const needsPeriod = !['aging_cc', 'stock_muerto'].includes(state.reporte);
+    const needsPeriod = !['aging_cc', 'stock_muerto', 'sustitutos_grupos'].includes(state.reporte);
     if (needsPeriod && (!state.desde || !state.hasta)) {
       resultsEl.innerHTML = `<div class="inf-error">Seleccioná el período completo.</div>`;
       return;
@@ -565,6 +566,10 @@ const Informes = (() => {
           case 'salidas_stock':
             state.data = querySalidasStock();
             resultsEl.innerHTML = renderSalidasStock(state.data);
+            break;
+          case 'sustitutos_grupos':
+            state.data = queryGruposSustitutos();
+            resultsEl.innerHTML = renderGruposSustitutos(state.data);
             break;
           default:
             resultsEl.innerHTML = `<div class="inf-error">Reporte no reconocido.</div>`;
@@ -1203,6 +1208,120 @@ const Informes = (() => {
     `;
   }
 
+  // ── REPORT 10: Grupos de Sustitutos ─────────────────────────────────────────────
+  //
+  // Auditoria del modelo producto_sustitutos (producto_id, referencia_id): no hay
+  // tabla de "grupo" con ID propio, asi que una referencia_id puede terminar
+  // apuntando a un producto que, a su vez, tiene su propia fila con OTRA
+  // referencia_id (cadena de dos niveles) — el sistema no la resuelve en ningun
+  // lado, asi que el stock/reposicion de esos seguidores queda huerfano. Este
+  // reporte detecta esos casos para poder corregirlos a mano.
+
+  function queryGruposSustitutos() {
+    const sid = state.sucursalId;
+    const rows = window.SGA_DB.query(`
+      SELECT
+        ps.referencia_id AS ref_id,
+        ref_p.nombre     AS ref_nombre,
+        ref_cb.codigo    AS ref_codigo,
+        ps.producto_id   AS miembro_id,
+        m.nombre         AS miembro_nombre,
+        mcb.codigo       AS miembro_codigo,
+        ps.activo        AS miembro_activo,
+        COALESCE(st.cantidad, 0) AS miembro_stock,
+        (SELECT ps2.referencia_id FROM producto_sustitutos ps2
+          WHERE ps2.producto_id = ps.referencia_id
+            AND ps2.referencia_id IS NOT NULL
+            AND ps2.referencia_id != ps.referencia_id
+          LIMIT 1) AS ref_real_id
+      FROM producto_sustitutos ps
+      JOIN productos m      ON m.id = ps.producto_id
+      JOIN productos ref_p  ON ref_p.id = ps.referencia_id
+      LEFT JOIN codigos_barras ref_cb ON ref_cb.producto_id = ps.referencia_id AND ref_cb.es_principal = 1
+      LEFT JOIN codigos_barras mcb    ON mcb.producto_id    = ps.producto_id  AND mcb.es_principal = 1
+      LEFT JOIN stock st ON st.producto_id = ps.producto_id AND st.sucursal_id = ?
+      WHERE ps.referencia_id IS NOT NULL
+      ORDER BY ref_p.nombre COLLATE NOCASE, m.nombre COLLATE NOCASE
+    `, [sid]);
+
+    const refRealIds = [...new Set(rows.map(r => r.ref_real_id).filter(Boolean))];
+    const refRealMap = {};
+    if (refRealIds.length) {
+      window.SGA_DB.query(`
+        SELECT p.id, p.nombre, cb.codigo
+        FROM productos p
+        LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
+        WHERE p.id IN (${refRealIds.map(() => '?').join(',')})
+      `, refRealIds).forEach(r => { refRealMap[r.id] = r; });
+    }
+
+    const grupos = new Map();
+    rows.forEach(r => {
+      if (!grupos.has(r.ref_id)) {
+        grupos.set(r.ref_id, {
+          ref_id: r.ref_id, ref_nombre: r.ref_nombre, ref_codigo: r.ref_codigo,
+          miembros: [], stock_total: 0, anomalia: false,
+          ref_real_nombre: null, ref_real_codigo: null,
+        });
+      }
+      const g = grupos.get(r.ref_id);
+      g.miembros.push({ nombre: r.miembro_nombre, codigo: r.miembro_codigo, stock: r.miembro_stock, activo: r.miembro_activo });
+      g.stock_total += (r.miembro_stock || 0);
+      if (r.ref_real_id && refRealMap[r.ref_real_id]) {
+        g.anomalia = true;
+        g.ref_real_nombre = refRealMap[r.ref_real_id].nombre;
+        g.ref_real_codigo = refRealMap[r.ref_real_id].codigo;
+      }
+    });
+
+    return [...grupos.values()];
+  }
+
+  function renderGruposSustitutos(grupos) {
+    const totMiembros = grupos.reduce((s, g) => s + g.miembros.length, 0);
+    const conProblema = grupos.filter(g => g.anomalia).length;
+    return `
+      <div class="inf-report-header">
+        <div class="inf-report-title">
+          <h3>Grupos de Sustitutos</h3>
+          <span class="inf-periodo">Estado actual — no depende de un período</span>
+        </div>
+        <div class="inf-export-btns">
+          <button id="inf-btn-excel" class="btn btn-sm inf-btn-excel">↓ Excel</button>
+          <button id="inf-btn-csv"   class="btn btn-sm">↓ CSV</button>
+        </div>
+      </div>
+      <div class="inf-kpi-row">
+        <div class="inf-kpi"><div class="inf-kpi-label">Grupos</div><div class="inf-kpi-value">${grupos.length}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Productos agrupados</div><div class="inf-kpi-value">${totMiembros}</div></div>
+        <div class="inf-kpi ${conProblema > 0 ? 'danger' : ''}"><div class="inf-kpi-label">Con problema</div><div class="inf-kpi-value ${conProblema > 0 ? 'text-danger' : ''}">${conProblema}</div></div>
+      </div>
+      ${grupos.length === 0 ? `<div class="inf-empty">No hay grupos de sustitutos armados.</div>` : `
+        <div class="inf-table-wrap">
+          <table class="inf-table">
+            <thead><tr>
+              <th>Referencia</th><th>Código</th><th>Miembros</th>
+              <th class="num">Stock total</th><th>¿Problema?</th>
+            </tr></thead>
+            <tbody>
+              ${grupos.map(g => `
+                <tr class="${g.anomalia ? 'row-danger' : ''}">
+                  <td><strong>${esc(g.ref_nombre)}</strong></td>
+                  <td class="mono">${esc(g.ref_codigo || '—')}</td>
+                  <td>${g.miembros.map(m => `${esc(m.nombre)}${m.activo ? '' : ' (inactivo)'}`).join('<br>')}</td>
+                  <td class="num">${fmtNum(g.stock_total)}</td>
+                  <td>${g.anomalia
+                    ? `<span class="text-danger bold">Sí</span> — "${esc(g.ref_nombre)}" ya no es la referencia real: a su vez apunta a "${esc(g.ref_real_nombre)}". Correspondería que estos miembros formen parte del grupo de "${esc(g.ref_real_nombre)}".`
+                    : '<span class="text-success">No</span>'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `}
+    `;
+  }
+
   // ── EXPORT ────────────────────────────────────────────────────────────────────
 
   function attachExportListeners() {
@@ -1217,6 +1336,7 @@ const Informes = (() => {
     const periodo = rep === 'aging_cc'    ? `Estado al ${new Date().toLocaleDateString('es-AR')}` :
                     rep === 'stock_muerto' ? `Sin ventas en los últimos ${state.diasSinMovimiento} días` :
                     rep === 'salidas_stock' ? `Período: ${fmtPeriodo()} · ${TIPO_SALIDA_LABEL[state.tipoSalida] || 'Todos los tipos'}` :
+                    rep === 'sustitutos_grupos' ? `Estado al ${new Date().toLocaleDateString('es-AR')}` :
                     `Período: ${fmtPeriodo()}`;
 
     if (rep === 'ventas_producto' || rep === 'analitica_producto') {
@@ -1285,6 +1405,15 @@ const Informes = (() => {
           r.stock_actual, r.costo, r.costo_inmovilizado,
           r.ultima_venta ? r.ultima_venta.slice(0,10) : 'Nunca', dias ?? 'Nunca'];
       });
+      return { title, periodo, headers, data };
+    }
+    if (rep === 'sustitutos_grupos') {
+      const headers = ['Referencia','Código','Miembros','Stock total','¿Problema?','Detalle'];
+      const data = rows.map(r => [r.ref_nombre, r.ref_codigo,
+        r.miembros.map(m => m.nombre + (m.activo ? '' : ' (inactivo)')).join(' | '),
+        r.stock_total,
+        r.anomalia ? 'Sí' : 'No',
+        r.anomalia ? `"${r.ref_nombre}" ya no es referencia real, apunta a "${r.ref_real_nombre}"` : '']);
       return { title, periodo, headers, data };
     }
     return null;
