@@ -38,6 +38,7 @@ const Informes = (() => {
     data: null,
     diasSinMovimiento: 90,
     tipoSalida: 'todos', // 'todos' | 'consumo' | 'rotura' | 'vencimiento'
+    mobilePeriod: 'mes', // 'hoy' | 'semana' | 'mes' | 'elegir-mes' — solo Admin-POS mobile
   };
 
   const ge  = (id) => document.getElementById(id);
@@ -388,6 +389,120 @@ const Informes = (() => {
 
     root.innerHTML = renderShell();
     attachListeners();
+
+    // Admin-POS mobile — ver renderShell() .inf-mobile-only. Se calcula
+    // siempre (no solo si la pantalla es angosta): es CSS quien decide qué
+    // bloque se ve, así que no hace falta detectar el ancho acá ni
+    // recalcular en un resize.
+    state.mobilePeriod = 'mes';
+    setMobilePeriod('mes');
+    attachMobileListeners();
+  }
+
+  // ── ADMIN-POS MOBILE: VENTAS POR VENDEDOR SIMPLIFICADO ──────────────────────
+
+  function setMobilePeriod(period) {
+    const now = new Date();
+    if (period === 'hoy') {
+      state.desde = defaultHasta();
+      state.hasta = defaultHasta();
+    } else if (period === 'semana') {
+      const mon = new Date(now);
+      mon.setDate(now.getDate() - now.getDay() + (now.getDay() === 0 ? -6 : 1));
+      state.desde = mon.toISOString().slice(0, 10);
+      state.hasta = defaultHasta();
+    } else if (period === 'mes') {
+      state.desde = defaultDesde();
+      state.hasta = defaultHasta();
+    }
+    state.mobilePeriod = period;
+    const mesInput = ge('inf-m-mes-input');
+    if (mesInput) mesInput.style.display = 'none';
+    renderMobileVentasVendedor();
+    syncMobileChips();
+  }
+
+  function syncMobileChips() {
+    document.querySelectorAll('.inf-m-chip').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mperiod === state.mobilePeriod);
+    });
+  }
+
+  function attachMobileListeners() {
+    document.querySelectorAll('.inf-m-chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.mperiod === 'elegir-mes') {
+          const input = ge('inf-m-mes-input');
+          if (!input) return;
+          const now = new Date();
+          input.max = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+          if (!input.value) input.value = input.max;
+          input.style.display = 'block';
+          input.focus();
+          return; // el período se fija recién con el 'change' del mes elegido
+        }
+        setMobilePeriod(btn.dataset.mperiod);
+      });
+    });
+
+    ge('inf-m-mes-input')?.addEventListener('change', (e) => {
+      if (!e.target.value) return;
+      const [y, m] = e.target.value.split('-').map(Number);
+      const first   = `${y}-${String(m).padStart(2, '0')}-01`;
+      const lastStr = new Date(y, m, 0).toISOString().slice(0, 10); // día 0 del mes siguiente = último día de este
+      const todayStr = defaultHasta();
+      state.desde = first;
+      state.hasta = lastStr > todayStr ? todayStr : lastStr; // nunca pedir fechas futuras
+      state.mobilePeriod = 'elegir-mes';
+      renderMobileVentasVendedor();
+      syncMobileChips();
+    });
+
+    syncMobileChips();
+  }
+
+  function renderMobileVentasVendedor() {
+    const kpisEl = ge('inf-m-kpis');
+    const vendEl = ge('inf-m-vendedores');
+    if (!kpisEl || !vendEl) return;
+
+    // queryVentasVendedor() lee state.desde/state.hasta/state.sucursalId —
+    // misma función y misma fórmula que el reporte de escritorio, nada
+    // nuevo que calcular acá.
+    const rows = queryVentasVendedor();
+    const totNeto = rows.reduce((s, r) => s + (r.total_neto || 0), 0);
+    const totTxns = rows.reduce((s, r) => s + (r.num_ventas || 0), 0);
+    const ticketProm = totTxns ? totNeto / totTxns : 0;
+
+    kpisEl.innerHTML = `
+      <div class="inf-m-kpi inf-m-kpi-wide"><div class="l">Total neto</div><div class="v">${fmtPeso(totNeto)}</div></div>
+      <div class="inf-m-kpi"><div class="l">Transacciones</div><div class="v">${fmtNum(totTxns)}</div></div>
+      <div class="inf-m-kpi"><div class="l">Ticket prom.</div><div class="v">${fmtPeso(ticketProm)}</div></div>
+    `;
+
+    if (!rows.length) {
+      vendEl.innerHTML = `
+        <div class="inf-empty-state">
+          <div class="inf-empty-icon">📊</div>
+          <p>Sin ventas en este período.</p>
+        </div>`;
+      return;
+    }
+
+    vendEl.innerHTML = rows.map(r => {
+      const ticket = r.num_ventas ? r.total_neto / r.num_ventas : 0;
+      return `
+        <div class="inf-m-vend-card">
+          <div>
+            <div class="nombre">${esc(r.vendedor)}</div>
+            <div class="tx">${fmtNum(r.num_ventas)} venta${r.num_ventas !== 1 ? 's' : ''}</div>
+          </div>
+          <div class="amt">
+            <div class="neto">${fmtPeso(r.total_neto)}</div>
+            <div class="tick">tkt ${fmtPeso(ticket)}</div>
+          </div>
+        </div>`;
+    }).join('');
   }
 
   function renderShell() {
@@ -424,6 +539,21 @@ const Informes = (() => {
           <div class="inf-empty-icon">📊</div>
           <p>Seleccioná un reporte y período, luego presioná <strong>Generar</strong>.</p>
         </div>
+      </div>
+
+      <!-- Admin-POS mobile: un solo reporte, sin selector — ver CSS
+           .inf-mobile-only (BACKLOG.md, "Admin-POS responsive"). -->
+      <div class="inf-mobile-only">
+        <div class="inf-m-header"><h2>📊 Ventas por Vendedor</h2></div>
+        <div class="inf-m-periods">
+          <button class="inf-m-chip" data-mperiod="hoy">Hoy</button>
+          <button class="inf-m-chip" data-mperiod="semana">Esta semana</button>
+          <button class="inf-m-chip" data-mperiod="mes">Este mes</button>
+          <button class="inf-m-chip" data-mperiod="elegir-mes">Elegir mes</button>
+        </div>
+        <input type="month" id="inf-m-mes-input" class="inf-m-mes-input">
+        <div id="inf-m-kpis" class="inf-m-kpis"></div>
+        <div id="inf-m-vendedores" class="inf-m-vendedores"></div>
       </div>
     `;
   }

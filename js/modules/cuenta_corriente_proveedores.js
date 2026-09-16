@@ -703,7 +703,7 @@ const CuentaCorrienteProveedores = (() => {
           ${proveedores.map(p => {
             const remitosN = getRemitosCount(p.id);
             return `
-            <tr>
+            <tr data-abrir-fila="${esc(p.id)}" data-nombre-fila="${esc(p.razon_social)}">
               <td><strong>${esc(p.razon_social)}</strong></td>
               <td>${esc(p.contacto_nombre || '—')}</td>
               <td>${esc(p.condicion_pago || '—')}</td>
@@ -728,6 +728,14 @@ const CuentaCorrienteProveedores = (() => {
 
     wrap.querySelectorAll('.btn-ver-detalle').forEach(btn => {
       btn.addEventListener('click', () => renderDetalle(btn.dataset.id, btn.dataset.nombre));
+    });
+    // Tocar la card entera abre el extracto — en mobile "Ver detalle" queda
+    // oculto (redundante, ver CSS), así que hace falta este camino.
+    wrap.querySelectorAll('tr[data-abrir-fila]').forEach(row => {
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return;
+        renderDetalle(row.dataset.abrirFila, row.dataset.nombreFila);
+      });
     });
     wrap.querySelectorAll('.btn-pagar').forEach(btn => {
       btn.addEventListener('click', () => openModalPago(btn.dataset.id, btn.dataset.nombre));

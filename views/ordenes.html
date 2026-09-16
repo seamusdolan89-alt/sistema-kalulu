@@ -440,6 +440,94 @@
     color: var(--color-primary, #0066cc);
     border-bottom-color: var(--color-primary, #0066cc);
   }
+
+  /* ── Mobile (<=768px) ─────────────────────────────────────────────────────
+     Alcance definido con el usuario: consultar OC ya generadas (lista +
+     detalle de solo lectura). Armar/editar una orden (botón "+ Generar
+     orden", tabla editable con Stock mín./Vtas 30d/Prom. 6m/Días s/stock,
+     panel de "Más opciones") sigue siendo cosa de la compu — mismo criterio
+     que "Nuevo Producto" en Productos. */
+  @media (max-width: 768px) {
+    .ord-header { padding: 10px 14px; }
+    .ord-header-title { font-size: 12px; white-space: nowrap; }
+    .ord-lista-wrap { padding: 14px 12px; }
+    /* Armar una orden nueva sigue siendo cosa de la compu (igual que "Nuevo
+       Producto" en Productos) — solo se consulta desde el celular. */
+    #ord-btn-generar { display: none; }
+
+    /* Lista -> cards */
+    .ord-table-wrap { background: none; box-shadow: none; border-radius: 0; }
+    .ord-table thead { display: none; }
+    .ord-table, .ord-table tbody { display: block; width: 100%; }
+    .ord-table tbody tr {
+      display: block;
+      position: relative;
+      background: #fff;
+      border: 1px solid #e0e6ee;
+      border-radius: 10px;
+      padding: 12px 70px 12px 14px;
+      margin-bottom: 10px;
+      cursor: pointer;
+    }
+    .ord-table td { padding: 0; border: none; }
+    .ord-table td:nth-child(2) { font-size: 14px; font-weight: 800; color: #1a2e4a; }
+    .ord-table td:nth-child(1),
+    .ord-table td:nth-child(3) { display: inline; font-size: 12px; color: #607080; }
+    .ord-table td:nth-child(1)::after { content: " · "; }
+    .ord-table td:nth-child(3)::after { content: " ítems"; }
+    .ord-table td:nth-child(4) {
+      position: absolute; top: 12px; right: 14px;
+    }
+    .ord-table td:nth-child(5) {
+      position: absolute; bottom: 10px; right: 10px;
+    }
+    /* "Ver" queda redundante — tocar la card ya abre la orden */
+    .ord-table td:nth-child(5) .ord-btn-sm-primary { display: none; }
+    .ord-table td:nth-child(5) .ord-btn-eliminar {
+      background: none; border: none; padding: 4px 8px;
+    }
+
+    /* Filtros: scroll horizontal en vez de aplastarse */
+    .ord-filter-bar { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+    /* Detalle de solo consulta -> cards (ver ord-items-readonly, JS la marca
+       para no pisar la tabla editable de 10 columnas con estas reglas). */
+    .ord-orden-infobar { padding: 10px 14px; gap: 8px; }
+    .ord-notas-input { display: none; } /* editar notas es de escritorio */
+    .ord-items-table.ord-items-readonly thead { display: none; }
+    .ord-items-table.ord-items-readonly,
+    .ord-items-table.ord-items-readonly tbody { display: block; width: 100%; }
+    .ord-items-wrap:has(.ord-items-readonly) { padding: 10px 12px; }
+    .ord-items-table.ord-items-readonly tr {
+      display: flex; flex-wrap: wrap; align-items: baseline;
+      background: #fff; border: 1px solid #e0e6ee; border-radius: 10px;
+      padding: 10px 12px; margin-bottom: 8px;
+    }
+    .ord-items-table.ord-items-readonly td {
+      padding: 0; border: none; text-align: left; white-space: normal;
+    }
+    .ord-items-table.ord-items-readonly td:nth-child(1) { display: none; } /* código proveedor */
+    .ord-items-table.ord-items-readonly td:nth-child(2) {
+      order: 1; flex: 1 0 100%; font-size: 14px; font-weight: 700; color: #1a2e4a;
+      margin-bottom: 6px;
+    }
+    .ord-items-table.ord-items-readonly td:nth-child(3),
+    .ord-items-table.ord-items-readonly td:nth-child(4) {
+      font-size: 13px; margin-right: 20px;
+    }
+    .ord-items-table.ord-items-readonly td:nth-child(3) { order: 2; }
+    .ord-items-table.ord-items-readonly td:nth-child(4) { order: 3; color: #f57f17; }
+    .ord-items-table.ord-items-readonly td:nth-child(3)::before,
+    .ord-items-table.ord-items-readonly td:nth-child(4)::before {
+      display: block; font-size: 10px; font-weight: 700; letter-spacing: .03em;
+      text-transform: uppercase; color: #8090a0; margin-bottom: 1px;
+    }
+    .ord-items-table.ord-items-readonly td:nth-child(3)::before { content: "Stock actual"; }
+    .ord-items-table.ord-items-readonly td:nth-child(4)::before { content: "A pedir"; }
+    .ord-items-table.ord-items-readonly td:nth-child(5) {
+      order: 4; flex: 1 0 100%; margin-top: 6px; font-size: 12px; color: #607080;
+    }
+  }
 </style>
 
 <div class="prov-section-tabs">

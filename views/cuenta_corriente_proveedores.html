@@ -355,6 +355,113 @@
     color: var(--color-primary, #0066cc);
     border-bottom-color: var(--color-primary, #0066cc);
   }
+
+  /* ── Mobile (<=768px) ─────────────────────────────────────────────────────
+     Alcance: cargar pagos + consultar cuenta corriente (ambos alta
+     prioridad, BACKLOG.md). El wizard de pago (ccprov-modal) ya funciona
+     bien en el celular, no se toca. El extracto por defecto ya es
+     "agrupado" (por factura) — es lo que el usuario prefirió del mockup —
+     así que en mobile directamente se oculta el toggle a "Cronológico". */
+  @media (max-width: 768px) {
+    .ccprov-header { padding: 10px 14px; flex-wrap: wrap; gap: 8px; }
+    .ccprov-header h2 { font-size: 1rem; }
+    .ccprov-btn-primary { font-size: .78rem; padding: 7px 12px; white-space: nowrap; }
+    .ccprov-filters { padding: 10px 14px; }
+
+    /* Lista de proveedores -> cards */
+    .ccprov-table-wrap { padding: 0 14px 14px; }
+    #ccprov-table-wrap > .ccprov-table thead { display: none; }
+    #ccprov-table-wrap > .ccprov-table,
+    #ccprov-table-wrap > .ccprov-table tbody { display: block; width: 100%; }
+    #ccprov-table-wrap > .ccprov-table tbody tr {
+      display: block; position: relative; cursor: pointer;
+      background: var(--color-background); border: 1px solid var(--color-border);
+      border-radius: var(--radius-md); padding: 12px 88px 44px 14px; margin-bottom: 10px;
+    }
+    #ccprov-table-wrap > .ccprov-table td { padding: 0; border: none; }
+    #ccprov-table-wrap > .ccprov-table td:nth-child(1) { display: block; font-size: .95rem; font-weight: 700; color: var(--color-text); }
+    #ccprov-table-wrap > .ccprov-table td:nth-child(2) { display: none; } /* contacto */
+    #ccprov-table-wrap > .ccprov-table td:nth-child(3) { display: block; font-size: .74rem; color: var(--color-text-secondary); margin-top: 2px; }
+    #ccprov-table-wrap > .ccprov-table td:nth-child(4) { position: absolute; top: 12px; right: 14px; text-align: right; }
+    #ccprov-table-wrap > .ccprov-table td:nth-child(5) { position: absolute; bottom: 10px; left: 14px; right: 14px; }
+    /* "Ver detalle" queda redundante (tocar la card ya abre el extracto);
+       remitos pendientes se deja para la compu. */
+    #ccprov-table-wrap .btn-ver-detalle,
+    #ccprov-table-wrap .btn-remitos-prov { display: none; }
+    #ccprov-table-wrap .btn-pagar {
+      display: block; width: 100%; text-align: center; padding: 8px;
+      border-radius: var(--radius-md); background: var(--color-primary); color: #fff;
+      border: none; font-weight: 700; font-size: .78rem;
+    }
+    #ccprov-table-wrap .btn-pagar::after { content: " Pagar"; }
+
+    /* Detalle — header, saldo, y se oculta el toggle (ya arranca en "agrupado") */
+    .ccprov-saldo-card { margin: 12px 14px 0; padding: 12px 14px; gap: 8px; flex-wrap: nowrap; }
+    .ccprov-saldo-item { flex: 1; text-align: center; min-width: 0; }
+    .ccprov-saldo-value { font-size: 1.05rem; }
+    .ccprov-credito-alert { margin: 12px 14px 0; }
+    .ccprov-ledger-bar { display: none; }
+    .ccprov-table-wrap#ccprov-table-wrap,
+    div.ccprov-table-wrap { padding: 0 14px 14px; }
+
+    /* Extracto agrupado (por factura) -> cards. Solo la tabla PRINCIPAL
+       (hijo directo de ccprov-ledger-wrap) — no toca la tabla de la lista
+       de arriba, que ya tiene su propio selector con #ccprov-table-wrap. */
+    #ccprov-ledger-wrap > table.ccprov-table thead,
+    .ledger-orphan-section table.ccprov-table thead { display: none; }
+    #ccprov-ledger-wrap > table.ccprov-table,
+    #ccprov-ledger-wrap > table.ccprov-table tbody,
+    .ledger-orphan-section table.ccprov-table,
+    .ledger-orphan-section table.ccprov-table tbody { display: block; width: 100%; }
+    #ccprov-ledger-wrap > table.ccprov-table tfoot { display: none; } /* el saldo total ya está en la tarjeta de arriba */
+
+    #ccprov-ledger-wrap tr,
+    .ledger-orphan-section tr {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px;
+      padding: 9px 11px; border-radius: var(--radius-md); margin-bottom: 4px;
+    }
+    #ccprov-ledger-wrap td,
+    .ledger-orphan-section td { padding: 0; border: none; text-align: left; }
+
+    /* Fila de compra/gasto: card blanca con la referencia y el saldo de esa factura */
+    #ccprov-ledger-wrap tr.ledger-row-compra {
+      background: var(--color-background); border: 1px solid var(--color-border);
+    }
+    #ccprov-ledger-wrap tr.ledger-row-compra td:nth-child(1) { order: 1; font-size: .68rem; color: var(--color-text-secondary); }
+    #ccprov-ledger-wrap tr.ledger-row-compra td:nth-child(2) { order: 2; }
+    #ccprov-ledger-wrap tr.ledger-row-compra td:nth-child(3) { order: 3; flex: 1 0 100%; font-size: .84rem; font-weight: 700; color: var(--color-text); }
+    #ccprov-ledger-wrap tr.ledger-row-compra td:nth-child(4) { order: 4; font-size: .78rem; }
+    #ccprov-ledger-wrap tr.ledger-row-compra td:nth-child(5) { display: none; } /* haber: siempre "—" en esta fila */
+    #ccprov-ledger-wrap tr.ledger-row-compra td:nth-child(6) { order: 5; margin-left: auto; font-size: .82rem; }
+
+    /* Filas de pago imputado (o "sin pagos aplicados") anidadas: más chicas,
+       tinte gris e indentadas — visualmente agrupadas bajo su factura sin
+       depender de anidar HTML que hoy no existe (son <tr> hermanos). */
+    #ccprov-ledger-wrap tr.ledger-row-imp {
+      background: var(--color-surface); margin: -1px 0 4px 16px; padding: 6px 10px;
+    }
+    #ccprov-ledger-wrap tr.ledger-row-imp td:nth-child(1) { order: 1; font-size: .65rem; color: var(--color-text-light); }
+    #ccprov-ledger-wrap tr.ledger-row-imp td:nth-child(2) { display: none; }
+    #ccprov-ledger-wrap tr.ledger-row-imp td:nth-child(3) { order: 2; flex: 1; font-size: .72rem; }
+    #ccprov-ledger-wrap tr.ledger-row-imp td:nth-child(3) .ledger-imp-ref { padding-left: 0; }
+    #ccprov-ledger-wrap tr.ledger-row-imp td:nth-child(4),
+    #ccprov-ledger-wrap tr.ledger-row-imp td:nth-child(6) { display: none; }
+    #ccprov-ledger-wrap tr.ledger-row-imp td:nth-child(5) { order: 3; font-size: .74rem; }
+
+    /* Pagos sin imputar — misma idea que un pago suelto, con el botón de
+       Imputar bien visible (esto sí se usa desde el celular). */
+    .ledger-orphan-section { margin: 14px 0 0; }
+    .ledger-orphan-title { padding: 0 0 6px; }
+    .ledger-orphan-section tr.ledger-row-orphan {
+      background: var(--color-info-bg, #e3f2fd); flex-direction: column; align-items: flex-start;
+    }
+    .ledger-orphan-section tr.ledger-row-orphan td:nth-child(1) { font-size: .68rem; }
+    .ledger-orphan-section tr.ledger-row-orphan td:nth-child(3) { font-size: .82rem; font-weight: 600; }
+    .ledger-orphan-section tr.ledger-row-orphan td:nth-child(4) { display: none; }
+    .ledger-orphan-section tr.ledger-row-orphan td:nth-child(5) { font-size: .8rem; font-weight: 700; }
+    .ledger-orphan-section tr.ledger-row-orphan td:nth-child(6) { width: 100%; margin-top: 4px; }
+    .ledger-orphan-section .ledger-btn-imputar { width: 100%; padding: 8px; }
+  }
 </style>
 
 <div class="prov-section-tabs">

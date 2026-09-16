@@ -316,6 +316,52 @@
     margin: 0;
     font-style: italic;
   }
+
+  /* ── Admin-POS mobile: Ventas por Vendedor simplificado ──────────────────────
+     Alcance definido con el usuario (BACKLOG.md): un solo reporte en mobile,
+     sin selector de los otros 8 ni fechas sueltas — chips de período +
+     "Elegir mes" (mes entero, no rango libre) + los KPIs y la lista de
+     vendedores. Reusa queryVentasVendedor() tal cual (misma fórmula que el
+     reporte de escritorio), solo cambia el render. */
+  .inf-mobile-only { display: none; }
+  @media (max-width: 768px) {
+    body.admin-pos .inf-toolbar,
+    body.admin-pos #inf-extra-bar,
+    body.admin-pos #inf-results { display: none; }
+    body.admin-pos .inf-mobile-only { display: block; padding: 14px 14px 12px; }
+  }
+  .inf-m-header h2 { margin: 0 0 10px; font-size: 1.05rem; display: flex; align-items: center; gap: 6px; }
+  .inf-m-periods { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .inf-m-chip {
+    font-size: .74rem; font-weight: 700; padding: 6px 12px; border-radius: var(--radius-full);
+    border: 1px solid var(--color-border-dark); background: var(--color-background); color: var(--color-text-secondary);
+  }
+  .inf-m-chip.active { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+  .inf-m-mes-input {
+    display: none; width: 100%; margin-bottom: 12px; padding: 8px 10px;
+    border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: .85rem;
+    background: var(--color-background); color: var(--color-text);
+  }
+  .inf-m-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .inf-m-kpi {
+    background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md);
+    padding: 10px 12px;
+  }
+  .inf-m-kpi.inf-m-kpi-wide { grid-column: 1 / -1; background: var(--color-primary-light); border-color: var(--color-primary); }
+  .inf-m-kpi .l { font-size: .62rem; font-weight: 700; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: .03em; }
+  .inf-m-kpi .v { font-size: 1.05rem; font-weight: 700; color: var(--color-text); margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .inf-m-kpi.inf-m-kpi-wide .v { color: var(--color-primary); }
+  .inf-m-vendedores { display: flex; flex-direction: column; gap: 8px; }
+  .inf-m-vend-card {
+    display: flex; justify-content: space-between; align-items: center;
+    background: var(--color-background); border: 1px solid var(--color-border); border-radius: var(--radius-md);
+    padding: 10px 12px;
+  }
+  .inf-m-vend-card .nombre { font-size: .84rem; font-weight: 600; color: var(--color-text); }
+  .inf-m-vend-card .tx { font-size: .68rem; color: var(--color-text-light); margin-top: 1px; }
+  .inf-m-vend-card .amt { text-align: right; }
+  .inf-m-vend-card .neto { font-size: .86rem; font-weight: 700; color: var(--color-text); font-variant-numeric: tabular-nums; }
+  .inf-m-vend-card .tick { font-size: .66rem; color: var(--color-text-light); margin-top: 1px; }
 </style>
 
 <div id="inf-root"></div>
