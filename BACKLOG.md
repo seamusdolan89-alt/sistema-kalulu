@@ -67,11 +67,12 @@ para no terminar con dos lugares donde se vende y que uno quede atrás del otro.
 
 ### Admin-POS responsive — para usar desde el celular
 
-**Estado al 16/9/2026: navegación, Productos e Inicio ya hechos (en `dev`,
-falta pasar a `main`). Quedan pendientes Órdenes, Proveedores/cuenta
-corriente e Informes — alcanzables desde la barra inferior, pero esas
-pantallas en sí todavía no tienen tratamiento responsive (tablas fijas,
-sin scroll horizontal).**
+**Estado al 16/9/2026: las 5 áreas del alcance original están hechas** (en
+`dev`; navegación/Productos/Inicio ya en `main`, falta pasar Órdenes/
+Proveedores/Informes). Quedan afuera a propósito dos sub-ítems de
+prioridad media que nunca estuvieron en el alcance alto: generar una OC
+nueva y ver sustitutos/familia de un producto — ambos siguen siendo cosa
+de la compu.
 
 **Ya hecho:**
 - **Navegación**: barra inferior fija para Admin-POS en `<768px` (Inicio /
@@ -82,25 +83,39 @@ sin scroll horizontal).**
   más de lo necesario).
 - **Productos**: lista pasa a cards en mobile (Nombre/Stock/Costo/Precio,
   badge "Bajo mín."), toolbar sin Descargar Plantilla/Importar
-  Excel/Nuevo Producto (`views/productos.html`, `js/modules/productos.js`).
-  Tocar la card abre el editor (ya funcionaba así, sin cambios).
+  Excel/Nuevo Producto/Bajo Mínimo (`views/productos.html`,
+  `js/modules/productos.js`). Tocar la card abre el editor (ya funcionaba
+  así, sin cambios).
 - **Inicio**: dashboard nuevo para Admin-POS (`js/modules/inicio.js`,
   branch por `window.ADMIN_MODE`) — saldo por caja/medio, ventas de hoy,
   ticket promedio. Sin "Nueva venta" entre los accesos rápidos (no aplica
   remoto). Admin-POS sigue arrancando en `#productos` en escritorio —
   Inicio es alcanzable (agregado a `ADMIN_POS_MODULES`), no el arranque por
   defecto. `test_inicio_dashboard.py` actualizado.
+- **Órdenes de Compra**: lista a cards; detalle de una orden ya generada
+  pasa a solo-lectura simplificado (Producto + Stock actual + A pedir, sin
+  las columnas de análisis para armar el pedido). Stock actual muestra la
+  suma del grupo de sustitutos completo (`stockEfectivo()`, ya existente),
+  no el producto individual — pedido explícito del usuario, verificado con
+  un grupo de 2 productos. "+ Generar orden" oculto en mobile.
+- **Proveedores / Cuenta Corriente**: lista a cards con saldo + botón
+  "Pagar" directo. El extracto usa "Agrupado" (por factura, preferencia
+  del usuario sobre "Cronológico") con la sección de pagos sin imputar y
+  su botón "Imputar…" incluida. El wizard de pago no necesitó cambios —
+  ya funcionaba bien en mobile.
+- **Informes**: sin el selector de 9 reportes ni fechas sueltas — directo
+  a "Ventas por Vendedor" con chips Hoy/Esta semana/Este mes + "Elegir
+  mes" (mes completo, no rango libre). Reusa `queryVentasVendedor()` tal
+  cual.
 - De yapa: se encontró y arregló un bug real de login en dispositivo nuevo
   — `views/login.html` siempre abría `sga.db` (la del POS) sin importar
   `returnTo`, así que nadie podía entrar a Admin-POS con su contraseña real
   desde un dispositivo que nunca había entrado antes (solo con el admin por
   defecto). Ver la nota en CLAUDE.md, sección Firebase.
 
-**Pendiente:** Órdenes de Compra, Proveedores (cuenta corriente + pagos) e
-Informes (recortado a "Ventas por Vendedor") — ver tabla de alcance más
-abajo. La navegación ya los apunta bien (`#ordenes`,
-`#cuenta_corriente_proveedores`, `#informes`), pero esas pantallas siguen
-con las tablas de escritorio sin adaptar.
+**Pendiente (prioridad media, fuera del alcance alto original):** generar
+una OC nueva desde el celular, y ver sustitutos/familia de un producto
+desde el celular — ver tabla de alcance más abajo.
 
 ---
 
@@ -129,20 +144,18 @@ completo** en una pantalla angosta (ver primer punto, ya resuelto arriba).
    siguen siendo compartidas a propósito (pedido explícito del usuario:
    "si este trabajo hace que POS también empiece a ser responsive,
    bienvenido").
-3. **~22 módulos propios de Admin-POS en total** (ver `ADMIN_POS_MODULES` en
-   `js/app.js`) — contexto general del patrón del código, no el alcance real
-   (ver más abajo: son solo 5 áreas). De 28 vistas totales, 24 traen su propio
-   `<style>` inline — no hay una convención centralizada de componentes.
-   Conteo aproximado: al menos 20 usos de `min-width` fijo en px repartidos en
-   esas vistas (celdas de tabla, inputs de modal) que van a desbordar en una
-   pantalla angosta — esperable también en las 5 vistas que sí están en
-   alcance (`productos.html`, `ordenes.html`, `cuenta_corriente_proveedores.html`,
-   `informes.html`, `caja.html`).
-4. **No hay convención de tabla ancha con scroll horizontal.** Algunas
-   pantallas lo resuelven ad hoc (`overflow-x:auto` puntual, visto hoy en
-   `compras_v2.js`), la mayoría probablemente no. Las pantallas de Admin-POS
-   son data-dense por naturaleza (historiales, cuentas corrientes, informes) —
-   esto va a aparecer en casi todas.
+3. ~~**~22 módulos propios de Admin-POS en total** — 20 usos de `min-width`
+   fijo repartidos en `productos.html`, `ordenes.html`,
+   `cuenta_corriente_proveedores.html`, `informes.html`, `caja.html`.~~ **✅
+   Resuelto para las 5 vistas en alcance** — cada una tiene su propio
+   `@media (max-width:768px)` con `body.admin-pos` (`caja.html` ya
+   refloweaba bien de entrada, no necesitó cambios). El resto de Admin-POS
+   (17 módulos) sigue sin tocar, a propósito — fuera de alcance.
+4. ~~**No hay convención de tabla ancha con scroll horizontal.**~~ **✅
+   No hizo falta una convención general** — cada tabla en alcance se
+   resolvió con su propio pasaje a cards (mismo patrón repetido: `thead`
+   oculto, `tr` a `display:flex`/`block`, columnas reordenadas con
+   `order`), no con scroll horizontal.
 5. **No hay framework CSS** (Tailwind, Bootstrap, etc.) — todo vanilla con
    variables (`css/variables.css`) y `<style>` por vista. Cualquier solución
    tiene que jugar con ese mismo enfoque.
@@ -158,11 +171,11 @@ pantallas para esto salvo que el usuario lo pida aparte.
 |---|---|---|---|
 | **Productos** | Consultar: stock, precio, costo | ✅ Hecho | Cards en mobile, `views/productos.html` + `js/modules/productos.js` |
 | Productos | Ver sustitutos y familia | Media — pendiente | Hoy son tabs dentro de `editor-producto.js` (`renderSustitutos`/`renderFamilia`, la página completa) — decidir si se reusa esa página responsive o se arma una vista de solo-consulta más liviana |
-| **Órdenes de Compra** | Consultar OC generadas | Alta — pendiente | `js/modules/ordenes.js` — lista + detalle de una orden. Alcanzable desde la barra inferior (`#ordenes`), la pantalla en sí no está adaptada todavía |
-| Órdenes de Compra | Generar una OC nueva | Media — pendiente | `js/modules/ordenes.js` — flujo "Generar Orden" (`generarOrdenCompra`, modal `ord-btn-generar`) |
-| **Proveedores** | Cargar pagos | Alta — pendiente | `js/modules/cuenta_corriente_proveedores.js` + `pago_proveedor_wizard.js` (mismo wizard que ya usa el botón "Pago a proveedor" del dashboard Inicio del POS — ver `js/modules/inicio.js`). Alcanzable desde la barra inferior (`#cuenta_corriente_proveedores`), pantalla sin adaptar |
-| Proveedores | Ver cuenta corriente | Alta — pendiente | `js/modules/cuenta_corriente_proveedores.js` — `getLedger`/`getLedgerAgrupado`, la vista de detalle por proveedor |
-| **Informes** | Solo "Ventas por Vendedor" — ningún otro reporte | Alta — pendiente | `js/modules/informes.js`, `id: 'ventas_vendedor'` (reporte #5). Alcanzable desde la barra inferior (`#informes`), pero hoy muestra el selector completo de 9 reportes + filtros de escritorio, no una vista recortada |
+| **Órdenes de Compra** | Consultar OC generadas | ✅ Hecho | Cards en mobile, `js/modules/ordenes.js` + `views/ordenes.html` |
+| Órdenes de Compra | Generar una OC nueva | Media — pendiente | `js/modules/ordenes.js` — flujo "Generar Orden" (`generarOrdenCompra`, modal `ord-btn-generar`). Sigue siendo cosa de la compu a propósito |
+| **Proveedores** | Cargar pagos | ✅ Hecho | Botón "Pagar" en la card + wizard existente (`pago_proveedor_wizard.js`) sin cambios |
+| Proveedores | Ver cuenta corriente | ✅ Hecho | Extracto agrupado por factura + pagos sin imputar, `js/modules/cuenta_corriente_proveedores.js` + `views/cuenta_corriente_proveedores.html` |
+| **Informes** | Solo "Ventas por Vendedor" — ningún otro reporte | ✅ Hecho | `js/modules/informes.js`, chips de período + "Elegir mes" |
 | **Cajas** | KPI de saldo actual por caja/medio de pago | ✅ Hecho | Terminó siendo parte del dashboard "Inicio" nuevo, ver abajo |
 
 **El KPI de Cajas terminó siendo, como se preveía, parte de algo más
