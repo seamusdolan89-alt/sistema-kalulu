@@ -109,6 +109,7 @@ sale "vacío" inesperadamente.
 | `test_gastos_generales.py` | Buscar un proveedor de servicios (`tipo_proveedor='servicios'`) y cargar un gasto |
 | `test_adelanto_pago.py` | Adelanto de Pago a proveedor (admin-only): se registra como crédito huérfano (`pagos_proveedores`), sin imputar todavía, listo para aplicarse a la próxima compra |
 | `test_informes.py` | Los 8 reportes de Informes (Ventas por Producto, Análisis de Productos, Ventas por Transacción, Quiebres de Stock, Ventas por Vendedor, Aging CC, Resumen Diario de Caja, Stock sin Movimiento) — verifica los números exactos, no solo que rendericen |
+| `test_informes_sustitutos_grupos.py` | Informes → "Grupos de Sustitutos": audita `producto_sustitutos` y detecta cadenas rotas (un producto apunta como referencia a otro que ya se unió a otro grupo distinto) |
 | `test_editor_producto.py` | Editor de Producto (página completa, no confundir con la lista de `productos.js`): crear producto nuevo, editar uno existente, y que el margen se recalcule automáticamente al cambiar el precio |
 
 Nota: toda compra en este sistema queda "Cta. Cte." — la condición de pago
