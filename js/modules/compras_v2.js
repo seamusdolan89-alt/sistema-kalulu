@@ -3032,10 +3032,10 @@ const ComprasV2 = (() => {
 
     const items = db().query(
       `SELECT ri.*, pr.nombre, pr.costo,
-              cb.codigo AS barcode
+              (SELECT codigo FROM codigos_barras
+               WHERE producto_id = pr.id AND es_principal = 1 LIMIT 1) AS barcode
        FROM remito_items ri
        JOIN productos pr ON pr.id = ri.producto_id
-       LEFT JOIN codigos_barras cb ON cb.producto_id = pr.id AND cb.es_principal = 1
        WHERE ri.remito_id = ?`,
       [remitoId]
     );
