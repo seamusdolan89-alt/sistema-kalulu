@@ -99,12 +99,15 @@ angosta (ver primer punto).
    compu fija del local, sin necesidad obvia de ser mobile), conviene agregar
    algo como `document.body.classList.add('admin-pos')` en
    `admin-pos/index.html` — no existe ese gancho todavía.
-3. **~22 módulos propios de Admin-POS** (ver `ADMIN_POS_MODULES` en
-   `js/app.js`), cada uno con su vista en `views/*.html`. De 28 vistas totales,
-   24 traen su propio `<style>` inline — no hay una convención centralizada de
-   componentes. Conteo aproximado: al menos 20 usos de `min-width` fijo en px
-   repartidos en esas vistas (celdas de tabla, inputs de modal) que van a
-   desbordar en una pantalla angosta.
+3. **~22 módulos propios de Admin-POS en total** (ver `ADMIN_POS_MODULES` en
+   `js/app.js`) — contexto general del patrón del código, no el alcance real
+   (ver más abajo: son solo 5 áreas). De 28 vistas totales, 24 traen su propio
+   `<style>` inline — no hay una convención centralizada de componentes.
+   Conteo aproximado: al menos 20 usos de `min-width` fijo en px repartidos en
+   esas vistas (celdas de tabla, inputs de modal) que van a desbordar en una
+   pantalla angosta — esperable también en las 5 vistas que sí están en
+   alcance (`productos.html`, `ordenes.html`, `cuenta_corriente_proveedores.html`,
+   `informes.html`, `caja.html`).
 4. **No hay convención de tabla ancha con scroll horizontal.** Algunas
    pantallas lo resuelven ad hoc (`overflow-x:auto` puntual, visto hoy en
    `compras_v2.js`), la mayoría probablemente no. Las pantallas de Admin-POS
@@ -114,15 +117,47 @@ angosta (ver primer punto).
    variables (`css/variables.css`) y `<style>` por vista. Cualquier solución
    tiene que jugar con ese mismo enfoque.
 
-**Sin decidir todavía — buenas preguntas para el usuario antes de tocar código:**
+**Alcance real, definido por el usuario (16/9/2026) — NO son las 22 pantallas.**
+Esto reemplaza el "sin decidir todavía" de la primera versión de esta entrada:
+son 5 áreas puntuales, con prioridad marcada, y el resto de Admin-POS
+(Clientes, Compras, Gastos, Usuarios, Configuración, Promociones, Etiquetas,
+Ajustes de stock, Flujo, etc.) **queda explícitamente afuera** — no tocar esas
+pantallas para esto salvo que el usuario lo pida aparte.
 
-- ¿Todo Admin-POS responsive, o un subconjunto priorizado (consulta rápida:
-  saldo de un cliente, aprobar un pago, mirar un informe) en vez de las 22
-  pantallas completas con edición full?
-- ¿Se anima a tocar `css/layout.css` sabiendo que afecta también al POS real,
-  o prefiere aislar todo detrás de una marca exclusiva de admin-pos primero?
-- ¿"Usable" alcanza (scrollea, se lee, funciona) o espera un rediseño visual
-  mobile-first para las pantallas prioritarias?
+| Área | Qué necesita ver/hacer | Prioridad | Dónde vive hoy |
+|---|---|---|---|
+| **Productos** | Consultar: stock, precio, costo | Alta | `js/modules/productos.js` (la lista — NO `editor-producto.js`, ver [[project_editor_producto]] en memoria) |
+| Productos | Ver sustitutos y familia | Media | Hoy son tabs dentro de `editor-producto.js` (`renderSustitutos`/`renderFamilia`, la página completa) — decidir si se reusa esa página responsive o se arma una vista de solo-consulta más liviana |
+| **Órdenes de Compra** | Consultar OC generadas | Alta | `js/modules/ordenes.js` — lista + detalle de una orden |
+| Órdenes de Compra | Generar una OC nueva | Media | `js/modules/ordenes.js` — flujo "Generar Orden" (`generarOrdenCompra`, modal `ord-btn-generar`) |
+| **Proveedores** | Cargar pagos | Alta | `js/modules/cuenta_corriente_proveedores.js` + `pago_proveedor_wizard.js` (mismo wizard que ya usa el botón "Pago a proveedor" del dashboard Inicio del POS — ver `js/modules/inicio.js`) |
+| Proveedores | Ver cuenta corriente | Alta | `js/modules/cuenta_corriente_proveedores.js` — `getLedger`/`getLedgerAgrupado`, la vista de detalle por proveedor |
+| **Informes** | Solo "Ventas por Vendedor" — ningún otro reporte | Alta | `js/modules/informes.js`, `id: 'ventas_vendedor'` (reporte #5). El resto de los 8 reportes no hace falta en mobile |
+| **Cajas** | KPI de saldo actual por caja/medio de pago | Alta | `js/modules/caja.js`, `renderOverview()` — el grid `.caja-overview-grid` ya usa `auto-fit`/`minmax`, es de los pocos lugares que ya reflowea razonablemente bien |
+
+**El KPI de Cajas es en realidad un pedido más grande: un dashboard "Inicio"
+propio para Admin-POS**, con saldo por caja + **Ticket promedio** + **Cantidad
+de ventas** del día — el mismo espíritu que `js/modules/inicio.js` (dashboard
+que ya existe, pero solo para POS; Admin-POS hoy arranca en `#productos` y no
+tiene "Inicio" en el menú — confirmado por `test_inicio_dashboard.py`, que
+además **assertea explícitamente que no lo tenga**, hay que actualizar ese
+test si esto cambia el arranque de escritorio también). Los cálculos de
+"ticket promedio" y "cantidad de ventas" no son nuevos: ya existen como
+`num_ventas` y `total_neto/num_ventas` en el reporte "Ventas por Vendedor" y
+en "Resumen Diario de Caja" (`js/modules/informes.js`) — es cuestión de
+reempaquetarlos en un KPI para "hoy", no de inventar la cuenta.
+
+**Decisión pendiente puntual sobre ese dashboard:** ¿arranca Admin-POS ahí
+siempre (cambiando el comportamiento actual también en escritorio), o el
+dashboard nuevo es *solo* la landing mobile (por debajo de cierto ancho),
+dejando el arranque en `#productos` intacto en desktop? Ver el test citado
+arriba antes de decidir — hoy garantiza lo segundo.
+
+**Sobre las decisiones técnicas ya no abiertas (siguen valiendo del
+relevamiento original):** el problema de navegación (sidebar sin reemplazo) y
+el CSS compartido sin marca que distinga Admin-POS del POS siguen siendo
+los primeros dos obstáculos a resolver, ahora acotados a estas 5 áreas en vez
+de las 22.
 
 ---
 
