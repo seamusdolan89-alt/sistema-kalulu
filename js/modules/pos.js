@@ -3838,13 +3838,14 @@ export const POS = (() => {
 
       for (const item of items) {
         const restoreStockSql = `
-          UPDATE stock SET cantidad = cantidad + ?, fecha_modificacion = ?, sync_status = ?
+          UPDATE stock SET cantidad = cantidad + ?, fecha_modificacion = ?, sync_status = ?, updated_at = ?
           WHERE producto_id = ? AND sucursal_id = ?
         `;
         window.SGA_DB.run(restoreStockSql, [
           item.cantidad,
           now,
           'pending',
+          now,
           item.producto_id,
           venta.sucursal_id
         ]);

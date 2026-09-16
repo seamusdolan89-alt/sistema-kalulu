@@ -202,9 +202,9 @@ const AjusteStock = (() => {
         );
 
         db().run(
-          `UPDATE stock SET cantidad = cantidad - ?, fecha_modificacion = ?
+          `UPDATE stock SET cantidad = cantidad - ?, fecha_modificacion = ?, sync_status = 'pending', updated_at = ?
            WHERE producto_id = ? AND sucursal_id = ?`,
-          [item.cantidad, now, item.productoId, sucursalId]
+          [item.cantidad, now, now, item.productoId, sucursalId]
         );
 
         db().run(
