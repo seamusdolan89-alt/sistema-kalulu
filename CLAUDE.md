@@ -12,6 +12,8 @@ Sistema de gestión de almacén (POS + administración) para un comercio real, e
 
 POS y Admin-POS son el **mismo código** (`js/modules/*.js`, router en `js/app.js`) corriendo en dos documentos distintos — por diseño son dos computadoras físicas separadas (ver `PUESTA_EN_MARCHA.md`). `window.ADMIN_MODE` decide qué archivo OPFS usar (`js/db.js` ~línea 74). Antes de tocar un módulo que se usa desde ambos lados, confirmá en qué contexto se prueba.
 
+Esto también vale para el **CSS global** (`css/reset.css`, `variables.css`, `layout.css`, `components.css`): son los mismos 4 archivos en las dos superficies — una regla nueva ahí pega en POS y Admin-POS por igual salvo que la limites explícitamente. Desde el trabajo de "Admin-POS responsive" (BACKLOG.md) sí existe un gancho en el DOM para eso: `js/app.js` (`init()`) agrega `body.classList.add('admin-pos')` cuando `window.ADMIN_MODE` es true — usalo (`body.admin-pos ...`) para CSS exclusivo de esa superficie en vez de asumir que no hay forma de distinguirlas.
+
 **Deploy:** GitHub Pages, sin build ni Actions — deploya automáticamente lo que esté en `main` (`https://seamusdolan89-alt.github.io/sistema-kalulu/...`). `firebase.json` solo configura Cloud Functions, no hosting.
 
 ## Router y cache-busting
@@ -23,6 +25,8 @@ La excepción son 5 archivos que se cargan con `<script src="...?v=N">` fijo en 
 ## Firebase: producción vs dev automático
 
 `js/firebase-config.js` elige el proyecto Firebase según el hostname: `localhost`/`127.0.0.1` → `dev-kalulu` (pruebas), cualquier otro dominio (GitHub Pages) → `kalulu-3139e` (producción). Probar en `http://localhost:8765` (o el puerto que sea) nunca toca datos reales — no hace falta nada especial para eso.
+
+**Login en un dispositivo nuevo (`views/login.html`):** si `?returnTo=` apunta a `admin-pos`, la página setea `window.ADMIN_MODE=true` ANTES de `SGA_DB.initialize()` (abre `sga-admin.db`, no `sga.db`) y, si esa base está vacía, corre `initialSyncFromFirestore()` (trae los usuarios reales) antes de dejar intentar el login — si no, un dispositivo que nunca entró a Admin-POS solo podía loguearse con el admin por defecto (`admin`/`kalulu123`) que crea `db.js` en la primera instalación, nunca con la contraseña real. El listener de submit del `<form>` se engancha de forma síncrona (antes de ese trabajo async) para que un click mientras el pre-sync está en curso no dispare un submit nativo del `<form>` sin handler todavía enganchado.
 
 ## Flujo de git: `dev` → `main`
 
@@ -59,7 +63,7 @@ python tests/e2e/test_pos_smoke.py               # correr un test puntual
 ```
 
 - `helpers.block_firebase` corta toda llamada de red a Firebase/GCP — ningún test puede tocar producción aunque quisiera.
-- `login_via_seed(page, admin_pos=True|False)` — `False` (default) loguea en POS y siembra `sga.db`; `True` loguea directo en `admin-pos/` y siembra `sga-admin.db` in place (login.html **siempre** escribe en `sga.db` sin importar `returnTo`, así que para Admin-POS hay que loguear ahí y sembrar aparte — ya resuelto por el helper).
+- `login_via_seed(page, admin_pos=True|False)` — `False` (default) loguea en POS y siembra `sga.db`; `True` loguea directo en `admin-pos/` y siembra `sga-admin.db` in place. Desde el fix de login en dispositivo nuevo (ver abajo), `login.html` con `?returnTo=admin-pos` ya abre `sga-admin.db` (no `sga.db`) y hace ADMIN_MODE=true antes de inicializar — pero el helper sigue sembrando datos demo aparte con `seed_in_place()` porque login.html solo crea el usuario admin por defecto, no productos/proveedores/categorías.
 - Cuando arreglás un bug, escribí el test ANTES de confirmar el fix como terminado: confirmá que falla sin el fix (revertilo con `git stash push -- <archivo>`, correr, `git stash pop`) y pasa con el fix. Es el estándar que se viene siguiendo en toda la suite.
 
 ## Convenciones reales del código

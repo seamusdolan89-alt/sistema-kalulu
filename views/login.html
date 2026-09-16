@@ -190,9 +190,43 @@
       color: var(--color-text-secondary);
       display: none;
     }
+
+    /* Overlay de sincronización previa al login — solo Admin-POS en un
+       dispositivo nuevo (ver script más abajo, "isAdminPos && isEmpty") */
+    .sync-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 999;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      color: #fff;
+      text-align: center;
+      padding: var(--spacing-xl);
+    }
+    .sync-overlay.show {
+      display: flex;
+    }
+    .sync-overlay p {
+      font-size: var(--font-size-sm);
+      color: #ddd;
+      max-width: 320px;
+    }
   </style>
 </head>
 <body>
+  <!-- Dispositivo nuevo entrando a Admin-POS: primero trae todo de Firestore
+       (incluidos los usuarios reales) antes de dejar intentar el login — ver
+       nota "isAdminPos" en el script de más abajo. -->
+  <div id="sync-overlay" class="sync-overlay">
+    <div class="spinner"></div>
+    <h2 style="font-size:1.1rem;margin:0">Preparando Admin-POS...</h2>
+    <p id="sync-progress">Conectando...</p>
+  </div>
+
   <div class="login-container">
     <div class="login-header">
       <h1 style="display:flex;align-items:center;justify-content:center;gap:10px"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5l1.2-5.5h15.6l1.2 5.5"/><path d="M3 9.5a2.2 2.2 0 0 0 4.4 0 2.2 2.2 0 0 0 4.4 0 2.2 2.2 0 0 0 4.4 0 2.2 2.2 0 0 0 4.4 0"/><path d="M5 9.5V20h14V9.5"/><path d="M9.5 20v-6.5h5V20"/></svg>Sistema Kalulu</h1>
@@ -235,59 +269,131 @@
     </div>
   </div>
 
-  <!-- Core modules (sin Firebase) -->
-  <script src="../js/utils.js"></script>
-  <script src="../js/db.js"></script>
-  <script src="../js/auth.js"></script>
+  <!-- Firebase SDK (9 compat) — solo se usa para el pull inicial de Admin-POS
+       en un dispositivo nuevo (ver script de más abajo). El login del POS
+       (sin ?returnTo=admin-pos) sigue siendo 100% local, no toca esto. -->
+  <script src="../js/firebase-config.js?v=46"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+
+  <!-- Core modules -->
+  <script src="../js/utils.js?v=46"></script>
+  <script src="../js/db.js?v=46"></script>
+  <script src="../js/auth.js?v=46"></script>
+  <script src="../js/sync.js?v=46"></script>
 
   <!-- Login script -->
   <script>
-    (async function() {
+    (function() {
       'use strict';
-
-      // Inicializar base de datos
-      try {
-        await window.SGA_DB.initialize();
-      } catch (error) {
-        document.getElementById('error-alert').textContent = 'Error al inicializar la base de datos: ' + error.message;
-        document.getElementById('error-alert').classList.add('show');
-        return;
-      }
-
-      // Inicializar auth (solo restaura sesión si ya existía)
-      await window.SGA_Auth.initialize();
 
       // URL de retorno (admin-pos pasa ?returnTo=../admin-pos/). Sin ese
       // param, el destino es el POS del local — arranca en el dashboard de
       // Inicio (ver js/app.js), no directo en #pos.
       const returnTo = new URLSearchParams(location.search).get('returnTo') || '../index.html#inicio';
 
-      // Si ya hay sesión activa, redirigir directamente
-      if (window.SGA_Auth.isAuthenticated()) {
-        window.location.href = returnTo;
-        return;
-      }
+      // ADMIN_MODE tiene que estar seteado ANTES de inicializar la DB: decide
+      // qué archivo OPFS abre js/db.js (sga-admin.db vs sga.db, ver ~línea 74
+      // ahí). Antes de este fix, login.html siempre abría sga.db sin importar
+      // el destino — en un dispositivo que nunca entró a admin-pos, el chequeo
+      // de contraseña corría contra una base vacía/equivocada y nadie podía
+      // loguearse con su contraseña real (solo con el admin por defecto que
+      // crea db.js en la primera instalación, ver "Primera vez" ahí).
+      const isAdminPos = returnTo.includes('admin-pos');
+      if (isAdminPos) window.ADMIN_MODE = true;
 
-      // Mostrar sección dev si corresponde
-      if (localStorage.getItem('dev_mode') === 'true') {
-        document.getElementById('dev-section').classList.add('show');
-      }
+      const errorAlert = document.getElementById('error-alert');
+      const loginBtn   = document.getElementById('login-btn');
+      const loading    = document.getElementById('loading');
+
+      // Todo el trabajo async (init de DB/auth + el pre-sync de admin-pos)
+      // vive en esta promesa, y el <form> engancha su listener de submit
+      // ANTES de arrancarla (más abajo) — a propósito: si el listener se
+      // engancha recién después de awaitear esto (como estaba antes), un
+      // click en "Ingresar" mientras el pre-sync todavía está en curso (el
+      // overlay tapando la pantalla puede durar varios segundos reales
+      // contra Firestore) no encuentra ningún handler todavía, y el <form>
+      // hace un submit NATIVO (recarga la página) — interrumpe la sync a
+      // mitad de camino y deja la DB local en un estado inconsistente. Con
+      // el listener ya enganchado desde el vamos, cualquier click llama
+      // siempre a preventDefault() primero, y recién después espera esta
+      // promesa antes de chequear la contraseña.
+      const ready = (async () => {
+        try {
+          await window.SGA_DB.initialize();
+        } catch (error) {
+          errorAlert.textContent = 'Error al inicializar la base de datos: ' + error.message;
+          errorAlert.classList.add('show');
+          throw error;
+        }
+
+        // Inicializar auth (solo restaura sesión si ya existía)
+        await window.SGA_Auth.initialize();
+
+        // Si ya hay sesión activa, redirigir directamente
+        if (window.SGA_Auth.isAuthenticated()) {
+          window.location.href = returnTo;
+          return;
+        }
+
+        // Admin-POS en un dispositivo nuevo: la base local recién abierta
+        // solo tiene el admin por defecto (admin/kalulu123) — sin esto no
+        // hay forma de entrar con la contraseña real hasta DESPUÉS de
+        // loguearse (la sincronización completa hoy corre recién en
+        // admin-pos/index.html, una vez adentro). Si se ve vacía, traer todo
+        // de Firestore (usuarios con la contraseña real incluidos) antes de
+        // dejar intentar el login. Si falla (sin internet, o bloqueado como
+        // en los tests e2e) se sigue de largo con los datos locales — mismo
+        // criterio que el resto de la app (ver initialSyncFromFirestore en
+        // admin-pos/index.html).
+        if (isAdminPos) {
+          const overlay = document.getElementById('sync-overlay');
+          try {
+            const productCount = window.SGA_DB.query('SELECT COUNT(*) as n FROM productos');
+            const isEmpty = !productCount || productCount[0]?.n === 0;
+            if (isEmpty && window.SGA_Sync?.initialSyncFromFirestore) {
+              const progressEl = document.getElementById('sync-progress');
+              overlay.classList.add('show');
+              loginBtn.disabled = true;
+              await window.SGA_Sync.initialSyncFromFirestore((msg) => {
+                if (progressEl) progressEl.textContent = msg;
+              });
+            }
+          } catch (err) {
+            console.warn('Sync inicial previa al login falló (se sigue con los datos locales):', err.message);
+          } finally {
+            overlay.classList.remove('show');
+            loginBtn.disabled = false;
+          }
+        }
+
+        // Mostrar sección dev si corresponde
+        if (localStorage.getItem('dev_mode') === 'true') {
+          document.getElementById('dev-section').classList.add('show');
+        }
+      })();
 
       // Submit del formulario
       document.getElementById('login-form').addEventListener('submit', async (e) => {
         e.preventDefault();
 
-        const username = document.getElementById('username').value;
-        const password = document.getElementById('password').value;
-        const errorAlert = document.getElementById('error-alert');
-        const loginBtn = document.getElementById('login-btn');
-        const loading = document.getElementById('loading');
+        loginBtn.disabled = true;
+        loading.classList.add('show');
+        errorAlert.classList.remove('show');
 
         try {
-          loginBtn.disabled = true;
-          loading.classList.add('show');
-          errorAlert.classList.remove('show');
+          await ready; // DB/auth listas y, si corresponde, el pre-sync de admin-pos ya terminó
+        } catch (_) {
+          // El error de inicialización de la DB ya se muestra arriba
+          loading.classList.remove('show');
+          return;
+        }
 
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+
+        try {
           await window.SGA_Auth.login(username, password);
           window.location.href = returnTo;
         } catch (error) {
@@ -315,6 +421,7 @@
         try {
           statusEl.style.display = 'block';
           restoreBtn.disabled = true;
+          await ready.catch(() => {});
           await window.SGA_DB.importarBackup(file);
           alert('Backup restaurado correctamente. La página se va a recargar.');
           location.reload();
@@ -326,7 +433,8 @@
         e.target.value = '';
       });
 
-      // Botón seed (modo dev)
+      // Botón seed (modo dev) — solo se ve tras ready() (dev-section), así
+      // que para cuando es clickeable la DB ya está lista.
       document.getElementById('seed-btn')?.addEventListener('click', async () => {
         const seedBtn = document.getElementById('seed-btn');
         try {
