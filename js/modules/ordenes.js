@@ -358,6 +358,33 @@ const Ordenes = (() => {
   }
 
   /**
+   * Agrega a la orden un producto que todavía no existe en el catálogo (una
+   * novedad que el proveedor ofrece). No tiene producto_id: viaja solo con
+   * la descripción que se tipeó, y las columnas de stock/ventas/sugerencia
+   * no aplican (quedan NULL — se muestran como "—", no como cero).
+   */
+  function agregarItemLibre(ordenId, descripcion) {
+    const desc = (descripcion || '').trim();
+    if (!desc) return false;
+
+    const ts = now();
+    db().run(`
+      INSERT INTO orden_compra_items
+        (id, orden_id, producto_id, cantidad_pedida, estado,
+         stock_actual, stock_minimo, cantidad_deseada,
+         ventas_30d, ventas_prom_6m, dias_sin_stock_6m,
+         cantidad_sugerida, cantidad_final, unidad_pedida, descripcion_libre)
+      VALUES (?, ?, NULL, ?, 'pendiente', NULL, NULL, NULL, NULL, NULL, NULL, ?, NULL, ?, ?)
+    `, [uuid(), ordenId, 1, 1, 'unidad', desc]);
+
+    db().run(
+      `UPDATE ordenes_compra SET sync_status = 'pending', updated_at = ? WHERE id = ?`,
+      [ts, ordenId]
+    );
+    return true;
+  }
+
+  /**
    * Reordena los items de una orden alfabéticamente por nombre de producto,
    * de forma persistente (no es un sort de UI que se pierde al recargar).
    *
@@ -382,7 +409,7 @@ const Ordenes = (() => {
       FROM orden_compra_items oi
       LEFT JOIN productos pr ON pr.id = oi.producto_id
       WHERE oi.orden_id = ?
-      ORDER BY pr.nombre COLLATE NOCASE ASC
+      ORDER BY COALESCE(pr.nombre, oi.descripcion_libre) COLLATE NOCASE ASC
     `, [ordenId]);
     if (rows.length < 2) return; // nada que reordenar
 
@@ -421,6 +448,9 @@ const Ordenes = (() => {
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const fmt$ = n => window.SGA_Utils.formatCurrency(n);
   const fmtN = n => (n == null ? '—' : Number(n).toLocaleString('es-AR', { maximumFractionDigits: 1 }));
+  // Nombre a mostrar: el del catálogo, o la descripción libre si el item es
+  // una novedad sin producto_id (ver agregarItemLibre).
+  const nombreItem = it => esc(it.producto_nombre || it.descripcion_libre || '—');
 
   const DIAS_SEMANA = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
@@ -681,20 +711,22 @@ const Ordenes = (() => {
     ui.panelAbierto = false;
 
     tbody.innerHTML = orden.items.map(it => {
+      const esLibre = !it.producto_id;
       const dias = it.dias_sin_stock_6m || 0;
-      const diasCls = dias === 0 ? 'ord-dias-ok' : dias <= 5 ? 'ord-dias-warn' : 'ord-dias-crit';
+      const diasCls = esLibre ? '' : (dias === 0 ? 'ord-dias-ok' : dias <= 5 ? 'ord-dias-warn' : 'ord-dias-crit');
       const cantFinal = it.cantidad_final != null ? it.cantidad_final : it.cantidad_sugerida;
       const unidad    = it.unidad_pedida || it.prod_pedido_unidad || 'unidad';
+      const nombre    = nombreItem(it) + (esLibre ? ' <span class="ord-tag-libre" title="No está en el catálogo — se pidió como novedad">nuevo</span>' : '');
 
       if (editable) {
         // producto_id y nombre viajan en el <tr> porque el panel los necesita
         // y ya no hay botones por accion de donde leerlos.
         return `<tr data-item-id="${esc(it.id)}" data-prod="${esc(it.producto_id)}"
-                    data-nombre="${esc(it.producto_nombre || '')}">
+                    data-nombre="${esc(it.producto_nombre || it.descripcion_libre || '')}">
           <td><input class="ord-cell-input ord-cell-input-cod" type="text"
             value="${esc(it.codigo_proveedor || '')}" placeholder="—"
             style="width:80px;text-align:left"></td>
-          <td>${esc(it.producto_nombre || '—')}</td>
+          <td>${nombre}</td>
           <td>${fmtN(it.stock_actual)}</td>
           <td>${fmtN(it.stock_minimo)}</td>
           <td>
@@ -707,7 +739,7 @@ const Ordenes = (() => {
           </td>
           <td>${fmtN(it.ventas_30d)}</td>
           <td>${fmtN(it.ventas_prom_6m)}</td>
-          <td class="${diasCls}">${dias}</td>
+          <td class="${diasCls}">${esLibre ? '—' : dias}</td>
           <td><input class="ord-cell-input ord-cell-input-text" type="text"
             value="${esc(it.notas || '')}" placeholder="—"></td>
           <td class="ord-acciones-cell" style="white-space:nowrap;text-align:right">
@@ -718,7 +750,7 @@ const Ordenes = (() => {
       } else {
         return `<tr>
           <td>${esc(it.codigo_proveedor || '—')}</td>
-          <td>${esc(it.producto_nombre || '—')}</td>
+          <td>${nombre}</td>
           <td>${fmtN(it.stock_actual)}</td>
           <td style="font-weight:700">${esc(labelApedir(cantFinal, unidad))}</td>
           <td>${esc(it.notas || '—')}</td>
@@ -829,18 +861,26 @@ const Ordenes = (() => {
   function abrirPanelFila() {
     cerrarPanelFila();
     if (!ui.focusedItemId) return;
-    const celda = ge('ord-items-tbody')
-      ?.querySelector(`tr[data-item-id="${ui.focusedItemId}"] .ord-acciones-cell`);
+    const row = ge('ord-items-tbody')?.querySelector(`tr[data-item-id="${ui.focusedItemId}"]`);
+    const celda = row?.querySelector('.ord-acciones-cell');
     if (!celda) return;   // orden ya confirmada: la fila no es editable
+
+    // Cambiar proveedor / asociar sustituto / pausar reposición operan sobre
+    // un producto del catálogo — no aplican a un item de texto libre (sin
+    // producto_id, ver agregarItemLibre).
+    const esLibre = !row.dataset.prod;
+    const acciones = esLibre
+      ? PANEL_ACCIONES.filter(a => !['prov', 'sust', 'pausa'].includes(a.accion))
+      : PANEL_ACCIONES;
 
     const div = document.createElement('div');
     div.className = 'ord-panel-fila';
     div.setAttribute('role', 'group');
     div.setAttribute('aria-label', 'Acciones del producto');
-    div.innerHTML = PANEL_ACCIONES.map((a, i) =>
+    div.innerHTML = acciones.map(a =>
       // El separador divide lo que se agrego (proveedor, sustituto, pausa) de
       // lo que la fila ya hacia (editar cantidad, quitar).
-      (i === 3 ? '<span class="ord-panel-sep"></span>' : '') +
+      (a.accion === 'cant' ? '<span class="ord-panel-sep"></span>' : '') +
       `<button class="ord-panel-acc${a.peligro ? ' peligro' : ''}" data-panel-acc="${a.accion}">` +
         `<span class="ord-panel-tecla">${esc(a.tecla)}</span>${esc(a.label)}</button>`
     ).join('');
@@ -861,6 +901,13 @@ const Ordenes = (() => {
     const prodId = row.dataset.prod;
     const nombre = row.dataset.nombre;
     cerrarPanelFila();
+
+    // El boton no se renderiza para estas 3 en una fila de texto libre, pero
+    // el atajo de teclado (PANEL_ACCIONES es fijo) igual podria dispararlas.
+    if (!prodId && ['prov', 'sust', 'pausa'].includes(accion)) {
+      showToast('Esta fila no tiene producto de catálogo asociado', 'error');
+      return;
+    }
 
     if (accion === 'prov')       openCambiarProvOverlay(itemId, prodId, nombre);
     else if (accion === 'sust')  openSustitutoOverlay(itemId, prodId, nombre);
@@ -1564,7 +1611,7 @@ const Ordenes = (() => {
             const unidad    = it.unidad_pedida || it.prod_pedido_unidad || 'unidad';
             const bg = i % 2 === 0 ? '#fff' : '#f4f6f9';
             return `<tr style="background:${bg}">
-              <td style="padding: 8px 12px; border: 1px solid #d0d7e3; color: #000;">${esc(it.producto_nombre || '—')}</td>
+              <td style="padding: 8px 12px; border: 1px solid #d0d7e3; color: #000;">${nombreItem(it)}</td>
               <td style="padding: 8px 12px; border: 1px solid #d0d7e3; color: #000; text-align: right; font-weight: 600;">${esc(labelApedir(cantFinal, unidad))}</td>
             </tr>`;
           }).join('')}
@@ -1901,7 +1948,8 @@ const Ordenes = (() => {
 
   function buscarProductosAgregar(q) {
     agHlIdx = -1;
-    if (!q.trim()) { ge('ord-agregar-results').innerHTML = ''; return; }
+    const texto = q.trim();
+    if (!texto) { ge('ord-agregar-results').innerHTML = ''; return; }
     const res = db().query(`
       SELECT p.id, p.nombre, COALESCE(st.cantidad, 0) AS stock
       FROM productos p
@@ -1915,13 +1963,25 @@ const Ordenes = (() => {
       LIMIT 20
     `, [ui.user.sucursal_id, `%${q}%`, ...Buscador.variantesCodigo(q)]);
 
-    ge('ord-agregar-results').innerHTML = res.length
+    const resultsHtml = res.length
       ? res.map(p => `
           <div class="ord-search-result" data-add-prod="${esc(p.id)}">
             <span style="font-weight:600">${esc(p.nombre)}</span>
             <span style="color:#607080;font-size:11px">Stock: ${fmtN(p.stock)}</span>
           </div>`).join('')
-      : '<p style="color:#8090a0;padding:8px 0">Sin resultados.</p>';
+      : '<p style="color:#8090a0;padding:8px 0">Sin resultados en el catálogo.</p>';
+
+    // Para pedir una novedad que el proveedor ofrece pero que todavía no
+    // está cargada como producto — ver agregarItemLibre. Siempre visible con
+    // texto tipeado, no solo cuando no hay resultados: puede que el usuario
+    // ya sepa que es nuevo y no quiera ni buscar.
+    const libreHtml = `
+      <div class="ord-search-result ord-search-result-libre" data-add-libre="1">
+        <span>+ Agregar “${esc(texto)}” como producto nuevo</span>
+        <span style="color:#607080;font-size:11px">No está en el catálogo</span>
+      </div>`;
+
+    ge('ord-agregar-results').innerHTML = resultsHtml + libreHtml;
 
     ge('ord-agregar-results').querySelectorAll('[data-add-prod]').forEach(el =>
       el.addEventListener('click', () => {
@@ -1931,6 +1991,13 @@ const Ordenes = (() => {
         else showToast('Error al agregar producto', 'error');
       })
     );
+
+    ge('ord-agregar-results').querySelector('[data-add-libre]')?.addEventListener('click', () => {
+      const ok = agregarItemLibre(ui.ordenActiva, texto);
+      ge('ord-agregar-overlay').style.display = 'none';
+      if (ok) { renderOrden(); renderTabs(); showToast('Producto agregado como novedad (fuera de catálogo)'); }
+      else showToast('Error al agregar producto', 'error');
+    });
   }
 
   // ── INIT ─────────────────────────────────────────────────────────────────────
@@ -1972,7 +2039,7 @@ const Ordenes = (() => {
       buscarProductosAgregar(e.target.value)
     );
     ge('ord-agregar-search')?.addEventListener('keydown', e => {
-      const items = ge('ord-agregar-results')?.querySelectorAll('[data-add-prod]') || [];
+      const items = ge('ord-agregar-results')?.querySelectorAll('[data-add-prod], [data-add-libre]') || [];
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         if (!items.length) return;
@@ -2025,6 +2092,7 @@ const Ordenes = (() => {
     guardarItem,
     eliminarItem,
     agregarItem,
+    agregarItemLibre,
     stockEfectivo,
   };
 })();

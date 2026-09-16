@@ -108,7 +108,7 @@ def main():
         page.wait_for_timeout(300)
         page.locator("#ord-agregar-search").type("AAA Agua", delay=20)
         page.wait_for_timeout(400)
-        page.locator(".ord-search-result", has_text="AAA Agua Mineral").click()
+        page.locator(".ord-search-result[data-add-prod]", has_text="AAA Agua Mineral").click()
         page.wait_for_timeout(400)
 
         print("--- Verificar orden de las filas ---")

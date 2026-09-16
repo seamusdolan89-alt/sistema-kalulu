@@ -805,6 +805,14 @@
       "ALTER TABLE orden_compra_items ADD COLUMN cantidad_sugerida REAL",
       "ALTER TABLE orden_compra_items ADD COLUMN cantidad_final REAL",
       "ALTER TABLE orden_compra_items ADD COLUMN unidad_pedida TEXT DEFAULT 'unidad'",
+      // notas nunca tuvo su ALTER: la UI (ordenes.js) llevaba meses leyendo y
+      // escribiendo esta columna como si existiera — el UPDATE fallaba en
+      // silencio (db().run() traga el error) y el comentario que la cajera
+      // tipeaba jamas se guardaba. Ver tambien applyOrdenCompra en sync.js.
+      "ALTER TABLE orden_compra_items ADD COLUMN notas TEXT",
+      // Producto pedido a un proveedor que todavia no existe en el catalogo
+      // (una novedad). producto_id queda NULL y la descripcion vive aca.
+      "ALTER TABLE orden_compra_items ADD COLUMN descripcion_libre TEXT",
       // etiquetas: auditoría de impresión y cambio de precio
       "ALTER TABLE productos ADD COLUMN ultima_impresion_etiqueta TEXT",
       "ALTER TABLE productos ADD COLUMN ultima_modificacion_precio TEXT",
