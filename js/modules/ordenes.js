@@ -1581,11 +1581,22 @@ const Ordenes = (() => {
   // ── EXPORTAR IMAGEN / PDF ────────────────────────────────────────────────────
 
   /**
-   * Tabla Descripción/Pedido compartida entre "Exportar imagen" (html2canvas,
-   * termina en un PNG) y "Exportar PDF" (impresión nativa del navegador). Se
-   * factoriza para que ambos exports muestren siempre lo mismo.
+   * Tabla Descripción/Pedido(/Notas) compartida entre "Exportar imagen"
+   * (html2canvas, termina en un PNG) y "Exportar PDF" (impresión nativa del
+   * navegador). Se factoriza para que ambos exports muestren siempre lo mismo.
+   *
+   * La columna Notas solo se agrega si algún item de la orden tiene una nota
+   * cargada — si ninguno tiene, ocupaba espacio mostrando "—" en todas las
+   * filas para nada.
    */
   function construirTablaOrdenHtml(orden) {
+    const conNotas = orden.items.some(it => (it.notas || '').trim());
+    const thNotas = conNotas ? `
+            <th style="
+              padding: 9px 12px; text-align: left; color: #fff;
+              font-weight: 700; font-size: 12px; text-transform: uppercase;
+              letter-spacing: 0.04em; border: 1px solid #1a2e4a;
+            ">Notas</th>` : '';
     return `
       <table style="
         width: auto; border-collapse: collapse;
@@ -1602,7 +1613,7 @@ const Ordenes = (() => {
               padding: 9px 12px; text-align: right; color: #fff;
               font-weight: 700; font-size: 12px; text-transform: uppercase;
               letter-spacing: 0.04em; border: 1px solid #1a2e4a;
-            ">Pedido</th>
+            ">Pedido</th>${thNotas}
           </tr>
         </thead>
         <tbody>
@@ -1610,9 +1621,12 @@ const Ordenes = (() => {
             const cantFinal = it.cantidad_final != null ? it.cantidad_final : it.cantidad_sugerida;
             const unidad    = it.unidad_pedida || it.prod_pedido_unidad || 'unidad';
             const bg = i % 2 === 0 ? '#fff' : '#f4f6f9';
+            const tdNotas = conNotas
+              ? `<td style="padding: 8px 12px; border: 1px solid #d0d7e3; color: #000;">${esc(it.notas || '—')}</td>`
+              : '';
             return `<tr style="background:${bg}">
               <td style="padding: 8px 12px; border: 1px solid #d0d7e3; color: #000;">${nombreItem(it)}</td>
-              <td style="padding: 8px 12px; border: 1px solid #d0d7e3; color: #000; text-align: right; font-weight: 600;">${esc(labelApedir(cantFinal, unidad))}</td>
+              <td style="padding: 8px 12px; border: 1px solid #d0d7e3; color: #000; text-align: right; font-weight: 600;">${esc(labelApedir(cantFinal, unidad))}</td>${tdNotas}
             </tr>`;
           }).join('')}
         </tbody>
