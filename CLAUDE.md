@@ -12,6 +12,8 @@ Sistema de gestión de almacén (POS + administración) para un comercio real, e
 
 POS y Admin-POS son el **mismo código** (`js/modules/*.js`, router en `js/app.js`) corriendo en dos documentos distintos — por diseño son dos computadoras físicas separadas (ver `PUESTA_EN_MARCHA.md`). `window.ADMIN_MODE` decide qué archivo OPFS usar (`js/db.js` ~línea 74). Antes de tocar un módulo que se usa desde ambos lados, confirmá en qué contexto se prueba.
 
+Esto también vale para el **CSS global** (`css/reset.css`, `variables.css`, `layout.css`, `components.css`): son los mismos 4 archivos en las dos superficies, sin ninguna clase ni selector que hoy las distinga (a diferencia de JS, que sí tiene `window.ADMIN_MODE`) — una regla nueva ahí pega en POS y Admin-POS por igual. Si hace falta CSS exclusivo de una superficie, no existe todavía el gancho para aislarlo (ver BACKLOG.md, "Admin-POS responsive").
+
 **Deploy:** GitHub Pages, sin build ni Actions — deploya automáticamente lo que esté en `main` (`https://seamusdolan89-alt.github.io/sistema-kalulu/...`). `firebase.json` solo configura Cloud Functions, no hosting.
 
 ## Router y cache-busting

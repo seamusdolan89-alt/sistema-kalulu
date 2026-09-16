@@ -65,6 +65,65 @@ para no terminar con dos lugares donde se vende y que uno quede atrás del otro.
 
 ---
 
+### Admin-POS responsive — para usar desde el celular
+
+**Estado: sin implementar. Relevado el 2026-09-16 para que la sesión que lo
+encare arranque informada, sin tener que redescubrir esto.**
+
+El pedido: poder usar Admin-POS desde el teléfono. Hoy no se puede — no es que
+se vea mal, es que **la navegación desaparece por completo** en una pantalla
+angosta (ver primer punto).
+
+**Lo que ya está, verificado:**
+
+- El `<meta viewport>` ya está en los tres entry points (`index.html`,
+  `admin-pos/index.html`, `views/login.html`) — no es lo que falta.
+
+**Lo que hace que esto sea más que "agregar un par de media queries":**
+
+1. **El sidebar desaparece sin reemplazo por debajo de 768px.** Ya existe un
+   único `@media (max-width: 768px)` en `css/layout.css` (~línea 243) que hace
+   `aside.sidebar { display: none; }` — pero no agrega ninguna navegación en su
+   lugar (nada de hamburguesa, drawer, bottom nav). Confirmado por grep: no
+   existe ningún "hamburger"/"toggle"/"mobile-nav" en toda la base. El sidebar
+   es la ÚNICA navegación entre módulos que existe hoy — sin él, entrar desde
+   un celular deja a cualquiera de las dos superficies sin forma de moverse
+   entre pantallas. Esto es lo primero que hay que resolver, antes que
+   cualquier otra cosa.
+2. **El CSS es compartido entre POS y Admin-POS** (ver CLAUDE.md, sección "Las
+   tres superficies") — los mismos 4 archivos, sin ninguna marca en el DOM que
+   distinga una superficie de la otra para CSS (JS sí tiene
+   `window.ADMIN_MODE`; CSS no tiene equivalente). Cualquier regla nueva en
+   `css/layout.css`/`components.css` pega en POS también. Si se quiere
+   responsive exclusivo de Admin-POS sin arriesgar el layout del POS real (una
+   compu fija del local, sin necesidad obvia de ser mobile), conviene agregar
+   algo como `document.body.classList.add('admin-pos')` en
+   `admin-pos/index.html` — no existe ese gancho todavía.
+3. **~22 módulos propios de Admin-POS** (ver `ADMIN_POS_MODULES` en
+   `js/app.js`), cada uno con su vista en `views/*.html`. De 28 vistas totales,
+   24 traen su propio `<style>` inline — no hay una convención centralizada de
+   componentes. Conteo aproximado: al menos 20 usos de `min-width` fijo en px
+   repartidos en esas vistas (celdas de tabla, inputs de modal) que van a
+   desbordar en una pantalla angosta.
+4. **No hay convención de tabla ancha con scroll horizontal.** Algunas
+   pantallas lo resuelven ad hoc (`overflow-x:auto` puntual, visto hoy en
+   `compras_v2.js`), la mayoría probablemente no. Las pantallas de Admin-POS
+   son data-dense por naturaleza (historiales, cuentas corrientes, informes) —
+   esto va a aparecer en casi todas.
+5. **No hay framework CSS** (Tailwind, Bootstrap, etc.) — todo vanilla con
+   variables (`css/variables.css`) y `<style>` por vista. Cualquier solución
+   tiene que jugar con ese mismo enfoque.
+
+**Sin decidir todavía — buenas preguntas para el usuario antes de tocar código:**
+
+- ¿Todo Admin-POS responsive, o un subconjunto priorizado (consulta rápida:
+  saldo de un cliente, aprobar un pago, mirar un informe) en vez de las 22
+  pantallas completas con edición full?
+- ¿Se anima a tocar `css/layout.css` sabiendo que afecta también al POS real,
+  o prefiere aislar todo detrás de una marca exclusiva de admin-pos primero?
+- ¿"Usable" alcanza (scrollea, se lee, funciona) o espera un rediseño visual
+  mobile-first para las pantallas prioritarias?
+
 ---
 
 *Agregar acá lo que se sepa pendiente — no hace falta esperar a que esté "bien redactado", una línea alcanza.*
