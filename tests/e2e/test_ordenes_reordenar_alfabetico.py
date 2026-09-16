@@ -150,7 +150,9 @@ def main():
         page.wait_for_timeout(300)
         page.locator("#ord-agregar-search").type("Aceite Natura", delay=20)
         page.wait_for_timeout(400)
-        page.locator(".ord-search-result", has_text="Aceite Natura").click()
+        # [data-add-prod] excluye la opcion "agregar como texto libre" (su texto
+        # tambien contiene lo tipeado, ej. Agregar "Aceite Natura" como nuevo).
+        page.locator(".ord-search-result[data-add-prod]", has_text="Aceite Natura").click()
         page.wait_for_timeout(400)
 
         final = nombres_actuales()

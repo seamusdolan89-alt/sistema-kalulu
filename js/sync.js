@@ -724,18 +724,22 @@
     window.SGA_DB.run(`DELETE FROM orden_compra_items WHERE orden_id = ?`, [data.id]);
 
     for (const item of (data._items || [])) {
-      // Las 18 columnas de la tabla. Antes se insertaban 8 y las otras 10
+      // Las 20 columnas de la tabla. Antes se insertaban 8 y las otras 10
       // llegaban vacias: stock_actual, stock_minimo, cantidad_sugerida y
       // demas quedaban en cero del otro lado, asi que la orden se veia con
       // todos los productos en cero aunque el push las mandaba (oi.*).
+      // notas y descripcion_libre faltaban del todo (bug real: un pull
+      // pisaba con NULL cualquier comentario que la cajera hubiera tipeado
+      // y borraba la descripcion de un producto fuera de catalogo).
       window.SGA_DB.run(`
         INSERT OR REPLACE INTO orden_compra_items
           (id, orden_id, producto_id, cantidad_pedida, cantidad_recibida, estado,
            costo_unitario, costo_anterior, codigo_proveedor,
            stock_actual, stock_minimo, cantidad_deseada,
            ventas_30d, ventas_prom_6m, dias_sin_stock_6m,
-           cantidad_sugerida, cantidad_final, unidad_pedida)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           cantidad_sugerida, cantidad_final, unidad_pedida,
+           notas, descripcion_libre)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [item.id, data.id, item.producto_id,
          item.cantidad_pedida, item.cantidad_recibida || 0,
          item.estado || 'pendiente',
@@ -746,7 +750,8 @@
          item.ventas_30d || 0, item.ventas_prom_6m || 0,
          item.dias_sin_stock_6m || 0,
          item.cantidad_sugerida ?? null, item.cantidad_final ?? null,
-         item.unidad_pedida || 'unidad']
+         item.unidad_pedida || 'unidad',
+         item.notas ?? null, item.descripcion_libre ?? null]
       );
     }
   }
