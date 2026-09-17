@@ -14,13 +14,23 @@ adentro de `admin-pos/index.html`.
 Fix en `views/login.html`:
 1. Si `returnTo` apunta a admin-pos, `window.ADMIN_MODE = true` ANTES de
    `SGA_DB.initialize()` — abre `sga-admin.db`, la base correcta.
-2. Si esa base está vacía, corre `initialSyncFromFirestore()` (trae los
-   usuarios reales) ANTES de dejar intentar el login.
+2. Si esa base está vacía, corre `SGA_Sync.pullUsuariosOnly()` (trae SOLO
+   `usuarios`, no initialSyncFromFirestore completo — ver nota 16/9 más
+   abajo) ANTES de dejar intentar el login.
 3. El listener de submit del `<form>` se engancha de forma SÍNCRONA, antes de
    arrancar ese trabajo async — si no, un click en "Ingresar" mientras el
    pre-sync todavía está en curso no encuentra ningún handler y el `<form>`
    (sin `action`) hace un submit NATIVO: recarga la página a mitad de camino
    y vuelve a sembrar un admin por defecto (con un id random nuevo) cada vez.
+
+Nota 16/9: la primera versión de este fix llamaba a
+`initialSyncFromFirestore()` completo (~28 colecciones) antes del login. En
+`dev-kalulu` no se notaba, pero contra producción real (meses de
+ventas/compras acumuladas) tardaba minutos en una conexión de celular antes
+de mostrar siquiera el formulario — el usuario lo reportó probándolo en su
+teléfono. Se acotó a `pullUsuariosOnly()` (solo la colección `usuarios`); el
+resto de los datos sigue llegando igual que siempre, pero DESPUÉS de
+loguearse (el overlay ya existente de admin-pos/index.html).
 
 Este test corre con `block_firebase` activo (como el resto de la suite), así
 que NO puede probar el pull real contra Firestore — eso se verificó a mano
@@ -33,6 +43,8 @@ la red local:
 2. Clickear "Ingresar" apenas aparece el botón (antes de que el pre-sync,
    bloqueado, llegue a resolverse) no dispara un submit nativo del `<form>`
    ni duplica el admin por defecto.
+3. El pre-login llama a `pullUsuariosOnly()`, NO a `initialSyncFromFirestore()`
+   completo — regresión del problema de lentitud del 16/9.
 
 Correr (server ya levantado en :8765, ver README.md):
 
@@ -56,6 +68,30 @@ def run():
         context.route("**/*", block_firebase)
         page = context.new_page()
 
+        # Espia SGA_Sync.pullUsuariosOnly / initialSyncFromFirestore ANTES de
+        # que js/sync.js siquiera exista (window.SGA_Sync se define recien
+        # cuando ese script corre) -- un defineProperty en window intercepta
+        # la asignacion real y envuelve los dos metodos, sin tocar el resto
+        # de la API. Corre en cada navegacion (add_init_script).
+        page.add_init_script("""
+          window.__syncCalls = [];
+          let _sgaSync;
+          Object.defineProperty(window, 'SGA_Sync', {
+            configurable: true,
+            get() { return _sgaSync; },
+            set(obj) {
+              if (obj && typeof obj.pullUsuariosOnly === 'function' && !obj.__spied) {
+                const origPull = obj.pullUsuariosOnly.bind(obj);
+                const origFull = obj.initialSyncFromFirestore.bind(obj);
+                obj.pullUsuariosOnly = (...args) => { window.__syncCalls.push('pullUsuariosOnly'); return origPull(...args); };
+                obj.initialSyncFromFirestore = (...args) => { window.__syncCalls.push('initialSyncFromFirestore'); return origFull(...args); };
+                obj.__spied = true;
+              }
+              _sgaSync = obj;
+            }
+          });
+        """)
+
         page.goto(f"{BASE_URL}/admin-pos/")
         page.wait_for_url(lambda u: "login.html" in u, timeout=15000)
         page.wait_for_load_state("networkidle")
@@ -75,6 +111,14 @@ def run():
             "() => window.SGA_DB.query(\"SELECT username FROM usuarios WHERE username='admin'\")"
         )
         assert len(local_admin) == 1, f"esperaba el admin por defecto ya sembrado, hay: {local_admin}"
+
+        sync_calls = page.evaluate("() => window.__syncCalls")
+        assert sync_calls == ['pullUsuariosOnly'], (
+            f"el pre-login de un dispositivo nuevo deberia llamar solo a pullUsuariosOnly "
+            f"(no a initialSyncFromFirestore completo, ~28 colecciones — eso es lo que lo hacia "
+            f"lento en produccion real). Llamadas registradas: {sync_calls}"
+        )
+        print("OK - el pre-login usa pullUsuariosOnly (liviano), no initialSyncFromFirestore completo")
 
         page.fill("#username", "admin")
         page.fill("#password", "kalulu123")
