@@ -12,11 +12,16 @@ asignar una madre.
 Cubre:
   1. El botón "⋯" de una fila abre un panel con "Asociar sustituto" y
      "Asignar madre".
-  2. "Asociar sustituto": buscar un producto existente y elegirlo asocia de
-     inmediato (sin pasos extra) vía producto_sustitutos/referencia_id.
-  3. "Asignar madre": buscar, elegir, confirmar con las 2 casillas de
+  2. Ambos buscadores navegan con ArrowUp/ArrowDown + Enter, igual que el
+     resto de los buscadores del sistema (Buscador.attachDropdownKeyboard).
+  3. "Asociar sustituto": buscar, elegir, y un paso de confirmación deja
+     elegir cuál de los dos productos queda como "producto de referencia"
+     (el que se le pide al proveedor) antes de aplicar
+     producto_sustitutos/referencia_id — no basta con "el que se acaba de
+     elegir" porque no queda claro cuál gana sin verlo explícito.
+  4. "Asignar madre": buscar, elegir, confirmar con las 2 casillas de
      herencia (default marcadas) setea productos.producto_madre_id.
-  4. Confirmar el ingreso de la compra funciona con normalidad después de
+  5. Confirmar el ingreso de la compra funciona con normalidad después de
      usar ambas acciones (no rompe el flujo de commitCompra).
 
 Correr (server ya levantado en :8765, ver README.md):
@@ -56,8 +61,10 @@ def main():
           () => {
             const now = new Date().toISOString();
             const productos = [
-              { id: 'prod-rar-sust-ref',  nombre: 'Sprite 600ml Referencia' },
-              { id: 'prod-rar-madre',     nombre: 'Coca-Cola Familia Madre' },
+              { id: 'prod-rar-sust-a',    nombre: 'Sprite 600ml Opcion A' },
+              { id: 'prod-rar-sust-b',  nombre: 'Sprite 600ml Opcion B' },
+              { id: 'prod-rar-madre-a',   nombre: 'Coca-Cola Familia Opcion A' },
+              { id: 'prod-rar-madre-b',     nombre: 'Coca-Cola Familia Opcion B' },
             ];
             for (const p of productos) {
               window.SGA_DB.run(
@@ -121,15 +128,38 @@ def main():
         page.wait_for_timeout(200)
         assert page.locator(".cv2-rev-panel").count() == 1, "El panel de acciones rapidas no se abrio"
 
-        print("--- Asociar sustituto ---")
+        print("--- Asociar sustituto: navegar con flechas hasta la 2da opcion ---")
         page.locator('[data-rev-accion="sust"]').click()
         page.wait_for_timeout(300)
         assert page.locator("#cv2-sust-overlay").is_visible(), "No se abrio el overlay de Asociar sustituto"
-        page.fill("#cv2-sust-search", "Sprite 600ml Referencia")
+        page.fill("#cv2-sust-search", "Sprite 600ml Opcion")
         page.wait_for_timeout(400)
-        page.locator("[data-sust-elegir]").click()
+        assert page.locator("[data-sust-elegir]").count() == 2, "Esperaba 2 candidatos de sustituto"
+
+        page.locator("#cv2-sust-search").press("ArrowDown")
+        page.locator("#cv2-sust-search").press("ArrowDown")
+        resaltado = page.locator("[data-sust-elegir].cv2-dd-item-hl")
+        assert resaltado.count() == 1, "ArrowDown x2 deberia resaltar exactamente un resultado"
+        assert "Opcion B" in resaltado.inner_text(), (
+            f"ArrowDown x2 deberia resaltar la 2da opcion: {resaltado.inner_text()!r}"
+        )
+        page.locator("#cv2-sust-search").press("Enter")
         page.wait_for_timeout(300)
-        assert not page.locator("#cv2-sust-overlay").is_visible(), "El overlay de sustituto no se cerro al elegir"
+
+        print("--- Confirmar cual queda como producto de referencia ---")
+        assert page.locator("#cv2-sust-ref").is_visible(), "No aparecio el paso de confirmar la referencia"
+        page.screenshot(path=os.path.join(SCREENSHOT_DIR, "compras_revision_sust_confirmar_referencia.png"))
+        # Sin grupo previo, por defecto queda seleccionado el recien elegido
+        # (el que se busco porque es el que hay que pedirle al proveedor).
+        ref_seleccionada = page.locator("#cv2-sust-ref").input_value()
+        assert ref_seleccionada == "prod-rar-sust-b", (
+            f"Por defecto deberia quedar seleccionado el producto recien elegido: {ref_seleccionada!r}"
+        )
+        aviso_txt = page.locator("#cv2-sust-aviso").inner_text()
+        assert "Sprite 600ml Opcion B" in aviso_txt, f"El aviso no aclara a quien se le pide: {aviso_txt!r}"
+        page.locator("#cv2-sust-btn-confirm").click()
+        page.wait_for_timeout(300)
+        assert not page.locator("#cv2-sust-overlay").is_visible(), "El overlay de sustituto no se cerro al confirmar"
 
         referencia = page.evaluate("""
           () => window.SGA_DB.query(
@@ -139,20 +169,33 @@ def main():
           )[0]?.referencia_id
         """)
         print(f"referencia_id asignada: {referencia}")
-        assert referencia == 'prod-rar-sust-ref', (
-            f"No quedo asociado el sustituto elegido: referencia_id={referencia!r}"
+        assert referencia == 'prod-rar-sust-b', (
+            f"No quedo asociada la referencia elegida en el paso de confirmacion: referencia_id={referencia!r}"
         )
 
-        print("--- Asignar madre ---")
+        print("--- Asignar madre: navegar con flechas hasta la 2da opcion ---")
         page.locator("[data-rev-mas]").click()
         page.wait_for_timeout(200)
         page.locator('[data-rev-accion="madre"]').click()
         page.wait_for_timeout(300)
         assert page.locator("#cv2-madre-overlay").is_visible(), "No se abrio el overlay de Asignar madre"
-        page.fill("#cv2-madre-search", "Coca-Cola Familia Madre")
+        page.fill("#cv2-madre-search", "Coca-Cola Familia Opcion")
         page.wait_for_timeout(400)
-        page.locator("[data-madre-elegir]").click()
+        assert page.locator("[data-madre-elegir]").count() == 2, "Esperaba 2 candidatos de madre"
+
+        page.locator("#cv2-madre-search").press("ArrowDown")
+        page.locator("#cv2-madre-search").press("ArrowDown")
+        resaltado_madre = page.locator("[data-madre-elegir].cv2-dd-item-hl")
+        assert resaltado_madre.count() == 1, "ArrowDown x2 deberia resaltar exactamente un resultado"
+        assert "Opcion B" in resaltado_madre.inner_text(), (
+            f"ArrowDown x2 deberia resaltar la 2da opcion: {resaltado_madre.inner_text()!r}"
+        )
+        page.locator("#cv2-madre-search").press("Enter")
         page.wait_for_timeout(300)
+
+        assert "Coca-Cola Familia Opcion B" in page.locator("#cv2-madre-confirm").inner_text(), (
+            "El paso de confirmar madre no muestra la opcion elegida con ArrowDown+Enter"
+        )
 
         # Las 2 casillas de herencia deben venir marcadas por defecto
         chk_costo  = page.locator("#cv2-madre-hereda-costo")
@@ -172,7 +215,7 @@ def main():
           )[0]
         """)
         print(f"producto_madre_id / herencia: {madre_info}")
-        assert madre_info["producto_madre_id"] == "prod-rar-madre", (
+        assert madre_info["producto_madre_id"] == "prod-rar-madre-b", (
             f"No quedo asignada la madre elegida: {madre_info}"
         )
         assert madre_info["hereda_costo"] == 1 and madre_info["hereda_precio"] == 1, (
@@ -180,7 +223,7 @@ def main():
         )
 
         madre_convertida = page.evaluate("""
-          () => window.SGA_DB.query(`SELECT es_madre FROM productos WHERE id = 'prod-rar-madre'`)[0]?.es_madre
+          () => window.SGA_DB.query(`SELECT es_madre FROM productos WHERE id = 'prod-rar-madre-b'`)[0]?.es_madre
         """)
         assert madre_convertida == 1, "El producto elegido como madre no quedo marcado es_madre=1"
 

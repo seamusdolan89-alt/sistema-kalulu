@@ -2475,21 +2475,26 @@ const ComprasV2 = (() => {
   function openSustQuickModal(productoId, nombre) {
     const overlay = ge('cv2-sust-overlay');
     overlay.dataset.prodId = productoId;
+    overlay.dataset.prodNombre = nombre || '';
     ge('cv2-sust-prod-nombre').textContent = nombre || '';
     ge('cv2-sust-search').value = '';
     ge('cv2-sust-results').innerHTML = '';
+    ge('cv2-sust-search-wrap').style.display = '';
+    ge('cv2-sust-confirm').style.display = 'none';
     overlay.style.display = 'flex';
+    sustKbNav?.reset();
     setTimeout(() => ge('cv2-sust-search')?.focus(), 60);
   }
 
-  function buscarSustQuick(q, productoId) {
+  function buscarSustQuick(q, productoId, productoNombre) {
     const results = ge('cv2-sust-results');
     const texto = q.trim();
+    sustKbNav?.reset();
     if (!texto) { results.innerHTML = ''; return; }
     const res = searchProductos(texto).filter(p => p.id !== productoId);
     results.innerHTML = res.length
       ? res.map(p => `
-          <div class="cv2-dd-item" data-sust-elegir="${esc(p.id)}">
+          <div class="cv2-dd-item" data-sust-elegir="${esc(p.id)}" data-sust-nombre="${esc(p.nombre)}">
             <span class="cv2-dd-nombre">${esc(p.nombre)}</span>
             <span class="cv2-dd-meta">${esc(p.barcode || '')}</span>
           </div>`).join('')
@@ -2497,11 +2502,76 @@ const ComprasV2 = (() => {
 
     results.querySelectorAll('[data-sust-elegir]').forEach(el =>
       el.addEventListener('click', () => {
-        GruposSustitutos.aplicarCambioReferencia(productoId, el.dataset.sustElegir);
-        ge('cv2-sust-overlay').style.display = 'none';
-        window.SGA_Utils.showNotification('Sustituto asignado', 'success');
+        mostrarConfirmSustQuick(productoId, productoNombre, el.dataset.sustElegir, el.dataset.sustNombre);
       })
     );
+  }
+
+  // Un paso más antes de aplicar: dejar elegir cuál de los dos productos
+  // queda como "producto de referencia" (el que se le pide al proveedor) --
+  // sin esto no quedaba claro si seguía siendo el que ya estaba en la orden
+  // o pasaba a ser el recién buscado. Mismo concepto que el overlay de
+  // sustituto de ordenes.js (openSustitutoOverlay), adaptado a 2 opciones.
+  function mostrarConfirmSustQuick(productoId, productoNombre, elegidoId, elegidoNombre) {
+    ge('cv2-sust-search-wrap').style.display = 'none';
+    const confirmDiv = ge('cv2-sust-confirm');
+    confirmDiv.style.display = '';
+
+    const refActual = GruposSustitutos.referenciaRealDe(productoId);
+    const yaAgrupado = refActual && refActual !== productoId
+      ? db().query('SELECT nombre FROM productos WHERE id=?', [refActual])[0]?.nombre
+      : null;
+
+    // Si esta fila ya es la referencia de su propio grupo, se mantiene por
+    // defecto; si no, el producto recién encontrado pasa a ser lo que se pide
+    // (es el caso normal: se buscó porque ES el producto real a pedir).
+    const porDefecto = refActual === productoId ? productoId : elegidoId;
+
+    confirmDiv.innerHTML = `
+      ${yaAgrupado ? `<p style="margin:0 0 10px;font-size:12px;color:#e65100;background:#fff3e0;border:1px solid #ffcc80;border-radius:6px;padding:8px 12px">
+          ⚠ ${esc(productoNombre)} ya pertenece a un grupo cuya referencia es <strong>${esc(yaAgrupado)}</strong>.
+        </p>` : ''}
+      <p style="margin:0 0 10px;font-size:14px">Producto de referencia <span style="font-weight:400;color:#8090a0">(el que se le va a pedir al proveedor)</span>:</p>
+      <select id="cv2-sust-ref" class="cv2-pm-input" style="margin-bottom:10px">
+        <option value="${esc(productoId)}"${porDefecto === productoId ? ' selected' : ''}>${esc(productoNombre)}</option>
+        <option value="${esc(elegidoId)}"${porDefecto === elegidoId ? ' selected' : ''}>${esc(elegidoNombre)}</option>
+      </select>
+      <p id="cv2-sust-aviso" style="margin:0 0 18px;font-size:12px;color:#607080"></p>
+      <div style="display:flex;gap:8px">
+        <button id="cv2-sust-btn-confirm" class="cv2-rev-btn-confirm" style="padding:8px 18px;font-size:13px">Confirmar</button>
+        <button id="cv2-sust-btn-volver" style="font-size:13px;background:#fff;border:1px solid #dde3ea;border-radius:6px;padding:8px 14px;cursor:pointer;color:#607080">Volver a buscar</button>
+      </div>
+    `;
+
+    const selRef = ge('cv2-sust-ref');
+    const aviso  = ge('cv2-sust-aviso');
+    const pintarAviso = () => {
+      aviso.textContent = selRef.value === productoId
+        ? `Se le sigue pidiendo a ${productoNombre}. ${elegidoNombre} queda como sustituto y su stock se suma al del grupo.`
+        : `De ahora en más se le pide a ${elegidoNombre}. ${productoNombre} queda como sustituto y su stock se suma al del grupo.`;
+    };
+    pintarAviso();
+    selRef.addEventListener('change', pintarAviso);
+    selRef.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); ge('cv2-sust-btn-confirm').click(); } });
+
+    ge('cv2-sust-btn-volver').addEventListener('click', () => {
+      confirmDiv.style.display = 'none';
+      ge('cv2-sust-search-wrap').style.display = '';
+      ge('cv2-sust-search')?.focus();
+    });
+    ge('cv2-sust-btn-confirm').addEventListener('click', () => {
+      const refId = selRef.value;
+      // aplicarCambioReferencia(prodId, nuevaRef) repunta TODO el grupo previo
+      // de prodId hacia nuevaRef -- por eso siempre se llama con el que
+      // "pierde" la referencia como prodId, sea la fila o el recién elegido.
+      if (refId === productoId) {
+        GruposSustitutos.aplicarCambioReferencia(elegidoId, productoId);
+      } else {
+        GruposSustitutos.aplicarCambioReferencia(productoId, elegidoId);
+      }
+      ge('cv2-sust-overlay').style.display = 'none';
+      window.SGA_Utils.showNotification('Sustituto asignado', 'success');
+    });
   }
 
   function openMadreQuickModal(productoId, nombre) {
@@ -2513,12 +2583,14 @@ const ComprasV2 = (() => {
     ge('cv2-madre-search-wrap').style.display = '';
     ge('cv2-madre-confirm').style.display = 'none';
     overlay.style.display = 'flex';
+    madreKbNav?.reset();
     setTimeout(() => ge('cv2-madre-search')?.focus(), 60);
   }
 
   function buscarMadreQuick(q, productoId) {
     const results = ge('cv2-madre-results');
     const texto = q.trim();
+    madreKbNav?.reset();
     if (!texto) { results.innerHTML = ''; return; }
     const res = searchProductos(texto).filter(p => p.id !== productoId);
     results.innerHTML = res.length
@@ -4119,6 +4191,11 @@ const ComprasV2 = (() => {
   // documentado a nivel modulo para poder sacarlo en destroy() (ver nota de
   // CLAUDE.md: un listener en document que sobrevive a la navegacion siguiente).
   let _docClickRevPanel = null;
+  // Handles de Buscador.attachDropdownKeyboard() para los buscadores de
+  // sustituto/madre -- se enganchan una sola vez en init() y se resetean
+  // (reset()) en cada búsqueda nueva, ver buscarSustQuick/buscarMadreQuick.
+  let sustKbNav  = null;
+  let madreKbNav = null;
 
   function setupKeyboard() {
     _docKeydown = e => {
@@ -4686,7 +4763,11 @@ const ComprasV2 = (() => {
       if (e.target === ge('cv2-sust-overlay')) ge('cv2-sust-overlay').style.display = 'none';
     });
     ge('cv2-sust-search')?.addEventListener('input', e => {
-      buscarSustQuick(e.target.value, ge('cv2-sust-overlay').dataset.prodId);
+      const overlay = ge('cv2-sust-overlay');
+      buscarSustQuick(e.target.value, overlay.dataset.prodId, overlay.dataset.prodNombre);
+    });
+    sustKbNav = Buscador.attachDropdownKeyboard(ge('cv2-sust-search'), {
+      getItems: () => ge('cv2-sust-results')?.querySelectorAll('[data-sust-elegir]'),
     });
 
     ge('cv2-madre-close')?.addEventListener('click', () => { ge('cv2-madre-overlay').style.display = 'none'; });
@@ -4695,6 +4776,9 @@ const ComprasV2 = (() => {
     });
     ge('cv2-madre-search')?.addEventListener('input', e => {
       buscarMadreQuick(e.target.value, ge('cv2-madre-overlay').dataset.prodId);
+    });
+    madreKbNav = Buscador.attachDropdownKeyboard(ge('cv2-madre-search'), {
+      getItems: () => ge('cv2-madre-results')?.querySelectorAll('[data-madre-elegir]'),
     });
 
     ge('cv2-pausadas-overlay')?.addEventListener('click', e => {

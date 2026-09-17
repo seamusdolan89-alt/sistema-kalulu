@@ -150,7 +150,84 @@ const SGA_Buscador = (() => {
     });
   }
 
-  return { variantesCodigo, porCodigo, porTexto, pintarDropdown };
+  /**
+   * Navegación con flechas/Enter/Escape sobre un dropdown de resultados.
+   *
+   * Antes cada pantalla con buscador (Ajuste de stock, Agregar producto de
+   * Órdenes, el sustituto de Órdenes, el carrito de Compras...) reimplementaba
+   * esto a mano, cada una con su propio índice de resaltado — mismo código,
+   * copiado. Se engancha una sola vez sobre el <input> de búsqueda; qué
+   * elementos son "navegables" se relee en cada tecla con `getItems()` (el
+   * dropdown se vuelve a pintar en cada búsqueda, así que no sirve guardar
+   * una lista fija).
+   *
+   * El propio elemento resaltado es el que recibe el click al confirmar con
+   * Enter — no hace falta un callback de selección aparte, alcanza con que
+   * cada item ya tenga su propio listener de click (como ya es el caso en
+   * todos los dropdowns existentes).
+   *
+   * @param {HTMLInputElement} input
+   * @param {Object}   opts
+   * @param {() => (HTMLElement[]|NodeList)} opts.getItems  items navegables, en el orden en que se muestran
+   * @param {string}   [opts.highlightClass='cv2-dd-item-hl']  clase para marcar el resaltado
+   * @param {Function} [opts.onEscape]              al apretar Escape
+   * @param {Function} [opts.onEnterSinResaltado]    Enter sin nada resaltado todavía
+   * @returns {{ reset: () => void }} `reset()` hay que llamarlo cada vez que se repinta la lista (nueva búsqueda)
+   */
+  function attachDropdownKeyboard(input, opts = {}) {
+    const {
+      getItems,
+      highlightClass = 'cv2-dd-item-hl',
+      onEscape,
+      onEnterSinResaltado,
+    } = opts;
+    let idx = -1;
+
+    const items = () => Array.from(getItems ? (getItems() || []) : []);
+
+    const pintar = (els) => {
+      els.forEach((el, i) => el.classList.toggle(highlightClass, i === idx));
+      if (idx >= 0 && els[idx]) els[idx].scrollIntoView({ block: 'nearest' });
+    };
+
+    const reset = () => { idx = -1; };
+
+    input.addEventListener('keydown', e => {
+      const els = items();
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!els.length) return;
+        idx = Math.min(idx + 1, els.length - 1);
+        pintar(els);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        idx = Math.max(idx - 1, -1);
+        pintar(els);
+        return;
+      }
+      if (e.key === 'Enter') {
+        if (idx >= 0 && els[idx]) {
+          e.preventDefault();
+          els[idx].click();
+          idx = -1;
+          return;
+        }
+        if (onEnterSinResaltado) onEnterSinResaltado();
+        return;
+      }
+      if (e.key === 'Escape') {
+        idx = -1;
+        if (onEscape) onEscape();
+      }
+    });
+
+    return { reset };
+  }
+
+  return { variantesCodigo, porCodigo, porTexto, pintarDropdown, attachDropdownKeyboard };
 })();
 
 window.SGA_Buscador = SGA_Buscador;

@@ -1642,9 +1642,12 @@
       <button class="cv2-overlay-close" id="cv2-sust-close" aria-label="Cerrar" title="Cerrar">×</button>
     </div>
     <div style="padding:16px 20px">
-      <input class="cv2-pm-input" id="cv2-sust-search" type="text"
-             placeholder="Buscar producto de referencia por nombre o código…" autocomplete="off">
-      <div id="cv2-sust-results" style="margin-top:10px;max-height:280px;overflow-y:auto"></div>
+      <div id="cv2-sust-search-wrap">
+        <input class="cv2-pm-input" id="cv2-sust-search" type="text"
+               placeholder="Buscar producto de referencia por nombre o código…" autocomplete="off">
+        <div id="cv2-sust-results" style="margin-top:10px;max-height:280px;overflow-y:auto"></div>
+      </div>
+      <div id="cv2-sust-confirm" style="display:none"></div>
     </div>
   </div>
 </div>
