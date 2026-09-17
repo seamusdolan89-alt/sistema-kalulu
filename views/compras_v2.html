@@ -913,7 +913,13 @@
   .cv2-rev-panel-acc:hover { background: rgba(255,255,255,.14); }
   /* Se abren desde arriba de #cv2-review-overlay (z-index:600) -- .cv2-overlay
      solo, base (z-index:400), quedaría tapado. */
-  #cv2-sust-overlay, #cv2-madre-overlay { z-index: 700; }
+  #cv2-sust-overlay, #cv2-madre-overlay, #cv2-ajuste-overlay { z-index: 700; }
+  .cv2-rev-ajuste-chip {
+    display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 10px;
+    background: #fff3e0; color: #e65100; font-weight: 700; font-size: 10px;
+    white-space: nowrap; cursor: pointer; border: 1px solid #ffcc80;
+  }
+  .cv2-rev-ajuste-chip:hover { background: #ffe0b2; }
 
   /* ── CABECERA (PASO 1) ────────────────────────────────────────────────── */
   #cv2-cabecera {
@@ -1666,6 +1672,29 @@
         <div id="cv2-madre-results" style="margin-top:10px;max-height:280px;overflow-y:auto"></div>
       </div>
       <div id="cv2-madre-confirm" style="display:none"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── ACCIONES RÁPIDAS (Revisión): AJUSTE DE STOCK ── -->
+<div id="cv2-ajuste-overlay" class="cv2-overlay" style="display:none">
+  <div class="cv2-overlay-box">
+    <div class="cv2-overlay-header">
+      <span>Ajuste de stock — <span id="cv2-ajuste-prod-nombre"></span></span>
+      <button class="cv2-overlay-close" id="cv2-ajuste-close" aria-label="Cerrar" title="Cerrar">×</button>
+    </div>
+    <div style="padding:16px 20px">
+      <p style="margin:0 0 14px;font-size:12px;color:#8090a0">
+        Queda pendiente de aprobación del administrador — el stock no se descuenta hasta que se apruebe.
+      </p>
+      <label style="display:block;font-size:12px;font-weight:600;color:#607080;margin-bottom:4px">Cantidad</label>
+      <input class="cv2-pm-input" id="cv2-ajuste-cantidad" type="number" min="0.01" step="0.01" style="margin-bottom:12px">
+      <label style="display:block;font-size:12px;font-weight:600;color:#607080;margin-bottom:4px">Motivo</label>
+      <select class="cv2-pm-input" id="cv2-ajuste-motivo" style="margin-bottom:18px"></select>
+      <div style="display:flex;gap:8px">
+        <button id="cv2-ajuste-btn-confirm" class="cv2-rev-btn-confirm" style="padding:8px 18px;font-size:13px">Agregar ajuste</button>
+        <button id="cv2-ajuste-btn-cancel" style="font-size:13px;background:#fff;border:1px solid #dde3ea;border-radius:6px;padding:8px 14px;cursor:pointer;color:#607080">Cancelar</button>
+      </div>
     </div>
   </div>
 </div>

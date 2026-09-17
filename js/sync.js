@@ -557,15 +557,18 @@
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO stock_ajustes
         (id, producto_id, sucursal_id, tipo, cantidad, motivo, usuario_id, fecha,
-         estado, aprobado_por, fecha_aprobacion, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+         estado, aprobado_por, fecha_aprobacion, compra_id, costo_unitario, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.producto_id || null, data.sucursal_id || null,
        data.tipo || null, data.cantidad || 0, data.motivo || null,
        data.usuario_id || null, data.fecha || null,
        // estado distingue un ajuste aprobado de uno esperando aprobacion
-       // (las devoluciones por producto vencido o defectuoso quedan pendientes).
+       // (las devoluciones por producto vencido o defectuoso, y ahora los
+       // pedidos de Compras-Revision, quedan pendientes hasta que el admin
+       // los aprueba en Aprobaciones Pendientes).
        data.estado || 'aprobado', data.aprobado_por || null,
-       data.fecha_aprobacion || null, data.updated_at || now]
+       data.fecha_aprobacion || null, data.compra_id || null,
+       data.costo_unitario ?? null, data.updated_at || now]
     );
   }
 

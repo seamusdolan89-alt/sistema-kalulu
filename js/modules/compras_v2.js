@@ -65,6 +65,10 @@ const ComprasV2 = (() => {
     percepcionIva:      0,
     percepcionIibb:     0,
     items:              [],     // cart items
+    // Ajustes de stock pedidos desde "⋯" en Revisión -- encolados acá porque
+    // todavía no existe compraId (se crea recién en commitCompra). Nada se
+    // escribe a la base hasta confirmar el ingreso.
+    pendingAjustes:     [],
     pausadaId:          null,
     sesionActiva:       null,
     currentUser:        null,
@@ -1915,6 +1919,7 @@ const ComprasV2 = (() => {
       proveedorAgRetIva:      state.proveedorAgRetIva,
       proveedorAgRetIibb:     state.proveedorAgRetIibb,
       items:               state.items,
+      pendingAjustes:      state.pendingAjustes,
     });
 
     const ts   = nowISO();
@@ -1974,6 +1979,7 @@ const ComprasV2 = (() => {
     state.proveedorAgRetIva     = 0;
     state.proveedorAgRetIibb    = 0;
     state.items                 = [];
+    state.pendingAjustes        = [];
     state.pausadaId             = null;
 
     // Reset cabecera UI
@@ -2072,6 +2078,7 @@ const ComprasV2 = (() => {
     state.proveedorAgRetIva      = snap.proveedorAgRetIva      || 0;
     state.proveedorAgRetIibb     = snap.proveedorAgRetIibb     || 0;
     state.items            = snap.items            || [];
+    state.pendingAjustes   = snap.pendingAjustes    || [];
     state.pausadaId        = pausadaId;
 
     if (state.proveedorId) {
@@ -2415,7 +2422,9 @@ const ComprasV2 = (() => {
         return `<tr>
           <td class="c">${i + 1}</td>
           <td>${esc(it.barcode || '—')}</td>
-          <td>${esc(it.nombre)}${it.esMuestra ? ' <span style="font-size:10px;font-weight:700;color:#6a1fc9">🎁 Muestra</span>' : ''}</td>
+          <td>${esc(it.nombre)}${it.esMuestra ? ' <span style="font-size:10px;font-weight:700;color:#6a1fc9">🎁 Muestra</span>' : ''}
+            <span id="cv2-rev-badge-${i}"></span>
+          </td>
           <td class="c">${cant}</td>
           <td class="c">${udsPaq}</td>
           <td class="c"><strong>${cantUds}</strong></td>
@@ -2427,6 +2436,11 @@ const ComprasV2 = (() => {
           </td>
         </tr>`;
       }).join('');
+
+      // Repinta los chips de ajuste pendiente por si se volvió del Carrito y
+      // se regresó a Revisión (o se retomó una compra pausada) con ajustes
+      // ya encolados.
+      state.items.forEach((_, i) => pintarBadgeAjuste(i));
     }
 
     // Show overlay
@@ -2439,12 +2453,15 @@ const ComprasV2 = (() => {
     if (overlay) overlay.style.display = 'none';
   }
 
-  // ── Acciones rápidas por fila (Revisión: sustituto / madre) ─────────────────────
+  // ── Acciones rápidas por fila (Revisión: sustituto / madre / ajuste) ────────────
   //
   // Pedido del usuario: para los productos recién ingresados, resolver desde
-  // la misma fila lo que hoy obliga a ir a otra pantalla. Aplican al instante
-  // -- no hay precedente de aprobación para sustituto/madre en ningún lado
-  // del código (a diferencia del ajuste de stock, que queda para otra etapa).
+  // la misma fila lo que hoy obliga a ir a otra pantalla. Sustituto y madre
+  // aplican al instante -- no hay precedente de aprobación para ninguna de
+  // las dos en ningún lado del código. El ajuste de stock es distinto: queda
+  // encolado en state.pendingAjustes hasta Confirmar Ingreso (ver más abajo),
+  // y aunque se confirme la compra el stock no se toca hasta que el admin lo
+  // aprueba desde Aprobaciones Pendientes.
 
   function cerrarPanelRevAcciones() {
     ge('cv2-rev-tbody')?.querySelector('.cv2-rev-panel')?.remove();
@@ -2460,6 +2477,7 @@ const ComprasV2 = (() => {
     panel.innerHTML = `
       <button class="cv2-rev-panel-acc" data-rev-accion="sust">🔗 Asociar sustituto</button>
       <button class="cv2-rev-panel-acc" data-rev-accion="madre">👪 Asignar madre</button>
+      <button class="cv2-rev-panel-acc" data-rev-accion="ajuste">📦 Ajuste de stock</button>
     `;
     panel.querySelector('[data-rev-accion="sust"]').addEventListener('click', () => {
       cerrarPanelRevAcciones();
@@ -2468,6 +2486,12 @@ const ComprasV2 = (() => {
     panel.querySelector('[data-rev-accion="madre"]').addEventListener('click', () => {
       cerrarPanelRevAcciones();
       openMadreQuickModal(it.productoId, it.nombre);
+    });
+    panel.querySelector('[data-rev-accion="ajuste"]').addEventListener('click', () => {
+      cerrarPanelRevAcciones();
+      const cant   = parseFloat(it.cantidad)   || 0;
+      const udsPaq = parseFloat(it.udsPaquete) || 1;
+      openAjusteQuickModal(idx, it.productoId, it.nombre, cant * udsPaq);
     });
     celda.appendChild(panel);
   }
@@ -2649,6 +2673,76 @@ const ComprasV2 = (() => {
       ge('cv2-madre-overlay').style.display = 'none';
       window.SGA_Utils.showNotification('Madre asignada', 'success');
     });
+  }
+
+  // ── Ajuste de stock (3ra acción rápida) ─────────────────────────────────────────
+  //
+  // A diferencia de sustituto/madre, esto NO escribe nada todavía: se encola
+  // en state.pendingAjustes y recién se inserta en stock_ajustes (estado
+  // 'pendiente_aprobacion') dentro de commitCompra(), una vez que existe
+  // compraId. El stock en sí no se toca ni ahí ni acá — solo cuando el admin
+  // lo aprueba desde Aprobaciones Pendientes.
+  const AJUSTE_MOTIVOS = [
+    { value: 'Rotura',                                tipo: 'rotura' },
+    { value: 'Consumo',                               tipo: 'consumo_interno' },
+    { value: 'Producto no entregado por proveedor',   tipo: 'ajuste_negativo' },
+  ];
+
+  function openAjusteQuickModal(idx, productoId, nombre, cantidadDefault) {
+    const overlay = ge('cv2-ajuste-overlay');
+    overlay.dataset.idx    = idx;
+    overlay.dataset.prodId = productoId;
+    ge('cv2-ajuste-prod-nombre').textContent = nombre || '';
+    ge('cv2-ajuste-cantidad').value = cantidadDefault > 0 ? cantidadDefault : 1;
+    const sel = ge('cv2-ajuste-motivo');
+    sel.innerHTML = AJUSTE_MOTIVOS.map(m => `<option value="${esc(m.value)}">${esc(m.value)}</option>`).join('');
+    overlay.style.display = 'flex';
+    setTimeout(() => ge('cv2-ajuste-cantidad')?.focus(), 60);
+  }
+
+  function confirmarAjusteQuick() {
+    const overlay    = ge('cv2-ajuste-overlay');
+    const idx        = parseInt(overlay.dataset.idx, 10);
+    const productoId = overlay.dataset.prodId;
+    const cantidad   = parseFloat(ge('cv2-ajuste-cantidad').value);
+    const motivoDef  = AJUSTE_MOTIVOS.find(m => m.value === ge('cv2-ajuste-motivo').value);
+
+    if (isNaN(cantidad) || cantidad <= 0) {
+      window.SGA_Utils.showNotification('Ingresá una cantidad válida', 'error');
+      return;
+    }
+    if (!motivoDef) return;
+
+    state.pendingAjustes.push({
+      uid: uuid(), idx, productoId,
+      cantidad, motivo: motivoDef.value, tipo: motivoDef.tipo,
+    });
+    overlay.style.display = 'none';
+    pintarBadgeAjuste(idx);
+    window.SGA_Utils.showNotification('Ajuste agregado — queda pendiente de aprobación al confirmar el ingreso', 'success');
+  }
+
+  // Chip "⚠ N pendiente(s) de aprobación" bajo el nombre del producto en
+  // Revisión — se repinta desde afuera (no re-renderiza toda la tabla) cada
+  // vez que cambia state.pendingAjustes para esa fila.
+  function pintarBadgeAjuste(idx) {
+    const el = ge('cv2-rev-badge-' + idx);
+    if (!el) return;
+    const propios = state.pendingAjustes.filter(a => a.idx === idx);
+    if (!propios.length) { el.innerHTML = ''; return; }
+    const totalCant = propios.reduce((s, a) => s + a.cantidad, 0);
+    el.innerHTML = `<span class="cv2-rev-ajuste-chip" data-rev-badge-idx="${idx}"
+      title="Click para ver y, si hace falta, quitarlos">⚠ ${totalCant} pendiente${totalCant === 1 ? '' : 's'} de aprobación</span>`;
+  }
+
+  function clickBadgeAjuste(idx) {
+    const propios = state.pendingAjustes.filter(a => a.idx === idx);
+    if (!propios.length) return;
+    const detalle = propios.map(a => `• ${a.motivo}: ${a.cantidad}`).join('\n');
+    if (confirm(`Ajustes pendientes de aprobación en esta fila:\n\n${detalle}\n\n¿Quitarlos de la compra?`)) {
+      state.pendingAjustes = state.pendingAjustes.filter(a => a.idx !== idx);
+      pintarBadgeAjuste(idx);
+    }
   }
 
   // ── Commit (ex-confirmar) ─────────────────────────────────────────────────────
@@ -2838,6 +2932,23 @@ const ComprasV2 = (() => {
       // 5. Clean up pausada if resuming
       if (state.pausadaId) {
         db().run(`DELETE FROM compras_pausadas WHERE id=?`, [state.pausadaId]);
+      }
+
+      // 6. Ajustes de stock pedidos desde "⋯" en Revisión (rotura / consumo /
+      // producto no entregado) — encolados en memoria porque hasta este punto
+      // no existía compraId para vincularlos (ver abrirPanelRevAcciones). El
+      // stock NO se toca acá: quedan 'pendiente_aprobacion' hasta que el admin
+      // los apruebe desde Aprobaciones Pendientes.
+      for (const adj of state.pendingAjustes) {
+        const itemOrigen = state.items[adj.idx];
+        const costoAdj = itemOrigen ? costoNetoUsado(itemOrigen) : 0;
+        db().run(`
+          INSERT INTO stock_ajustes
+            (id, producto_id, sucursal_id, tipo, cantidad, motivo, usuario_id, fecha,
+             estado, compra_id, costo_unitario, sync_status, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendiente_aprobacion', ?, ?, 'pending', ?)
+        `, [uuid(), adj.productoId, user.sucursal_id, adj.tipo, adj.cantidad, adj.motivo,
+            user.id, ts, compraId, costoAdj, ts]);
       }
 
       // Verificación pre-commit: db().run() nunca tira excepción aunque el SQL
@@ -4318,6 +4429,7 @@ const ComprasV2 = (() => {
     state.proveedorAgRetIva     = 0;
     state.proveedorAgRetIibb    = 0;
     state.items                 = [];
+    state.pendingAjustes        = [];
     state.pausadaId             = null;
     state.searchResults         = [];
     state.searchHighlight       = -1;
@@ -4746,6 +4858,11 @@ const ComprasV2 = (() => {
 
     // ── Acciones rápidas por fila (Revisión) ──
     ge('cv2-rev-tbody')?.addEventListener('click', e => {
+      const chip = e.target.closest('[data-rev-badge-idx]');
+      if (chip) {
+        clickBadgeAjuste(parseInt(chip.dataset.revBadgeIdx, 10));
+        return;
+      }
       const btnMas = e.target.closest('[data-rev-mas]');
       if (!btnMas) return;
       e.stopPropagation();
@@ -4780,6 +4897,13 @@ const ComprasV2 = (() => {
     madreKbNav = Buscador.attachDropdownKeyboard(ge('cv2-madre-search'), {
       getItems: () => ge('cv2-madre-results')?.querySelectorAll('[data-madre-elegir]'),
     });
+
+    ge('cv2-ajuste-close')?.addEventListener('click', () => { ge('cv2-ajuste-overlay').style.display = 'none'; });
+    ge('cv2-ajuste-btn-cancel')?.addEventListener('click', () => { ge('cv2-ajuste-overlay').style.display = 'none'; });
+    ge('cv2-ajuste-overlay')?.addEventListener('click', e => {
+      if (e.target === ge('cv2-ajuste-overlay')) ge('cv2-ajuste-overlay').style.display = 'none';
+    });
+    ge('cv2-ajuste-btn-confirm')?.addEventListener('click', confirmarAjusteQuick);
 
     ge('cv2-pausadas-overlay')?.addEventListener('click', e => {
       if (e.target === ge('cv2-pausadas-overlay')) {

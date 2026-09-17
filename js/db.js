@@ -559,6 +559,12 @@
       `ALTER TABLE stock_ajustes ADD COLUMN estado TEXT DEFAULT 'aprobado'`,
       `ALTER TABLE stock_ajustes ADD COLUMN aprobado_por TEXT`,
       `ALTER TABLE stock_ajustes ADD COLUMN fecha_aprobacion TEXT`,
+      // De que compra salio el pedido (NULL para los 5 circuitos "instantaneos"
+      // y para las devoluciones del POS) y el costo vigente en esa linea al
+      // pedirlo -- para armar el consumo_interno en la aprobacion sin depender
+      // del costo actual del producto, que puede haber cambiado para entonces.
+      `ALTER TABLE stock_ajustes ADD COLUMN compra_id TEXT`,
+      `ALTER TABLE stock_ajustes ADD COLUMN costo_unitario REAL`,
     ];
     for (const sql of stockAjustesMigrations) {
       try { database.run(sql); } catch(e) { /* column already exists */ }

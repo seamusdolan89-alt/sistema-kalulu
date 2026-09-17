@@ -50,6 +50,7 @@
     'adelanto_pago':   () => import('./modules/adelanto_pago.js').then(m => m.default),
     'configuracion':   () => import('./modules/configuracion.js').then(m => m.default),
     'flujo':           () => import('./modules/flujo.js').then(m => m.default),
+    'aprobaciones_pendientes': () => import('./modules/aprobaciones_pendientes.js').then(m => m.default),
     // Sin entrada en el menú a propósito — utilidad de una sola vez para la
     // limpieza previa a la migración real. Se accede escribiendo el hash a
     // mano (#limpieza_prueba); igual queda blindada por ROUTE_ADMIN_ONLY.
@@ -186,7 +187,7 @@
   // Módulos del admin-pos (panel remoto): siempre completo. "inicio" queda
   // afuera a propósito — es un dashboard del POS del local (ver inicio.js),
   // no del panel del dueño.
-  const ADMIN_POS_MODULES = ['inicio', 'pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'ajuste_stock', 'ajuste_stock_positivo', 'adelanto_pago', 'caja_admin', 'configuracion', 'flujo'];
+  const ADMIN_POS_MODULES = ['inicio', 'pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'ajuste_stock', 'ajuste_stock_positivo', 'adelanto_pago', 'caja_admin', 'configuracion', 'flujo', 'aprobaciones_pendientes'];
 
   function getAllowedModules() {
     if (window.ADMIN_MODE) return ADMIN_POS_MODULES;
@@ -225,11 +226,12 @@
   //
   // Rutas admin-pos-only: solo alcanzables desde admin-pos/ (nunca desde el
   // POS local), más allá del rol de quien esté logueado ahí.
-  const ROUTE_ADMIN_POS_ONLY = ['configuracion', 'flujo'];
+  const ROUTE_ADMIN_POS_ONLY = ['configuracion', 'flujo', 'aprobaciones_pendientes'];
   // Rutas que ya se autoprotegen con su propio chequeo de rol==='admin'
   // adentro del módulo (usuarios.js, configuracion.js, caja_admin.js,
-  // adelanto_pago.js) — se listan igual acá para blindaje centralizado.
-  const ROUTE_ADMIN_ONLY = ['usuarios', 'caja_admin', 'configuracion', 'adelanto_pago', 'limpieza_prueba'];
+  // adelanto_pago.js, aprobaciones_pendientes.js) — se listan igual acá
+  // para blindaje centralizado.
+  const ROUTE_ADMIN_ONLY = ['usuarios', 'caja_admin', 'configuracion', 'adelanto_pago', 'limpieza_prueba', 'aprobaciones_pendientes'];
   // Ruta -> permiso granular (SGA_PERMISOS_DEF en auth.js) que hace falta para
   // entrar. Rutas ausentes de este mapa (pos, caja, y cualquier módulo nuevo
   // que se agregue sin actualizar esta lista) quedan sin restricción
@@ -316,6 +318,7 @@
       { name: 'caja_admin', icon: 'briefcase', text: 'Caja Seamus', adminOnly: true },
       { name: 'usuarios', icon: 'usuarios', text: 'Usuarios' },
       { name: 'flujo', icon: 'flujo', text: 'Flujo de Fondos', adminPosOnly: true },
+      { name: 'aprobaciones_pendientes', icon: 'aprobaciones', text: 'Aprobaciones Pendientes', adminOnly: true, adminPosOnly: true },
       { name: 'configuracion', icon: 'configuracion', text: 'Configuración', adminOnly: true, adminPosOnly: true },
     ];
 
