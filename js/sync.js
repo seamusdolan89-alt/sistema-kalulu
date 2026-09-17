@@ -1741,13 +1741,66 @@
       ? COLLECTIONS.filter(c => !MOBILE_SKIP_COLLECTIONS.includes(c.name))
       : COLLECTIONS;
 
-    for (const { name, applyFn, label } of collectionsToSync) {
+    // Catálogo primero, bloqueante (17/9/2026): usuarios/categorías/
+    // proveedores/productos/stock/medios_cobro/sucursales crecen con la
+    // CANTIDAD de productos/proveedores, no con el tiempo — son chicas sin
+    // importar cuántos años de historia tenga el negocio, así que siempre
+    // son rápidas. El resto (ventas, compras, movimientos de stock, etc.)
+    // es justamente lo que se vuelve enorme con meses/años de uso real —
+    // antes bloqueaba la pantalla completa detrás de "Descargando datos..."
+    // hasta terminar TODO, y en producción real eso podía tardar minutos
+    // sin dejar ni siquiera entrar. Ahora ese resto sigue bajando solo,
+    // en segundo plano, DESPUÉS de que quien llama a esta función ya
+    // recibió el control (ver syncHistoricalInBackground más abajo) — el
+    // usuario ya puede usar Productos/Inicio mientras tanto; recién
+    // Proveedores/Órdenes/Informes pueden verse incompletos hasta que
+    // termine (el saldo de un proveedor, por ejemplo, depende de compras/
+    // gastos/pagos, que están en el lote de fondo).
+    const essential  = collectionsToSync.filter(c => ESSENTIAL_COLLECTIONS.has(c.name));
+    const historical = collectionsToSync.filter(c => !ESSENTIAL_COLLECTIONS.has(c.name));
+
+    for (const { name, applyFn, label } of essential) {
       report(`Descargando ${label}...`);
       await syncCollectionFull(name, applyFn, label, report);
     }
+    report('Catálogo listo — el resto del historial sigue bajando de fondo.');
 
-    closeOrphanSessions();
-    report('¡Sincronización inicial completa!');
+    syncHistoricalInBackground(historical); // fire-and-forget a propósito, no se espera
+  }
+
+  // Colecciones "catálogo": su tamaño depende de CUÁNTOS productos/
+  // proveedores existen, no de CUÁNTO TIEMPO lleva operando el negocio —
+  // por eso son seguras de esperar antes de dejar entrar a la app.
+  const ESSENTIAL_COLLECTIONS = new Set([
+    'usuarios', 'categorias', 'proveedores', 'productos', 'stock',
+    'medios_cobro', 'sucursales',
+  ]);
+
+  let historicalSyncPromise = null;
+
+  // El resto del catálogo (ventas, compras, movimientos de stock, etc.) —
+  // corre DESPUÉS de que initialSyncFromFirestore ya le devolvió el control
+  // a quien la llamó (la app ya está renderizada, el overlay bloqueante ya
+  // se cerró). Usa el badge de sync existente (🟡 mientras corre, 🟢 al
+  // terminar) en vez de un progressFn — ese ya no tiene overlay del otro
+  // lado escuchándolo para cuando esto arranca.
+  function syncHistoricalInBackground(historical) {
+    if (!historical.length) return Promise.resolve();
+    updateSyncBadge('pending');
+    historicalSyncPromise = (async () => {
+      for (const { name, applyFn, label } of historical) {
+        try {
+          await syncCollectionFull(name, applyFn, label,
+            (msg) => console.log('🔄 Historial (fondo):', msg));
+        } catch (err) {
+          console.warn(`Historial de fondo (${name}) falló:`, err.message);
+        }
+      }
+      closeOrphanSessions();
+      updateSyncBadge('ok');
+      console.log('✅ Historial completo sincronizado de fondo.');
+    })();
+    return historicalSyncPromise;
   }
 
   // ─── Badge visual ─────────────────────────────────────────────────────────────
@@ -1827,6 +1880,10 @@
     // mobile sin depender de Firestore real (ver MOBILE_SKIP_COLLECTIONS).
     isMobileAdminPos,
     MOBILE_SKIP_COLLECTIONS,
+    ESSENTIAL_COLLECTIONS,
+    // Para poder esperar (en un test, o eventualmente una UI) a que el
+    // historial de fondo termine, sin necesidad de pollear.
+    getHistoricalSyncPromise: () => historicalSyncPromise,
     queueChange:     async () => {},
     syncPending:     syncNow,
     resolveConflict: (local) => local,
