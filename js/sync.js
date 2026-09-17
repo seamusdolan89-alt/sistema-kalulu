@@ -106,6 +106,37 @@
     { table: 'sucursales',        collection: 'sucursales',        pk: 'id',   denormalize: null, posPush: false },
   ];
 
+  // Admin-POS en un celular (<=768px) solo usa 5 áreas — Inicio, Productos,
+  // Órdenes, Proveedores/Cta Cte, Informes (nada más que "Ventas por
+  // Vendedor") — ver BACKLOG.md "Admin-POS responsive". Estas colecciones NO
+  // las lee ningún módulo de esas 5 áreas (auditado módulo por módulo antes
+  // de tocar esto, 17/9/2026) — en mobile se excluyen del pull inicial y del
+  // sync periódico para no traer datos que ese dispositivo nunca va a
+  // mostrar. A propósito quedan AFUERA de esta lista (siguen sincronizando
+  // igual, en mobile también) compras/gastos/pagos_proveedores/ventas/
+  // sesiones_caja/ordenes_compra/stock_ajustes: el saldo de un proveedor
+  // (getSaldoProveedor) suma compras+gastos+pagos de TODA la vida, sin
+  // filtro de fecha — acotarlas arriesgaba mostrar un saldo mal en el
+  // celular, y eso ya causó plata invisible en caja antes (ver
+  // CLAUDE.md, "medios de pago").
+  const MOBILE_SKIP_COLLECTIONS = [
+    'producto_codigo_proveedor', // matcheo de códigos de barra — flujo de escaneo/OCR, desktop
+    'gastos_pagos',              // desglose de pagos de Gastos Generales — pantalla desktop-only
+    'system_config',             // Configuración — desktop-only
+    'flujo_forecast', 'flujo_liquidar', 'flujo_pagos_prov', // Flujo de Fondos — desktop-only (ROUTE_ADMIN_POS_ONLY)
+    'cuenta_corriente',          // cta cte de CLIENTES (reporte Aging) — desktop-only, no confundir con proveedores
+    'caja_admin',                // Caja Seamus — desktop-only; el wizard de pago solo ESCRIBE ahí, nunca lee
+    'consumo_interno',           // pantalla desktop-only
+    'clientes',                  // pedido explícito del usuario (17/9) — no lo necesita desde el celular
+  ];
+
+  // window.innerWidth es estable durante la sesión (un celular no cambia de
+  // ancho) — se chequea en el momento en vez de pasarlo como parámetro desde
+  // cada llamador (login.html, app.js al iniciar, el timer de 5 min).
+  function isMobileAdminPos() {
+    return !!window.ADMIN_MODE && window.innerWidth <= 768;
+  }
+
   // ─── PULL: colecciones Firestore → SQLite ─────────────────────────────────────
   // Cada entrada define cómo aplicar un documento admin al SQLite local.
 
@@ -1484,7 +1515,15 @@
     const cursorViejoCompartido = localStorage.getItem('admin_monitor_sync_at');
     let total = 0;
 
-    for (const { name, applyFn } of MONITOR_SOURCES) {
+    // En un celular (ver MOBILE_SKIP_COLLECTIONS más arriba), saltear acá
+    // también — sin esto, el sync periódico de cada 5 min iba a volver a
+    // traer estas colecciones aunque el pre-login o el pull inicial ya las
+    // hubieran salteado.
+    const sources = isMobileAdminPos()
+      ? MONITOR_SOURCES.filter(s => !MOBILE_SKIP_COLLECTIONS.includes(s.name))
+      : MONITOR_SOURCES;
+
+    for (const { name, applyFn } of sources) {
       const cursorKey = `admin_monitor_sync_at:${name}`;
       try {
         let cursor = localStorage.getItem(cursorKey) || cursorViejoCompartido;
@@ -1695,7 +1734,14 @@
       { name: 'sucursales',        applyFn: applySucursalFull,     label: 'Cajas' },
     ];
 
-    for (const { name, applyFn, label } of COLLECTIONS) {
+    // En un celular, saltear las colecciones que ninguna de las 5 áreas
+    // mobile usa (ver MOBILE_SKIP_COLLECTIONS) — no tiene sentido bajarlas
+    // completas a un dispositivo que nunca las va a mostrar.
+    const collectionsToSync = isMobileAdminPos()
+      ? COLLECTIONS.filter(c => !MOBILE_SKIP_COLLECTIONS.includes(c.name))
+      : COLLECTIONS;
+
+    for (const { name, applyFn, label } of collectionsToSync) {
       report(`Descargando ${label}...`);
       await syncCollectionFull(name, applyFn, label, report);
     }
@@ -1777,6 +1823,10 @@
     // directo, sin pasar por el loop, necesita el mismo reset para no arrastrar
     // el resultado de la llamada anterior.
     __testResetUltimoSkipPorPendiente: () => { ultimoSkipPorPendiente = false; },
+    // Expuestos para poder testear el recorte de colecciones en Admin-POS
+    // mobile sin depender de Firestore real (ver MOBILE_SKIP_COLLECTIONS).
+    isMobileAdminPos,
+    MOBILE_SKIP_COLLECTIONS,
     queueChange:     async () => {},
     syncPending:     syncNow,
     resolveConflict: (local) => local,
