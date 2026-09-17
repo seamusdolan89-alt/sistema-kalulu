@@ -339,24 +339,26 @@
 
         // Admin-POS en un dispositivo nuevo: la base local recién abierta
         // solo tiene el admin por defecto (admin/kalulu123) — sin esto no
-        // hay forma de entrar con la contraseña real hasta DESPUÉS de
-        // loguearse (la sincronización completa hoy corre recién en
-        // admin-pos/index.html, una vez adentro). Si se ve vacía, traer todo
-        // de Firestore (usuarios con la contraseña real incluidos) antes de
-        // dejar intentar el login. Si falla (sin internet, o bloqueado como
-        // en los tests e2e) se sigue de largo con los datos locales — mismo
-        // criterio que el resto de la app (ver initialSyncFromFirestore en
-        // admin-pos/index.html).
+        // hay forma de entrar con la contraseña real. Si se ve vacía
+        // (`productos` en 0, proxy de "nunca sincronizó nada"), traer SOLO
+        // usuarios antes de dejar intentar el login — no las ~28
+        // colecciones completas (initialSyncFromFirestore), que en una base
+        // real con meses de ventas/compras podía tardar minutos en una
+        // conexión de celular antes de mostrar siquiera el formulario. El
+        // resto de los datos sigue llegando igual que siempre, pero DESPUÉS
+        // de loguearse, con su propio overlay en admin-pos/index.html. Si
+        // esto falla (sin internet, o bloqueado como en los tests e2e) se
+        // sigue de largo con los datos locales.
         if (isAdminPos) {
           const overlay = document.getElementById('sync-overlay');
           try {
             const productCount = window.SGA_DB.query('SELECT COUNT(*) as n FROM productos');
             const isEmpty = !productCount || productCount[0]?.n === 0;
-            if (isEmpty && window.SGA_Sync?.initialSyncFromFirestore) {
+            if (isEmpty && window.SGA_Sync?.pullUsuariosOnly) {
               const progressEl = document.getElementById('sync-progress');
               overlay.classList.add('show');
               loginBtn.disabled = true;
-              await window.SGA_Sync.initialSyncFromFirestore((msg) => {
+              await window.SGA_Sync.pullUsuariosOnly((msg) => {
                 if (progressEl) progressEl.textContent = msg;
               });
             }

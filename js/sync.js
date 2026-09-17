@@ -1575,15 +1575,17 @@
 
   // ─── Sincronización inicial completa (admin-pos primer arranque) ──────────────
 
-  async function initialSyncFromFirestore(progressFn = () => {}) {
-    const report = (msg) => { progressFn(msg); console.log('🔄 Initial Sync:', msg); };
-
+  // Conecta a Firestore si todavía no hay una conexión abierta (initialSync
+  // completo, pullUsuariosOnly, etc. la comparten). Separado de
+  // initialSyncFromFirestore para poder conectar sin arrastrar las ~28
+  // colecciones completas cuando solo hace falta una.
+  async function ensureFirestoreConnected(report) {
+    if (initialized && firestoreDb) return true;
     const cfg = window.FIREBASE_CONFIG;
     if (!cfg || cfg.apiKey.startsWith('REEMPLAZAR')) {
       report('Firebase no configurado — se omite sincronización inicial.');
-      return;
+      return false;
     }
-
     try {
       if (!firebase.apps.length) firebase.initializeApp(cfg);
       const db = firebase.firestore();
@@ -1592,10 +1594,74 @@
       }
       firestoreDb = db;
       initialized = true;
+      return true;
     } catch (err) {
       report('Error conectando a Firebase: ' + err.message);
       throw err;
     }
+  }
+
+  // Trae una sola colección completa, página por página — el cuerpo del
+  // loop que antes vivía inline en initialSyncFromFirestore, factorizado
+  // para poder reusarlo también en pullUsuariosOnly() (ver más abajo).
+  async function syncCollectionFull(name, applyFn, label, report) {
+    let count = 0;
+    let lastDoc = null;
+
+    while (true) {
+      let q = firestoreDb.collection(name).orderBy('updated_at', 'desc').limit(500);
+      if (lastDoc) q = q.startAfter(lastDoc);
+
+      let snap;
+      try {
+        snap = await q.get();
+      } catch (err) {
+        // Si no hay índice u otro error, intentar sin orden
+        try {
+          let q2 = firestoreDb.collection(name).limit(500);
+          if (lastDoc) q2 = q2.startAfter(lastDoc);
+          snap = await q2.get();
+        } catch (err2) {
+          console.warn(`Sync skip (${name}):`, err2.message);
+          break;
+        }
+      }
+
+      if (snap.empty) break;
+
+      for (const doc of snap.docs) {
+        try { applyFn(doc.data()); count++; }
+        catch (err) { console.warn(`Apply error (${name} ${doc.id}):`, err.message); }
+      }
+
+      report(`${label}: ${count} registros...`);
+      lastDoc = snap.docs[snap.docs.length - 1];
+      if (snap.docs.length < 500) break;
+    }
+
+    report(`✓ ${label}: ${count}`);
+  }
+
+  // Pull liviano de UNA sola colección (usuarios) — para el pre-login de
+  // Admin-POS en un dispositivo nuevo (ver views/login.html). Antes ese
+  // pre-login llamaba a initialSyncFromFirestore() completo: en una base
+  // real, con meses de ventas/compras acumuladas, eso podía tardar minutos
+  // en una conexión de celular ANTES de dejar ni siquiera intentar el
+  // login. Acá solo hace falta la contraseña real, que viaja en
+  // `usuarios` — el resto de las ~28 colecciones se sigue trayendo igual
+  // que siempre, pero DESPUÉS de loguearse (admin-pos/index.html ya tiene
+  // su propio overlay "Descargando datos..." para eso).
+  async function pullUsuariosOnly(progressFn = () => {}) {
+    const report = (msg) => { progressFn(msg); console.log('🔄 Pull usuarios:', msg); };
+    const ok = await ensureFirestoreConnected(report);
+    if (!ok) return;
+    await syncCollectionFull('usuarios', applyUsuarioFull, 'Usuarios', report);
+  }
+
+  async function initialSyncFromFirestore(progressFn = () => {}) {
+    const report = (msg) => { progressFn(msg); console.log('🔄 Initial Sync:', msg); };
+    const ok = await ensureFirestoreConnected(report);
+    if (!ok) return;
 
     const COLLECTIONS = [
       { name: 'usuarios',          applyFn: applyUsuarioFull,      label: 'Usuarios' },
@@ -1631,41 +1697,7 @@
 
     for (const { name, applyFn, label } of COLLECTIONS) {
       report(`Descargando ${label}...`);
-      let count = 0;
-      let lastDoc = null;
-
-      while (true) {
-        let q = firestoreDb.collection(name).orderBy('updated_at', 'desc').limit(500);
-        if (lastDoc) q = q.startAfter(lastDoc);
-
-        let snap;
-        try {
-          snap = await q.get();
-        } catch (err) {
-          // Si no hay índice u otro error, intentar sin orden
-          try {
-            let q2 = firestoreDb.collection(name).limit(500);
-            if (lastDoc) q2 = q2.startAfter(lastDoc);
-            snap = await q2.get();
-          } catch (err2) {
-            console.warn(`Initial sync skip (${name}):`, err2.message);
-            break;
-          }
-        }
-
-        if (snap.empty) break;
-
-        for (const doc of snap.docs) {
-          try { applyFn(doc.data()); count++; }
-          catch (err) { console.warn(`Apply error (${name} ${doc.id}):`, err.message); }
-        }
-
-        report(`${label}: ${count} registros...`);
-        lastDoc = snap.docs[snap.docs.length - 1];
-        if (snap.docs.length < 500) break;
-      }
-
-      report(`✓ ${label}: ${count}`);
+      await syncCollectionFull(name, applyFn, label, report);
     }
 
     closeOrphanSessions();
@@ -1726,6 +1758,7 @@
     pushPending,
     pushToPos,
     initialSyncFromFirestore,
+    pullUsuariosOnly,
     syncMonitoringData,
     wipeFirestoreCollections,
     getFirestore: () => firestoreDb,
