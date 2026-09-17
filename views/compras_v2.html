@@ -891,6 +891,30 @@
   }
   .cv2-rev-btn-confirm:hover { background: linear-gradient(135deg, #1976d2, #1e88e5); }
 
+  /* ── Acciones rápidas por fila (Revisión) ── */
+  .cv2-rev-acciones-cell { position: relative; }
+  .cv2-rev-btn-mas {
+    background: transparent; border: 1px solid #dde3ea; border-radius: 6px;
+    color: #607080; font-size: 14px; padding: 3px 10px; cursor: pointer; line-height: 1.4;
+  }
+  .cv2-rev-btn-mas:hover { background: #f0f4ff; border-color: #b8c4d8; color: #1565c0; }
+  .cv2-rev-panel {
+    position: absolute; top: 50%; right: 8px; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 2px; white-space: nowrap;
+    background: #1a2e4a; padding: 5px; border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(26,46,74,.3); z-index: 20;
+  }
+  .cv2-rev-panel-acc {
+    display: flex; align-items: center; gap: 6px; text-align: left;
+    background: transparent; border: 1px solid transparent; border-radius: 6px;
+    color: #eef2f7; font-size: 12px; font-family: inherit;
+    padding: 6px 10px; cursor: pointer; white-space: nowrap;
+  }
+  .cv2-rev-panel-acc:hover { background: rgba(255,255,255,.14); }
+  /* Se abren desde arriba de #cv2-review-overlay (z-index:600) -- .cv2-overlay
+     solo, base (z-index:400), quedaría tapado. */
+  #cv2-sust-overlay, #cv2-madre-overlay { z-index: 700; }
+
   /* ── CABECERA (PASO 1) ────────────────────────────────────────────────── */
   #cv2-cabecera {
     flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #f0f2f5;
@@ -1587,6 +1611,7 @@
           <th class="r">Costo Unit.</th>
           <th class="r">Descuento</th>
           <th class="r">Subtotal</th>
+          <th class="c">Acciones</th>
         </tr>
       </thead>
       <tbody id="cv2-rev-tbody"></tbody>
@@ -1606,5 +1631,38 @@
       <button class="cv2-overlay-close" id="cv2-pausadas-close" aria-label="Cerrar" title="Cerrar">×</button>
     </div>
     <div id="cv2-pausadas-list"></div>
+  </div>
+</div>
+
+<!-- ── ACCIONES RÁPIDAS (Revisión): ASOCIAR SUSTITUTO ── -->
+<div id="cv2-sust-overlay" class="cv2-overlay" style="display:none">
+  <div class="cv2-overlay-box">
+    <div class="cv2-overlay-header">
+      <span>Asociar sustituto — <span id="cv2-sust-prod-nombre"></span></span>
+      <button class="cv2-overlay-close" id="cv2-sust-close" aria-label="Cerrar" title="Cerrar">×</button>
+    </div>
+    <div style="padding:16px 20px">
+      <input class="cv2-pm-input" id="cv2-sust-search" type="text"
+             placeholder="Buscar producto de referencia por nombre o código…" autocomplete="off">
+      <div id="cv2-sust-results" style="margin-top:10px;max-height:280px;overflow-y:auto"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── ACCIONES RÁPIDAS (Revisión): ASIGNAR MADRE ── -->
+<div id="cv2-madre-overlay" class="cv2-overlay" style="display:none">
+  <div class="cv2-overlay-box">
+    <div class="cv2-overlay-header">
+      <span>Asignar madre — <span id="cv2-madre-prod-nombre"></span></span>
+      <button class="cv2-overlay-close" id="cv2-madre-close" aria-label="Cerrar" title="Cerrar">×</button>
+    </div>
+    <div style="padding:16px 20px">
+      <div id="cv2-madre-search-wrap">
+        <input class="cv2-pm-input" id="cv2-madre-search" type="text"
+               placeholder="Buscar producto madre por nombre o código…" autocomplete="off">
+        <div id="cv2-madre-results" style="margin-top:10px;max-height:280px;overflow-y:auto"></div>
+      </div>
+      <div id="cv2-madre-confirm" style="display:none"></div>
+    </div>
   </div>
 </div>

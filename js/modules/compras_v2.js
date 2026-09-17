@@ -6,6 +6,7 @@
 // viejo, y el wizard no se abriera nunca sin decir nada.
 import Familia from './familia.js';
 import Buscador from './buscador_productos.js';
+import GruposSustitutos from './grupos_sustitutos.js';
 
 const ComprasV2 = (() => {
 
@@ -2402,6 +2403,7 @@ const ComprasV2 = (() => {
             <td class="r">—</td>
             <td class="r">—</td>
             <td class="r"><strong>${it.tipo === 'descuento' && subtotal !== 0 ? '− ' : ''}${fmt$(Math.abs(subtotal))}</strong></td>
+            <td class="c">—</td>
           </tr>`;
         }
 
@@ -2420,6 +2422,9 @@ const ComprasV2 = (() => {
           <td class="r">${fmt$(costo)}</td>
           <td class="r">${descPct > 0.001 ? descPct.toFixed(1) + '%' : '—'}</td>
           <td class="r"><strong>${fmt$(subtotal)}</strong></td>
+          <td class="c cv2-rev-acciones-cell">
+            <button class="cv2-rev-btn-mas" data-rev-mas="${i}" title="Acciones rápidas">⋯</button>
+          </td>
         </tr>`;
       }).join('');
     }
@@ -2432,6 +2437,146 @@ const ComprasV2 = (() => {
   function hideReviewOverlay() {
     const overlay = ge('cv2-review-overlay');
     if (overlay) overlay.style.display = 'none';
+  }
+
+  // ── Acciones rápidas por fila (Revisión: sustituto / madre) ─────────────────────
+  //
+  // Pedido del usuario: para los productos recién ingresados, resolver desde
+  // la misma fila lo que hoy obliga a ir a otra pantalla. Aplican al instante
+  // -- no hay precedente de aprobación para sustituto/madre en ningún lado
+  // del código (a diferencia del ajuste de stock, que queda para otra etapa).
+
+  function cerrarPanelRevAcciones() {
+    ge('cv2-rev-tbody')?.querySelector('.cv2-rev-panel')?.remove();
+  }
+
+  function abrirPanelRevAcciones(idx, celda) {
+    cerrarPanelRevAcciones();
+    const it = state.items[idx];
+    if (!it || !it.productoId || !celda) return;
+
+    const panel = document.createElement('div');
+    panel.className = 'cv2-rev-panel';
+    panel.innerHTML = `
+      <button class="cv2-rev-panel-acc" data-rev-accion="sust">🔗 Asociar sustituto</button>
+      <button class="cv2-rev-panel-acc" data-rev-accion="madre">👪 Asignar madre</button>
+    `;
+    panel.querySelector('[data-rev-accion="sust"]').addEventListener('click', () => {
+      cerrarPanelRevAcciones();
+      openSustQuickModal(it.productoId, it.nombre);
+    });
+    panel.querySelector('[data-rev-accion="madre"]').addEventListener('click', () => {
+      cerrarPanelRevAcciones();
+      openMadreQuickModal(it.productoId, it.nombre);
+    });
+    celda.appendChild(panel);
+  }
+
+  function openSustQuickModal(productoId, nombre) {
+    const overlay = ge('cv2-sust-overlay');
+    overlay.dataset.prodId = productoId;
+    ge('cv2-sust-prod-nombre').textContent = nombre || '';
+    ge('cv2-sust-search').value = '';
+    ge('cv2-sust-results').innerHTML = '';
+    overlay.style.display = 'flex';
+    setTimeout(() => ge('cv2-sust-search')?.focus(), 60);
+  }
+
+  function buscarSustQuick(q, productoId) {
+    const results = ge('cv2-sust-results');
+    const texto = q.trim();
+    if (!texto) { results.innerHTML = ''; return; }
+    const res = searchProductos(texto).filter(p => p.id !== productoId);
+    results.innerHTML = res.length
+      ? res.map(p => `
+          <div class="cv2-dd-item" data-sust-elegir="${esc(p.id)}">
+            <span class="cv2-dd-nombre">${esc(p.nombre)}</span>
+            <span class="cv2-dd-meta">${esc(p.barcode || '')}</span>
+          </div>`).join('')
+      : '<p style="color:#8090a0;padding:8px 0">Sin resultados.</p>';
+
+    results.querySelectorAll('[data-sust-elegir]').forEach(el =>
+      el.addEventListener('click', () => {
+        GruposSustitutos.aplicarCambioReferencia(productoId, el.dataset.sustElegir);
+        ge('cv2-sust-overlay').style.display = 'none';
+        window.SGA_Utils.showNotification('Sustituto asignado', 'success');
+      })
+    );
+  }
+
+  function openMadreQuickModal(productoId, nombre) {
+    const overlay = ge('cv2-madre-overlay');
+    overlay.dataset.prodId = productoId;
+    ge('cv2-madre-prod-nombre').textContent = nombre || '';
+    ge('cv2-madre-search').value = '';
+    ge('cv2-madre-results').innerHTML = '';
+    ge('cv2-madre-search-wrap').style.display = '';
+    ge('cv2-madre-confirm').style.display = 'none';
+    overlay.style.display = 'flex';
+    setTimeout(() => ge('cv2-madre-search')?.focus(), 60);
+  }
+
+  function buscarMadreQuick(q, productoId) {
+    const results = ge('cv2-madre-results');
+    const texto = q.trim();
+    if (!texto) { results.innerHTML = ''; return; }
+    const res = searchProductos(texto).filter(p => p.id !== productoId);
+    results.innerHTML = res.length
+      ? res.map(p => `
+          <div class="cv2-dd-item" data-madre-elegir="${esc(p.id)}" data-madre-nombre="${esc(p.nombre)}">
+            <span class="cv2-dd-nombre">${esc(p.nombre)}</span>
+            <span class="cv2-dd-meta">${esc(p.barcode || '')}</span>
+          </div>`).join('')
+      : '<p style="color:#8090a0;padding:8px 0">Sin resultados.</p>';
+
+    results.querySelectorAll('[data-madre-elegir]').forEach(el =>
+      el.addEventListener('click', () => {
+        mostrarConfirmMadreQuick(productoId, el.dataset.madreElegir, el.dataset.madreNombre);
+      })
+    );
+  }
+
+  // Mismo patrón que confirmAsignarMadre() en editor-producto.js: si la
+  // elegida no es madre todavía, se convierte, y después se asigna
+  // producto_madre_id con las 2 banderas de herencia (default: ambas).
+  function mostrarConfirmMadreQuick(productoId, madreId, madreNombre) {
+    ge('cv2-madre-search-wrap').style.display = 'none';
+    const confirmDiv = ge('cv2-madre-confirm');
+    confirmDiv.style.display = '';
+    confirmDiv.innerHTML = `
+      <p style="margin:0 0 14px;font-size:14px">Asignar <strong>${esc(madreNombre)}</strong> como madre de este producto.</p>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px">
+        <input type="checkbox" id="cv2-madre-hereda-costo" checked> Heredar costo de la madre
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:18px;font-size:13px">
+        <input type="checkbox" id="cv2-madre-hereda-precio" checked> Heredar precio de la madre
+      </label>
+      <div style="display:flex;gap:8px">
+        <button id="cv2-madre-btn-confirm" class="cv2-rev-btn-confirm" style="padding:8px 18px;font-size:13px">Confirmar</button>
+        <button id="cv2-madre-btn-volver" style="font-size:13px;background:#fff;border:1px solid #dde3ea;border-radius:6px;padding:8px 14px;cursor:pointer;color:#607080">Volver a buscar</button>
+      </div>
+    `;
+    ge('cv2-madre-btn-volver').addEventListener('click', () => {
+      confirmDiv.style.display = 'none';
+      ge('cv2-madre-search-wrap').style.display = '';
+      ge('cv2-madre-search')?.focus();
+    });
+    ge('cv2-madre-btn-confirm').addEventListener('click', () => {
+      const hc = ge('cv2-madre-hereda-costo').checked ? 1 : 0;
+      const hp = ge('cv2-madre-hereda-precio').checked ? 1 : 0;
+      const ts = nowISO();
+      const yaEsMadre = db().query('SELECT es_madre FROM productos WHERE id=?', [madreId])[0]?.es_madre;
+      if (!yaEsMadre) {
+        db().run("UPDATE productos SET es_madre=1, sync_status='pending', updated_at=? WHERE id=?", [ts, madreId]);
+      }
+      db().run(
+        `UPDATE productos SET producto_madre_id=?, hereda_costo=?, hereda_precio=?, es_madre=0,
+           fecha_modificacion=?, sync_status='pending', updated_at=? WHERE id=?`,
+        [madreId, hc, hp, ts, ts, productoId]
+      );
+      ge('cv2-madre-overlay').style.display = 'none';
+      window.SGA_Utils.showNotification('Madre asignada', 'success');
+    });
   }
 
   // ── Commit (ex-confirmar) ─────────────────────────────────────────────────────
@@ -3970,6 +4115,10 @@ const ComprasV2 = (() => {
 
   // ── Keyboard ─────────────────────────────────────────────────────────────────
   let _docKeydown = null;
+  // Cierra el panel de acciones rápidas de Revisión al clickear afuera --
+  // documentado a nivel modulo para poder sacarlo en destroy() (ver nota de
+  // CLAUDE.md: un listener en document que sobrevive a la navegacion siguiente).
+  let _docClickRevPanel = null;
 
   function setupKeyboard() {
     _docKeydown = e => {
@@ -4029,6 +4178,7 @@ const ComprasV2 = (() => {
 
   function teardownKeyboard() {
     if (_docKeydown) { document.removeEventListener('keydown', _docKeydown); _docKeydown = null; }
+    if (_docClickRevPanel) { document.removeEventListener('click', _docClickRevPanel); _docClickRevPanel = null; }
   }
 
   // ── Init ─────────────────────────────────────────────────────────────────────
@@ -4515,6 +4665,36 @@ const ComprasV2 = (() => {
 
     ge('cv2-pausadas-close')?.addEventListener('click', () => {
       ge('cv2-pausadas-overlay').style.display = 'none';
+    });
+
+    // ── Acciones rápidas por fila (Revisión) ──
+    ge('cv2-rev-tbody')?.addEventListener('click', e => {
+      const btnMas = e.target.closest('[data-rev-mas]');
+      if (!btnMas) return;
+      e.stopPropagation();
+      const idx = parseInt(btnMas.dataset.revMas, 10);
+      abrirPanelRevAcciones(idx, btnMas.closest('.cv2-rev-acciones-cell'));
+    });
+    _docClickRevPanel = e => {
+      if (e.target.closest('.cv2-rev-panel') || e.target.closest('[data-rev-mas]')) return;
+      cerrarPanelRevAcciones();
+    };
+    document.addEventListener('click', _docClickRevPanel);
+
+    ge('cv2-sust-close')?.addEventListener('click', () => { ge('cv2-sust-overlay').style.display = 'none'; });
+    ge('cv2-sust-overlay')?.addEventListener('click', e => {
+      if (e.target === ge('cv2-sust-overlay')) ge('cv2-sust-overlay').style.display = 'none';
+    });
+    ge('cv2-sust-search')?.addEventListener('input', e => {
+      buscarSustQuick(e.target.value, ge('cv2-sust-overlay').dataset.prodId);
+    });
+
+    ge('cv2-madre-close')?.addEventListener('click', () => { ge('cv2-madre-overlay').style.display = 'none'; });
+    ge('cv2-madre-overlay')?.addEventListener('click', e => {
+      if (e.target === ge('cv2-madre-overlay')) ge('cv2-madre-overlay').style.display = 'none';
+    });
+    ge('cv2-madre-search')?.addEventListener('input', e => {
+      buscarMadreQuick(e.target.value, ge('cv2-madre-overlay').dataset.prodId);
     });
 
     ge('cv2-pausadas-overlay')?.addEventListener('click', e => {
