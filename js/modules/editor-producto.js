@@ -1356,10 +1356,13 @@ const EditorProducto = (() => {
     if (!q || q.length < 2) { dropdown.style.display = 'none'; return; }
 
     const results = window.SGA_DB.query(`
-      SELECT p.id, p.nombre, cb.codigo AS codigo_barras
+      SELECT p.id, p.nombre,
+        (SELECT codigo FROM codigos_barras
+         WHERE producto_id = p.id AND es_principal = 1 LIMIT 1) AS codigo_barras
       FROM productos p
-      LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
-      WHERE p.activo = 1 AND p.id != ? AND (LOWER(p.nombre) LIKE ? OR cb.codigo LIKE ?)
+      WHERE p.activo = 1 AND p.id != ? AND (LOWER(p.nombre) LIKE ? OR EXISTS (
+        SELECT 1 FROM codigos_barras WHERE producto_id = p.id AND codigo LIKE ?
+      ))
       ORDER BY p.nombre LIMIT 10
     `, [state.productoId, `%${q.toLowerCase()}%`, `%${q}%`]);
 
@@ -1404,11 +1407,14 @@ const EditorProducto = (() => {
     existingIds.add(state.productoId);
 
     const results = window.SGA_DB.query(`
-      SELECT p.id, p.nombre, cat.nombre AS categoria_nombre, cb.codigo AS codigo_barras
+      SELECT p.id, p.nombre, cat.nombre AS categoria_nombre,
+        (SELECT codigo FROM codigos_barras
+         WHERE producto_id = p.id AND es_principal = 1 LIMIT 1) AS codigo_barras
       FROM productos p
       LEFT JOIN categorias cat ON cat.id = p.categoria_id
-      LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
-      WHERE p.activo = 1 AND p.id != ? AND (LOWER(p.nombre) LIKE ? OR cb.codigo LIKE ?)
+      WHERE p.activo = 1 AND p.id != ? AND (LOWER(p.nombre) LIKE ? OR EXISTS (
+        SELECT 1 FROM codigos_barras WHERE producto_id = p.id AND codigo LIKE ?
+      ))
       ORDER BY p.nombre LIMIT 15
     `, [state.productoId, `%${q.toLowerCase()}%`, `%${q}%`])
     .filter(pr => !existingIds.has(pr.id));

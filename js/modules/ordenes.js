@@ -1971,7 +1971,7 @@ const Ordenes = (() => {
       WHERE p.activo = 1
         AND (p.nombre LIKE ? OR EXISTS (
           SELECT 1 FROM codigos_barras
-          WHERE producto_id = p.id AND es_principal = 1
+          WHERE producto_id = p.id
             AND codigo IN (${Buscador.variantesCodigo(q).map(() => '?').join(',') || "''"})
         ))
       LIMIT 20
