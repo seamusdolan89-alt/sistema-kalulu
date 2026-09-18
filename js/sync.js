@@ -20,6 +20,12 @@
  *   El pull de admin-pos trae por fecha (_synced_at > cursor), no por
  *   _pulled como el del POS — journal aparte por colección
  *   (admin_monitor_sync_at:<tabla> en localStorage).
+ *   BUG del 16 al 18/9/2026: syncNow() en modo admin quedó llamando SOLO al
+ *   pull (syncMonitoringData) — el push (pushToPos) se quedó sin ningún
+ *   llamador automático dos días enteros, aunque el comentario de acá
+ *   arriba y el botón ya decían "pull + push". Cualquier cambio de Admin-POS
+ *   quedaba 'pending' local para siempre, sin llegar nunca al POS. Ver
+ *   CLAUDE.md y tests/e2e/test_sync_admin_push_wired.py.
  *
  * GUARDA ANTI-PISADA Y SU RIESGO (fix 16/9/2026):
  *   Si al aplicar un documento entrante la copia local tiene un cambio
@@ -260,8 +266,27 @@
     if (!initialized || !firestoreDb) return;
 
     if (window.ADMIN_MODE) {
-      // Admin-pos: pull manual (botón Pull) o al iniciar. Push al POS es manual (botón Push POS).
-      return await syncMonitoringData();
+      // Admin-pos: un solo ciclo trae (pull, syncMonitoringData) Y manda
+      // (push, pushToPos) los cambios propios — corre así tanto al apretar
+      // "Sincronizar" como en el automático de cada 5 min (ver initialize()
+      // más abajo). BUG real hasta el 18/9/2026: cuando el 16/9 se
+      // unificaron los botones "Pull"/"Push POS" en uno solo, este código
+      // se quedó llamando SOLO a syncMonitoringData() — pushToPos() quedó
+      // sin ningún llamador automático. Cualquier cambio hecho en Admin-POS
+      // (un pago a proveedor, una compra, etc.) quedaba 'pending' en la
+      // base local para siempre: nunca llegaba a Firestore ni al POS del
+      // local, aunque se "sincronizara" mil veces y el botón dijera "Al
+      // día". Reportado por el usuario: el saldo de un proveedor no
+      // coincidía entre su computadora y la del local pese a haber
+      // sincronizado de los dos lados.
+      const pulled = await syncMonitoringData();
+      try {
+        const pushed = await pushToPos();
+        if (pushed > 0) console.log(`⬆️  Push a POS: ${pushed} registros enviados`);
+      } catch (err) {
+        console.warn('Push a POS (auto) falló:', err.message);
+      }
+      return pulled;
     } else {
       // POS: primero bajar cambios del admin, luego subir los del POS
       const pulled = await pullFromFirestore();
@@ -1879,6 +1904,16 @@
     // directo, sin pasar por el loop, necesita el mismo reset para no arrastrar
     // el resultado de la llamada anterior.
     __testResetUltimoSkipPorPendiente: () => { ultimoSkipPorPendiente = false; },
+    // Fuerza el estado "ya conectado" con un firestoreDb simulado, sin pasar
+    // por Firebase real — para poder probar que syncNow() en modo admin
+    // llama de verdad a pushToPos() (ver bug 18/9/2026: quedó sin ningún
+    // llamador tras unificar los botones Pull/Push POS el 16/9) sin
+    // depender de la red, bloqueada por block_firebase en el resto de la
+    // suite.
+    __testForceInitialized: (fakeFirestoreDb) => {
+      initialized = true;
+      firestoreDb = fakeFirestoreDb;
+    },
     // Expuestos para poder testear el recorte de colecciones en Admin-POS
     // mobile sin depender de Firestore real (ver MOBILE_SKIP_COLLECTIONS).
     isMobileAdminPos,
