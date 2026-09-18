@@ -82,6 +82,9 @@ sale "vacío" inesperadamente.
 
 ## Tests existentes
 
+> `sync_sim.py` (en esta carpeta, sin prefijo `test_` a proposito para que el CI no lo ejecute como test) es el simulador de dos dispositivos: `with Simulador() as sim:` da `sim.pos` y `sim.admin` (cada uno con `q()/run()/push()/pull()`), y `sim.nuevo_dispositivo()` para un Admin-POS con base vacia.
+
+
 | Archivo | Cubre |
 |---|---|
 | `test_pos_smoke.py` | Login → POS carga → sidebar completo → modal Apertura de Caja |
@@ -111,6 +114,7 @@ sale "vacío" inesperadamente.
 | `test_informes.py` | Los 8 reportes de Informes (Ventas por Producto, Análisis de Productos, Ventas por Transacción, Quiebres de Stock, Ventas por Vendedor, Aging CC, Resumen Diario de Caja, Stock sin Movimiento) — verifica los números exactos, no solo que rendericen |
 | `test_informes_sustitutos_grupos.py` | Informes → "Grupos de Sustitutos": audita `producto_sustitutos` y detecta cadenas rotas (un producto apunta como referencia a otro que ya se unió a otro grupo distinto) |
 | `test_compras_vincular_remito_barcode_duplicado.py` | Compras → "Vincular Factura" desde un remito pendiente: un producto con código de barras duplicado (`es_principal=1` repetido) ya no duplica la fila en el carrito (mismo patrón de JOIN sin límite que en Órdenes/Informes) |
+| `test_sync_convergencia_tablas.py` | **Auditoria de sync tabla por tabla y en los dos sentidos** con DOS dispositivos reales (POS + Admin-POS) contra un Firestore falso compartido (`sync_sim.py`). Descubre las tablas del esquema REAL (sqlite_master), no de una lista: para cada una prueba alta con todas las columnas, actualizacion, borrado de hijos, borrado de padres con marca de eliminacion, y un Admin-POS nuevo con base vacia. Toda falla tiene que estar en `EXCEPCIONES_DISENO` (justificada) o en `DEUDA` (con plan); si una entrada ya converge el test falla para que la lista solo pueda encogerse. `--informe` imprime todo sin fallar |
 | `test_sync_admin_push_bandera_pulled.py` | Caso real "Agua Belen" (18/9/2026): en Admin-POS, `pushPending()` (que llaman gastos/compras/caja/aprobaciones) subia los docs SIN `_pulled:false` y los dejaba `synced`, asi que el POS nunca los descargaba; ahora en modo admin `pushPending()` = `pushToPos()`. Tambien cubre que `pushToPos()` suba TODA tabla pendiente (antes una lista fija dejaba afuera categorias, stock_ajustes, gastos_pagos, etc.). Usa un Firestore falso que registra cada `batch.set()` |
 | `test_compras_editar_remito.py` | Compras → Remitos Pendientes → "✏️ Editar" (solo Admin-POS): sacar el producto equivocado, cambiar una cantidad y agregar el correcto mueve el stock por la diferencia neta por producto (no "revertir todo y recargar"), la línea editada conserva su `remito_items.id`, el remito queda `pending` para sync, avisa (confirm) antes de dejar stock negativo, restaura la pantalla al salir, y el botón no aparece en el POS del local |
 | `test_stock_ajustes_sync.py` | Los 5 flujos de ajuste/salida de stock (Ingreso por Ajuste, Ajuste, Consumo Interno, Rotura, Vencimiento) marcan `stock.sync_status='pending'` al confirmar — antes ninguno lo hacía, así que el número de stock quedaba desincronizado entre POS y Admin-POS aunque el historial de movimientos sí viajara |

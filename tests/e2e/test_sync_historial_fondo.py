@@ -10,8 +10,8 @@ acotadas por MOBILE_SKIP_COLLECTIONS pero igual grandes).
 
 Fix en js/sync.js: `initialSyncFromFirestore()` separa las colecciones en
 dos lotes:
-  - `ESSENTIAL_COLLECTIONS` (usuarios, categorías, proveedores, productos,
-    stock, medios_cobro, sucursales) — catálogo cuyo tamaño depende de
+  - `ESSENTIAL_COLLECTIONS` (eliminaciones, usuarios, categorías, proveedores,
+    productos, stock, medios_cobro, sucursales) — catálogo cuyo tamaño depende de
     CUÁNTOS productos/proveedores existen, no de cuánto tiempo lleva
     operando el negocio. Se espera (bloqueante) antes de cerrar el overlay.
   - El resto (ventas, compras, movimientos de stock, órdenes, etc.) —
@@ -60,7 +60,11 @@ def run():
         print("ESSENTIAL_COLLECTIONS:", essential)
 
         must_be_essential = {
-            'usuarios', 'categorias', 'proveedores', 'productos', 'stock',
+            # 'eliminaciones' (18/9/2026): las marcas de borrado tienen que estar
+            # ANTES que el resto, o un dispositivo nuevo resucita lo ya borrado
+            # (productos/promociones/ordenes). Crece con la cantidad de borrados
+            # (raros), no con el volumen de ventas, asi que es seguro esperarla.
+            'eliminaciones', 'usuarios', 'categorias', 'proveedores', 'productos', 'stock',
             'medios_cobro', 'sucursales',
         }
         assert set(essential) == must_be_essential, (
