@@ -47,23 +47,29 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 
 
 def check_admin_push_tables():
-    """ADMIN_PUSH_TABLES no se puede leer desde la pagina (const interna del
-    modulo, no expuesta) -- se verifica el source de sync.js directamente."""
+    """SYNC_SOURCES y pushToPos() no se pueden leer desde la pagina (consts /
+    funciones internas del modulo, no expuestas) -- se verifica el source de
+    sync.js directamente. Antes esto miraba una lista fija (ADMIN_PUSH_TABLES);
+    esa lista se eliminó: pushToPos() sube TODA fuente con filas pendientes, asi
+    que alcanza con que las dos tablas esten registradas y que pushToPos() no
+    filtre por ninguna lista."""
     sync_js_path = os.path.join(REPO_ROOT, "js", "sync.js")
     with open(sync_js_path, encoding="utf-8") as f:
         src = f.read()
-    m = re.search(r"ADMIN_PUSH_TABLES\s*=\s*\[(.*?)\];", src, re.DOTALL)
-    assert m, "No se encontro la declaracion de ADMIN_PUSH_TABLES en sync.js"
-    tabla_list = m.group(1)
     for tabla in ("eliminaciones", "ingresos_caja"):
-        assert f"'{tabla}'" in tabla_list, (
-            f"BUG: '{tabla}' falta en ADMIN_PUSH_TABLES -- 'Push POS' nunca la va a enviar"
+        assert re.search(rf"\{{\s*table:\s*'{tabla}'", src), (
+            f"BUG: '{tabla}' no esta registrada en SYNC_SOURCES -- 'Push POS' nunca la va a enviar"
         )
+    m = re.search(r"async function pushToPos\(\)\s*\{(.*?)\n  \}", src, re.DOTALL)
+    assert m, "No se encontro pushToPos() en sync.js"
+    assert ".filter(" not in m.group(1) and "for (const source of SYNC_SOURCES)" in m.group(1), (
+        "BUG: pushToPos() filtra las fuentes por una lista -- lo pendiente en cualquier tabla tiene que viajar"
+    )
 
 
 def main():
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-    print("--- ADMIN_PUSH_TABLES incluye eliminaciones e ingresos_caja ---")
+    print("--- eliminaciones e ingresos_caja registradas y pushToPos() sin lista fija ---")
     check_admin_push_tables()
 
     with sync_playwright() as p:
