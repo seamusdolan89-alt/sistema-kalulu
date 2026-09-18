@@ -337,14 +337,6 @@ const SGA_PagoProveedorWizard = (() => {
               </div>
             </div>
 
-            ${window.ADMIN_MODE ? `
-            <div class="ccprov-metodo-row" id="row-caja-seamus">
-              <input type="checkbox" class="ccprov-metodo-check" id="chk-caja-seamus">
-              <span class="ccprov-metodo-label">💼 Caja Seamus</span>
-              <div class="ccprov-metodo-inputs">
-                <input type="number" class="ccprov-input" id="mp-cs-monto" placeholder="$ 0,00" min="0" step="0.01">
-              </div>
-            </div>` : ''}
 
             <div class="ccprov-total-row">
               <span>Total del pago:</span>
@@ -396,7 +388,6 @@ const SGA_PagoProveedorWizard = (() => {
       let t = 0;
       if (ge('chk-efectivo').checked) t += parseFloat(ge('mp-ef-monto').value) || 0;
       if (ge('chk-transferencia').checked) t += parseFloat(ge('mp-tr-monto').value) || 0;
-      if (ge('chk-caja-seamus')?.checked) t += parseFloat(ge('mp-cs-monto')?.value) || 0;
       return t;
     };
     const showError = msg => {
@@ -601,10 +592,6 @@ const SGA_PagoProveedorWizard = (() => {
       syncCheckboxStyle('chk-transferencia', 'row-transferencia');
       updateTotal();
     });
-    ge('chk-caja-seamus')?.addEventListener('change', () => {
-      syncCheckboxStyle('chk-caja-seamus', 'row-caja-seamus');
-      updateTotal();
-    });
     ge('mp-ef-monto').addEventListener('input', updateTotal);
     ge('mp-tr-monto').addEventListener('input', updateTotal);
 
@@ -653,10 +640,6 @@ const SGA_PagoProveedorWizard = (() => {
             referencia: ge('mp-tr-ref').value.trim() || null,
           });
         }
-      }
-      if (ge('chk-caja-seamus')?.checked) {
-        const monto = parseFloat(ge('mp-cs-monto')?.value) || 0;
-        if (monto > 0) metodos.push({ metodo: 'caja_seamus', monto, referencia: null });
       }
       if (!metodos.length) { showError('Ingresá al menos un monto.'); return; }
 

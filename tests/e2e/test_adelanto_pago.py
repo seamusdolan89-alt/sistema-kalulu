@@ -38,13 +38,13 @@ def main():
         print("--- Login POS (sga.db) + seed (admin) ---")
         login_via_seed(page, admin_pos=False)
 
-        print("--- Registrar adelanto $1000 (Caja Seamus) a Pepsico SA ---")
+        print("--- Registrar adelanto $1000 (Transferencia) a Pepsico SA ---")
         page.evaluate("window.location.hash = 'adelanto_pago'")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(400)
 
         page.select_option("#ap-proveedor", label="Pepsico SA")
-        page.fill("#ap-monto-caja_seamus", "1000")
+        page.fill("#ap-monto-transferencia", "1000")
         page.fill("#ap-observaciones", "Adelanto para proxima compra")
         page.locator("#ap-btn-registrar").click()
         page.wait_for_timeout(600)
@@ -63,7 +63,7 @@ def main():
           `)
         """)
         assert len(pagos) == 1, f"Se esperaba 1 pago con 1 metodo, hay: {pagos}"
-        assert pagos[0]["metodo"] == "caja_seamus", f"Metodo incorrecto: {pagos[0]}"
+        assert pagos[0]["metodo"] == "transferencia", f"Metodo incorrecto: {pagos[0]}"
         assert abs(pagos[0]["monto"] - 1000) < 0.01, f"Monto incorrecto: {pagos[0]}"
 
         imputaciones = page.evaluate("() => window.SGA_DB.query('SELECT * FROM imputaciones_pagos')")

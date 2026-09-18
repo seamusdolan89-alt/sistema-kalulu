@@ -46,7 +46,6 @@
     'vencimientos':    () => import('./modules/vencimientos.js').then(m => m.default),
     'roturas':         () => import('./modules/roturas.js').then(m => m.default),
     'gastos':          () => import('./modules/gastos.js').then(m => m.default),
-    'caja_admin':      () => import('./modules/caja_admin.js').then(m => m.default),
     'adelanto_pago':   () => import('./modules/adelanto_pago.js').then(m => m.default),
     'configuracion':   () => import('./modules/configuracion.js').then(m => m.default),
     'flujo':           () => import('./modules/flujo.js').then(m => m.default),
@@ -186,14 +185,14 @@
   // Módulos del admin-pos (panel remoto): siempre completo. "inicio" queda
   // afuera a propósito — es un dashboard del POS del local (ver inicio.js),
   // no del panel del dueño.
-  const ADMIN_POS_MODULES = ['inicio', 'pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'ajuste_stock', 'ajuste_stock_positivo', 'adelanto_pago', 'caja_admin', 'configuracion', 'flujo'];
+  const ADMIN_POS_MODULES = ['inicio', 'pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'ajuste_stock', 'ajuste_stock_positivo', 'adelanto_pago', 'configuracion', 'flujo'];
 
   function getAllowedModules() {
     if (window.ADMIN_MODE) return ADMIN_POS_MODULES;
     const u = window.SGA_Auth.getCurrentUser();
     if (!u) return [];
     // Admin: acceso total
-    if (u.rol === 'admin') return ['inicio', 'pos', 'cajas', 'productos', 'clientes', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'caja_admin', 'adelanto_pago'];
+    if (u.rol === 'admin') return ['inicio', 'pos', 'cajas', 'productos', 'clientes', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'adelanto_pago'];
     // Colaboradores: según permisos individuales
     const P = window.SGA_Permisos;
     const allowed = ['inicio', 'pos', 'cajas']; // siempre visibles
@@ -227,9 +226,9 @@
   // POS local), más allá del rol de quien esté logueado ahí.
   const ROUTE_ADMIN_POS_ONLY = ['configuracion', 'flujo'];
   // Rutas que ya se autoprotegen con su propio chequeo de rol==='admin'
-  // adentro del módulo (usuarios.js, configuracion.js, caja_admin.js,
+  // adentro del módulo (usuarios.js, configuracion.js,
   // adelanto_pago.js) — se listan igual acá para blindaje centralizado.
-  const ROUTE_ADMIN_ONLY = ['usuarios', 'caja_admin', 'configuracion', 'adelanto_pago', 'limpieza_prueba'];
+  const ROUTE_ADMIN_ONLY = ['usuarios', 'configuracion', 'adelanto_pago', 'limpieza_prueba'];
   // Ruta -> permiso granular (SGA_PERMISOS_DEF en auth.js) que hace falta para
   // entrar. Rutas ausentes de este mapa (pos, caja, y cualquier módulo nuevo
   // que se agregue sin actualizar esta lista) quedan sin restricción
@@ -313,7 +312,6 @@
       { name: 'etiquetas', icon: 'tag', text: 'Etiquetas' },
       { name: 'informes', icon: 'informes', text: 'Informes' },
       { name: 'gastos', icon: 'gastos', text: 'Gastos Generales' },
-      { name: 'caja_admin', icon: 'briefcase', text: 'Caja Seamus', adminOnly: true },
       { name: 'usuarios', icon: 'usuarios', text: 'Usuarios' },
       { name: 'flujo', icon: 'flujo', text: 'Flujo de Fondos', adminPosOnly: true },
       { name: 'configuracion', icon: 'configuracion', text: 'Configuración', adminOnly: true, adminPosOnly: true },

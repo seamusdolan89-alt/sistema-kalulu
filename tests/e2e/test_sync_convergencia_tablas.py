@@ -97,7 +97,6 @@ DEUDA = {
     ("ventas", "Admin -> POS"):         "caja: el POS no tiene receptor; una venta suma a los contadores de la sesion",
     ("consumo_interno", "Admin -> POS"): "el POS no tiene receptor",
     # Decisiones que son del dueno:
-    ("caja_admin", "Admin -> POS"):     "DECISION DEL DUENO: 'Caja Seamus' es plata personal; sincronizarla la deja en la base local del POS",
     ("historial_stock", "POS -> Admin"): "sin sync_status/updated_at ni fuente; se reemplaza por el ledger de stock (informe 'dias sin stock' incompleto en Admin)",
     ("historial_stock", "Admin -> POS"): "idem",
     # Borradores (necesarios con 2 cajas por sucursal):

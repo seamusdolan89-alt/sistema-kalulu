@@ -1,7 +1,7 @@
 /**
  * adelanto_pago.js — Registrar adelanto de pago a proveedor (admin only)
  *
- * Multi-method form: fill amounts for Caja Seamus, Transferencia, MercadoPago
+ * Multi-method form: fill amounts for Transferencia, MercadoPago
  * independently. Any combination is supported in a single payment record.
  * Stored as orphan (auto_imputar=false); cashier applies it when loading the purchase.
  */
@@ -16,7 +16,6 @@ const AdelantoPagoModule = (() => {
   }
 
   const METODOS = [
-    { key: 'caja_seamus',   label: 'Caja Seamus',   hasRef: false },
     { key: 'transferencia', label: 'Transferencia',  hasRef: true  },
     { key: 'mercadopago',   label: 'MercadoPago',    hasRef: true  },
   ];
@@ -151,9 +150,6 @@ const AdelantoPagoModule = (() => {
         actualizarTotal();
       });
     });
-
-    // Non-ref methods just update total
-    ge('ap-monto-caja_seamus')?.addEventListener('input', actualizarTotal);
 
     ge('ap-btn-registrar')?.addEventListener('click', registrar);
     ge('ap-btn-nuevo')?.addEventListener('click', () => {

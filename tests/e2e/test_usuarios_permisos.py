@@ -11,7 +11,7 @@ Productos, Compras, Proveedores y Gastos completos por URL directa.
 Cubre:
 1. Cajero SIN permisos: bloqueado en rutas con permiso granular
    (productos, compras_v2, proveedores, gastos) y en rutas admin-only
-   (usuarios, caja_admin, configuracion).
+   (usuarios, configuracion).
 2. Cajero CON un permiso puntual (can_ver_productos): accede a esa ruta.
 3. Admin en POS local: sigue con acceso total a los módulos que ya usaba
    sin necesitar permiso explícito (compras_v2, consumo_interno, roturas,
@@ -97,7 +97,7 @@ def main():
             assert RESTRINGIDO in text, f"#{ruta} deberia estar bloqueado para un cajero sin permisos: {text[:150]!r}"
 
         print("=== Cajero SIN permisos: rutas admin-only tambien bloqueadas ===")
-        for ruta in ["usuarios", "caja_admin", "configuracion", "adelanto_pago"]:
+        for ruta in ["usuarios", "configuracion", "adelanto_pago"]:
             text = ir_a(page, ruta)
             assert RESTRINGIDO in text, f"#{ruta} deberia estar bloqueado (admin-only): {text[:150]!r}"
 
@@ -118,7 +118,7 @@ def main():
         login_direct(page, username="admin", password="kalulu123")
         page.wait_for_timeout(300)
         for ruta in ["compras_v2", "consumo_interno", "roturas", "vencimientos", "operaciones_stock",
-                     "proveedores", "gastos", "caja_admin", "usuarios"]:
+                     "proveedores", "gastos", "usuarios"]:
             text = ir_a(page, ruta)
             assert RESTRINGIDO not in text, f"Regresion: admin en POS ya no puede entrar a #{ruta}: {text[:150]!r}"
 

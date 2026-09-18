@@ -103,7 +103,6 @@
     { table: 'clientes',          collection: 'clientes',          pk: 'id',   denormalize: null },
     { table: 'promociones',       collection: 'promociones',       pk: 'id',   denormalize: denormalizePromocion },
     { table: 'proveedores',       collection: 'proveedores',       pk: 'id',   denormalize: null },
-    { table: 'caja_admin',        collection: 'caja_admin',        pk: 'id',   denormalize: null },
     { table: 'consumo_interno',   collection: 'consumo_interno',   pk: 'id',   denormalize: null },
     // posPush:false — son admin-authoritative (solo se crean/editan desde ADMIN POS,
     // ver Configuración). El POS no debe re-pushear su copia local: si lo hiciera,
@@ -131,7 +130,6 @@
     'system_config',             // Configuración — desktop-only
     'flujo_forecast', 'flujo_liquidar', 'flujo_pagos_prov', // Flujo de Fondos — desktop-only (ROUTE_ADMIN_POS_ONLY)
     'cuenta_corriente',          // cta cte de CLIENTES (reporte Aging) — desktop-only, no confundir con proveedores
-    'caja_admin',                // Caja Seamus — desktop-only; el wizard de pago solo ESCRIBE ahí, nunca lee
     'consumo_interno',           // pantalla desktop-only
     'clientes',                  // pedido explícito del usuario (17/9) — no lo necesita desde el celular
   ];
@@ -946,21 +944,6 @@
     );
   }
 
-  function applyCajaAdmin(data) {
-    if (tienePendienteLocal('caja_admin', 'id = ?', [data.id])) return;
-    const now = new Date().toISOString();
-    window.SGA_DB.run(`
-      INSERT OR REPLACE INTO caja_admin
-        (id, tipo, monto, concepto, egreso_caja_id, compra_id, proveedor_id,
-         fecha, usuario_id, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,'synced',?)`,
-      [data.id, data.tipo, data.monto, data.concepto || null,
-       data.egreso_caja_id || null, data.compra_id || null,
-       data.proveedor_id || null, data.fecha, data.usuario_id,
-       data.updated_at || now]
-    );
-  }
-
   function applyProductoUpdate(data) {
     // Solo actualiza los campos que el admin puede modificar remotamente.
     // No toca stock ni campos calculados por el POS.
@@ -1569,7 +1552,6 @@
       { name: 'proveedores',       applyFn: applyProveedorFull },
       { name: 'stock',             applyFn: applyStockFull },
       { name: 'promociones',       applyFn: applyPromocion },
-      { name: 'caja_admin',        applyFn: applyCajaAdmin },
       { name: 'consumo_interno',   applyFn: applyConsumoInternoFull },
       { name: 'ingresos_caja',     applyFn: applyIngresoCaja },
       { name: 'cuenta_corriente',  applyFn: applyCuentaCorriente },
@@ -1799,7 +1781,6 @@
       { name: 'gastos',            applyFn: applyGasto,            label: 'Gastos' },
       { name: 'promociones',       applyFn: applyPromocion,        label: 'Promociones' },
       { name: 'pagos_proveedores', applyFn: applyPagoProveedor,    label: 'Pagos proveedores' },
-      { name: 'caja_admin',        applyFn: applyCajaAdmin,        label: 'Caja Seamus' },
       { name: 'consumo_interno',   applyFn: applyConsumoInternoFull, label: 'Consumo interno' },
       { name: 'ingresos_caja',     applyFn: applyIngresoCaja,      label: 'Ingresos de caja' },
       { name: 'cuenta_corriente',  applyFn: applyCuentaCorriente,  label: 'Cuenta corriente' },
