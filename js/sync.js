@@ -415,6 +415,18 @@
 
   async function pushPending() {
     if (!initialized || !firestoreDb) return 0;
+
+    // En Admin-POS esta función NO puede subir como el POS: syncSource borra la
+    // marca `_pulled`, y el POS solo descarga los documentos con `_pulled:false`
+    // (pullFromFirestore). Los módulos llaman pushPending() sin saber en qué
+    // superficie corren (gastos.js, compras_v2.js, caja.js, aprobaciones_pendientes.js,
+    // pos.js), así que la decisión vive acá: en modo admin, pushPending() ES
+    // pushToPos(). Antes subía el gasto sin la marca Y dejaba la fila 'synced',
+    // con lo cual ni el POS lo bajaba ni pushToPos() lo volvía a mandar
+    // (caso real "Agua Belen", 18/9/2026: un gasto y la imputación de un pago
+    // cargados en Admin-POS nunca llegaron al POS).
+    if (window.ADMIN_MODE) return pushToPos();
+
     let pushed = 0;
     for (const source of SYNC_SOURCES) {
       if (source.posPush === false) continue;
@@ -429,32 +441,21 @@
     return pushed;
   }
 
-  // ─── PUSH manual desde admin-pos al POS ──────────────────────────────────────
+  // ─── PUSH desde admin-pos al POS ─────────────────────────────────────────────
 
-  // 'eliminaciones' es la que hace que un borrado hecho desde admin-pos (ej.
-  // "eliminar un cobro mal cargado" en clientes.js) viaje de verdad: sin ella
-  // acá, la marca de borrado quedaba 'pending' en la base local del admin
-  // para siempre — nunca llegaba a Firestore y el POS del local jamás se
-  // enteraba, aunque se tocara el botón "Push POS" mil veces. 'ingresos_caja'
-  // por el mismo motivo: si el cobro mal cargado había sumado efectivo a una
-  // caja, esa corrección también tiene que cruzar. 'remitos' por lo mismo: editar
-  // un remito desde Admin-POS (compras_v2.js, "✏️ Editar" en remitos pendientes)
-  // ajusta su stock; sin esta tabla acá, el remito corregido quedaba solo en la
-  // base del admin y el POS del local seguía viendo el remito viejo. También
-  // cubre que vincular una factura a un remito desde acá lo marque 'facturado'
-  // en el POS (antes ese UPDATE quedaba 'pending' localmente para siempre).
-  const ADMIN_PUSH_TABLES = ['usuarios', 'productos', 'proveedores', 'clientes', 'compras',
-                              'remitos',
-                              'ordenes_compra', 'pagos_proveedores', 'gastos',
-                              'promociones', 'stock', 'cuenta_corriente', 'producto_codigo_proveedor',
-                              'medios_cobro', 'sucursales', 'eliminaciones', 'ingresos_caja'];
-
+  // Sube TODA fuente con filas pendientes, sin lista fija. Antes había una
+  // lista (ADMIN_PUSH_TABLES) armada a mano que se iba completando cada vez que
+  // aparecía un bug ("eliminaciones", "ingresos_caja", "remitos"...) y dejaba
+  // afuera 8 tablas para las que el POS SÍ tiene receptor en PULL_SOURCES
+  // (categorias, stock_ajustes, gastos_pagos, devoluciones, system_config,
+  // flujo_*): el POS sabía recibirlas pero el admin nunca las mandaba. Una
+  // fila solo está 'pending' si alguien la escribió acá y no se subió todavía,
+  // así que no hay nada que "filtrar": lo que esté pendiente tiene que viajar.
   async function pushToPos() {
     if (!initialized || !firestoreDb) throw new Error('Firebase no conectado');
 
-    const adminSources = SYNC_SOURCES.filter(s => ADMIN_PUSH_TABLES.includes(s.table));
     let total = 0;
-    for (const source of adminSources) {
+    for (const source of SYNC_SOURCES) {
       try { total += await drainSource(source, syncAdminSource); }
       catch (err) { console.warn(`Push error (${source.table}):`, err.message); }
     }
