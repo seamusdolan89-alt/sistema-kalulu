@@ -122,6 +122,9 @@
       state.productos = window.SGA_DB.query(`
         SELECT p.*,
           cb.codigo AS codigo_barras,
+          (SELECT GROUP_CONCAT(c2.codigo, ' ')
+           FROM codigos_barras c2
+           WHERE c2.producto_id = p.id) AS todos_codigos_barras,
           cat.nombre AS categoria_nombre,
           prov.razon_social AS proveedor_nombre,
           COALESCE(st.cantidad, 0) AS stock_actual,
@@ -171,12 +174,17 @@
   const applyFilters = () => {
     let filtered = [...state.productos];
 
-    // Main search bar (FIX 1)
+    // Main search bar (FIX 1) — busca en TODOS los códigos de barras del
+    // producto, no solo el principal (ver todos_codigos_barras en
+    // loadProductos): un producto con más de un código escaneable (ej.
+    // Lysoform con 3 códigos distintos) no aparecía si se buscaba por uno
+    // de los secundarios, aunque el buscador del carrito del POS sí lo
+    // encontraba (ese usa codigos_barras sin filtrar por es_principal).
     const q = state.filters.query.trim().toLowerCase();
     if (q) {
       filtered = filtered.filter(p =>
         (p.nombre || '').toLowerCase().includes(q) ||
-        (p.codigo_barras || '').toLowerCase().includes(q)
+        (p.todos_codigos_barras || p.codigo_barras || '').toLowerCase().includes(q)
       );
     }
 
@@ -1745,7 +1753,7 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
     const lower = q.toLowerCase();
     const results = state.productos.filter(p =>
       (p.nombre || '').toLowerCase().includes(lower) ||
-      (p.codigo_barras || '').toLowerCase().includes(lower)
+      (p.todos_codigos_barras || p.codigo_barras || '').toLowerCase().includes(lower)
     ).slice(0, 10);
 
     if (!results.length) { dropdown.classList.add('hidden'); return; }
@@ -2082,7 +2090,7 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
       if (p.id === assignMadreState.targetProductId) return false;
       if (assignMadreState.soloMadres && !(p.es_madre === 1 || p.es_madre === '1')) return false;
       return (p.nombre || '').toLowerCase().includes(lower) ||
-             (p.codigo_barras || '').toLowerCase().includes(lower);
+             (p.todos_codigos_barras || p.codigo_barras || '').toLowerCase().includes(lower);
     }).slice(0, 15);
 
     if (!results.length) { dropdown.classList.add('hidden'); return; }
