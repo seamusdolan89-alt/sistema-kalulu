@@ -1929,7 +1929,8 @@ const ComprasV2 = (() => {
       if (state.pausadaId) {
         db().run(
           `UPDATE compras_pausadas
-           SET snapshot=?, proveedor_nombre=?, num_items=?, total_estimado=?, updated_at=?
+           SET snapshot=?, proveedor_nombre=?, num_items=?, total_estimado=?, updated_at=?,
+               sync_status='pending'
            WHERE id=?`,
           [snapshot, state.proveedorNombre || '', state.items.length, calcMontoFactura(), ts, state.pausadaId]
         );
@@ -1937,8 +1938,8 @@ const ComprasV2 = (() => {
         const id = uuid();
         db().run(
           `INSERT INTO compras_pausadas
-             (id, sucursal_id, usuario_id, snapshot, proveedor_nombre, num_items, total_estimado, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (id, sucursal_id, usuario_id, snapshot, proveedor_nombre, num_items, total_estimado, created_at, updated_at, sync_status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
           [id, user.sucursal_id, user.id, snapshot,
            state.proveedorNombre || '', state.items.length, calcMontoFactura(), ts, ts]
         );
@@ -1949,6 +1950,7 @@ const ComprasV2 = (() => {
       return false;
     }
 
+    window.SGA_Sync?.pushPending?.();
     window.SGA_Utils.showNotification('Compra pausada', 'success');
     resetToNew();
     return true;
@@ -2283,6 +2285,8 @@ const ComprasV2 = (() => {
   function deletePausada(id) {
     if (!confirm('¿Eliminar esta compra pausada?')) return;
     db().run(`DELETE FROM compras_pausadas WHERE id=?`, [id]);
+    window.SGA_DB.registrarEliminacion('compras_pausadas', id); // con marca: que no reaparezca desde otra compu
+    window.SGA_Sync?.pushPending?.();
     if (state.pausadaId === id) state.pausadaId = null;
 
     const item = document.querySelector(`.cv2-pausada-item:has([data-id="${id}"])`);
@@ -2629,6 +2633,7 @@ const ComprasV2 = (() => {
       // 5. Clean up pausada if resuming
       if (state.pausadaId) {
         db().run(`DELETE FROM compras_pausadas WHERE id=?`, [state.pausadaId]);
+        window.SGA_DB.registrarEliminacion('compras_pausadas', state.pausadaId);
       }
 
       // Verificación pre-commit: db().run() nunca tira excepción aunque el SQL
