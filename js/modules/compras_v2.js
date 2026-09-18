@@ -86,6 +86,10 @@ const ComprasV2 = (() => {
     // edición de una compra ya confirmada (desde Operaciones de Stock)
     editandoCompraId:    null,
     editandoSucursalId:  null,
+    // edición de un remito pendiente de factura (solo admin, desde el panel de
+    // remitos pendientes). Comparte editandoSucursalId con la de compras: nunca
+    // se editan las dos a la vez.
+    editandoRemitoId:    null,
   };
 
   // ── DB helpers ───────────────────────────────────────────────────────────────
@@ -519,7 +523,8 @@ const ComprasV2 = (() => {
 
     // Confirm button label
     const confirmBtn = ge('cv2-btn-confirmar');
-    if (confirmBtn) confirmBtn.textContent = state.modoRemito ? '✓ Confirmar Ingreso' : '→ Siguiente · F10';
+    if (confirmBtn) confirmBtn.textContent = state.editandoRemitoId ? '💾 Guardar Cambios'
+      : state.modoRemito ? '✓ Confirmar Ingreso' : '→ Siguiente · F10';
 
     // In vincular mode with pre-loaded items, hide search bar (quantities are locked to the remito)
     const searchBarRow = document.querySelector('.cv2-search-bar-row');
@@ -1951,6 +1956,7 @@ const ComprasV2 = (() => {
 
   function resetToNew() {
     state.editandoCompraId      = null;
+    state.editandoRemitoId      = null;
     state.editandoSucursalId    = null;
     state.proveedorId           = null;
     state.proveedorNombre       = null;
@@ -2299,8 +2305,12 @@ const ComprasV2 = (() => {
   // Destino al salir de compras_v2: al POS normalmente, pero si se estaba
   // editando una compra ya confirmada hay que volver al historial de donde
   // vino (Operaciones de Stock) — #pos no tiene sentido en ese contexto.
+  // Editar un remito pendiente también termina (guardando o descartando) en
+  // Operaciones de Stock: es una operación de stock, no una compra nueva. Al
+  // ser una navegación real, el router reinicia el módulo entero, así que no
+  // hace falta restaurar a mano banner/título/botones que el editor tocó.
   function salirCompras() {
-    window.location.hash = state.editandoCompraId ? 'operaciones_stock' : '#pos';
+    window.location.hash = (state.editandoCompraId || state.editandoRemitoId) ? 'operaciones_stock' : '#pos';
   }
 
   function showVolverModal() {
@@ -2315,7 +2325,7 @@ const ComprasV2 = (() => {
       summaryEl.textContent = `${n} ${n === 1 ? 'artículo' : 'artículos'} — ${fmt$(calcMontoAdeudado())}`;
     }
     const pausarOpt = ge('cv2-volver-pausar');
-    if (pausarOpt) pausarOpt.style.display = state.editandoCompraId ? 'none' : '';
+    if (pausarOpt) pausarOpt.style.display = (state.editandoCompraId || state.editandoRemitoId) ? 'none' : '';
     if (overlay) overlay.style.display = 'flex';
   }
 
@@ -2848,8 +2858,248 @@ const ComprasV2 = (() => {
     }
   }
 
+  // ── Editar un remito pendiente de factura (solo admin) ───────────────────────
+  // El remito suma stock al guardarse (commitRemito) y vincular la factura
+  // después NO lo vuelve a tocar — así que corregir un remito mal cargado
+  // tiene que corregir también el stock. Mismo enfoque que la edición de
+  // compras: no se "revierte todo y se recarga", se calcula la DIFERENCIA de
+  // stock por producto contra lo que el remito tenía antes de abrir el
+  // editor. El resultado neto es el mismo, pero solo se toca el stock de los
+  // productos que realmente cambiaron, no hay un instante con stock de más o
+  // de menos, y los remito_items que siguen existiendo conservan su id (el
+  // sync los actualiza en vez de duplicarlos).
+  function cargarRemitoParaEditar(remitoId) {
+    if (!window.ADMIN_MODE) { alert('Solo el administrador puede editar remitos.'); return; }
+
+    const remito = db().query(
+      `SELECT r.*, p.razon_social, p.condicion_iva, p.agente_retencion_iva, p.agente_retencion_iibb
+       FROM remitos r LEFT JOIN proveedores p ON p.id = r.proveedor_id
+       WHERE r.id = ?`,
+      [remitoId]
+    )[0];
+    if (!remito) { alert('Remito no encontrado'); return; }
+    if (remito.estado !== 'pendiente') {
+      alert('Este remito ya tiene una factura vinculada: no se puede editar.');
+      return;
+    }
+
+    const rows = db().query(`
+      SELECT ri.id AS ri_id, ri.producto_id, ri.cantidad, ri.unidad_compra, ri.unidades_por_paquete,
+             p.nombre AS producto_nombre, p.costo,
+             (SELECT codigo FROM codigos_barras WHERE producto_id = p.id AND es_principal = 1 LIMIT 1) AS barcode
+      FROM remito_items ri
+      LEFT JOIN productos p ON p.id = ri.producto_id
+      WHERE ri.remito_id = ?
+      ORDER BY ri.rowid
+    `, [remitoId]);
+
+    state.items = rows.map(r => ({
+      _riId:        r.ri_id,
+      productoId:   r.producto_id,
+      nombre:       r.producto_nombre || '(producto eliminado)',
+      barcode:      r.barcode || '',
+      cantidad:     parseFloat(r.cantidad) || 0,
+      udsPaquete:   parseFloat(r.unidades_por_paquete) || 1,
+      unidadCompra: r.unidad_compra || 'Unidad',
+      costoActual:  parseFloat(r.costo) || 0,
+      costoNuevo:   parseFloat(r.costo) || 0,
+      descuento:    0,
+      descuentoMonto: 0,
+    }));
+
+    state.modoRemito         = true;
+    state.editandoRemitoId   = remitoId;
+    state.editandoCompraId   = null;
+    // El stock se ajusta en la MISMA sucursal del remito original, no en la de
+    // quien lo edita ahora (admin desde su casa, remito cargado en el local).
+    state.editandoSucursalId = remito.sucursal_id || state.currentUser.sucursal_id;
+    state.vinculandoRemitoId = null;
+    state.pausadaId          = null;
+    state.pendingAjustes     = [];
+    state.proveedorId        = remito.proveedor_id;
+    state.proveedorNombre    = remito.razon_social || '(proveedor eliminado)';
+    state.proveedorCondicionIva  = remito.condicion_iva || null;
+    state.proveedorAgRetIva      = remito.agente_retencion_iva  ? 1 : 0;
+    state.proveedorAgRetIibb     = remito.agente_retencion_iibb ? 1 : 0;
+    state.proveedorSaldo             = state.proveedorId ? getProveedorSaldo(state.proveedorId) : 0;
+    state.proveedorCreditoDisponible = state.proveedorId ? getCreditoDisponibleProveedor(state.proveedorId) : 0;
+    state.aplicarSaldo       = false;
+    state.remitoNumero       = remito.numero_remito || '';
+    state.fecha              = remito.fecha ? remito.fecha.slice(0, 10) : todayDate();
+    state.condicionCompra    = '';
+    state.facturaPv          = '';
+    state.numeroFactura      = '';
+    state.totalFactura       = 0;
+
+    // Proveedor card
+    const card    = ge('cv2-prov-card');
+    const nameEl  = ge('cv2-prov-nombre');
+    const provInp = ge('cv2-prov-search');
+    if (card)    card.style.display = 'flex';
+    if (nameEl)  nameEl.textContent = state.proveedorNombre;
+    if (provInp) { provInp.value = ''; provInp.style.display = 'none'; }
+
+    // Campos propios del remito
+    const numInp   = ge('cv2-remito-numero');
+    if (numInp) numInp.value = state.remitoNumero;
+    const fechaInp = ge('cv2-remito-fecha');
+    if (fechaInp) fechaInp.value = state.fecha;
+
+    // Modo "sin factura" fijo mientras se edita (no tiene sentido convertir un
+    // remito en compra por acá: para eso está "Vincular Factura").
+    const sinFact = ge('cv2-btn-sin-factura');
+    if (sinFact) {
+      sinFact.classList.add('active');
+      sinFact.setAttribute('aria-checked', 'true');
+      sinFact.closest('.cv2-sinf-toggle-wrap')?.style.setProperty('display', 'none');
+    }
+    ge('cv2-btn-pausadas')?.style.setProperty('display', 'none');
+    ge('cv2-btn-pausar')?.style.setProperty('display', 'none');
+    ge('cv2-btn-remitos-pendientes')?.style.setProperty('display', 'none');
+
+    const editBanner = ge('cv2-editando-banner');
+    if (editBanner) {
+      editBanner.style.display = 'flex';
+      editBanner.textContent = `✏️ Editando remito ${state.remitoNumero || '(sin número)'} de ${state.proveedorNombre} — los cambios van a ajustar el stock por la diferencia.`;
+    }
+    const headerTitle = document.querySelector('.cv2-header-title');
+    if (headerTitle) headerTitle.textContent = 'Compras — Editando Remito';
+
+    renderFiscalBadges();
+    renderCabeceraFields();
+    renderCart();
+    window.SGA_Utils.showNotification('Remito cargado para editar', 'info');
+    showCabecera();
+  }
+
+  function commitRemitoEdicion() {
+    const remitoId   = state.editandoRemitoId;
+    const sucursalId = state.editandoSucursalId;
+    const ts         = nowISO();
+
+    // Otra compu pudo haberlo vinculado a una factura mientras estaba abierto.
+    const estadoActual = db().query(`SELECT estado FROM remitos WHERE id=?`, [remitoId])[0]?.estado;
+    if (estadoActual !== 'pendiente') {
+      alert('Este remito ya no está pendiente (se le vinculó una factura). No se guardó ningún cambio.');
+      salirCompras();
+      return;
+    }
+
+    const itemsAntes = db().query(
+      `SELECT id, producto_id, cantidad, unidades_por_paquete FROM remito_items WHERE remito_id=?`,
+      [remitoId]
+    );
+
+    // Diferencia de stock NETA por producto (unidades sueltas): lo que el
+    // remito va a tener menos lo que tenía. Agrupar por producto (y no línea
+    // por línea) cubre en un solo caso corregir un producto equivocado, dos
+    // líneas del mismo producto y cambios de cantidad.
+    const deltas = new Map();
+    const acumular = (pid, uds) => { if (pid) deltas.set(pid, (deltas.get(pid) || 0) + uds); };
+    for (const prev of itemsAntes) {
+      acumular(prev.producto_id, -((parseFloat(prev.cantidad) || 0) * (parseFloat(prev.unidades_por_paquete) || 1)));
+    }
+    for (const item of state.items) {
+      acumular(item.productoId, (parseFloat(item.cantidad) || 0) * (parseFloat(item.udsPaquete) || 1));
+    }
+
+    // Avisar antes de dejar stock negativo: pasa cuando ya se vendió parte de
+    // lo que este remito había ingresado y se lo saca de la lista.
+    const negativos = [];
+    for (const [pid, delta] of deltas) {
+      if (delta >= -0.0001) continue;
+      const actual = parseFloat(db().query(
+        `SELECT cantidad FROM stock WHERE producto_id=? AND sucursal_id=?`, [pid, sucursalId]
+      )[0]?.cantidad) || 0;
+      if (actual + delta < -0.0001) {
+        const nom = db().query(`SELECT nombre FROM productos WHERE id=?`, [pid])[0]?.nombre || pid;
+        negativos.push(`• ${nom}: quedaría en ${Math.round((actual + delta) * 100) / 100}`);
+      }
+    }
+    if (negativos.length &&
+        !confirm(`Este cambio deja stock negativo (ya se vendió parte de lo que ingresó este remito):\n\n${negativos.join('\n')}\n\n¿Guardar igual?`)) {
+      return;
+    }
+
+    try {
+      db().beginBatch();
+
+      db().run(
+        `UPDATE remitos SET proveedor_id=?, fecha=?, numero_remito=?, sync_status='pending', updated_at=? WHERE id=?`,
+        [state.proveedorId, state.fecha, state.remitoNumero || null, ts, remitoId]
+      );
+
+      const idsVistos = new Set();
+      for (const item of state.items) {
+        const cant   = parseFloat(item.cantidad)   || 0;
+        const udsPaq = parseFloat(item.udsPaquete) || 1;
+        if (item._riId) {
+          idsVistos.add(item._riId);
+          db().run(
+            `UPDATE remito_items SET producto_id=?, cantidad=?, unidad_compra=?, unidades_por_paquete=? WHERE id=?`,
+            [item.productoId, cant, item.unidadCompra || 'Unidad', udsPaq, item._riId]
+          );
+        } else {
+          db().run(
+            `INSERT INTO remito_items (id, remito_id, producto_id, cantidad, unidad_compra, unidades_por_paquete)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [uuid(), remitoId, item.productoId, cant, item.unidadCompra || 'Unidad', udsPaq]
+          );
+        }
+      }
+      for (const prev of itemsAntes) {
+        if (!idsVistos.has(prev.id)) db().run(`DELETE FROM remito_items WHERE id=?`, [prev.id]);
+      }
+
+      for (const [pid, delta] of deltas) {
+        if (Math.abs(delta) <= 0.0001) continue;
+        const stockRow = db().query(
+          `SELECT cantidad FROM stock WHERE producto_id=? AND sucursal_id=?`, [pid, sucursalId]
+        )[0];
+        if (stockRow) {
+          db().run(
+            `UPDATE stock SET cantidad=cantidad+?, fecha_modificacion=?, sync_status='pending', updated_at=? WHERE producto_id=? AND sucursal_id=?`,
+            [delta, ts, ts, pid, sucursalId]
+          );
+        } else {
+          db().run(
+            `INSERT INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at) VALUES (?, ?, ?, ?, 'pending', ?)`,
+            [pid, sucursalId, delta, ts, ts]
+          );
+        }
+        window.SGA_DB.registrarHistorialStock(pid, sucursalId);
+      }
+
+      // Verificación pre-commit (mismo criterio que commitCompraEdicion)
+      const itemsFinales = db().query(`SELECT COUNT(*) AS n FROM remito_items WHERE remito_id=?`, [remitoId])[0]?.n || 0;
+      if (itemsFinales !== state.items.length) {
+        db().rollbackBatch();
+        const sqlErr = db().getLastError?.();
+        console.error('[commitRemitoEdicion] Verificacion fallo:', { itemsFinales, esperados: state.items.length, sqlErr });
+        alert('⚠️ No se pudo guardar la edición del remito: algo falló al guardar los productos. No se guardó nada — probá de nuevo.' +
+          (sqlErr ? '\n\nDetalle: ' + sqlErr.message + '\n' + sqlErr.sql : ''));
+        return;
+      }
+
+      db().commitBatch();
+      // pushToPos() y no pushPending(): en Admin-POS los cambios tienen que
+      // subir con _pulled:false para que el POS del local los descargue.
+      window.SGA_Sync?.pushToPos?.()?.catch(() => {});
+      window.SGA_Utils.showNotification('Remito actualizado', 'success');
+      salirCompras(); // antes de limpiar editandoRemitoId, que es lo que decide el destino
+      state.editandoRemitoId   = null;
+      state.editandoSucursalId = null;
+    } catch (e) {
+      db().rollbackBatch();
+      console.error('Error editando remito:', e);
+      alert('Error al guardar los cambios del remito: ' + e.message);
+    }
+  }
+
   // ── Remito: commit ───────────────────────────────────────────────────────────
   function commitRemito() {
+    if (state.editandoRemitoId) { commitRemitoEdicion(); return; }
+
     const user     = state.currentUser;
     const ts       = nowISO();
     const remitoId = uuid();
@@ -3006,6 +3256,7 @@ const ComprasV2 = (() => {
             <span class="cv2-remito-meta">Fecha: ${fechaFmt}</span>
           </div>
           <div class="cv2-remito-actions">
+            ${window.ADMIN_MODE ? `<button class="cv2-btn-editar-remito" data-id="${esc(r.id)}" title="Corregir productos o cantidades de este remito">✏️ Editar</button>` : ''}
             <button class="cv2-btn-vincular" data-id="${esc(r.id)}">Vincular Factura →</button>
           </div>
         </div>
@@ -3016,6 +3267,12 @@ const ComprasV2 = (() => {
       btn.addEventListener('click', () => {
         ge('cv2-remitos-overlay').style.display = 'none';
         vincularFacturaDesdeRemito(btn.dataset.id);
+      });
+    });
+    listEl.querySelectorAll('.cv2-btn-editar-remito').forEach(btn => {
+      btn.addEventListener('click', () => {
+        ge('cv2-remitos-overlay').style.display = 'none';
+        cargarRemitoParaEditar(btn.dataset.id);
       });
     });
   }

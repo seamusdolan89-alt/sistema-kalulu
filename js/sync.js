@@ -437,8 +437,14 @@
   // para siempre — nunca llegaba a Firestore y el POS del local jamás se
   // enteraba, aunque se tocara el botón "Push POS" mil veces. 'ingresos_caja'
   // por el mismo motivo: si el cobro mal cargado había sumado efectivo a una
-  // caja, esa corrección también tiene que cruzar.
+  // caja, esa corrección también tiene que cruzar. 'remitos' por lo mismo: editar
+  // un remito desde Admin-POS (compras_v2.js, "✏️ Editar" en remitos pendientes)
+  // ajusta su stock; sin esta tabla acá, el remito corregido quedaba solo en la
+  // base del admin y el POS del local seguía viendo el remito viejo. También
+  // cubre que vincular una factura a un remito desde acá lo marque 'facturado'
+  // en el POS (antes ese UPDATE quedaba 'pending' localmente para siempre).
   const ADMIN_PUSH_TABLES = ['usuarios', 'productos', 'proveedores', 'clientes', 'compras',
+                              'remitos',
                               'ordenes_compra', 'pagos_proveedores', 'gastos',
                               'promociones', 'stock', 'cuenta_corriente', 'producto_codigo_proveedor',
                               'medios_cobro', 'sucursales', 'eliminaciones', 'ingresos_caja'];

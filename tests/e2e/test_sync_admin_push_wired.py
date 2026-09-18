@@ -101,6 +101,14 @@ def run():
               INSERT INTO pagos_proveedores (id, proveedor_id, fecha, sync_status, updated_at)
               VALUES ('pago-push-test', 'prov-push-test', ?, 'pending', ?)
             `, [now, now]);
+            // Remito editado desde Admin-POS (compras_v2 "✏️ Editar"): tambien tiene
+            // que subir. 'remitos' no estaba en ADMIN_PUSH_TABLES (sync.js), asi que
+            // un remito corregido en Admin-POS quedaba 'pending' para siempre.
+            window.SGA_DB.run(`DELETE FROM remitos WHERE id = 'remito-push-test'`);
+            window.SGA_DB.run(`
+              INSERT INTO remitos (id, proveedor_id, fecha, numero_remito, estado, sync_status, updated_at)
+              VALUES ('remito-push-test', 'prov-push-test', '2026-09-18', 'R-PUSH', 'pendiente', 'pending', ?)
+            `, [now]);
           }
         """)
 
@@ -122,6 +130,16 @@ def run():
             f"le pasó al usuario: un pago cargado en Admin-POS nunca llegaba al POS del local."
         )
         print("OK - syncNow() en modo admin sube (push) los cambios propios, no solo trae (pull)")
+
+        remito_despues = page.evaluate(
+            "() => window.SGA_DB.query(\"SELECT sync_status FROM remitos WHERE id='remito-push-test'\")[0].sync_status"
+        )
+        assert remito_despues == 'synced', (
+            f"BUG: un remito 'pending' en Admin-POS no se sube (sync_status quedó {remito_despues!r}) — "
+            f"falta 'remitos' en ADMIN_PUSH_TABLES (js/sync.js): editar o vincular un remito desde "
+            f"Admin-POS nunca llegaba al POS del local."
+        )
+        print("OK - un remito 'pending' de Admin-POS también sube")
 
         calls = page.evaluate("() => window.__fakeFirestoreCalls")
         assert 'pagos_proveedores' in calls, (
