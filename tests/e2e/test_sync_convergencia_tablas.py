@@ -73,7 +73,8 @@ HIJOS_CON_BORRADO_REAL = {
 }
 
 # Tablas cuyo borrado el codigo realmente registra con registrarEliminacion().
-BORRADO_CON_MARCA = ["productos", "promociones", "ordenes_compra", "cuenta_corriente", "ingresos_caja"]
+BORRADO_CON_MARCA = ["productos", "promociones", "ordenes_compra", "cuenta_corriente", "ingresos_caja",
+                     "pedidos_abiertos", "compras_pausadas"]
 
 # --- Excepciones ----------------------------------------------------------------
 # clave: (tabla, sentido). Valor: motivo.
@@ -87,23 +88,14 @@ EXCEPCIONES_COLUMNA = {
     ("usuarios", "firebase_uid"): "vestigial: el login es 100% local (comentado en sync.js applyUsuarioFull)",
 }
 DEUDA = {
-    # Caja: los totales de la sesion (total_efectivo, total_egresos, ...) son CONTADORES que se
-    # incrementan en el lugar y la caja esperada se calcula con ellos (pos.js:448). Sincronizarlos
-    # como estan reintroduce el problema del stock (el ultimo que escribe pisa al otro): primero
-    # hay que derivarlos de las filas (ventas/egresos/ingresos), como el saldo de proveedor.
-    ("sesiones_caja", "Admin -> POS"):  "caja: contador total_* sin derivar de filas (ver plan de caja)",
-    ("egresos_caja", "Admin -> POS"):   "caja: el POS no tiene receptor; va junto con derivar total_egresos",
-    ("ingresos_caja", "Admin -> POS"):  "caja: el POS no tiene receptor; va junto con derivar los totales",
-    ("ventas", "Admin -> POS"):         "caja: el POS no tiene receptor; una venta suma a los contadores de la sesion",
-    ("consumo_interno", "Admin -> POS"): "el POS no tiene receptor",
+    # (Caja resuelta el 18/9/2026: la caja esperada se suma desde las filas y el POS ya recibe
+    #  sesiones_caja/egresos_caja/ingresos_caja/ventas/consumo_interno del admin, con guardas
+    #  para no reabrir una caja cerrada ni pisar el recuento en curso — ver test_sync_caja_admin_pos.py)
     # Decisiones que son del dueno:
     ("historial_stock", "POS -> Admin"): "sin sync_status/updated_at ni fuente; se reemplaza por el ledger de stock (informe 'dias sin stock' incompleto en Admin)",
     ("historial_stock", "Admin -> POS"): "idem",
-    # Borradores (necesarios con 2 cajas por sucursal):
-    ("pedidos_abiertos", "POS -> Admin"):  "ventas pausadas: local a cada caja; falta sync_status/fuente/marca de borrado",
-    ("pedidos_abiertos", "Admin -> POS"):  "idem",
-    ("compras_pausadas", "POS -> Admin"):  "compras pausadas: local a cada compu; falta sync_status/fuente/marca de borrado",
-    ("compras_pausadas", "Admin -> POS"):  "idem",
+    # (Borradores resueltos el 18/9/2026: pedidos_abiertos y compras_pausadas sincronizan y su borrado
+    #  viaja con marca — ver test_sync_borradores.py)
 }
 
 SENTIDOS = [("POS -> Admin", "pos", "admin", "p2a"), ("Admin -> POS", "admin", "pos", "a2p")]

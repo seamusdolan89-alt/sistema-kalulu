@@ -104,6 +104,10 @@
     { table: 'promociones',       collection: 'promociones',       pk: 'id',   denormalize: denormalizePromocion },
     { table: 'proveedores',       collection: 'proveedores',       pk: 'id',   denormalize: null },
     { table: 'consumo_interno',   collection: 'consumo_interno',   pk: 'id',   denormalize: null },
+    // Borradores: se retoman desde otra caja y se ven desde Admin-POS. Su borrado
+    // viaja con marca (registrarEliminacion), si no reaparecerian.
+    { table: 'pedidos_abiertos',  collection: 'pedidos_abiertos',  pk: 'id',   denormalize: null },
+    { table: 'compras_pausadas',  collection: 'compras_pausadas',  pk: 'id',   denormalize: null },
     // posPush:false — son admin-authoritative (solo se crean/editan desde ADMIN POS,
     // ver Configuración). El POS no debe re-pushear su copia local: si lo hiciera,
     // una fila local vieja podría pisar en Firestore un cambio recién hecho desde admin.
@@ -131,6 +135,8 @@
     'flujo_forecast', 'flujo_liquidar', 'flujo_pagos_prov', // Flujo de Fondos — desktop-only (ROUTE_ADMIN_POS_ONLY)
     'cuenta_corriente',          // cta cte de CLIENTES (reporte Aging) — desktop-only, no confundir con proveedores
     'consumo_interno',           // pantalla desktop-only
+    'pedidos_abiertos',          // ventas pausadas del POS — pantalla desktop-only
+    'compras_pausadas',          // compras pausadas — pantalla desktop-only
     'clientes',                  // pedido explícito del usuario (17/9) — no lo necesita desde el celular
   ];
 
@@ -170,6 +176,19 @@
     { collection: 'proveedores',       applyFn: applyProveedorFull },
     { collection: 'clientes',          applyFn: applyClienteFull },
     { collection: 'stock',             applyFn: applyStockFull },
+    // Caja: el admin tambien escribe estas filas (pagar a un proveedor en efectivo
+    // contra la caja abierta del local -> egresos_caja; cobrar la deuda de un
+    // cliente -> ingresos_caja; una venta; un consumo interno). La caja esperada
+    // se SUMA desde ellas (caja.js getTotalesSesion), asi que el POS tiene que
+    // recibirlas: sin receptor, el pago no bajaba la caja del POS y el arqueo del
+    // dia daba una diferencia inventada.
+    { collection: 'sesiones_caja',     applyFn: applySesionCajaFull },
+    { collection: 'egresos_caja',      applyFn: applyEgresoCajaFull },
+    { collection: 'ingresos_caja',     applyFn: applyIngresoCaja },
+    { collection: 'ventas',            applyFn: applyVentaFull },
+    { collection: 'consumo_interno',   applyFn: applyConsumoInternoFull },
+    { collection: 'pedidos_abiertos',  applyFn: applyPedidoAbierto },
+    { collection: 'compras_pausadas',  applyFn: applyCompraPausada },
     { collection: 'medios_cobro',      applyFn: applyMedioCobroFull },
     { collection: 'sucursales',        applyFn: applySucursalFull },
     { collection: 'cuenta_corriente',  applyFn: applyCuentaCorriente },
@@ -930,6 +949,39 @@
     );
   }
 
+  // Venta pausada en una caja (pos.js pausarVenta): se ve y se retoma desde otra
+  // caja o desde Admin-POS. `items` es el carrito serializado a JSON (texto).
+  function applyPedidoAbierto(data) {
+    if (window.SGA_DB.fueEliminado('pedidos_abiertos', data.id)) return;
+    if (tienePendienteLocal('pedidos_abiertos', 'id = ?', [data.id])) return;
+    const now = new Date().toISOString();
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO pedidos_abiertos
+        (id, sucursal_id, usuario_id, cliente_id, items, total, fecha, nombre,
+         sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,'synced',?)`,
+      [data.id, data.sucursal_id || null, data.usuario_id || null, data.cliente_id || null,
+       data.items ?? '[]', data.total || 0, data.fecha || now, data.nombre || null,
+       data.updated_at || now]
+    );
+  }
+
+  // Compra pausada (compras_v2.js pausar). `snapshot` es el estado del carrito en JSON.
+  function applyCompraPausada(data) {
+    if (window.SGA_DB.fueEliminado('compras_pausadas', data.id)) return;
+    if (tienePendienteLocal('compras_pausadas', 'id = ?', [data.id])) return;
+    const now = new Date().toISOString();
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO compras_pausadas
+        (id, sucursal_id, usuario_id, snapshot, proveedor_nombre, num_items,
+         total_estimado, created_at, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,'synced',?)`,
+      [data.id, data.sucursal_id || null, data.usuario_id || null, data.snapshot ?? '{}',
+       data.proveedor_nombre || null, data.num_items || 0, data.total_estimado || 0,
+       data.created_at || now, data.updated_at || now]
+    );
+  }
+
   function applyConsumoInternoFull(data) {
     if (tienePendienteLocal('consumo_interno', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
@@ -1393,6 +1445,20 @@
 
   function applySesionCajaFull(data) {
     if (tienePendienteLocal('sesiones_caja', 'id = ?', [data.id])) return;
+
+    // La sesion de caja la maneja UNA compu (la del local: abre, cuenta los
+    // billetes y cierra). Ahora que el POS tambien recibe sesiones desde el admin,
+    // una copia que llega puede estar VIEJA y no puede deshacer lo que ya paso
+    // aca: ni reabrir una caja que ya se cerro (se perderia el cierre y la
+    // diferencia), ni borrar el recuento de billetes que la cajera tiene en curso.
+    // (La caja esperada no se lee de esta fila: se suma desde ventas/egresos/
+    // ingresos, ver caja.js getTotalesSesion.)
+    const local = window.SGA_DB.query(
+      `SELECT estado, detalle_billetes FROM sesiones_caja WHERE id = ?`, [data.id]
+    )[0];
+    if (local && local.estado === 'cerrada' && (data.estado || 'abierta') !== 'cerrada') return;
+    const detalleBilletes = data.detalle_billetes || local?.detalle_billetes || null;
+
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO sesiones_caja
         (id, sucursal_id, usuario_apertura_id, usuario_cierre_id,
@@ -1411,7 +1477,7 @@
        data.total_tarjeta || 0, data.total_transferencia || 0,
        data.total_cuenta_corriente || 0, data.total_egresos || 0,
        data.saldo_final_esperado || 0, data.saldo_final_real ?? null,
-       data.diferencia ?? null, data.detalle_billetes || null,
+       data.diferencia ?? null, detalleBilletes,
        data.estado || 'abierta', data.cierre_automatico ? 1 : 0,
        data.updated_at || null]
     );
@@ -1556,6 +1622,8 @@
       { name: 'stock',             applyFn: applyStockFull },
       { name: 'promociones',       applyFn: applyPromocion },
       { name: 'consumo_interno',   applyFn: applyConsumoInternoFull },
+      { name: 'pedidos_abiertos',  applyFn: applyPedidoAbierto },
+      { name: 'compras_pausadas',  applyFn: applyCompraPausada },
       { name: 'ingresos_caja',     applyFn: applyIngresoCaja },
       { name: 'cuenta_corriente',  applyFn: applyCuentaCorriente },
     ];
@@ -1785,6 +1853,8 @@
       { name: 'promociones',       applyFn: applyPromocion,        label: 'Promociones' },
       { name: 'pagos_proveedores', applyFn: applyPagoProveedor,    label: 'Pagos proveedores' },
       { name: 'consumo_interno',   applyFn: applyConsumoInternoFull, label: 'Consumo interno' },
+      { name: 'pedidos_abiertos',  applyFn: applyPedidoAbierto,    label: 'Ventas pausadas' },
+      { name: 'compras_pausadas',  applyFn: applyCompraPausada,    label: 'Compras pausadas' },
       { name: 'ingresos_caja',     applyFn: applyIngresoCaja,      label: 'Ingresos de caja' },
       { name: 'cuenta_corriente',  applyFn: applyCuentaCorriente,  label: 'Cuenta corriente' },
       { name: 'medios_cobro',      applyFn: applyMedioCobroFull,   label: 'Medios de pago' },

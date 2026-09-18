@@ -1116,6 +1116,18 @@
       `);
     } catch(e) { console.warn('compras_pausadas:', e.message); }
 
+    // Los borradores (ventas pausadas del POS y compras pausadas) ahora se
+    // sincronizan: se pueden retomar desde OTRA caja y verse desde Admin-POS. Para
+    // eso necesitan sync_status/updated_at. Las filas que ya existian quedan
+    // 'pending' (default) y se suben una vez.
+    for (const sql of [
+      `ALTER TABLE pedidos_abiertos ADD COLUMN sync_status TEXT DEFAULT 'pending'`,
+      `ALTER TABLE pedidos_abiertos ADD COLUMN updated_at TEXT`,
+      `ALTER TABLE compras_pausadas ADD COLUMN sync_status TEXT DEFAULT 'pending'`,
+    ]) {
+      try { database.run(sql); } catch(e) { /* la columna ya existe */ }
+    }
+
     // ── Usuarios — autenticación local (username + password_hash) ─────────────
     const usuariosMigrations = [
       `ALTER TABLE usuarios ADD COLUMN username TEXT`,
@@ -1506,6 +1518,9 @@
     gastos:         [],
     cuenta_corriente: [],
     ingresos_caja:    [],
+    // Borradores: se retoman/borran desde cualquier caja o desde Admin-POS.
+    pedidos_abiertos: [],
+    compras_pausadas: [],
   };
 
   /**

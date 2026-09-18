@@ -3647,8 +3647,9 @@ export const POS = (() => {
 
       const sql = `
         INSERT INTO pedidos_abiertos (
-          id, sucursal_id, usuario_id, cliente_id, items, total, fecha, nombre
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          id, sucursal_id, usuario_id, cliente_id, items, total, fecha, nombre,
+          sync_status, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
       `;
 
       window.SGA_DB.run(sql, [
@@ -3659,8 +3660,10 @@ export const POS = (() => {
         JSON.stringify(cartData.items),
         cartData.totales.total,
         now,
-        cartData.nombre || `Pedido ${pedidoId.substring(0, 8)}`
+        cartData.nombre || `Pedido ${pedidoId.substring(0, 8)}`,
+        now
       ]);
+      window.SGA_Sync?.pushPending?.();
 
       console.log('✅ Venta pausada:', pedidoId);
       return { success: true, pedidoId };
@@ -3717,6 +3720,10 @@ export const POS = (() => {
     try {
       const sql = `DELETE FROM pedidos_abiertos WHERE id = ?`;
       window.SGA_DB.run(sql, [pedidoId]);
+      // Con marca de borrado: si no, la otra caja / Admin-POS seguirian mostrando
+      // (o retomando) un pedido que ya se retomo o se elimino aca.
+      window.SGA_DB.registrarEliminacion('pedidos_abiertos', pedidoId);
+      window.SGA_Sync?.pushPending?.();
       console.log('✅ Pedido eliminado:', pedidoId);
       return { success: true };
     } catch (error) {
