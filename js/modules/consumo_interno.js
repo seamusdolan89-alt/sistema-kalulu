@@ -76,6 +76,14 @@ const ConsumoInterno = (() => {
     lastResults = [];
     searchHlIdx = -1;
     input.focus();
+    // El lector de codigo de barras escribe + Enter mas rapido que el
+    // debounce de 180ms del listener de 'input' (ver mas abajo): sin este
+    // clearTimeout, la busqueda debounced del codigo que acabamos de agregar
+    // seguia pendiente y terminaba re-pintando el dropdown con ese mismo
+    // producto DESPUES de que el input ya quedo vacio -- aparecia como
+    // "sugerencia fantasma" (mismo bug y mismo fix que POS, ver
+    // tests/e2e/test_pos_buscador_sugerencia_fantasma.py).
+    clearTimeout(searchTimer);
 
     ocultarError();
     renderCart();
