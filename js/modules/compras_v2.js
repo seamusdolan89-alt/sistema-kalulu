@@ -844,11 +844,12 @@ const ComprasV2 = (() => {
     return db().query(`
       SELECT p.id, p.nombre, p.costo, p.iva,
              p.unidad_compra, p.unidades_por_paquete_compra,
-             cb.codigo AS barcode
+             (SELECT codigo FROM codigos_barras
+              WHERE producto_id = p.id AND es_principal = 1 LIMIT 1) AS barcode
       FROM productos p
-      LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
-      WHERE p.activo = 1 AND (p.nombre LIKE ? OR cb.codigo = ?)
-      GROUP BY p.id
+      WHERE p.activo = 1 AND (p.nombre LIKE ? OR EXISTS (
+        SELECT 1 FROM codigos_barras WHERE producto_id = p.id AND codigo = ?
+      ))
       LIMIT 15
     `, [like, q.trim()]);
   }

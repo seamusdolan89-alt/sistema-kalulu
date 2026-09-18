@@ -31,13 +31,14 @@ const AjusteStockPositivo = (() => {
   function searchProductos(q) {
     return db().query(`
       SELECT p.id, p.nombre, p.costo, p.precio_venta, p.unidad_venta,
-             cb.codigo,
+             (SELECT codigo FROM codigos_barras
+              WHERE producto_id = p.id AND es_principal = 1 LIMIT 1) AS codigo,
              COALESCE(s.cantidad, 0) AS stock
       FROM productos p
       LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?
-      LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
-      WHERE p.activo = 1 AND (p.nombre LIKE ? OR cb.codigo = ?)
-      GROUP BY p.id
+      WHERE p.activo = 1 AND (p.nombre LIKE ? OR EXISTS (
+        SELECT 1 FROM codigos_barras WHERE producto_id = p.id AND codigo = ?
+      ))
       ORDER BY p.nombre
       LIMIT 20
     `, [sucursalId, `%${q}%`, q]);
