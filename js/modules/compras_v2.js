@@ -2902,11 +2902,8 @@ const ComprasV2 = (() => {
             (id, sesion_caja_id, monto, descripcion, tipo, fecha, usuario_id, sync_status, updated_at)
           VALUES (?, ?, ?, ?, 'pago_proveedor', ?, ?, 'pending', ?)
         `, [uuid(), sesion.id, neto, desc, ts, user.id, ts]);
-
-        db().run(
-          `UPDATE sesiones_caja SET total_egresos=COALESCE(total_egresos,0)+?, sync_status='pending', updated_at=? WHERE id=?`,
-          [neto, ts, sesion.id]
-        );
+        // Sin UPDATE de sesiones_caja.total_egresos: la caja esperada se suma
+        // desde egresos_caja (ver cuenta_corriente_proveedores.js, mismo motivo).
       }
       // Una compra en cuenta corriente no necesita anotarse en ningun lado: la
       // deuda del proveedor se calcula sumando sus compras y gastos y restando

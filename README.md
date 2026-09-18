@@ -41,7 +41,7 @@ POS y Admin-POS comparten el mismo código (`js/modules/*.js`) pero corren sobre
 │       ├── compras_v2.js / ordenes.js / proveedores.js / pago_proveedor_wizard.js
 │       ├── cuenta_corriente_proveedores.js / adelanto_pago.js / gastos.js
 │       ├── clientes.js
-│       ├── caja.js / caja_admin.js
+│       ├── caja.js
 │       ├── operaciones_stock.js / ajuste_stock.js / ajuste_stock_positivo.js
 │       ├── roturas.js / vencimientos.js / consumo_interno.js
 │       ├── promociones.js / etiquetas.js

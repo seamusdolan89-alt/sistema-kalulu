@@ -5,7 +5,7 @@ Pedido del usuario (17/9): el celular usa solo 5 áreas de Admin-POS (Inicio,
 Productos, Órdenes, Proveedores/Cta Cte, Informes — ver BACKLOG.md, "Admin-POS
 responsive") pero el pull inicial y el sync periódico bajaban las ~28
 colecciones completas, incluidas varias que ninguna pantalla mobile lee
-(Clientes, Configuración, Flujo de Fondos, Caja Seamus, Consumo Interno,
+(Clientes, Configuración, Flujo de Fondos, Consumo Interno,
 etc.) — eso hacía que el primer login en un dispositivo nuevo, contra
 producción real (meses de datos), tardara mucho.
 
@@ -61,7 +61,7 @@ def run():
         print("Colecciones salteadas en mobile:", skip_list)
 
         must_skip = {
-            'clientes', 'caja_admin', 'consumo_interno', 'system_config',
+            'clientes', 'consumo_interno', 'system_config',
             'flujo_forecast', 'flujo_liquidar', 'flujo_pagos_prov',
             'cuenta_corriente', 'producto_codigo_proveedor', 'gastos_pagos',
         }

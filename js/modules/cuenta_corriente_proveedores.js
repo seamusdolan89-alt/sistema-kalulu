@@ -289,24 +289,11 @@ const SGA_PagosProveedores = (() => {
              VALUES (?, ?, ?, ?, 'pago_proveedor', ?, ?, ?, 'pending', ?)`,
             [uid(), m.sesion_caja_id, parseFloat(m.monto), desc, fechaPago, usuario_id, proveedor_id, ts]
           );
-          db().run(
-            `UPDATE sesiones_caja SET total_egresos = COALESCE(total_egresos, 0) + ?, sync_status='pending', updated_at=? WHERE id=?`,
-            [parseFloat(m.monto), ts, m.sesion_caja_id]
-          );
-        }
-
-        if (m.metodo === 'caja_seamus') {
-          const provRow = db().query(`SELECT razon_social FROM proveedores WHERE id=?`, [proveedor_id])[0];
-          const provNombre = provRow?.razon_social || '';
-          const desc = observaciones
-            ? `Pago ${provNombre} — ${observaciones}`
-            : `Pago a proveedor${provNombre ? ' ' + provNombre : ''}`;
-          db().run(
-            `INSERT INTO caja_admin
-               (id, tipo, monto, concepto, proveedor_id, fecha, usuario_id, sync_status, updated_at)
-             VALUES (?, 'egreso', ?, ?, ?, ?, ?, 'pending', ?)`,
-            [uid(), parseFloat(m.monto), desc, proveedor_id, fechaPago, usuario_id, ts]
-          );
+          // La caja esperada se calcula sumando las filas de egresos_caja
+          // (caja.js getTotalesSesion): NO se incrementa sesiones_caja.total_egresos.
+          // Ese contador ya no lo lee nadie, y tocarlo marcaba la sesion como
+          // 'pending' desde Admin-POS: con una copia vieja de la sesion, el POS
+          // podia recibir una caja "abierta" que en realidad ya estaba cerrada.
         }
       }
 

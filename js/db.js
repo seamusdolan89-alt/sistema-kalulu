@@ -1324,24 +1324,10 @@
       `);
     } catch(e) { console.warn('gastos:', e.message); }
 
-    // ── Caja Admin (fondo propio del administrador) ───────────────────────────
-    try {
-      database.run(`
-        CREATE TABLE IF NOT EXISTS caja_admin (
-          id TEXT PRIMARY KEY,
-          tipo TEXT NOT NULL CHECK(tipo IN ('ingreso','egreso')),
-          monto REAL NOT NULL,
-          concepto TEXT,
-          egreso_caja_id TEXT,  -- referencia al retiro de caja que generó el ingreso
-          compra_id TEXT,       -- referencia a la compra que se pagó (egresos)
-          proveedor_id TEXT,    -- proveedor de la compra (desnormalizado para rapidez)
-          fecha TEXT NOT NULL,
-          usuario_id TEXT NOT NULL,
-          sync_status TEXT DEFAULT 'pending',
-          updated_at TEXT
-        )
-      `);
-    } catch(e) { console.warn('caja_admin:', e.message); }
+    // (18/9/2026) La tabla caja_admin ("Caja Seamus", fondo personal del admin) se
+    // dejo de crear: la funcion no se usaba y sus retiros/pagos ya no se registran.
+    // En bases existentes la tabla y su historial siguen ahi, sin tocar (no se hace
+    // DROP a proposito); si la funcion vuelve, se reimplementa desde cero.
 
     // ── Flujo de Fondos — proyecciones manuales de ingresos / egresos ─────────
     try {
