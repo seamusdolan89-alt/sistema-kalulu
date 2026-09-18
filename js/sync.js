@@ -550,18 +550,32 @@
    * el set completo y actual, asi que reconstruir desde cero es seguro y
    * ademas hace que un item borrado del otro lado desaparezca de verdad.
    */
+  // Booleano de SQLite (0/1) tal como llega en un documento: 0, 1, true, false,
+  // '0' o ausente. NO usar `data.x !== false ? 1 : 0`: las columnas viajan como
+  // el NUMERO 0 (no como false), y `0 !== false` es true — desactivar un
+  // producto/proveedor/usuario/medio de cobro/sucursal/promocion en una compu
+  // lo dejaba ACTIVO en la otra (y cada pull lo reactivaba). `def` es lo que
+  // vale si el documento no trae el campo.
+  function bool01(v, def = 1) {
+    if (v === undefined || v === null) return def;
+    return (v === false || v === 0 || v === '0') ? 0 : 1;
+  }
+
   function applyDevolucion(data) {
     if (window.SGA_DB.fueEliminado('devoluciones', data.id)) return;
     if (tienePendienteLocal('devoluciones', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
 
+    // reintegro_tipo faltaba en esta lista: como INSERT OR REPLACE reescribe la
+    // fila entera, del otro lado volvia a su default y se perdia si la
+    // devolucion se habia reintegrado en efectivo o a cuenta corriente.
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO devoluciones
-        (id, venta_id, sucursal_id, usuario_id, fecha, motivo, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,'synced',?)`,
+        (id, venta_id, sucursal_id, usuario_id, fecha, motivo, reintegro_tipo, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.venta_id || null, data.sucursal_id || null,
        data.usuario_id || null, data.fecha || null, data.motivo || null,
-       data.updated_at || now]
+       data.reintegro_tipo ?? null, data.updated_at || now]
     );
 
     window.SGA_DB.run(`DELETE FROM devolucion_items WHERE devolucion_id = ?`, [data.id]);
@@ -822,20 +836,26 @@
   function applyPagoProveedor(data) {
     if (tienePendienteLocal('pagos_proveedores', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
+    // REPLACE y no IGNORE: con IGNORE un cambio en el pago (ej. observaciones)
+    // hecho en una compu nunca se reflejaba en la otra. tienePendienteLocal()
+    // de arriba ya protege lo que esta sin subir.
     window.SGA_DB.run(`
-      INSERT OR IGNORE INTO pagos_proveedores
+      INSERT OR REPLACE INTO pagos_proveedores
         (id, proveedor_id, fecha, observaciones, usuario_id, sync_status, updated_at)
       VALUES (?,?,?,?,?,'synced',?)`,
       [data.id, data.proveedor_id, data.fecha,
        data.observaciones || null, data.usuario_id || null, data.updated_at || now]
     );
 
+    // sesion_caja_id faltaba: dice de que caja salio un pago en efectivo, y
+    // sin el la otra compu no podia conciliar esa caja.
     for (const metodo of (data._metodos || [])) {
       window.SGA_DB.run(`
         INSERT OR REPLACE INTO pagos_proveedores_metodos
-          (id, pago_id, metodo, monto, referencia)
-        VALUES (?,?,?,?,?)`,
-        [metodo.id, data.id, metodo.metodo, metodo.monto, metodo.referencia || null]
+          (id, pago_id, metodo, monto, referencia, sesion_caja_id)
+        VALUES (?,?,?,?,?,?)`,
+        [metodo.id, data.id, metodo.metodo, metodo.monto, metodo.referencia || null,
+         metodo.sesion_caja_id || null]
       );
     }
 
@@ -980,7 +1000,7 @@
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.nombre, data.tipo || null, data.descripcion || null,
        data.fecha_desde || null, data.fecha_hasta || null,
-       data.activa !== false ? 1 : 0,
+       bool01(data.activa),
        data.aplica_a || null, data.valor_descuento || null,
        data.tipo_descuento || null,
        // Sin estas, un combo llegaba sin precio y sin sus reglas: no funcionaba.
@@ -1197,7 +1217,7 @@
          sync_status, updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.nombre || '?', data.rol || 'cajero', data.sucursal_id || null,
-       data.activo !== false ? 1 : 0, data.username || null, passwordHash, passwordUpdatedAt,
+       bool01(data.activo), data.username || null, passwordHash, passwordUpdatedAt,
        data.permisos_json || null, data.updated_at || new Date().toISOString()]
     );
   }
@@ -1235,7 +1255,7 @@
        data.condicion_iva || null, data.agente_retencion_iva ? 1 : 0,
        data.agente_retencion_iibb ? 1 : 0, data.condicion_compra || null,
        data.order_day ?? null, data.dia_entrega ?? null,
-       data.activo !== false ? 1 : 0, data.updated_at || null]
+       bool01(data.activo), data.updated_at || null]
     );
   }
 
@@ -1265,9 +1285,9 @@
        data.unidad_compra || 'Unidad', data.unidades_por_paquete_compra || 1,
        data.unidad_venta || 'Unidad', data.costo_paquete || 0,
        data.precio_lista_por || 'Por unidad de compra', data.precio_lista_divisor || 1,
-       data.hereda_costo !== false ? 1 : 0, data.hereda_precio !== false ? 1 : 0,
+       bool01(data.hereda_costo), bool01(data.hereda_precio),
        data.es_oferta ? 1 : 0, data.oferta_desde || null, data.oferta_hasta || null,
-       data.activo !== false ? 1 : 0, data.fecha_alta || null, data.iva || null,
+       bool01(data.activo), data.fecha_alta || null, data.iva || null,
        data.imagen || null, data.fecha_modificacion || null,
        data.pedido_unidades_por_paquete ?? null,
        data.ultima_impresion_etiqueta || null,
@@ -1371,7 +1391,7 @@
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO medios_cobro (id, nombre, icono, activo, orden, sync_status, updated_at)
       VALUES (?,?,?,?,?,'synced',?)`,
-      [data.id, data.nombre || '?', data.icono || '', data.activo !== false ? 1 : 0,
+      [data.id, data.nombre || '?', data.icono || '', bool01(data.activo),
        data.orden || 0, data.updated_at || null]
     );
   }
@@ -1381,7 +1401,7 @@
       INSERT OR REPLACE INTO sucursales (id, nombre, direccion, activa, sync_status, updated_at)
       VALUES (?,?,?,?,'synced',?)`,
       [data.id, data.nombre || '?', data.direccion || null,
-       data.activa !== false ? 1 : 0, data.updated_at || null]
+       bool01(data.activa), data.updated_at || null]
     );
   }
 
@@ -1463,6 +1483,16 @@
        data.total || 0, data.estado || 'completada', data.updated_at || null]
     );
 
+    // Los hijos viajan como el conjunto COMPLETO y actual: hay que reemplazar, no
+    // solo insertar. Al editar una venta en el POS (pos.js, "✏️ Editar") se
+    // borran las lineas y se reinsertan con ids NUEVOS; sin este DELETE el otro
+    // lado quedaba con las lineas viejas mas las nuevas (venta duplicada en
+    // informes y en el desglose de pagos de la caja). Mismo criterio que
+    // applyCompra / applyRemito / applyDevolucion.
+    window.SGA_DB.run(`DELETE FROM venta_items WHERE venta_id = ?`, [data.id]);
+    window.SGA_DB.run(`DELETE FROM venta_pagos WHERE venta_id = ?`, [data.id]);
+    window.SGA_DB.run(`DELETE FROM venta_promociones WHERE venta_id = ?`, [data.id]);
+
     for (const item of (data.items || [])) {
       try {
         window.SGA_DB.run(`
@@ -1510,6 +1540,13 @@
     if (!firestoreDb) return 0;
 
     const MONITOR_SOURCES = [
+      // Primero a proposito (igual que en PULL_SOURCES): un borrado hecho en el
+      // POS (producto, promocion, orden...) tiene que llegar antes que el
+      // documento viejo del registro, o applyX lo recrearia. Antes el admin
+      // NUNCA bajaba las marcas de borrado del POS; 'categorias' tampoco: una
+      // categoria creada en el POS no aparecia en Admin-POS.
+      { name: 'eliminaciones',     applyFn: applyEliminacion },
+      { name: 'categorias',        applyFn: applyCategoria },
       { name: 'usuarios',          applyFn: applyUsuarioFull },
       { name: 'producto_codigo_proveedor', applyFn: applyCodigoProveedorFull },
       { name: 'sesiones_caja',     applyFn: applySesionCajaFull },
@@ -1735,6 +1772,10 @@
     if (!ok) return;
 
     const COLLECTIONS = [
+      // Las marcas de borrado van PRIMERO: sin ellas un dispositivo nuevo bajaba
+      // todos los documentos, incluso los de productos/promociones/ordenes ya
+      // borrados (el documento sigue en Firestore), y los resucitaba.
+      { name: 'eliminaciones',     applyFn: applyEliminacion,      label: 'Borrados' },
       { name: 'usuarios',          applyFn: applyUsuarioFull,      label: 'Usuarios' },
       { name: 'producto_codigo_proveedor', applyFn: applyCodigoProveedorFull, label: 'Matcheo códigos proveedor' },
       { name: 'categorias',        applyFn: applyCategoria,        label: 'Categorías' },
@@ -1804,7 +1845,7 @@
   // proveedores existen, no de CUÁNTO TIEMPO lleva operando el negocio —
   // por eso son seguras de esperar antes de dejar entrar a la app.
   const ESSENTIAL_COLLECTIONS = new Set([
-    'usuarios', 'categorias', 'proveedores', 'productos', 'stock',
+    'eliminaciones', 'usuarios', 'categorias', 'proveedores', 'productos', 'stock',
     'medios_cobro', 'sucursales',
   ]);
 
