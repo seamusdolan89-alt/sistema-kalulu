@@ -1880,7 +1880,20 @@ const EditorProducto = (() => {
     devolucion_compra: 'background:#E65100;color:white',
     consumo_interno:   'background:#6A1B9A;color:white',
     rotura:            'background:#B71C1C;color:white',
+    anulacion_venta:   'background:#0D47A1;color:white',
+    edicion_venta:     'background:#1565C0;color:white',
+    devolucion:        'background:#E65100;color:white',
+    compra_edicion:    'background:#2E7D32;color:white',
+    remito:            'background:#00695C;color:white',
+    remito_edicion:    'background:#00695C;color:white',
+    vencimiento:       'background:#B71C1C;color:white',
+    ajuste_aprobado:   'background:#616161;color:white',
+    ajuste_conteo:     'background:#F9A825;color:#222',
+    importacion:       'background:#F9A825;color:#222',
+    saldo_inicial:     'background:#455A64;color:white',
+    sync:              'background:#9E9E9E;color:white',
   };
+
 
   const TX_LABEL = {
     venta:             'Venta',
@@ -1892,7 +1905,28 @@ const EditorProducto = (() => {
     devolucion_compra: 'Dev. Compra',
     consumo_interno:   'Consumo',
     rotura:            'Rotura',
+    // tipos del registro de movimientos (stock_movimientos)
+    anulacion_venta:   'Anulación',
+    edicion_venta:     'Edición venta',
+    devolucion:        'Devolución',
+    compra_edicion:    'Edición compra',
+    remito:            'Remito',
+    remito_edicion:    'Edición remito',
+    vencimiento:       'Vencimiento',
+    ajuste_aprobado:   'Ajuste aprobado',
+    ajuste_conteo:     'Conteo',
+    importacion:       'Importación',
+    saldo_inicial:     'Saldo inicial',
+    sync:              'Sincronización',
   };
+  // Categoria de filtro (select "Tipo") de cada tipo de movimiento del registro
+  const TX_CATEGORIA = {
+    venta: 'venta', anulacion_venta: 'venta', edicion_venta: 'venta',
+    devolucion: 'devolucion',
+    compra: 'compra', compra_edicion: 'compra', remito: 'compra', remito_edicion: 'compra',
+  };
+  // A que pantalla lleva el link de un movimiento, segun el documento que lo origino
+  const TX_NAV = { ventas: 'venta', compras: 'compra', remitos: null, devoluciones: null, stock_ajustes: 'ajuste' };
 
   const fmtFecha = (str) => {
     if (!str) return '-';
@@ -1938,6 +1972,34 @@ const EditorProducto = (() => {
       if (hasta && fecha.substring(0,10) > hasta) return false;
       return true;
     };
+
+    // Registro REAL de movimientos de stock (stock_movimientos): cada cambio, exacto, con quien y
+    // por que. El saldo se calcula sobre TODOS los movimientos (y despues se filtra para mostrar),
+    // asi la columna Saldo es siempre el stock verdadero y termina en el stock actual.
+    try {
+      const reales = window.SGA_DB.query(`
+        SELECT m.*, COALESCE(u.nombre, '') AS usuario_nombre
+        FROM stock_movimientos m LEFT JOIN usuarios u ON u.id = m.usuario_id
+        WHERE m.producto_id = ? ${sucFlt ? 'AND m.sucursal_id = ?' : ''}
+        ORDER BY m.fecha ASC, m.rowid ASC`,
+        sucFlt ? [state.productoId, sucFlt] : [state.productoId]);
+      if (reales.length) {
+        let saldoReal = 0;
+        const todos = reales.map(r => {
+          saldoReal += r.delta;
+          const nav = Object.prototype.hasOwnProperty.call(TX_NAV, r.ref_tipo) ? TX_NAV[r.ref_tipo] : null;
+          return {
+            id: r.id, tipo: r.tipo, fecha: r.fecha, saldo: Math.round(saldoReal * 10000) / 10000,
+            descripcion: (r.motivo || TX_LABEL[r.tipo] || r.tipo) + (r.usuario_nombre ? ` — ${r.usuario_nombre}` : ''),
+            debe: r.delta > 0 ? r.delta : 0, haber: r.delta < 0 ? -r.delta : 0,
+            ref_id: r.ref_id || r.id, nav,
+          };
+        });
+        const categoria = (t) => TX_CATEGORIA[t] || 'ajuste';
+        renderLedger(todos.filter(m => inDateRange(m.fecha) && (!tipoFlt || categoria(m.tipo) === tipoFlt)));
+        return;
+      }
+    } catch (e) { /* sin registro de movimientos todavia: se usa el historial reconstruido de abajo */ }
 
     let movements = [];
 
@@ -2038,21 +2100,25 @@ const EditorProducto = (() => {
       const debeStr  = m.debe  > 0 ? `<span style="color:#388E3C;font-weight:600">+${m.debe}</span>` : '–';
       const haberStr = m.haber > 0 ? `<span style="color:#d32f2f;font-weight:600">-${m.haber}</span>` : '–';
       const saldoClr = m.saldo >= 0 ? 'inherit' : '#d32f2f';
+      // Los movimientos del registro real traen `nav` (a que pantalla ir; null = sin detalle navegable)
+      const navTipo  = m.nav !== undefined ? m.nav : m.tipo;
+      const linkId   = navTipo
+        ? `<a href="#" class="ed-tx-link" data-tipo="${escapeHtml(navTipo)}" data-ref="${escapeHtml(m.ref_id)}"
+             style="font-family:monospace;font-size:11px;color:var(--color-primary)">${shortId}</a>`
+        : `<span style="font-family:monospace;font-size:11px;color:#888">${shortId}</span>`;
+      const linkBtn  = navTipo
+        ? `<button class="btn btn-sm btn-secondary ed-tx-link" style="padding:2px 6px"
+            data-tipo="${escapeHtml(navTipo)}" data-ref="${escapeHtml(m.ref_id)}" title="Ver detalle">🔍</button>`
+        : '';
       return `<tr>
-        <td>
-          <a href="#" class="ed-tx-link" data-tipo="${escapeHtml(m.tipo)}" data-ref="${escapeHtml(m.ref_id)}"
-             style="font-family:monospace;font-size:11px;color:var(--color-primary)">${shortId}</a>
-        </td>
+        <td>${linkId}</td>
         <td style="font-size:12px;white-space:nowrap">${fmtFecha(m.fecha)}</td>
         <td><span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;${badge}">${label}</span></td>
         <td style="font-size:12px">${escapeHtml(m.descripcion)}</td>
         <td style="text-align:right">${debeStr}</td>
         <td style="text-align:right">${haberStr}</td>
         <td style="text-align:right;font-weight:600;color:${saldoClr}">${m.saldo}</td>
-        <td>
-          <button class="btn btn-sm btn-secondary ed-tx-link" style="padding:2px 6px"
-            data-tipo="${escapeHtml(m.tipo)}" data-ref="${escapeHtml(m.ref_id)}" title="Ver detalle">🔍</button>
-        </td>
+        <td>${linkBtn}</td>
       </tr>`;
     }).join('');
 
