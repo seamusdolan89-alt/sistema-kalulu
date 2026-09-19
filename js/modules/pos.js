@@ -167,12 +167,11 @@ export const POS = (() => {
           [ventaId]
         );
         for (const old of oldItems) {
-          window.SGA_DB.run(
-            `UPDATE stock SET cantidad = cantidad + ?, fecha_modificacion = ?, sync_status = ?, updated_at = ?
-             WHERE producto_id = ? AND sucursal_id = ?`,
-            [old.cantidad, now, 'pending', now, old.producto_id, sucursalId]
-          );
-          window.SGA_DB.registrarHistorialStock(old.producto_id, sucursalId);
+          window.SGA_DB.moverStock({
+            productoId: old.producto_id, sucursalId, delta: old.cantidad,
+            tipo: 'edicion_venta', refTipo: 'ventas', refId: ventaId, fecha: now,
+            crearSiNoExiste: false,
+          });
         }
         window.SGA_DB.run('DELETE FROM venta_items WHERE venta_id = ?', [ventaId]);
         window.SGA_DB.run('DELETE FROM venta_pagos WHERE venta_id = ?', [ventaId]);
@@ -202,22 +201,12 @@ export const POS = (() => {
           item.comisionPct || 0
         ]);
 
-        // Deduct stock for each sucursal (this sucursal only)
-        const updateStockSql = `
-          UPDATE stock
-          SET cantidad = cantidad - ?, fecha_modificacion = ?, sync_status = ?, updated_at = ?
-          WHERE producto_id = ? AND sucursal_id = ?
-        `;
-
-        window.SGA_DB.run(updateStockSql, [
-          item.cantidad,
-          now,
-          'pending',
-          now,
-          item.productoId,
-          sucursalId
-        ]);
-        window.SGA_DB.registrarHistorialStock(item.productoId, sucursalId);
+        // Descuenta el stock de esta sucursal (punto unico de escritura de stock)
+        window.SGA_DB.moverStock({
+          productoId: item.productoId, sucursalId, delta: -item.cantidad,
+          tipo: 'venta', refTipo: 'ventas', refId: ventaId, fecha: now,
+          crearSiNoExiste: false, // como antes: sin fila de stock no se toca nada
+        });
       }
 
       // INSERT venta_pagos and update payment method totals
@@ -3762,11 +3751,11 @@ export const POS = (() => {
         `, [window.SGA_Utils.generateUUID(), devolucionId, item.productoId, item.cantidad, item.precio]);
 
         // Always restore stock
-        window.SGA_DB.run(`
-          UPDATE stock SET cantidad = cantidad + ?, fecha_modificacion = ?, sync_status = 'pending'
-          WHERE producto_id = ? AND sucursal_id = ?
-        `, [item.cantidad, now, item.productoId, venta.sucursal_id]);
-        window.SGA_DB.registrarHistorialStock(item.productoId, venta.sucursal_id);
+        window.SGA_DB.moverStock({
+          productoId: item.productoId, sucursalId: venta.sucursal_id, delta: item.cantidad,
+          tipo: 'devolucion', refTipo: 'devoluciones', refId: devolucionId, motivo, fecha: now,
+          crearSiNoExiste: false,
+        });
 
         // Record stock adjustment: reincorporation (always approved)
         window.SGA_DB.run(`
@@ -3844,19 +3833,11 @@ export const POS = (() => {
       const items = window.SGA_DB.query(itemsSql, [ventaId]);
 
       for (const item of items) {
-        const restoreStockSql = `
-          UPDATE stock SET cantidad = cantidad + ?, fecha_modificacion = ?, sync_status = ?, updated_at = ?
-          WHERE producto_id = ? AND sucursal_id = ?
-        `;
-        window.SGA_DB.run(restoreStockSql, [
-          item.cantidad,
-          now,
-          'pending',
-          now,
-          item.producto_id,
-          venta.sucursal_id
-        ]);
-        window.SGA_DB.registrarHistorialStock(item.producto_id, venta.sucursal_id);
+        window.SGA_DB.moverStock({
+          productoId: item.producto_id, sucursalId: venta.sucursal_id, delta: item.cantidad,
+          tipo: 'anulacion_venta', refTipo: 'ventas', refId: ventaId, fecha: now,
+          crearSiNoExiste: false,
+        });
       }
 
       // Reverse cuenta_corriente

@@ -115,11 +115,12 @@ const AprobacionesPendientes = (() => {
 
     db().beginBatch();
     try {
-      db().run(
-        `UPDATE stock SET cantidad = cantidad - ?, fecha_modificacion = ?, sync_status = 'pending', updated_at = ?
-         WHERE producto_id = ? AND sucursal_id = ?`,
-        [a.cantidad, ts, ts, a.producto_id, a.sucursal_id]
-      );
+      db().moverStock({
+        productoId: a.producto_id, sucursalId: a.sucursal_id, delta: -a.cantidad,
+        tipo: 'ajuste_aprobado', refTipo: 'stock_ajustes', refId: id,
+        motivo: MOTIVO_LABEL[a.motivo] || a.motivo || 'Ajuste de stock', usuarioId: admin.id, fecha: ts,
+        crearSiNoExiste: false,
+      });
       db().run(
         `INSERT INTO consumo_interno
            (id, producto_id, sucursal_id, usuario_id, registrado_por_usuario_id,
@@ -141,7 +142,6 @@ const AprobacionesPendientes = (() => {
       return;
     }
 
-    db().registrarHistorialStock(a.producto_id, a.sucursal_id);
     window.SGA_Utils.showNotification('Ajuste aprobado', 'success');
     window.SGA_Sync?.pushPending?.();
     renderLista();

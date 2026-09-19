@@ -178,3 +178,12 @@ def login_direct(page, username=DEV_ADMIN_USER, password=DEV_ADMIN_PASS, wait_ta
     page.wait_for_url(re.compile(rf".*{target_re}#{re.escape(wait_target)}"), timeout=15000)
     page.wait_for_load_state("networkidle")
     page.wait_for_timeout(300)
+
+
+def assert_stock_integro(page, contexto=""):
+    """Invariante del registro de movimientos de stock: para todo (producto, sucursal),
+    stock.cantidad == SUM(stock_movimientos.delta). Si una pantalla escribe stock por fuera de
+    SGA_DB.moverStock (o lo hace mal), aca salta. Ver tests/e2e/test_stock_ledger.py."""
+    filas = page.evaluate("() => window.SGA_DB.verificarIntegridadStock()")
+    assert not filas, (
+        f"BUG: stock.cantidad no coincide con la suma de sus movimientos {contexto}: {filas}")

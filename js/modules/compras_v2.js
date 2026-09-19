@@ -2844,25 +2844,10 @@ const ComprasV2 = (() => {
 
         // Stock: only increment if NOT vinculando (remito already updated stock)
         if (!state.vinculandoRemitoId) {
-          const stockRow = db().query(
-            `SELECT cantidad FROM stock WHERE producto_id=? AND sucursal_id=?`,
-            [item.productoId, user.sucursal_id]
-          )[0];
-
-          if (stockRow) {
-            db().run(
-              `UPDATE stock SET cantidad=cantidad+?, fecha_modificacion=?, sync_status='pending', updated_at=?
-               WHERE producto_id=? AND sucursal_id=?`,
-              [cantUds, ts, ts, item.productoId, user.sucursal_id]
-            );
-          } else {
-            db().run(
-              `INSERT INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at)
-               VALUES (?, ?, ?, ?, 'pending', ?)`,
-              [item.productoId, user.sucursal_id, cantUds, ts, ts]
-            );
-          }
-          window.SGA_DB.registrarHistorialStock(item.productoId, user.sucursal_id);
+          db().moverStock({
+            productoId: item.productoId, sucursalId: user.sucursal_id, delta: cantUds,
+            tipo: 'compra', refTipo: 'compras', refId: compraId, fecha: ts,
+          });
         }
 
         // Cost update (if changed) — las líneas de muestra NUNCA actualizan el
@@ -3107,22 +3092,10 @@ const ComprasV2 = (() => {
         // Stock: ajustar solo por la diferencia contra lo que había antes
         const deltaUds = cantUds - cantUdsAntes;
         if (Math.abs(deltaUds) > 0.0001) {
-          const stockRow = db().query(
-            `SELECT cantidad FROM stock WHERE producto_id=? AND sucursal_id=?`,
-            [item.productoId, sucursalId]
-          )[0];
-          if (stockRow) {
-            db().run(
-              `UPDATE stock SET cantidad=cantidad+?, fecha_modificacion=?, sync_status='pending', updated_at=? WHERE producto_id=? AND sucursal_id=?`,
-              [deltaUds, ts, ts, item.productoId, sucursalId]
-            );
-          } else {
-            db().run(
-              `INSERT INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at) VALUES (?, ?, ?, ?, 'pending', ?)`,
-              [item.productoId, sucursalId, deltaUds, ts, ts]
-            );
-          }
-          window.SGA_DB.registrarHistorialStock(item.productoId, sucursalId);
+          db().moverStock({
+            productoId: item.productoId, sucursalId, delta: deltaUds,
+            tipo: 'compra_edicion', refTipo: 'compras', refId: compraId, fecha: ts,
+          });
         }
 
         // Costo del producto: solo si cambió Y esta sigue siendo la compra
@@ -3151,11 +3124,11 @@ const ComprasV2 = (() => {
         if (prev.tipo !== 'envio' && prev.tipo !== 'descuento') {
           const cantUdsPrev = (parseFloat(prev.cantidad) || 0) * (parseFloat(prev.unidades_por_paquete) || 1);
           if (Math.abs(cantUdsPrev) > 0.0001) {
-            db().run(
-              `UPDATE stock SET cantidad=cantidad-?, fecha_modificacion=?, sync_status='pending', updated_at=? WHERE producto_id=? AND sucursal_id=?`,
-              [cantUdsPrev, ts, ts, prev.producto_id, sucursalId]
-            );
-            window.SGA_DB.registrarHistorialStock(prev.producto_id, sucursalId);
+            db().moverStock({
+              productoId: prev.producto_id, sucursalId, delta: -cantUdsPrev,
+              tipo: 'compra_edicion', refTipo: 'compras', refId: compraId, fecha: ts,
+              crearSiNoExiste: false,
+            });
           }
         }
         db().run(`DELETE FROM compra_items WHERE id=?`, [prev.id]);
@@ -3383,21 +3356,10 @@ const ComprasV2 = (() => {
 
       for (const [pid, delta] of deltas) {
         if (Math.abs(delta) <= 0.0001) continue;
-        const stockRow = db().query(
-          `SELECT cantidad FROM stock WHERE producto_id=? AND sucursal_id=?`, [pid, sucursalId]
-        )[0];
-        if (stockRow) {
-          db().run(
-            `UPDATE stock SET cantidad=cantidad+?, fecha_modificacion=?, sync_status='pending', updated_at=? WHERE producto_id=? AND sucursal_id=?`,
-            [delta, ts, ts, pid, sucursalId]
-          );
-        } else {
-          db().run(
-            `INSERT INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at) VALUES (?, ?, ?, ?, 'pending', ?)`,
-            [pid, sucursalId, delta, ts, ts]
-          );
-        }
-        window.SGA_DB.registrarHistorialStock(pid, sucursalId);
+        db().moverStock({
+          productoId: pid, sucursalId, delta,
+          tipo: 'remito_edicion', refTipo: 'remitos', refId: remitoId, fecha: ts,
+        });
       }
 
       // Verificación pre-commit (mismo criterio que commitCompraEdicion)
@@ -3468,22 +3430,10 @@ const ComprasV2 = (() => {
           VALUES (?, ?, ?, ?, ?, ?)
         `, [uuid(), remitoId, item.productoId, cant, item.unidadCompra || 'Unidad', udsPaq]);
 
-        const stockRow = db().query(
-          `SELECT cantidad FROM stock WHERE producto_id=? AND sucursal_id=?`,
-          [item.productoId, user.sucursal_id]
-        )[0];
-        if (stockRow) {
-          db().run(
-            `UPDATE stock SET cantidad=cantidad+?, fecha_modificacion=?, sync_status='pending', updated_at=? WHERE producto_id=? AND sucursal_id=?`,
-            [cantUds, ts, ts, item.productoId, user.sucursal_id]
-          );
-        } else {
-          db().run(
-            `INSERT INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at) VALUES (?, ?, ?, ?, 'pending', ?)`,
-            [item.productoId, user.sucursal_id, cantUds, ts, ts]
-          );
-        }
-        window.SGA_DB.registrarHistorialStock(item.productoId, user.sucursal_id);
+        db().moverStock({
+          productoId: item.productoId, sucursalId: user.sucursal_id, delta: cantUds,
+          tipo: 'remito', refTipo: 'remitos', refId: remitoId, fecha: ts,
+        });
       }
 
       db().commitBatch();

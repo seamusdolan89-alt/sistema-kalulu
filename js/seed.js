@@ -144,11 +144,10 @@ export default async function seed() {
     );
 
     // Create initial stock for this product per sucursal
-    window.SGA_DB.run(
-      `INSERT INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at)
-       VALUES (?, ?, ?, ?, 'pending', ?)`,
-      [prod_id, sucursal_id, 20, now, now]
-    );
+    window.SGA_DB.moverStock({
+      productoId: prod_id, sucursalId: sucursal_id, delta: 20,
+      tipo: 'saldo_inicial', motivo: 'Datos de demostracion', usuarioId: null, fecha: now,
+    });
   }
   console.log(`✅ ${products.length} products created`);
 

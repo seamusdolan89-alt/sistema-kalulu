@@ -35,7 +35,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 from playwright.sync_api import sync_playwright
-from helpers import block_firebase, enable_dev_mode, login_via_seed
+from helpers import block_firebase, enable_dev_mode, login_via_seed, assert_stock_integro
 
 SCREENSHOT_DIR = os.path.join(os.path.dirname(__file__), "screenshots")
 
@@ -241,6 +241,7 @@ def main():
         page.wait_for_timeout(200)
         assert page.locator("#aprob-empty").is_visible(), "Deberia mostrar el estado vacio tras resolver los 2 pendientes"
 
+        assert_stock_integro(page, 'al final de test_aprobaciones_pendientes.py')
         assert not errors, f"Errores JS no capturados en pagina: {errors}"
 
         print("OK - Circuito de ajuste pendiente + Aprobaciones Pendientes funciona para Compras y para POS/devoluciones.")

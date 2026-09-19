@@ -32,7 +32,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 sys.path.insert(0, os.path.dirname(__file__))
 
 from playwright.sync_api import sync_playwright
-from helpers import block_firebase, enable_dev_mode, login_via_seed
+from helpers import assert_stock_integro, block_firebase, enable_dev_mode, login_via_seed
 
 SCREENSHOT_DIR = os.path.join(os.path.dirname(__file__), "screenshots")
 
@@ -65,12 +65,11 @@ SEED_JS = """
 
   // Stock DESPUES de haber cargado el remito original: mal=10 (+6 del remito),
   // ok=5 (no estaba en el remito), qty=20 (+3 del remito).
+  // Por el punto unico de escritura (SGA_DB.moverStock), como el resto de la app: si no, el
+  // registro de movimientos no cuadraria con la cache de stock.
   for (const [pid, cant] of [['prod-er-mal', 16], ['prod-er-ok', 5], ['prod-er-qty', 23]]) {
-    window.SGA_DB.run(
-      `INSERT OR REPLACE INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at)
-       VALUES (?, ?, ?, ?, 'synced', ?)`,
-      [pid, sucursalId, cant, now, now]
-    );
+    window.SGA_DB.moverStock({ productoId: pid, sucursalId, delta: cant, tipo: 'saldo_inicial',
+                               motivo: 'seed del test', usuarioId: null, fecha: now });
   }
 
   window.SGA_DB.run(
@@ -188,6 +187,7 @@ def main():
         assert remito["estado"] == "pendiente", f"El remito no deberia cambiar de estado: {remito}"
         assert remito["sync_status"] == "pending", f"BUG: el remito editado no quedo pending, no viajaria por sync: {remito}"
         assert not dialogos, f"No deberia haber pedido confirmacion (no hay stock negativo): {dialogos}"
+        assert_stock_integro(page, 'despues de editar el remito (diferencia por producto)')
 
         print("--- Al guardar cae en Operaciones de Stock (no en la lista de remitos) ---")
         assert page.evaluate("() => window.location.hash").endswith("operaciones_stock"), \
@@ -224,6 +224,11 @@ def main():
         assert stock_de(page, "prod-er-qty") == -4, f"1 - 5 = -4, es {stock_de(page, 'prod-er-qty')}"
         n = page.evaluate("() => window.SGA_DB.query(`SELECT COUNT(*) AS n FROM remito_items WHERE remito_id='remito-er'`)[0].n")
         assert n == 1, f"Deberia quedar 1 linea, hay {n}"
+        # el UPDATE manual de stock a 1 (simula que ya se vendio) rompe la invariante a proposito:
+        # se comprueba que el editor mueve por diferencia y que los movimientos del remito son coherentes
+        movs = page.evaluate("() => window.SGA_DB.query(`SELECT tipo, delta FROM stock_movimientos WHERE producto_id='prod-er-qty' ORDER BY rowid`)")
+        tipos = [m['tipo'] for m in movs]
+        assert tipos[-2:] == ['remito_edicion', 'remito_edicion'] or tipos[-1] == 'remito_edicion', f"movimientos de la edicion: {tipos}"
 
         print("--- POS del local (no admin): el remito aparece pero SIN boton Editar ---")
         pos = context.new_page()

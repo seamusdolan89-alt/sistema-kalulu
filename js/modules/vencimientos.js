@@ -190,26 +190,25 @@ const Vencimientos = (() => {
            user.id, user.id, item.cantidad, item.costo, item.precioVenta, motivo, obs, now, now]
         );
 
-        db().run(
-          `UPDATE stock SET cantidad = cantidad - ?, fecha_modificacion = ?, sync_status = 'pending', updated_at = ?
-           WHERE producto_id = ? AND sucursal_id = ?`,
-          [item.cantidad, now, now, item.productoId, sucursalId]
-        );
+        const ajusteId = window.SGA_Utils.generateUUID();
+        db().moverStock({
+          productoId: item.productoId, sucursalId, delta: -item.cantidad,
+          tipo: 'vencimiento', refTipo: 'stock_ajustes', refId: ajusteId,
+          motivo: motivo, usuarioId: user.id, fecha: now,
+          crearSiNoExiste: false, // como antes: sin fila de stock no se toca nada
+        });
 
         db().run(
           `INSERT INTO stock_ajustes
              (id, producto_id, sucursal_id, tipo, cantidad, motivo, usuario_id, fecha, estado, sync_status, updated_at)
            VALUES (?, ?, ?, 'vencimiento', ?, ?, ?, ?, 'aprobado', 'pending', ?)`,
-          [window.SGA_Utils.generateUUID(), item.productoId, sucursalId,
+          [ajusteId, item.productoId, sucursalId,
            item.cantidad, 'Producto vencido' + (obs ? ': ' + obs : ''), user.id, now, now]
         );
       }
 
       db().commitBatch();
 
-      for (const item of cart) {
-        db().registrarHistorialStock(item.productoId, sucursalId);
-      }
 
       window.SGA_Utils.showNotification('Vencimiento registrado correctamente', 'success');
       window.location.hash = '#operaciones_stock';

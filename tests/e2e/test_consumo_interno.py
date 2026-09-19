@@ -28,7 +28,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 from playwright.sync_api import sync_playwright
-from helpers import block_firebase, enable_dev_mode, login_via_seed
+from helpers import block_firebase, enable_dev_mode, login_via_seed, assert_stock_integro
 
 SCREENSHOT_DIR = os.path.join(os.path.dirname(__file__), "screenshots")
 
@@ -131,6 +131,7 @@ def main():
         """)
         assert abs(stock[0]["cantidad"] - 18) < 0.01, f"Stock esperado 18 (20-2), obtenido: {stock}"
 
+        assert_stock_integro(page, 'al final de test_consumo_interno.py')
         assert not errors, f"Errores JS no capturados en pagina: {errors}"
 
         print("OK - Consumo interno: atribucion a otro usuario con confirmacion por password funciona correctamente.")

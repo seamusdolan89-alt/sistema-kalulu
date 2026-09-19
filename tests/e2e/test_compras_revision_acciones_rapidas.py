@@ -34,7 +34,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 from playwright.sync_api import sync_playwright
-from helpers import block_firebase, enable_dev_mode, login_via_seed
+from helpers import block_firebase, enable_dev_mode, login_via_seed, assert_stock_integro
 
 SCREENSHOT_DIR = os.path.join(os.path.dirname(__file__), "screenshots")
 
@@ -236,6 +236,7 @@ def main():
         """)
         assert compra_ok >= 1, "La compra no quedo confirmada tras usar las acciones rapidas"
 
+        assert_stock_integro(page, 'al final de test_compras_revision_acciones_rapidas.py')
         assert not errors, f"Errores JS no capturados en pagina: {errors}"
 
         print("OK - 'Asociar sustituto' y 'Asignar madre' funcionan desde Compras-Revision y no rompen el commit.")
