@@ -23,7 +23,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 from playwright.sync_api import sync_playwright
-from helpers import block_firebase, enable_dev_mode, login_via_seed
+from helpers import block_firebase, enable_dev_mode, login_via_seed, assert_stock_integro
 
 SCREENSHOT_DIR = os.path.join(os.path.dirname(__file__), "screenshots")
 
@@ -105,6 +105,7 @@ def main():
         assert "95,00" in filtered_text, f"Valor a venta de la rotura ($95,00) no aparece: {filtered_text[:600]!r}"
         assert "130,00" not in filtered_text, "El filtro por Rotura no deberia incluir el total sin filtrar ($130,00)"
 
+        assert_stock_integro(page, 'al final de test_operaciones_stock_salidas.py')
         assert not errors, f"Errores JS no capturados en pagina: {errors}"
 
         print("OK - Rotura/Vencimiento/Consumo Interno + informe Salidas de Stock funcionan correctamente.")

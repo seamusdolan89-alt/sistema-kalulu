@@ -20,7 +20,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 from playwright.sync_api import sync_playwright
-from helpers import block_firebase, enable_dev_mode, login_via_seed, abrir_caja_si_hace_falta
+from helpers import block_firebase, enable_dev_mode, login_via_seed, abrir_caja_si_hace_falta, assert_stock_integro
 
 SCREENSHOT_DIR = os.path.join(os.path.dirname(__file__), "screenshots")
 
@@ -130,6 +130,7 @@ def main():
         assert cc[0]["tipo"] == "venta_fiada", f"Tipo de movimiento inesperado: {cc[0]}"
         assert abs(cc[0]["monto"] - 45) < 0.01, f"Monto de deuda inesperado: {cc[0]}"
 
+        assert_stock_integro(page, 'al final de test_pos_multiples_medios_pago.py')
         assert not errors, f"Errores JS no capturados en pagina (regresion MPAY?): {errors}"
 
         print("OK - Cobro multiple: $50 Efectivo + $45 Cta.Cte. registrados correctamente para Juan Perez.")

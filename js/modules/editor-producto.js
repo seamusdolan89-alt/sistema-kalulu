@@ -926,23 +926,11 @@ const EditorProducto = (() => {
 
   const saveStockImmediate = (sucursalId, cantidad) => {
     if (state.isNew) { showToast('Creá el producto primero para guardar stock'); return; }
-    const now = window.SGA_Utils.formatISODate(new Date());
-    const exists = window.SGA_DB.query(
-      'SELECT 1 FROM stock WHERE producto_id = ? AND sucursal_id = ?',
-      [state.productoId, sucursalId]
-    );
-    if (exists.length) {
-      window.SGA_DB.run(
-        "UPDATE stock SET cantidad = ?, fecha_modificacion = ?, sync_status = 'pending', updated_at = ? WHERE producto_id = ? AND sucursal_id = ?",
-        [cantidad, now, now, state.productoId, sucursalId]
-      );
-    } else {
-      window.SGA_DB.run(
-        "INSERT INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at) VALUES (?, ?, ?, ?, 'pending', ?)",
-        [state.productoId, sucursalId, cantidad, now, now]
-      );
-    }
-    window.SGA_DB.registrarHistorialStock(state.productoId, sucursalId);
+    // "Poner el stock en N": se registra como un movimiento por la diferencia
+    window.SGA_DB.setStockAbsoluto({
+      productoId: state.productoId, sucursalId, cantidad,
+      tipo: 'ajuste_conteo', motivo: 'Editado desde la ficha del producto',
+    });
     showToast('Stock actualizado');
   };
 
@@ -2157,22 +2145,12 @@ const EditorProducto = (() => {
       `, [id, state.productoId, sucId, tipo, cantidad, motivo, currentUser?.id || null, now, now]);
 
       const delta = tipo === 'ajuste_positivo' ? cantidad : -cantidad;
-      const exists = window.SGA_DB.query(
-        'SELECT 1 FROM stock WHERE producto_id=? AND sucursal_id=?',
-        [state.productoId, sucId]
-      );
-      if (exists.length) {
-        window.SGA_DB.run(
-          "UPDATE stock SET cantidad=cantidad+?,fecha_modificacion=?,sync_status='pending',updated_at=? WHERE producto_id=? AND sucursal_id=?",
-          [delta, now, now, state.productoId, sucId]
-        );
-      } else {
-        window.SGA_DB.run(
-          "INSERT INTO stock (producto_id,sucursal_id,cantidad,fecha_modificacion,sync_status,updated_at) VALUES (?,?,?,?,'pending',?)",
-          [state.productoId, sucId, Math.max(0, delta), now, now]
-        );
-      }
-      window.SGA_DB.registrarHistorialStock(state.productoId, sucId);
+      window.SGA_DB.moverStock({
+        productoId: state.productoId, sucursalId: sucId, delta,
+        tipo, refTipo: 'stock_ajustes', refId: id, motivo,
+        usuarioId: currentUser?.id || null, fecha: now,
+        crearSiNoExiste: delta > 0, // como antes: un ajuste negativo sin fila no crea stock
+      });
       closeFamiliaModal();
       showToast('Movimiento registrado');
       renderTransacciones();

@@ -92,6 +92,11 @@ DEUDA = {
     #  sesiones_caja/egresos_caja/ingresos_caja/ventas/consumo_interno del admin, con guardas
     #  para no reabrir una caja cerrada ni pisar el recuento en curso — ver test_sync_caja_admin_pos.py)
     # Decisiones que son del dueno:
+    # Ledger de stock, etapa 1 (18/9/2026): el registro de movimientos es local a cada compu. La etapa 2 lo
+    # sincroniza (solo-agregar, con saldos iniciales deterministas) y deja de sincronizar stock.cantidad
+    # como valor absoluto (el ultimo que escribe pisa al otro). Ver tests/e2e/test_stock_ledger.py.
+    ("stock_movimientos", "POS -> Admin"): "ledger de stock, etapa 1: local; la etapa 2 lo sincroniza",
+    ("stock_movimientos", "Admin -> POS"): "idem",
     ("historial_stock", "POS -> Admin"): "sin sync_status/updated_at ni fuente; se reemplaza por el ledger de stock (informe 'dias sin stock' incompleto en Admin)",
     ("historial_stock", "Admin -> POS"): "idem",
     # (Borradores resueltos el 18/9/2026: pedidos_abiertos y compras_pausadas sincronizan y su borrado

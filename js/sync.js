@@ -1414,11 +1414,12 @@
 
   function applyStockFull(data) {
     if (tienePendienteLocal('stock', 'producto_id = ? AND sucursal_id = ?', [data.producto_id, data.sucursal_id || (window.SK_SUCURSAL_FIREBASE_ID || 'sucursal-1')])) return;
-    window.SGA_DB.run(`
-      INSERT OR REPLACE INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at)
-      VALUES (?,?,?,?,'synced',?)`,
-      [data.producto_id, data.sucursal_id || (window.SK_SUCURSAL_FIREBASE_ID || 'sucursal-1'),
-       data.cantidad || 0, data.fecha_modificacion || null, data.updated_at || null]
+    // Por el punto unico de escritura: lo recibido se anota como movimiento 'sync' por la
+    // diferencia, asi stock.cantidad sigue igual a la suma de movimientos.
+    window.SGA_DB.aplicarStockSync(
+      data.producto_id, data.sucursal_id || (window.SK_SUCURSAL_FIREBASE_ID || 'sucursal-1'),
+      data.cantidad || 0,
+      { fechaModificacion: data.fecha_modificacion || null, updatedAt: data.updated_at || null }
     );
   }
 

@@ -1519,22 +1519,14 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
 
         // Upsert stock — only if stock_actual was mapped
         if (stock_actual !== undefined) {
-          const existingStock = window.SGA_DB.query(
-            'SELECT 1 FROM stock WHERE producto_id = ? AND sucursal_id = ?',
-            [producto_id, sucursal_id]
-          );
-          if (existingStock.length) {
-            window.SGA_DB.run(
-              'UPDATE stock SET cantidad = ?, fecha_modificacion = ?, sync_status = \'pending\', updated_at = ? WHERE producto_id = ? AND sucursal_id = ?',
-              [stock_actual, now, now, producto_id, sucursal_id]
-            );
-          } else {
-            window.SGA_DB.run(
-              'INSERT INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at) VALUES (?, ?, ?, ?, \'pending\', ?)',
-              [producto_id, sucursal_id, stock_actual, now, now]
-            );
+          // La importacion pone el stock en el valor de la planilla: un movimiento por la diferencia.
+          // Una celda no numerica se saltea (antes se guardaba cualquier cosa).
+          if (Number.isFinite(parseFloat(stock_actual))) {
+            window.SGA_DB.setStockAbsoluto({
+              productoId: producto_id, sucursalId: sucursal_id, cantidad: parseFloat(stock_actual),
+              tipo: 'importacion', motivo: 'Importacion de productos',
+            });
           }
-          window.SGA_DB.registrarHistorialStock(producto_id, sucursal_id);
         }
 
         // Sustituto referencia — se resuelve en la segunda pasada, despues del

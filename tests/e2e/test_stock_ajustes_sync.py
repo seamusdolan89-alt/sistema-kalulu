@@ -41,7 +41,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 sys.path.insert(0, os.path.dirname(__file__))
 
 from playwright.sync_api import sync_playwright
-from helpers import block_firebase, enable_dev_mode, login_via_seed
+from helpers import block_firebase, enable_dev_mode, login_via_seed, assert_stock_integro
 
 SCREENSHOT_DIR = os.path.join(os.path.dirname(__file__), "screenshots")
 
@@ -126,6 +126,7 @@ def main():
 
         page.screenshot(path=os.path.join(SCREENSHOT_DIR, "stock_ajustes_sync.png"), full_page=True)
 
+        assert_stock_integro(page, 'al final de test_stock_ajustes_sync.py')
         assert not errors, f"Errores JS no capturados en pagina: {errors}"
 
         print("\n=== OK: los 5 flujos de ajuste/salida de stock marcan la fila de stock pendiente de sync ===")

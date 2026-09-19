@@ -16,7 +16,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 from playwright.sync_api import sync_playwright
-from helpers import block_firebase, enable_dev_mode, login_via_seed
+from helpers import block_firebase, enable_dev_mode, login_via_seed, assert_stock_integro
 
 SCREENSHOT_DIR = os.path.join(os.path.dirname(__file__), "screenshots")
 
@@ -125,6 +125,7 @@ def main():
         saldo_text = fila_pepsico.inner_text()
         assert "200,00" in saldo_text, f"Saldo tras pago parcial inesperado: {saldo_text!r}"
 
+        assert_stock_integro(page, 'al final de test_cuenta_corriente_proveedores.py')
         assert not errors, f"Errores JS no capturados en pagina: {errors}"
 
         print("OK - Cuentas Corrientes: compra genera saldo correcto y el pago se imputa y descuenta bien.")

@@ -977,6 +977,33 @@
       `);
     } catch(e) { console.warn('historial_stock:', e.message); }
 
+    // ── stock_movimientos — registro inmutable de CADA cambio de stock (ledger) ───
+    // stock.cantidad es una CACHE: siempre igual a SUM(delta) de este registro (ver
+    // moverStock / verificarIntegridadStock más abajo). Solo se agregan filas, nunca se
+    // editan ni se borran: una correccion es un movimiento nuevo con signo contrario.
+    // Etapa 1: local a cada compu (todavia no sincroniza; por eso no tiene sync_status).
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS stock_movimientos (
+          id TEXT PRIMARY KEY,
+          producto_id TEXT NOT NULL,
+          sucursal_id TEXT NOT NULL,
+          delta REAL NOT NULL,
+          tipo TEXT NOT NULL,
+          ref_tipo TEXT,
+          ref_id TEXT,
+          motivo TEXT,
+          usuario_id TEXT,
+          fecha TEXT NOT NULL
+        )
+      `);
+      database.run(`CREATE INDEX IF NOT EXISTS idx_stock_mov_prod
+                    ON stock_movimientos(producto_id, sucursal_id, fecha)`);
+      database.run(`CREATE INDEX IF NOT EXISTS idx_stock_mov_ref
+                    ON stock_movimientos(ref_tipo, ref_id)`);
+      backfillSaldoInicial();
+    } catch(e) { console.warn('stock_movimientos:', e.message); }
+
     // ── venta_promociones — historial de uso de cada promoción ────────────────
     try {
       database.run(`
@@ -1624,6 +1651,223 @@
     }
   }
 
+  // ─── Movimientos de stock (ledger): el UNICO punto de escritura de stock ──────
+  // Ningun otro archivo escribe la tabla stock (lo verifica tests/e2e/test_stock_ledger.py
+  // y tests/check_stock_escrituras.py en CI). Cada cambio deja un movimiento inmutable y
+  // actualiza la cache stock.cantidad en la MISMA transaccion, asi que
+  // stock.cantidad == SUM(stock_movimientos.delta) siempre (verificarIntegridadStock).
+
+  function nuevoUuid() {
+    return (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+
+  /**
+   * Cambia el stock de un producto en una sucursal por `delta` (+ suma, - resta).
+   *
+   * @param {Object}  o
+   * @param {string}  o.productoId
+   * @param {string}  o.sucursalId
+   * @param {number}  o.delta
+   * @param {string}  o.tipo            venta | anulacion_venta | devolucion | compra | remito | ajuste_positivo | rotura | ...
+   * @param {string=} o.refTipo         tabla del documento que origino el movimiento (ventas, compras, remitos, stock_ajustes...)
+   * @param {string=} o.refId           id de ese documento
+   * @param {string=} o.motivo
+   * @param {string=} o.usuarioId       por defecto, el usuario logueado
+   * @param {boolean} o.crearSiNoExiste por defecto true. En false, si el producto no tiene fila de stock no
+   *                                    se hace nada (asi funcionaban la venta, la anulacion y la devolucion).
+   * @returns {string|null} id del movimiento, o null si no hubo cambio.
+   * Tira si los datos son invalidos: antes los errores de escritura se tragaban en silencio.
+   */
+  function moverStock(o) {
+    o = o || {};
+    const delta = Number(o.delta);
+    if (!o.productoId || !o.sucursalId) throw new Error('moverStock: falta el producto o la sucursal');
+    if (!o.tipo) throw new Error('moverStock: falta el tipo de movimiento');
+    if (!Number.isFinite(delta)) throw new Error('moverStock: delta invalido (' + o.delta + ')');
+    if (Math.abs(delta) < 1e-9) return null;
+
+    const crear = o.crearSiNoExiste !== false;
+    const ts = o.fecha || new Date().toISOString();
+    const usuario = o.usuarioId !== undefined
+      ? o.usuarioId
+      : ((window.SGA_Auth && window.SGA_Auth.getCurrentUser && window.SGA_Auth.getCurrentUser() || {}).id || null);
+
+    const existe = query(
+      'SELECT 1 AS x FROM stock WHERE producto_id = ? AND sucursal_id = ?',
+      [o.productoId, o.sucursalId]
+    ).length > 0;
+    if (!existe && !crear) return null;
+
+    const loteMio = !batchMode;
+    if (loteMio) beginBatch();
+    try {
+      const id = nuevoUuid();
+      database.run(
+        `INSERT INTO stock_movimientos
+           (id, producto_id, sucursal_id, delta, tipo, ref_tipo, ref_id, motivo, usuario_id, fecha)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, o.productoId, o.sucursalId, delta, o.tipo, o.refTipo || null, o.refId || null,
+         o.motivo || null, usuario, ts]
+      );
+      if (existe) {
+        database.run(
+          `UPDATE stock SET cantidad = cantidad + ?, fecha_modificacion = ?, sync_status = 'pending', updated_at = ?
+           WHERE producto_id = ? AND sucursal_id = ?`,
+          [delta, ts, ts, o.productoId, o.sucursalId]
+        );
+      } else {
+        database.run(
+          `INSERT INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at)
+           VALUES (?, ?, ?, ?, 'pending', ?)`,
+          [o.productoId, o.sucursalId, delta, ts, ts]
+        );
+      }
+      registrarHistorialStock(o.productoId, o.sucursalId);
+      if (loteMio) commitBatch();
+      return id;
+    } catch (e) {
+      if (loteMio) rollbackBatch();
+      throw e;
+    }
+  }
+
+  /**
+   * "Poner el stock en N" (editor de producto, importacion): se registra como UN movimiento
+   * por la diferencia contra lo que hay ahora. Si el producto no tenia fila y N es 0, igual
+   * se crea la fila en 0 (sin movimiento), como hacia el codigo anterior.
+   */
+  function setStockAbsoluto(o) {
+    o = o || {};
+    const nueva = Number(o.cantidad);
+    if (!o.productoId || !o.sucursalId) throw new Error('setStockAbsoluto: falta el producto o la sucursal');
+    if (!Number.isFinite(nueva)) throw new Error('setStockAbsoluto: cantidad invalida (' + o.cantidad + ')');
+    const fila = query(
+      'SELECT cantidad FROM stock WHERE producto_id = ? AND sucursal_id = ?',
+      [o.productoId, o.sucursalId]
+    )[0];
+    const actual = fila ? (Number(fila.cantidad) || 0) : 0;
+    const delta = nueva - actual;
+    if (Math.abs(delta) < 1e-9) {
+      if (!fila) {
+        const ts = new Date().toISOString();
+        database.run(
+          `INSERT INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at)
+           VALUES (?, ?, 0, ?, 'pending', ?)`,
+          [o.productoId, o.sucursalId, ts, ts]
+        );
+        if (!batchMode) saveDatabase();
+      }
+      return null;
+    }
+    return moverStock({
+      productoId: o.productoId, sucursalId: o.sucursalId, delta,
+      tipo: o.tipo || 'ajuste_conteo', refTipo: o.refTipo, refId: o.refId,
+      motivo: o.motivo, usuarioId: o.usuarioId, fecha: o.fecha,
+    });
+  }
+
+  /**
+   * Stock que LLEGA de la otra compu por sincronizacion (applyStockFull en sync.js). Mientras
+   * el stock siga viajando como valor absoluto (ver plan del ledger, etapa 2), lo recibido
+   * se anota como un movimiento 'sync' por la diferencia para que la invariante siga
+   * valiendo. La fila queda 'synced' (no vuelve a subirse).
+   */
+  function aplicarStockSync(productoId, sucursalId, cantidad, extra) {
+    extra = extra || {};
+    const nueva = Number(cantidad) || 0;
+    const loteMio = !batchMode;
+    if (loteMio) beginBatch();
+    try {
+      const fila = query(
+        'SELECT cantidad FROM stock WHERE producto_id = ? AND sucursal_id = ?',
+        [productoId, sucursalId]
+      )[0];
+      const actual = fila ? (Number(fila.cantidad) || 0) : 0;
+      const delta = nueva - actual;
+      if (Math.abs(delta) > 1e-9) {
+        database.run(
+          `INSERT INTO stock_movimientos
+             (id, producto_id, sucursal_id, delta, tipo, ref_tipo, ref_id, motivo, usuario_id, fecha)
+           VALUES (?, ?, ?, ?, 'sync', NULL, NULL, 'Recibido por sincronizacion', NULL, ?)`,
+          [nuevoUuid(), productoId, sucursalId, delta, new Date().toISOString()]
+        );
+      }
+      database.run(
+        `INSERT OR REPLACE INTO stock
+           (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at)
+         VALUES (?, ?, ?, ?, 'synced', ?)`,
+        [productoId, sucursalId, nueva, extra.fechaModificacion || null, extra.updatedAt || null]
+      );
+      if (loteMio) commitBatch();
+    } catch (e) {
+      if (loteMio) rollbackBatch();
+      throw e;
+    }
+  }
+
+  /**
+   * Filas donde la cache stock.cantidad NO coincide con la suma de sus movimientos.
+   * Vacio = todo cuadra. Cada elemento: { producto_id, sucursal_id, cache, movimientos }.
+   */
+  function verificarIntegridadStock() {
+    return query(`
+      SELECT s.producto_id AS producto_id, s.sucursal_id AS sucursal_id,
+             s.cantidad AS cache, COALESCE(m.suma, 0) AS movimientos
+      FROM stock s
+      LEFT JOIN (SELECT producto_id, sucursal_id, SUM(delta) AS suma
+                 FROM stock_movimientos GROUP BY producto_id, sucursal_id) m
+        ON m.producto_id = s.producto_id AND m.sucursal_id = s.sucursal_id
+      WHERE ABS(COALESCE(s.cantidad, 0) - COALESCE(m.suma, 0)) > 0.0001
+      UNION ALL
+      SELECT m.producto_id, m.sucursal_id, 0, m.suma
+      FROM (SELECT producto_id, sucursal_id, SUM(delta) AS suma
+            FROM stock_movimientos GROUP BY producto_id, sucursal_id) m
+      LEFT JOIN stock s ON s.producto_id = m.producto_id AND s.sucursal_id = m.sucursal_id
+      WHERE s.producto_id IS NULL AND ABS(m.suma) > 0.0001
+    `);
+  }
+
+  /**
+   * Una sola vez: si ya hay stock cargado y NO hay ningun movimiento, cada fila con cantidad
+   * distinta de 0 recibe un 'saldo_inicial' (el punto de partida del registro). Solo corre con
+   * el registro vacio: si corriera siempre, taparia cualquier escritura que se saltee moverStock.
+   * @returns {number} cantidad de saldos iniciales creados
+   */
+  function backfillSaldoInicial() {
+    const st = database.prepare('SELECT COUNT(*) AS n FROM stock_movimientos');
+    st.step();
+    const n = st.getAsObject().n;
+    st.free();
+    if (n > 0) return 0;
+    database.run(
+      `INSERT INTO stock_movimientos
+         (id, producto_id, sucursal_id, delta, tipo, ref_tipo, ref_id, motivo, usuario_id, fecha)
+       SELECT 'saldo_inicial:' || producto_id || ':' || sucursal_id, producto_id, sucursal_id, cantidad,
+              'saldo_inicial', NULL, NULL, 'Saldo al empezar a registrar movimientos', NULL, ?
+       FROM stock WHERE ABS(COALESCE(cantidad, 0)) > 0.0001`,
+      [new Date().toISOString()]
+    );
+    const c = database.prepare('SELECT COUNT(*) AS n FROM stock_movimientos');
+    c.step();
+    const creados = c.getAsObject().n;
+    c.free();
+    if (creados > 0 && !batchMode) saveDatabase();
+    return creados;
+  }
+
+  /** Historial de movimientos de un producto (mas nuevo primero). */
+  function getMovimientosStock(productoId, sucursalId, limite) {
+    const params = [productoId];
+    let where = 'producto_id = ?';
+    if (sucursalId) { where += ' AND sucursal_id = ?'; params.push(sucursalId); }
+    params.push(limite || 200);
+    return query(
+      `SELECT * FROM stock_movimientos WHERE ${where} ORDER BY fecha DESC, rowid DESC LIMIT ?`, params
+    );
+  }
+
   function beginBatch() {
     batchMode = true;
     database.run('BEGIN TRANSACTION');
@@ -1706,6 +1950,12 @@
     usingOPFS: () => db.usingOPFS,
     useFeature: () => db.useFeature,
     registrarHistorialStock,
+    moverStock,
+    setStockAbsoluto,
+    aplicarStockSync,
+    verificarIntegridadStock,
+    backfillSaldoInicial,
+    getMovimientosStock,
     calcularDiasSinStock6m,
     exportarBackup,
     importarBackup,
