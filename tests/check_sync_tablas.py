@@ -36,10 +36,11 @@ SYNC_JS = os.path.join(ROOT, "js", "sync.js")
 # mano el 2026-09-11. Si alguna de estas alguna vez necesita viajar entre
 # máquinas, sacarla de esta lista Y agregarle sync_status/updated_at en
 # db.js antes de registrarla en sync.js.
+#
+# pedidos_abiertos y compras_pausadas SALIERON de esta lista el 18/9/2026: ya
+# sincronizan (ver test_sync_borradores.py) -- quedan afuera a propósito.
 TABLAS_LOCALES_A_PROPOSITO = {
-    "pedidos_abiertos",   # venta pausada -- se retoma en la misma caja
-    "compras_pausadas",   # compra pausada -- se retoma en la misma máquina
-    "historial_stock",    # snapshot de auditoría, nunca tuvo sync_status
+    "historial_stock",    # snapshot de auditoría, nunca tuvo sync_status (se reemplaza por el ledger de stock)
 }
 
 
