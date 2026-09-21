@@ -82,6 +82,20 @@ EXCEPCIONES_DISENO = {
     ("medios_cobro", "POS -> Admin"): "solo se escribe desde Configuracion, ruta exclusiva de Admin-POS "
                                       "(app.js ROUTE_ADMIN_POS_ONLY) y posPush:false en sync.js",
     ("sucursales", "POS -> Admin"):   "idem medios_cobro",
+    # Ledger de stock, etapa 2 (20/9/2026): 'stock' sigue subiendo (foto util para el bootstrap
+    # de un dispositivo NUEVO, initialSyncFromFirestore/ESSENTIAL_COLLECTIONS) pero YA NADIE LA
+    # APLICA en el ciclo continuo -- lo que de verdad mueve el stock entre compus ya existentes
+    # es 'stock_movimientos' (ver mas abajo, convergiendo en las dos direcciones). Por eso ALTA/
+    # ACTUALIZACION de 'stock' entre sim.pos/sim.admin (que ya existen, no son "dispositivo
+    # nuevo") no converge a proposito -- la fase 5 (DISPOSITIVO NUEVO) si la sigue recibiendo.
+    ("stock", "POS -> Admin"):   "reemplazada por stock_movimientos; solo se aplica en el bootstrap de un dispositivo nuevo",
+    ("stock", "Admin -> POS"):   "idem",
+    # ACTUALIZACION de stock_movimientos: a proposito NO converge. Es append-only e
+    # inmutable por diseno (aplicarMovimientoStock hace INSERT OR IGNORE) -- una correccion
+    # es un movimiento NUEVO con signo contrario, nunca un UPDATE del que ya existe. El ALTA
+    # (que el movimiento en si llegue) SI converge -- eso es lo que hace falta que funcione.
+    ("stock_movimientos", "POS -> Admin"):   "append-only por diseno: un movimiento no se edita, se corrige con uno nuevo",
+    ("stock_movimientos", "Admin -> POS"):   "idem",
 }
 # Columnas que NO viajan a proposito: (tabla, columna) -> motivo.
 EXCEPCIONES_COLUMNA = {
@@ -92,11 +106,9 @@ DEUDA = {
     #  sesiones_caja/egresos_caja/ingresos_caja/ventas/consumo_interno del admin, con guardas
     #  para no reabrir una caja cerrada ni pisar el recuento en curso — ver test_sync_caja_admin_pos.py)
     # Decisiones que son del dueno:
-    # Ledger de stock, etapa 1 (18/9/2026): el registro de movimientos es local a cada compu. La etapa 2 lo
-    # sincroniza (solo-agregar, con saldos iniciales deterministas) y deja de sincronizar stock.cantidad
-    # como valor absoluto (el ultimo que escribe pisa al otro). Ver tests/e2e/test_stock_ledger.py.
-    ("stock_movimientos", "POS -> Admin"): "ledger de stock, etapa 1: local; la etapa 2 lo sincroniza",
-    ("stock_movimientos", "Admin -> POS"): "idem",
+    # (Ledger de stock resuelto el 20/9/2026: stock_movimientos ya sincroniza -- ver
+    #  EXCEPCIONES_DISENO mas arriba para 'stock', que pasa a ser bootstrap-only, y
+    #  tests/e2e/test_stock_ledger.py para la invariante y el corte de saldo inicial.)
     ("historial_stock", "POS -> Admin"): "sin sync_status/updated_at ni fuente; se reemplaza por el ledger de stock (informe 'dias sin stock' incompleto en Admin)",
     ("historial_stock", "Admin -> POS"): "idem",
     # (Borradores resueltos el 18/9/2026: pedidos_abiertos y compras_pausadas sincronizan y su borrado

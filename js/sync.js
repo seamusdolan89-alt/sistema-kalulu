@@ -93,7 +93,27 @@
     { table: 'flujo_pagos_prov',  collection: 'flujo_pagos_prov',  pk: 'id',   denormalize: null },
     { table: 'ordenes_compra',    collection: 'ordenes_compra',    pk: 'id',   denormalize: denormalizeOrden },
     { table: 'pagos_proveedores', collection: 'pagos_proveedores', pk: 'id',   denormalize: denormalizePagoProveedor },
+    // 'stock' sigue subiendo (útil como foto para el bootstrap de un dispositivo nuevo,
+    // ver ESSENTIAL_COLLECTIONS más abajo) pero YA NADIE LA APLICA en el ciclo continuo —
+    // ver PULL_SOURCES/MONITOR_SOURCES. Lo que de verdad mueve el stock entre compus, sin
+    // que el último que escribe pise al otro, es 'stock_movimientos' (etapa 2 del ledger,
+    // 20/9/2026): cada fila es un hecho con id propio que nunca se pisa (INSERT OR IGNORE
+    // en el receptor) — sumar todos los movimientos da siempre el mismo total sin importar
+    // el orden en que lleguen desde cada compu.
     { table: 'stock',             collection: 'stock',             pk: null,   compositeKey: ['producto_id', 'sucursal_id'], denormalize: denormalizeStock },
+    // adminPushWhereExtra (solo lo usa syncAdminSource, el push desde Admin-POS): el POS del
+    // local es la fuente autoritativa del ANCLA del ledger de cada producto — el movimiento
+    // con id DETERMINISTICO 'saldo_inicial:<producto>:<sucursal>' que crea backfillSaldoInicial
+    // en db.js (filtra por el ID, NO por tipo='saldo_inicial': ese mismo texto también lo usa
+    // seed.js para el stock de demostración, con un id al azar sin ningún riesgo — filtrar por
+    // tipo bloquearía ESOS movimientos para siempre, sin ninguna razón). Si Admin-POS llegara a
+    // subir su PROPIO ancla al mismo id determinístico, pisaría en Firestore el valor correcto
+    // del POS (pueden ser distintos si los dos dispositivos no tenían el mismo stock.cantidad
+    // al arrancar el ledger) — y como aplicar un movimiento es INSERT OR IGNORE, cualquier compu
+    // que ya lo tenga localmente nunca adoptaría la corrección. Filtrando esto en el push, el
+    // ganador en Firestore es siempre el mismo dispositivo, sin carrera por quién llega primero.
+    { table: 'stock_movimientos', collection: 'stock_movimientos', pk: 'id',   denormalize: null,
+      adminPushWhereExtra: "AND id NOT LIKE 'saldo_inicial:%'" },
     { table: 'categorias',        collection: 'categorias',        pk: 'id',   denormalize: null },
     // Las marcas de borrado viajan como cualquier otra tabla; del otro lado
     // applyEliminacion las convierte en el DELETE correspondiente.
@@ -175,7 +195,11 @@
     { collection: 'promociones',       applyFn: applyPromocion },
     { collection: 'proveedores',       applyFn: applyProveedorFull },
     { collection: 'clientes',          applyFn: applyClienteFull },
-    { collection: 'stock',             applyFn: applyStockFull },
+    // 'stock' (valor absoluto) NO se aplica acá — solo se usa una vez, para el bootstrap de
+    // un dispositivo nuevo (ver initialSyncFromFirestore). El ciclo continuo mueve el stock
+    // por 'stock_movimientos' (ledger etapa 2): applyStockMovimiento es idempotente por id,
+    // así que aplicar el mismo movimiento dos veces (reintento, doble pull) no duplica nada.
+    { collection: 'stock_movimientos', applyFn: applyStockMovimiento },
     // Caja: el admin tambien escribe estas filas (pagar a un proveedor en efectivo
     // contra la caja abierta del local -> egresos_caja; cobrar la deuda de un
     // cliente -> ingresos_caja; una venta; un consumo interno). La caja esperada
@@ -370,11 +394,11 @@
 
   // ─── PUSH desde admin-pos (con _pulled:false para que POS los descargue) ───────
 
-  async function syncAdminSource({ table, collection, pk, compositeKey, denormalize }) {
+  async function syncAdminSource({ table, collection, pk, compositeKey, denormalize, adminPushWhereExtra }) {
     let rows;
     try {
       rows = window.SGA_DB.query(
-        `SELECT * FROM ${table} WHERE sync_status = 'pending' LIMIT ${BATCH_LIMIT}`
+        `SELECT * FROM ${table} WHERE sync_status = 'pending' ${adminPushWhereExtra || ''} LIMIT ${BATCH_LIMIT}`
       );
     } catch (_) { return 0; }
 
@@ -1415,15 +1439,26 @@
     );
   }
 
+  // SOLO se llama desde el bootstrap de un dispositivo nuevo (initialSyncFromFirestore,
+  // ESSENTIAL_COLLECTIONS) — ver el comentario en PULL_SOURCES/MONITOR_SOURCES sobre por
+  // qué 'stock' ya no se aplica en el ciclo continuo. La guarda anti-pisada sigue acá por
+  // las dudas (un dispositivo nuevo no debería tener nada 'pending' todavía, pero si lo
+  // tuviera, gana lo local igual que en cualquier otra tabla).
   function applyStockFull(data) {
     if (tienePendienteLocal('stock', 'producto_id = ? AND sucursal_id = ?', [data.producto_id, data.sucursal_id || (window.SK_SUCURSAL_FIREBASE_ID || 'sucursal-1')])) return;
-    // Por el punto unico de escritura: lo recibido se anota como movimiento 'sync' por la
-    // diferencia, asi stock.cantidad sigue igual a la suma de movimientos.
-    window.SGA_DB.aplicarStockSync(
+    window.SGA_DB.bootstrapStockAbsoluto(
       data.producto_id, data.sucursal_id || (window.SK_SUCURSAL_FIREBASE_ID || 'sucursal-1'),
       data.cantidad || 0,
       { fechaModificacion: data.fecha_modificacion || null, updatedAt: data.updated_at || null }
     );
+  }
+
+  // Movimiento de stock que llega de la otra compu (ledger etapa 2). Append-only e
+  // idempotente por id — nunca hay nada que "pisar", así que no hace falta la guarda
+  // anti-pisada (tienePendienteLocal) que usa el resto de los applyX: dos compus pueden
+  // mandar movimientos del MISMO producto al mismo tiempo sin que ninguno se pierda.
+  function applyStockMovimiento(data) {
+    window.SGA_DB.aplicarMovimientoStock(data);
   }
 
   function applyMedioCobroFull(data) {
@@ -1620,7 +1655,8 @@
       { name: 'productos',         applyFn: applyProductoFull },
       { name: 'clientes',          applyFn: applyClienteFull },
       { name: 'proveedores',       applyFn: applyProveedorFull },
-      { name: 'stock',             applyFn: applyStockFull },
+      // 'stock' NO se aplica acá — ver el mismo comentario en PULL_SOURCES.
+      { name: 'stock_movimientos', applyFn: applyStockMovimiento },
       { name: 'promociones',       applyFn: applyPromocion },
       { name: 'consumo_interno',   applyFn: applyConsumoInternoFull },
       { name: 'pedidos_abiertos',  applyFn: applyPedidoAbierto },
@@ -1843,7 +1879,13 @@
       { name: 'compras',           applyFn: applyCompra,           label: 'Compras' },
       { name: 'remitos',           applyFn: applyRemito,           label: 'Remitos' },
       { name: 'devoluciones',      applyFn: applyDevolucion,       label: 'Devoluciones' },
-      { name: 'stock_ajustes',     applyFn: applyStockAjuste,      label: 'Movimientos de stock' },
+      { name: 'stock_ajustes',     applyFn: applyStockAjuste,      label: 'Ajustes de stock' },
+      // El ledger de movimientos (etapa 2): crece con el TIEMPO de uso, no con la cantidad
+      // de productos — va al lote de fondo, igual que ventas/compras. 'stock' (arriba, en
+      // ESSENTIAL_COLLECTIONS) ya le dio a este dispositivo un numero USABLE de entrada;
+      // apenas llegue el primer movimiento de un producto, ese numero se recalcula desde
+      // la suma real de movimientos (ver aplicarMovimientoStock en db.js).
+      { name: 'stock_movimientos', applyFn: applyStockMovimiento,  label: 'Movimientos de stock' },
       { name: 'gastos_pagos',      applyFn: applyGastoPago,        label: 'Pagos de gastos' },
       { name: 'system_config',     applyFn: applySystemConfig,     label: 'Configuración' },
       { name: 'flujo_forecast',    applyFn: applyFlujoForecast,    label: 'Flujo — proyección' },
@@ -1977,6 +2019,70 @@
     return total;
   }
 
+  // ─── Corte del ledger de stock (etapa 2, herramienta de una sola vez) ─────────
+  //
+  // Las dos compus corrieron backfillSaldoInicial() (etapa 1) POR SU CUENTA, cada una
+  // con SU stock.cantidad de ese momento. El id de ese movimiento es determinístico
+  // ('saldo_inicial:<producto>:<sucursal>', no un uuid al azar) — así que si en algún
+  // producto los dos números no coincidían, hoy cada compu tiene un 'saldo_inicial'
+  // propio y en conflicto, y nada lo resuelve solo: al sincronizar, applyStockMovimiento
+  // hace INSERT OR IGNORE, así que el que ya existe LOCALMENTE gana para siempre.
+  // Admin-POS nunca sube el suyo (ver adminPushWhereExtra en SYNC_SOURCES), así que en
+  // Firestore siempre queda el del POS del local — el único lado que hay que arreglar
+  // es la copia LOCAL de Admin-POS.
+  //
+  // Procedimiento (a mano, una sola vez, con las dos compus ya en esta versión):
+  //   1. En cualquiera de las dos: await SGA_Sync.diagnosticarSaldoInicial() — []
+  //      significa que los saldos YA COINCIDÍAN y no hace falta nada más.
+  //   2. Si hay diferencias: en Admin-POS (nunca en el POS del local, que es la fuente
+  //      autoritativa) → await SGA_Sync.prepararAdopcionLedger().
+  //   3. Repetir el diagnóstico: debería dar [].
+
+  async function diagnosticarSaldoInicial() {
+    if (!initialized || !firestoreDb) throw new Error('Firebase no conectado');
+    const locales = window.SGA_DB.query(`SELECT id, delta FROM stock_movimientos WHERE tipo = 'saldo_inicial'`);
+    const porId = new Map(locales.map(r => [r.id, r.delta]));
+
+    // Recorre TODA la colección paginando (mismo patrón que syncCollectionFull) y filtra
+    // por el prefijo del id en el cliente — es una herramienta manual, de una sola vez,
+    // no un canal de sync que necesite ser eficiente con meses de historial.
+    const diffs = [];
+    const vistos = new Set();
+    let lastDoc = null, batchSize;
+    do {
+      let q = firestoreDb.collection('stock_movimientos').orderBy('fecha').limit(400);
+      if (lastDoc) q = q.startAfter(lastDoc);
+      const snap = await q.get();
+      batchSize = snap.size;
+      for (const doc of snap.docs) {
+        if (typeof doc.id === 'string' && doc.id.startsWith('saldo_inicial:')) {
+          vistos.add(doc.id);
+          const remoto = doc.data().delta;
+          const local = porId.get(doc.id);
+          if (local === undefined || Math.abs((local || 0) - (remoto || 0)) > 0.0001) {
+            diffs.push({ id: doc.id, local: local ?? null, remoto });
+          }
+        }
+      }
+      lastDoc = snap.docs[snap.docs.length - 1];
+    } while (batchSize >= 400);
+
+    for (const [id, local] of porId) {
+      if (!vistos.has(id)) diffs.push({ id, local, remoto: null });
+    }
+    return diffs;
+  }
+
+  async function prepararAdopcionLedger() {
+    if (!window.ADMIN_MODE) {
+      throw new Error('prepararAdopcionLedger() se corre desde Admin-POS, adoptando el ledger '
+        + 'del POS del local (la fuente autoritativa) — nunca al revés.');
+    }
+    const saldosAbandonadosLocal = window.SGA_DB.abandonarSaldoInicialLocal();
+    const movimientosTraidos = await syncMonitoringData();
+    return { saldosAbandonadosLocal, movimientosTraidos };
+  }
+
   // ─── API pública ─────────────────────────────────────────────────────────────
 
   window.SGA_Sync = {
@@ -1988,6 +2094,8 @@
     pullUsuariosOnly,
     syncMonitoringData,
     wipeFirestoreCollections,
+    diagnosticarSaldoInicial,
+    prepararAdopcionLedger,
     getFirestore: () => firestoreDb,
     isInitialized: () => initialized,
     getStatus: () => ({ initialized, lastSyncAt }),

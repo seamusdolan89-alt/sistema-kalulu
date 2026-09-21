@@ -987,7 +987,10 @@
     // stock.cantidad es una CACHE: siempre igual a SUM(delta) de este registro (ver
     // moverStock / verificarIntegridadStock más abajo). Solo se agregan filas, nunca se
     // editan ni se borran: una correccion es un movimiento nuevo con signo contrario.
-    // Etapa 1: local a cada compu (todavia no sincroniza; por eso no tiene sync_status).
+    // Etapa 2 (20/9/2026): sincroniza como cualquier tabla — es append-only con id propio
+    // (uuid o 'saldo_inicial:<producto>:<sucursal>' para el arranque), asi que aplicar un
+    // movimiento que llega es siempre INSERT OR IGNORE (nunca pisa uno que ya esta) — no hay
+    // "ultimo que escribe gana" posible. Ver sync.js applyStockMovimiento.
     try {
       database.run(`
         CREATE TABLE IF NOT EXISTS stock_movimientos (
@@ -1000,13 +1003,18 @@
           ref_id TEXT,
           motivo TEXT,
           usuario_id TEXT,
-          fecha TEXT NOT NULL
+          fecha TEXT NOT NULL,
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
         )
       `);
       database.run(`CREATE INDEX IF NOT EXISTS idx_stock_mov_prod
                     ON stock_movimientos(producto_id, sucursal_id, fecha)`);
       database.run(`CREATE INDEX IF NOT EXISTS idx_stock_mov_ref
                     ON stock_movimientos(ref_tipo, ref_id)`);
+      // Bases que ya tenian la tabla de la etapa 1 (sin estas columnas): agregarlas.
+      try { database.run(`ALTER TABLE stock_movimientos ADD COLUMN sync_status TEXT DEFAULT 'pending'`); } catch(e) {}
+      try { database.run(`ALTER TABLE stock_movimientos ADD COLUMN updated_at TEXT`); } catch(e) {}
       backfillSaldoInicial();
     } catch(e) { console.warn('stock_movimientos:', e.message); }
 
@@ -1658,8 +1666,8 @@
   }
 
   // ─── Movimientos de stock (ledger): el UNICO punto de escritura de stock ──────
-  // Ningun otro archivo escribe la tabla stock (lo verifica tests/e2e/test_stock_ledger.py
-  // y tests/check_stock_escrituras.py en CI). Cada cambio deja un movimiento inmutable y
+  // Ningun otro archivo escribe la tabla stock (regla estatica que corre
+  // tests/e2e/test_stock_ledger.py). Cada cambio deja un movimiento inmutable y
   // actualiza la cache stock.cantidad en la MISMA transaccion, asi que
   // stock.cantidad == SUM(stock_movimientos.delta) siempre (verificarIntegridadStock).
 
@@ -1712,10 +1720,11 @@
       const id = nuevoUuid();
       database.run(
         `INSERT INTO stock_movimientos
-           (id, producto_id, sucursal_id, delta, tipo, ref_tipo, ref_id, motivo, usuario_id, fecha)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, producto_id, sucursal_id, delta, tipo, ref_tipo, ref_id, motivo, usuario_id, fecha,
+            sync_status, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
         [id, o.productoId, o.sucursalId, delta, o.tipo, o.refTipo || null, o.refId || null,
-         o.motivo || null, usuario, ts]
+         o.motivo || null, usuario, ts, ts]
       );
       if (existe) {
         database.run(
@@ -1775,37 +1784,64 @@
   }
 
   /**
-   * Stock que LLEGA de la otra compu por sincronizacion (applyStockFull en sync.js). Mientras
-   * el stock siga viajando como valor absoluto (ver plan del ledger, etapa 2), lo recibido
-   * se anota como un movimiento 'sync' por la diferencia para que la invariante siga
-   * valiendo. La fila queda 'synced' (no vuelve a subirse).
+   * SOLO para el arranque de un dispositivo NUEVO (initialSyncFromFirestore, base local
+   * vacia): escribe `stock.cantidad` directo, SIN movimiento, como valor provisorio hasta
+   * que lleguen los movimientos de verdad (stock_movimientos, que baja de fondo por ser
+   * historico — ver ESSENTIAL_COLLECTIONS en sync.js). Es la UNICA escritura de `stock` que
+   * no pasa por moverStock/setStockAbsoluto: un dispositivo recien instalado no tiene
+   * movimientos locales con los que este numero pueda chocar. `verificarIntegridadStock()`
+   * puede marcar estas filas como inconsistentes mientras tanto — es transitorio y
+   * esperado, se resuelve solo apenas llega el primer movimiento real de ese producto
+   * (aplicarMovimientoStock recalcula la cache desde CERO sumando TODOS los movimientos,
+   * pisando este valor provisorio).
+   *
+   * NUNCA usar esto para un dispositivo que ya esta en uso: crearia una fila 'synced' sin
+   * respaldo en el registro, y volveria a aparecer como inconsistencia para siempre.
    */
-  function aplicarStockSync(productoId, sucursalId, cantidad, extra) {
+  function bootstrapStockAbsoluto(productoId, sucursalId, cantidad, extra) {
     extra = extra || {};
-    const nueva = Number(cantidad) || 0;
+    database.run(
+      `INSERT OR REPLACE INTO stock
+         (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at)
+       VALUES (?, ?, ?, ?, 'synced', ?)`,
+      [productoId, sucursalId, Number(cantidad) || 0, extra.fechaModificacion || null, extra.updatedAt || null]
+    );
+    if (!batchMode) saveDatabase();
+  }
+
+  /**
+   * Movimiento que LLEGA de la otra compu por sincronizacion (sync.js applyStockMovimiento).
+   * Append-only real: si el id ya existe LOCALMENTE (mismo movimiento bajado antes, o —
+   * caso `saldo_inicial:<producto>:<sucursal>` — el mismo movimiento creado independientemente
+   * en las dos puntas) se IGNORA, nunca se pisa. Después, se recalcula la cache completa
+   * desde CERO sumando TODOS los movimientos que haya localmente para ese (producto,
+   * sucursal) — no un incremento sobre el valor anterior — así da lo mismo en que orden
+   * lleguen los movimientos de las dos compus: el resultado final es siempre la misma suma.
+   */
+  function aplicarMovimientoStock(mov) {
     const loteMio = !batchMode;
     if (loteMio) beginBatch();
     try {
-      const fila = query(
-        'SELECT cantidad FROM stock WHERE producto_id = ? AND sucursal_id = ?',
-        [productoId, sucursalId]
-      )[0];
-      const actual = fila ? (Number(fila.cantidad) || 0) : 0;
-      const delta = nueva - actual;
-      if (Math.abs(delta) > 1e-9) {
-        database.run(
-          `INSERT INTO stock_movimientos
-             (id, producto_id, sucursal_id, delta, tipo, ref_tipo, ref_id, motivo, usuario_id, fecha)
-           VALUES (?, ?, ?, ?, 'sync', NULL, NULL, 'Recibido por sincronizacion', NULL, ?)`,
-          [nuevoUuid(), productoId, sucursalId, delta, new Date().toISOString()]
-        );
-      }
       database.run(
-        `INSERT OR REPLACE INTO stock
-           (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at)
-         VALUES (?, ?, ?, ?, 'synced', ?)`,
-        [productoId, sucursalId, nueva, extra.fechaModificacion || null, extra.updatedAt || null]
+        `INSERT OR IGNORE INTO stock_movimientos
+           (id, producto_id, sucursal_id, delta, tipo, ref_tipo, ref_id, motivo, usuario_id, fecha,
+            sync_status, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', ?)`,
+        [mov.id, mov.producto_id, mov.sucursal_id, mov.delta, mov.tipo,
+         mov.ref_tipo || null, mov.ref_id || null, mov.motivo || null, mov.usuario_id || null,
+         mov.fecha, mov.updated_at || new Date().toISOString()]
       );
+      const suma = query(
+        `SELECT COALESCE(SUM(delta), 0) AS s FROM stock_movimientos WHERE producto_id = ? AND sucursal_id = ?`,
+        [mov.producto_id, mov.sucursal_id]
+      )[0].s;
+      const ts = new Date().toISOString();
+      database.run(
+        `INSERT OR REPLACE INTO stock (producto_id, sucursal_id, cantidad, fecha_modificacion, sync_status, updated_at)
+         VALUES (?, ?, ?, ?, 'synced', ?)`,
+        [mov.producto_id, mov.sucursal_id, suma, ts, ts]
+      );
+      registrarHistorialStock(mov.producto_id, mov.sucursal_id);
       if (loteMio) commitBatch();
     } catch (e) {
       if (loteMio) rollbackBatch();
@@ -1847,13 +1883,18 @@
     const n = st.getAsObject().n;
     st.free();
     if (n > 0) return 0;
+    // El id determinístico ('saldo_inicial:<producto>:<sucursal>', no un uuid) es a propósito:
+    // es el ancla del ledger de ESTE dispositivo. Si esta compu es la autoritativa (ver
+    // SGA_Sync.prepararAdopcionLedger), su saldo_inicial es el que las demás van a adoptar.
     database.run(
       `INSERT INTO stock_movimientos
-         (id, producto_id, sucursal_id, delta, tipo, ref_tipo, ref_id, motivo, usuario_id, fecha)
+         (id, producto_id, sucursal_id, delta, tipo, ref_tipo, ref_id, motivo, usuario_id, fecha,
+          sync_status, updated_at)
        SELECT 'saldo_inicial:' || producto_id || ':' || sucursal_id, producto_id, sucursal_id, cantidad,
-              'saldo_inicial', NULL, NULL, 'Saldo al empezar a registrar movimientos', NULL, ?
+              'saldo_inicial', NULL, NULL, 'Saldo al empezar a registrar movimientos', NULL, ?,
+              'pending', ?
        FROM stock WHERE ABS(COALESCE(cantidad, 0)) > 0.0001`,
-      [new Date().toISOString()]
+      [new Date().toISOString(), new Date().toISOString()]
     );
     const c = database.prepare('SELECT COUNT(*) AS n FROM stock_movimientos');
     c.step();
@@ -1861,6 +1902,49 @@
     c.free();
     if (creados > 0 && !batchMode) saveDatabase();
     return creados;
+  }
+
+  /**
+   * CORTE del ledger de stock, una sola vez, en el dispositivo NO autoritativo (ver
+   * SGA_Sync.prepararAdopcionLedger, que llama a esto desde Admin-POS): borra los
+   * 'saldo_inicial' que ESTE dispositivo generó solo (backfillSaldoInicial, con su propio
+   * stock.cantidad de ese momento, que puede no coincidir con el de la otra compu) para que,
+   * al sincronizar, se puedan adoptar los 'saldo_inicial' de la compu autoritativa en su lugar
+   * (mismo id determinístico → si el local ya existe, INSERT OR IGNORE nunca lo reemplaza).
+   *
+   * Deja el stock de los productos afectados en un estado TRANSITORIO (cache sin su ancla,
+   * hasta que el próximo sync traiga la versión autoritativa) — a propósito: es preferible a
+   * que la pisada quede escondida. verificarIntegridadStock() los va a marcar mientras tanto.
+   * @returns {number} saldos iniciales borrados
+   */
+  function abandonarSaldoInicialLocal() {
+    // Filtra por el ID determinístico, NO por tipo='saldo_inicial': ese mismo texto también lo
+    // usa seed.js para el stock de demostración (con un id al azar, sin ningún riesgo) — filtrar
+    // por tipo borraría esos movimientos también, sin ninguna razón (mismo bug que ya se corrigió
+    // en adminPushWhereExtra, sync.js).
+    const afectados = query(`SELECT DISTINCT producto_id, sucursal_id FROM stock_movimientos WHERE id LIKE 'saldo_inicial:%'`);
+    if (!afectados.length) return 0;
+    beginBatch();
+    try {
+      database.run(`DELETE FROM stock_movimientos WHERE id LIKE 'saldo_inicial:%'`);
+      const ts = new Date().toISOString();
+      for (const { producto_id, sucursal_id } of afectados) {
+        const suma = query(
+          `SELECT COALESCE(SUM(delta), 0) AS s FROM stock_movimientos WHERE producto_id = ? AND sucursal_id = ?`,
+          [producto_id, sucursal_id]
+        )[0].s;
+        database.run(
+          `UPDATE stock SET cantidad = ?, fecha_modificacion = ?, sync_status = 'synced', updated_at = ?
+           WHERE producto_id = ? AND sucursal_id = ?`,
+          [suma, ts, ts, producto_id, sucursal_id]
+        );
+      }
+      commitBatch();
+      return afectados.length;
+    } catch (e) {
+      rollbackBatch();
+      throw e;
+    }
   }
 
   /** Historial de movimientos de un producto (mas nuevo primero). */
@@ -1958,9 +2042,11 @@
     registrarHistorialStock,
     moverStock,
     setStockAbsoluto,
-    aplicarStockSync,
+    bootstrapStockAbsoluto,
+    aplicarMovimientoStock,
     verificarIntegridadStock,
     backfillSaldoInicial,
+    abandonarSaldoInicialLocal,
     getMovimientosStock,
     calcularDiasSinStock6m,
     exportarBackup,

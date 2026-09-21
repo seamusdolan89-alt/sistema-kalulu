@@ -1,13 +1,22 @@
 """
-tests/e2e/test_stock_ledger.py — Registro de MOVIMIENTOS de stock (ledger), etapa 1.
+tests/e2e/test_stock_ledger.py — Registro de MOVIMIENTOS de stock (ledger).
 
-Hasta ahora `stock.cantidad` era el UNICO dato: 25 sentencias UPDATE/INSERT repartidas en 12
-archivos lo modificaban y nada explicaba "por que tengo 17". Seis de ellas (auditoria del
-16/9/2026) ni marcaban la fila para sincronizar. Ahora hay UN solo punto de escritura,
-`SGA_DB.moverStock()`, que en una transaccion:
-  1. agrega un movimiento inmutable a `stock_movimientos` (delta, tipo, referencia, quien, cuando)
-  2. actualiza la cache `stock.cantidad` y la marca 'pending' para sync
-  3. registra la foto de historial_stock
+ETAPA 1 (18/9/2026): hasta entonces `stock.cantidad` era el UNICO dato: 25 sentencias
+UPDATE/INSERT repartidas en 12 archivos lo modificaban y nada explicaba "por que tengo 17".
+Seis de ellas (auditoria del 16/9/2026) ni marcaban la fila para sincronizar. Se creo UN
+solo punto de escritura, `SGA_DB.moverStock()`, que en una transaccion agrega un movimiento
+inmutable a `stock_movimientos` (delta, tipo, referencia, quien, cuando), actualiza la cache
+`stock.cantidad` y registra la foto de historial_stock — pero el registro era local a cada
+compu (sin sync_status).
+
+ETAPA 2 (20/9/2026): `stock_movimientos` sincroniza como cualquier tabla, y `stock`
+(la cache, valor absoluto) deja de aplicarse en el ciclo continuo — sigue existiendo SOLO
+para el bootstrap rapido de un dispositivo nuevo (ver ESSENTIAL_COLLECTIONS en sync.js).
+Cada movimiento tiene su propio id (uuid, o determinístico `saldo_inicial:<producto>:
+<sucursal>` para el arranque) y es INMUTABLE: aplicarlo del otro lado es siempre
+INSERT OR IGNORE, nunca un UPDATE — dos compus pueden mover el MISMO producto sin verse y
+el total final es siempre la suma real, sin importar el orden en que lleguen los
+movimientos ("el ultimo que escribe pisa al otro" deja de poder pasar).
 
 Invariante (lo que este test defiende): para todo (producto, sucursal), stock.cantidad ==
 SUM(stock_movimientos.delta). `SGA_DB.verificarIntegridadStock()` lista las filas que no cumplen.
@@ -22,8 +31,11 @@ Casos:
     una sola vez.
   - Flujos reales del POS con integridad verificada: venta, edicion de venta, anulacion y
     devolucion.
-  - Receptor de sync (applyStockFull): lo que llega del otro lado se anota como movimiento
-    'sync' para no romper la invariante.
+  - Sync (etapa 2): un movimiento sube y baja TAL CUAL (no como 'sync' generico); dos compus
+    mueven el mismo producto sin coordinarse y el total converge en las dos; aplicar el mismo
+    movimiento dos veces (redelivery real de Firestore) no lo duplica; un dispositivo NUEVO
+    arranca con el bootstrap rapido de `stock` y se autocorrige solo cuando le llega el
+    historial real, sin generar ningun movimiento 'sync'.
   - Regla estatica: ningun otro archivo escribe la tabla stock.
 
 Correr (server ya levantado en :8765, ver README.md):
@@ -73,7 +85,7 @@ def regla_estatica():
             infractores.append(f"{rel}:{src.count(chr(10), 0, m.start()) + 1}")
     assert not infractores, (
         "BUG: estas lineas escriben la tabla stock directo en vez de pasar por SGA_DB.moverStock / "
-        "setStockAbsoluto / aplicarStockSync: " + ", ".join(infractores))
+        "setStockAbsoluto / bootstrapStockAbsoluto / aplicarMovimientoStock: " + ", ".join(infractores))
 
 
 def main():
@@ -191,22 +203,64 @@ def main():
         assert integridad(pos) == [], integridad(pos)
         print("   devolucion: +1, stock 11")
 
-        print("--- Receptor de sync: lo que llega del otro lado se anota como movimiento 'sync' ---")
+        print("--- Etapa 2: los movimientos suben y bajan TAL CUAL (no como un 'sync' generico) ---")
+        firma = lambda ms: sorted((m["tipo"], round(m["delta"], 4), m["ref_id"]) for m in ms)  # noqa: E731
+        antes = firma(movs(pos, "prod-led"))
         pos.push()
         admin.pull()
         assert stock_de(admin, "prod-led", suc) == 11, f"el admin recibe 11: {stock_de(admin, 'prod-led', suc)}"
-        assert integridad(admin) == [], f"el admin recibio stock por sync y la invariante tiene que valer: {integridad(admin)}"
-        tipos = [x["tipo"] for x in movs(admin, "prod-led")]
-        assert tipos == ["sync"], f"en el admin el stock entro por sync: {tipos}"
-        # y un cambio posterior del otro lado, sobre una fila que ya existe
-        pos.js("([p, s]) => window.SGA_DB.moverStock({productoId: p, sucursalId: s, delta: -6, tipo: 'rotura'})", ["prod-led", suc])
-        pos.push()
-        admin.pull()
-        assert stock_de(admin, "prod-led", suc) == 5 and integridad(admin) == []
-        assert [x["delta"] for x in movs(admin, "prod-led")] == [11, -6], movs(admin, "prod-led")
-        print("   OK: admin 11 y luego 5, con movimientos [+11, -6] tipo sync")
+        assert integridad(admin) == [], f"la invariante tiene que valer del lado admin: {integridad(admin)}"
+        despues = firma(movs(admin, "prod-led"))
+        assert despues == antes, f"los movimientos que llegaron al admin no son los mismos que los del POS: {despues} vs {antes}"
+        assert all(m["tipo"] != "sync" for m in movs(admin, "prod-led")), "ya no deberia crearse el tipo 'sync' (era de la etapa 1)"
+        print(f"   OK: los {len(antes)} movimientos llegaron tal cual al admin, con su tipo real; stock=11")
 
-        errs = pos.errores + admin.errores
+        print("--- Concurrencia: las DOS compus mueven el MISMO producto sin coordinarse ---")
+        pos.js("([p, s]) => window.SGA_DB.moverStock({productoId: p, sucursalId: s, delta: -2, tipo: 'rotura'})", ["prod-led", suc])
+        admin.js("([p, s]) => window.SGA_DB.moverStock({productoId: p, sucursalId: s, delta: 5, tipo: 'ajuste_positivo'})", ["prod-led", suc])
+        assert stock_de(pos, "prod-led", suc) == 9 and stock_de(admin, "prod-led", suc) == 16, (
+            "cada una ve solo su propio cambio antes de sincronizar")
+        pos.push()
+        admin.push()
+        admin.pull()
+        pos.pull()
+        esperado = stock_de(pos, "prod-led", suc)
+        assert esperado == 14, f"11 - 2 + 5 = 14 en las dos compus, sea cual sea el orden en que llegaron; es {esperado}"
+        assert stock_de(admin, "prod-led", suc) == esperado, "las dos compus tienen que terminar en el MISMO numero"
+        assert integridad(pos) == [] and integridad(admin) == []
+        print(f"   OK: las dos compus convergen a {esperado} sin que ninguna se haya pisado")
+
+        print("--- Idempotencia: el mismo movimiento aplicado dos veces (redelivery real de Firestore) no duplica nada ---")
+        mov = {"id": "mov-idem-test", "producto_id": "prod-led", "sucursal_id": suc, "delta": 100,
+               "tipo": "compra", "ref_tipo": None, "ref_id": None, "motivo": "test idempotencia",
+               "usuario_id": None, "fecha": "2026-09-20T00:00:00.000Z", "updated_at": "2026-09-20T00:00:00.000Z"}
+        admin.js("(m) => window.SGA_DB.aplicarMovimientoStock(m)", mov)
+        una_vez = stock_de(admin, "prod-led", suc)
+        admin.js("(m) => window.SGA_DB.aplicarMovimientoStock(m)", mov)  # mismo id, se "reenvia"
+        assert una_vez == esperado + 100, f"deberia sumar 100 la primera vez: {esperado} -> {una_vez}"
+        assert stock_de(admin, "prod-led", suc) == una_vez, "BUG: aplicar el mismo movimiento dos veces sumo dos veces"
+        n_con_ese_id = admin.q("SELECT COUNT(*) AS n FROM stock_movimientos WHERE id='mov-idem-test'")[0]["n"]
+        assert n_con_ese_id == 1, f"tiene que quedar UNA sola fila con ese id, hay {n_con_ese_id}"
+        assert integridad(admin) == []
+        # deshacer el movimiento de prueba para no arrastrarlo al resto del test
+        admin.run("DELETE FROM stock_movimientos WHERE id='mov-idem-test'")
+        admin.run("UPDATE stock SET cantidad=? WHERE producto_id='prod-led' AND sucursal_id=?", [esperado, suc])
+        print("   OK: redelivery del mismo id no duplica el efecto")
+
+        print("--- Dispositivo NUEVO: bootstrap rapido de 'stock' + autocorreccion cuando llega el historial real ---")
+        pos.push()
+        admin.push()
+        nuevo = sim.nuevo_dispositivo(es_admin=True, nombre="Admin-POS nuevo")
+        nuevo.sync_inicial()
+        stock_nuevo = stock_de(nuevo, "prod-led", suc)
+        assert stock_nuevo == esperado, f"el bootstrap + historial tiene que terminar en {esperado}, dio {stock_nuevo}"
+        assert integridad(nuevo) == [], f"tras el historial completo la invariante tiene que valer: {integridad(nuevo)}"
+        movs_nuevo = movs(nuevo, "prod-led")
+        assert movs_nuevo and all(m["tipo"] != "sync" for m in movs_nuevo), (
+            f"el dispositivo nuevo tiene que recibir los movimientos REALES, nunca un 'sync': {movs_nuevo}")
+        print(f"   OK: dispositivo nuevo termina en {stock_nuevo} con {len(movs_nuevo)} movimientos reales, sin 'sync'")
+
+        errs = pos.errores + admin.errores + nuevo.errores
         assert not errs, f"Errores JS: {errs}"
         print("\nOK - test_stock_ledger")
 
