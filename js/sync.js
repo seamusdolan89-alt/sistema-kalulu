@@ -327,6 +327,13 @@
       } catch (err) {
         console.warn('Push a POS (auto) falló:', err.message);
       }
+      // BUG real (encontrado 22/9/2026): esta rama nunca tocaba el badge — quedaba
+      // en 🟡 "Sincronizando..." para siempre en Admin-POS (initialize() lo pone en
+      // 'pending' UNA vez al conectar, y nada lo volvía a mover salvo la rama POS de
+      // más abajo). No afectaba la sincronización en sí (pull/push seguían corriendo
+      // solos cada 5 min) — solo el indicador mentía.
+      lastSyncAt = new Date();
+      updateSyncBadge('ok');
       return pulled;
     } else {
       // POS: primero bajar cambios del admin, luego subir los del POS
