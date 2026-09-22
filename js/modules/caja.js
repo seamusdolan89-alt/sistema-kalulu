@@ -48,12 +48,17 @@ const Caja = (() => {
       { id: 'mercadopago', nombre: 'Mercado Pago', icono: '📲' },
     ];
   }
+  // 'reintegro_devolucion' lo genera el sistema (pos.js registrarDevolucion) cuando
+  // un cliente devuelve un producto y se le reintegra en efectivo -- no es una opción
+  // manual del formulario "+ Egreso" (EGRESO_TIPOS), solo se usa para mostrar el
+  // motivo correcto en listados/reportes.
   const EGRESO_TIPOS = ['retiro', 'gasto_operativo', 'pago_proveedor', 'otro'];
   const EGRESO_TIPO_LABEL = {
     retiro: 'Retiro',
     gasto_operativo: 'Gasto Operativo',
     pago_proveedor: 'Pago Proveedor',
     otro: 'Otro',
+    reintegro_devolucion: 'Reintegro por devolución',
   };
 
   const state = {

@@ -2435,31 +2435,38 @@ export const POS = (() => {
         if (!sel) { if (errEl) errEl.style.display = 'block'; return; }
         if (errEl) errEl.style.display = 'none';
         devState.motivo = sel.value;
-        if (devState.venta?.cliente_id) { devStep4(); } else { devStep5(); }
+        // Antes esto se saltaba entero si la venta no tenia cliente -- el caso de la
+        // inmensa mayoria de ventas de mostrador -- y a la cajera nunca se le preguntaba
+        // el reintegro: la plata que salia de la caja quedaba sin registrar (bug real,
+        // 22/9/2026: una devolucion en efectivo nunca aparecio en egresos_caja y la
+        // caja cerro con un faltante). Ahora SIEMPRE se pregunta.
+        devStep4();
       });
     };
 
-    // STEP 4 — Reintegro method (only if venta has cliente)
+    // STEP 4 — Reintegro method
     const devStep4 = () => {
       devState.step = 4;
       if (devTitle()) devTitle().textContent = '↩ Devolución — Reintegro';
       const b = devBody();
       if (!b) return;
+
+      // Mismos medios activos que el resto del POS (medios_cobro, 100% dinámicos —
+      // antes esta lista era fija y un medio custom, ej. "Link de Pago", no aparecía
+      // como opción de reintegro). "Saldo a favor" es aparte: solo tiene sentido si
+      // la venta tiene un cliente asociado.
+      const opciones = MEDIOS.map(m => ({ value: m.id, label: `Reintegrar por ${m.nombre}` }));
+      if (devState.venta?.cliente_id) {
+        opciones.unshift({ value: 'saldo_favor', label: 'Aplicar como saldo a favor del cliente' });
+      }
+
       b.innerHTML = `
         <p style="margin:0 0 12px;font-size:13px;color:#555">¿Cómo se reintegra el monto al cliente?</p>
         <div style="display:flex;flex-direction:column;gap:10px">
+          ${opciones.map(o => `
           <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid #e0e0e0;border-radius:6px;cursor:pointer;font-size:14px">
-            <input type="radio" name="dev-reintegro" value="saldo_favor"> Aplicar como saldo a favor
-          </label>
-          <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid #e0e0e0;border-radius:6px;cursor:pointer;font-size:14px">
-            <input type="radio" name="dev-reintegro" value="efectivo"> Reintegrar en efectivo
-          </label>
-          <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid #e0e0e0;border-radius:6px;cursor:pointer;font-size:14px">
-            <input type="radio" name="dev-reintegro" value="mercadopago"> Reintegrar por Mercado Pago
-          </label>
-          <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid #e0e0e0;border-radius:6px;cursor:pointer;font-size:14px">
-            <input type="radio" name="dev-reintegro" value="transferencia"> Reintegrar por transferencia
-          </label>
+            <input type="radio" name="dev-reintegro" value="${esc(o.value)}"> ${esc(o.label)}
+          </label>`).join('')}
         </div>
         <p id="dev-reintegro-error" style="color:#f44336;font-size:13px;margin:8px 0 0;display:none">Seleccioná un método.</p>`;
 
@@ -2491,7 +2498,7 @@ export const POS = (() => {
       const totalDev = selectedItems.reduce((s, i) => s + i.cantidad * i.precio, 0);
 
       const MOTIVO_LABEL = { no_queria: 'El cliente no lo quería', vencido: 'Producto vencido', defectuoso: 'Producto roto / defectuoso' };
-      const REINTEGRO_LABEL = { saldo_favor: 'Saldo a favor', efectivo: 'Efectivo', mercadopago: 'Mercado Pago', transferencia: 'Transferencia' };
+      const REINTEGRO_LABEL = { saldo_favor: 'Saldo a favor', ...Object.fromEntries(MEDIOS.map(m => [m.id, m.nombre])) };
 
       b.innerHTML = `
         <div style="background:#f8f9fa;border-radius:8px;padding:14px;margin-bottom:12px">
@@ -2533,7 +2540,7 @@ export const POS = (() => {
       devRenderFooter(`<button class="mbtn mbtn-danger" id="btn-dev-confirmar">Confirmar devolución</button>`,
         `<button class="mbtn mbtn-secondary" id="btn-dev-back4">← Volver</button>`);
 
-      ge('btn-dev-back4')?.addEventListener('click', devState.venta?.cliente_id ? devStep4 : devStep3);
+      ge('btn-dev-back4')?.addEventListener('click', devStep4);
       ge('btn-dev-confirmar')?.addEventListener('click', () => {
         const result = registrarDevolucion(
           devState.venta.id,
@@ -3730,6 +3737,26 @@ export const POS = (() => {
       if (!ventaResults.length) return { success: false, error: 'Venta no encontrada' };
 
       const venta = ventaResults[0];
+      const totalDevuelto = items.reduce((s, it) => s + (parseFloat(it.cantidad) || 0) * (parseFloat(it.precio) || 0), 0);
+
+      // Validar el reintegro ANTES de escribir nada (stock, devoluciones): si esto
+      // fallara después de restaurar el stock, la devolución queda a medias -- el
+      // producto ya cuenta como devuelto pero la plata sigue sin rastro. Bug real,
+      // 22/9/2026: una venta de mostrador (sin cliente) nunca preguntaba esto y una
+      // devolución en efectivo jamás aparecía en egresos_caja -- la caja cerraba con
+      // un faltante sin que nadie se enterara hasta el arqueo.
+      if (totalDevuelto > 0.01) {
+        if (!reintegroTipo) {
+          return { success: false, error: 'Falta indicar cómo se reintegra el dinero al cliente.' };
+        }
+        if (reintegroTipo === 'saldo_favor' && !venta.cliente_id) {
+          return { success: false, error: 'No se puede aplicar saldo a favor: esta venta no tiene un cliente asociado.' };
+        }
+        if (reintegroTipo === 'efectivo' && !sesionActiva) {
+          return { success: false, error: 'No hay una caja abierta: no se puede reintegrar en efectivo. Elegí otro medio o abrí la caja primero.' };
+        }
+      }
+
       const devolucionId = window.SGA_Utils.generateUUID();
       const now = window.SGA_Utils.formatISODate(new Date());
       const usuarioId = window.SGA_Auth.getCurrentUser().id;
@@ -3740,8 +3767,6 @@ export const POS = (() => {
           id, venta_id, sucursal_id, usuario_id, fecha, motivo, reintegro_tipo, sync_status, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
       `, [devolucionId, ventaId, venta.sucursal_id, usuarioId, now, motivo, reintegroTipo || null, now]);
-
-      let totalDevuelto = 0;
 
       for (const item of items) {
         // Insert devolucion item
@@ -3773,8 +3798,6 @@ export const POS = (() => {
             VALUES (?, ?, ?, 'ajuste_negativo', ?, ?, ?, ?, 'pendiente_aprobacion', 'pending', ?)
           `, [window.SGA_Utils.generateUUID(), item.productoId, venta.sucursal_id, item.cantidad, ajusteMotivo, usuarioId, now, now]);
         }
-
-        totalDevuelto += item.cantidad * item.precio;
       }
 
       if (totalDevuelto < 0.01) {
@@ -3782,23 +3805,27 @@ export const POS = (() => {
         return { success: true, devolucionId };
       }
 
-      // Reintegro
-      if (reintegroTipo === 'saldo_favor' && venta.cliente_id) {
-        // Credit the client's account
+      // Reintegro -- ya validado arriba, esto solo ejecuta la acción correspondiente.
+      if (reintegroTipo === 'saldo_favor') {
         window.SGA_DB.run(`
           INSERT INTO cuenta_corriente
             (id, cliente_id, sucursal_id, tipo, monto, descripcion, fecha, usuario_id, sync_status, updated_at)
           VALUES (?, ?, ?, 'saldo_favor', ?, ?, ?, ?, 'pending', ?)
         `, [window.SGA_Utils.generateUUID(), venta.cliente_id, venta.sucursal_id,
             -totalDevuelto, `Devolución venta ...${ventaId.slice(-6)}`, now, usuarioId, now]);
-      } else if (reintegroTipo && reintegroTipo !== 'saldo_favor' && sesionActiva) {
-        // Cash / MP / transfer: register as egreso
+      } else if (reintegroTipo === 'efectivo') {
+        // Único medio que descuenta de la caja física -- caja.js getTotalesSesion suma
+        // TODA egresos_caja sin filtrar por medio, así que cualquier otro medio (abajo)
+        // NO debe escribir acá: esa plata nunca estuvo en el cajón.
         window.SGA_DB.run(`
-          INSERT INTO egresos_caja (id, sesion_caja_id, monto, descripcion, fecha, usuario_id, sync_status, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+          INSERT INTO egresos_caja (id, sesion_caja_id, monto, descripcion, fecha, usuario_id, tipo, sync_status, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, 'reintegro_devolucion', 'pending', ?)
         `, [window.SGA_Utils.generateUUID(), sesionActiva.id, totalDevuelto,
-            `Reintegro devolución (${reintegroTipo}) venta ...${ventaId.slice(-6)}`, now, usuarioId, now]);
+            `Reintegro devolución venta ...${ventaId.slice(-6)}`, now, usuarioId, now]);
       }
+      // Cualquier otro medio (transferencia, Mercado Pago, u otro medio_cobro custom):
+      // no toca egresos_caja -- esa plata nunca estuvo en la caja física. Queda
+      // registrado igual en devoluciones.reintegro_tipo para poder reportarlo aparte.
 
       console.log('✅ Devolución registrada:', devolucionId);
       return { success: true, devolucionId };
