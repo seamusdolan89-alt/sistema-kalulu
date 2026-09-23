@@ -1,5 +1,11 @@
 'use strict';
 
+// Import estatico (no window.SGA_Familia): el modulo que necesita el wizard
+// se lo trae solo -- evita el bug real de import() dinamico resolviendo a una
+// instancia vieja cacheada si otra ruta ya cargo familia.js antes (ver
+// CLAUDE.md, "otra excepcion real" del router).
+import Familia from './familia.js';
+
 const OperacionesStock = (() => {
 
   const ge  = id => document.getElementById(id);
@@ -259,6 +265,12 @@ const OperacionesStock = (() => {
           </div>
         ` : ''}
       </div>
+      ${isAdmin ? `
+        <div style="margin:0 0 10px;padding:7px 12px;background:#f0f6ff;border:1px solid #cfe0fb;border-radius:6px;font-size:12px;color:#2c4a72;display:flex;align-items:center;gap:6px">
+          <span style="font-size:14px">✏️</span>
+          Esta pantalla es tu revisión de precios de esta compra: el campo <strong>Precio Venta</strong> se edita acá mismo, se guarda solo al salir del campo — <strong>Enter</strong> guarda y pasa directo al siguiente producto.
+        </div>
+      ` : ''}
       <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px">
         <thead>
@@ -307,10 +319,13 @@ const OperacionesStock = (() => {
               <td style="padding:7px 10px;text-align:right;font-weight:600">${fmt$(it.subtotal)}</td>
               ${isAdmin ? (
                 it.producto_id
-                  ? `<td style="padding:5px 10px;text-align:right">
+                  ? `<td style="padding:5px 10px;text-align:right;white-space:nowrap">
                        <input type="number" class="ops-precio-input" data-idx="${idx}" data-prodid="${esc(it.producto_id)}"
+                              data-nombre="${esc(it.producto_nombre || '')}" data-costo="${it.costo_unitario || 0}"
                               value="${precioActual.toFixed(2)}" min="0" step="any"
-                              style="width:92px;padding:4px 6px;border:1px solid #c8d0dc;border-radius:4px;text-align:right;font-size:13px">
+                              title="Precio de venta — editable"
+                              style="width:92px;padding:5px 6px;border:1.5px solid #90b8f0;border-radius:4px;text-align:right;font-size:13px;background:#f0f6ff;transition:background .15s,border-color .15s">
+                       <span class="ops-precio-saved" data-idx="${idx}" style="display:none;color:#2e7d32;font-weight:700;margin-left:5px;font-size:13px" title="Guardado">✓</span>
                      </td>
                      <td class="ops-margen-cell" data-idx="${idx}" style="padding:7px 10px;text-align:right;font-weight:700;color:${margenColor}">
                        ${margen == null ? '—' : margen.toFixed(1) + '%'}
@@ -328,34 +343,86 @@ const OperacionesStock = (() => {
     overlay.style.display = 'flex';
 
     if (isAdmin) {
-      body.querySelectorAll('.ops-precio-input').forEach(inp => {
-        inp.addEventListener('blur', () => {
-          const idx    = parseInt(inp.dataset.idx);
-          const prodId = inp.dataset.prodid;
-          const item   = compra.items[idx];
-          const nuevoPrecio = parseFloat(inp.value);
-          if (isNaN(nuevoPrecio) || nuevoPrecio < 0) { inp.value = (parseFloat(item.producto_precio_venta) || 0).toFixed(2); return; }
-          if (Math.abs(nuevoPrecio - (parseFloat(item.producto_precio_venta) || 0)) < 0.001) return; // sin cambios
+      const inputsPrecio = Array.from(body.querySelectorAll('.ops-precio-input'));
 
-          const ts = window.SGA_Utils.formatISODate(new Date());
-          db().run(
-            `UPDATE productos SET precio_venta=?, ultima_modificacion_precio=?, sync_status='pending', updated_at=? WHERE id=?`,
-            [nuevoPrecio, ts, ts, prodId]
-          );
-          item.producto_precio_venta = nuevoPrecio;
-          inp.value = nuevoPrecio.toFixed(2);
+      // onSettled: cuando termino todo lo relacionado a este precio -- guardado
+      // Y, si correspondia, el wizard de familia ya cerrado. Enter lo usa para
+      // recien ahi mover el foco al siguiente producto: si se moviera antes,
+      // competiria con el wizard (que puede abrirse en el medio) por el foco.
+      const guardarPrecio = (inp, { onSettled } = {}) => {
+        const settle = () => { if (typeof onSettled === 'function') onSettled(); };
+        const idx    = parseInt(inp.dataset.idx);
+        const prodId = inp.dataset.prodid;
+        const item   = compra.items[idx];
+        const nuevoPrecio = parseFloat(inp.value);
+        if (isNaN(nuevoPrecio) || nuevoPrecio < 0) {
+          inp.value = (parseFloat(item.producto_precio_venta) || 0).toFixed(2);
+          settle();
+          return;
+        }
+        if (Math.abs(nuevoPrecio - (parseFloat(item.producto_precio_venta) || 0)) < 0.001) { settle(); return; } // sin cambios
 
-          const margenCell = body.querySelector(`.ops-margen-cell[data-idx="${idx}"]`);
-          if (margenCell) {
-            const esMuestra = item.tipo === 'muestra';
-            const margen = esMuestra ? null : calcMargenPct(item.costo_unitario, nuevoPrecio);
-            const color = margen == null ? '#8090a0' : margen < 0 ? '#c62828' : margen < 15 ? '#e65100' : '#445566';
-            margenCell.style.color = color;
-            margenCell.textContent = margen == null ? '—' : margen.toFixed(1) + '%';
-          }
-          window.SGA_Utils.showNotification('Precio actualizado', 'success', 1500);
+        const ts = window.SGA_Utils.formatISODate(new Date());
+        db().run(
+          `UPDATE productos SET precio_venta=?, ultima_modificacion_precio=?, sync_status='pending', updated_at=? WHERE id=?`,
+          [nuevoPrecio, ts, ts, prodId]
+        );
+        item.producto_precio_venta = nuevoPrecio;
+        inp.value = nuevoPrecio.toFixed(2);
+
+        const margenCell = body.querySelector(`.ops-margen-cell[data-idx="${idx}"]`);
+        if (margenCell) {
+          const esMuestra = item.tipo === 'muestra';
+          const margen = esMuestra ? null : calcMargenPct(item.costo_unitario, nuevoPrecio);
+          const color = margen == null ? '#8090a0' : margen < 0 ? '#c62828' : margen < 15 ? '#e65100' : '#445566';
+          margenCell.style.color = color;
+          margenCell.textContent = margen == null ? '—' : margen.toFixed(1) + '%';
+        }
+
+        // Guardado consciente: a diferencia de un toast que desaparece solo, este
+        // check queda a la vista mientras el modal siga abierto — sirve para ver
+        // de un vistazo qué productos de la compra ya se revisaron.
+        const savedBadge = body.querySelector(`.ops-precio-saved[data-idx="${idx}"]`);
+        if (savedBadge) savedBadge.style.display = 'inline';
+        window.SGA_Utils.showNotification('Precio actualizado', 'success', 1500);
+
+        // Familia de productos: si este producto comparte costo/precio con otros
+        // (ej. Coca-Cola 600ml + Sprite 600ml), ofrecer sincronizarlos — mismo
+        // wizard que ya se abre al confirmar una compra o desde el editor de
+        // productos (js/modules/familia.js), ahora también desde acá.
+        if (Familia.tieneFamilia(prodId)) {
+          Familia.showHerenciaModal({
+            prodId,
+            prodNombre: inp.dataset.nombre,
+            nuevoCosto: parseFloat(inp.dataset.costo) || 0,
+            nuevoPrecio,
+            onDone: settle,
+          });
+        } else {
+          settle();
+        }
+      };
+
+      inputsPrecio.forEach((inp, i) => {
+        inp.addEventListener('focus', () => {
+          inp.style.background = '#fff';
+          inp.style.borderColor = '#1565c0';
+          inp.select();
         });
-        inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
+        inp.addEventListener('blur', () => {
+          inp.style.background = '#f0f6ff';
+          inp.style.borderColor = '#90b8f0';
+          guardarPrecio(inp);
+        });
+        inp.addEventListener('keydown', e => {
+          if (e.key !== 'Enter') return;
+          e.preventDefault();
+          const next = inputsPrecio[i + 1];
+          // No llamar inp.blur() acá: guardarPrecio ya hace todo el trabajo, y
+          // mover el foco (más abajo, en settle) dispara el blur natural solo
+          // -- así el wizard de familia (si se abre) no compite por el foco.
+          guardarPrecio(inp, { onSettled: () => { if (next) next.focus(); } });
+        });
       });
     }
   }
