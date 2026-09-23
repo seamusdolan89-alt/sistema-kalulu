@@ -317,6 +317,39 @@
       { name: 'configuracion', icon: 'configuracion', text: 'Configuración', adminOnly: true, adminPosOnly: true },
     ];
 
+    // Migración de una sola vez (23/9/2026): un ajuste de precios pausado ANTES
+    // de este fix vive en localStorage de esta compu, invisible para la tabla
+    // nueva. Sin esto, el propio arreglo hace desaparecer de la vista lo que
+    // ya estaba pausado (sigue en localStorage, pero ninguna pantalla lo lee
+    // más ahí) — se migra una vez a ajustes_precio_pendientes y se limpia la
+    // clave vieja. Corre en initNav() (se llama en cada navegación) porque es
+    // el primer lugar, después del login, con currentUser ya disponible;
+    // localStorage.getItem devuelve null apenas migra, así que las próximas
+    // llamadas son un no-op barato.
+    try {
+      const legacyRaw = localStorage.getItem('compras_resumen_pending');
+      if (legacyRaw) {
+        const u = window.SGA_Auth.getCurrentUser();
+        if (u?.sucursal_id) {
+          const yaHay = window.SGA_DB.query(
+            `SELECT 1 FROM ajustes_precio_pendientes WHERE sucursal_id = ? LIMIT 1`, [u.sucursal_id]
+          )[0];
+          if (!yaHay) {
+            const now = new Date().toISOString();
+            window.SGA_DB.run(`
+              INSERT INTO ajustes_precio_pendientes
+                (id, sucursal_id, usuario_id, snapshot, created_at, updated_at, sync_status)
+              VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+              [window.SGA_Utils.generateUUID(), u.sucursal_id, u.id, legacyRaw, now, now]
+            );
+            window.SGA_Sync?.pushPending?.();
+            console.log('🔧 Migrado a ajustes_precio_pendientes: un ajuste de precios que estaba pausado en localStorage');
+          }
+          localStorage.removeItem('compras_resumen_pending');
+        }
+      }
+    } catch (e) { console.warn('Migración ajuste pendiente legacy:', e.message); }
+
     // Sincroniza entre compus (ver ajustes_precio_pendientes en sync.js) — antes
     // vivía solo en localStorage y esta badge nunca se veía desde otra máquina.
     const _sucPendiente = window.SGA_Auth.getCurrentUser()?.sucursal_id;
