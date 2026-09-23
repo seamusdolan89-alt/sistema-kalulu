@@ -223,6 +223,48 @@
     { collection: 'cuenta_corriente',  applyFn: applyCuentaCorriente },
   ];
 
+  // Receptores de Admin-POS (syncMonitoringData) — a nivel de módulo (no dentro
+  // de la función) para que la auditoría de documentos huérfanos (más abajo)
+  // pueda reusar la MISMA lista sin duplicarla a mano en otro lado.
+  const MONITOR_SOURCES = [
+    // Primero a proposito (igual que en PULL_SOURCES): un borrado hecho en el
+    // POS (producto, promocion, orden...) tiene que llegar antes que el
+    // documento viejo del registro, o applyX lo recrearia. Antes el admin
+    // NUNCA bajaba las marcas de borrado del POS; 'categorias' tampoco: una
+    // categoria creada en el POS no aparecia en Admin-POS.
+    { name: 'eliminaciones',     applyFn: applyEliminacion },
+    { name: 'categorias',        applyFn: applyCategoria },
+    { name: 'usuarios',          applyFn: applyUsuarioFull },
+    { name: 'producto_codigo_proveedor', applyFn: applyCodigoProveedorFull },
+    { name: 'sesiones_caja',     applyFn: applySesionCajaFull },
+    { name: 'egresos_caja',      applyFn: applyEgresoCajaFull },
+    { name: 'ventas',            applyFn: applyVentaFull },
+    { name: 'compras',           applyFn: applyCompra },
+    { name: 'remitos',           applyFn: applyRemito },
+    { name: 'devoluciones',      applyFn: applyDevolucion },
+    { name: 'stock_ajustes',     applyFn: applyStockAjuste },
+    { name: 'gastos_pagos',      applyFn: applyGastoPago },
+    { name: 'system_config',     applyFn: applySystemConfig },
+    { name: 'flujo_forecast',    applyFn: applyFlujoForecast },
+    { name: 'flujo_liquidar',    applyFn: applyFlujoLiquidar },
+    { name: 'flujo_pagos_prov',  applyFn: applyFlujoPagoProv },
+    { name: 'ordenes_compra',    applyFn: applyOrdenCompra },
+    { name: 'pagos_proveedores', applyFn: applyPagoProveedor },
+    { name: 'gastos',            applyFn: applyGasto },
+    { name: 'productos',         applyFn: applyProductoFull },
+    { name: 'clientes',          applyFn: applyClienteFull },
+    { name: 'proveedores',       applyFn: applyProveedorFull },
+    // 'stock' NO se aplica acá — ver el mismo comentario en PULL_SOURCES.
+    { name: 'stock_movimientos', applyFn: applyStockMovimiento },
+    { name: 'promociones',       applyFn: applyPromocion },
+    { name: 'consumo_interno',   applyFn: applyConsumoInternoFull },
+    { name: 'pedidos_abiertos',  applyFn: applyPedidoAbierto },
+    { name: 'compras_pausadas',  applyFn: applyCompraPausada },
+    { name: 'ajustes_precio_pendientes', applyFn: applyAjustePrecioPendiente },
+    { name: 'ingresos_caja',     applyFn: applyIngresoCaja },
+    { name: 'cuenta_corriente',  applyFn: applyCuentaCorriente },
+  ];
+
   // ─── Inicialización ──────────────────────────────────────────────────────────
 
   async function initialize() {
@@ -1655,45 +1697,6 @@
   async function syncMonitoringData() {
     if (!firestoreDb) return 0;
 
-    const MONITOR_SOURCES = [
-      // Primero a proposito (igual que en PULL_SOURCES): un borrado hecho en el
-      // POS (producto, promocion, orden...) tiene que llegar antes que el
-      // documento viejo del registro, o applyX lo recrearia. Antes el admin
-      // NUNCA bajaba las marcas de borrado del POS; 'categorias' tampoco: una
-      // categoria creada en el POS no aparecia en Admin-POS.
-      { name: 'eliminaciones',     applyFn: applyEliminacion },
-      { name: 'categorias',        applyFn: applyCategoria },
-      { name: 'usuarios',          applyFn: applyUsuarioFull },
-      { name: 'producto_codigo_proveedor', applyFn: applyCodigoProveedorFull },
-      { name: 'sesiones_caja',     applyFn: applySesionCajaFull },
-      { name: 'egresos_caja',      applyFn: applyEgresoCajaFull },
-      { name: 'ventas',            applyFn: applyVentaFull },
-      { name: 'compras',           applyFn: applyCompra },
-      { name: 'remitos',           applyFn: applyRemito },
-      { name: 'devoluciones',      applyFn: applyDevolucion },
-      { name: 'stock_ajustes',     applyFn: applyStockAjuste },
-      { name: 'gastos_pagos',      applyFn: applyGastoPago },
-      { name: 'system_config',     applyFn: applySystemConfig },
-      { name: 'flujo_forecast',    applyFn: applyFlujoForecast },
-      { name: 'flujo_liquidar',    applyFn: applyFlujoLiquidar },
-      { name: 'flujo_pagos_prov',  applyFn: applyFlujoPagoProv },
-      { name: 'ordenes_compra',    applyFn: applyOrdenCompra },
-      { name: 'pagos_proveedores', applyFn: applyPagoProveedor },
-      { name: 'gastos',            applyFn: applyGasto },
-      { name: 'productos',         applyFn: applyProductoFull },
-      { name: 'clientes',          applyFn: applyClienteFull },
-      { name: 'proveedores',       applyFn: applyProveedorFull },
-      // 'stock' NO se aplica acá — ver el mismo comentario en PULL_SOURCES.
-      { name: 'stock_movimientos', applyFn: applyStockMovimiento },
-      { name: 'promociones',       applyFn: applyPromocion },
-      { name: 'consumo_interno',   applyFn: applyConsumoInternoFull },
-      { name: 'pedidos_abiertos',  applyFn: applyPedidoAbierto },
-      { name: 'compras_pausadas',  applyFn: applyCompraPausada },
-      { name: 'ajustes_precio_pendientes', applyFn: applyAjustePrecioPendiente },
-      { name: 'ingresos_caja',     applyFn: applyIngresoCaja },
-      { name: 'cuenta_corriente',  applyFn: applyCuentaCorriente },
-    ];
-
     // Cursor propio por coleccion (antes era uno solo compartido, pisado a
     // "ahora" al final de CADA corrida sin importar si algun documento se
     // habia descartado por choque local -- eso invalidaba en el acto la
@@ -2113,6 +2116,157 @@
     return { saldosAbandonadosLocal, movimientosTraidos };
   }
 
+  // ─── Auditoría de documentos huérfanos (23/9/2026) ────────────────────────────
+  //
+  // Riesgo anotado desde el 18/9 (ver memoria project_pulled_true_sin_aplicar_residual)
+  // y confirmado real dos veces desde entonces (un pago de Arcor, un gasto de Hugo
+  // Altamirano de $400.000): un documento puede quedar "marcado como entregado" sin
+  // haberse aplicado NUNCA del otro lado, e invisible para siempre porque el ciclo
+  // normal ya no lo vuelve a pedir. Pasa por dos mecanismos distintos según el sentido:
+  //
+  //  - Admin→POS: pullFromFirestore() filtra `_pulled == false`. Un documento con
+  //    `_pulled: true` (aplicado mal, ej. tienePendienteLocal lo descartó ANTES del
+  //    fix de ultimoSkipPorPendiente del 16/9) o directamente SIN el campo (de un
+  //    push viejo, anterior a que existiera) nunca vuelve a matchear esa consulta.
+  //  - POS→Admin: syncMonitoringData() avanza un cursor por `_synced_at`; si un
+  //    applyFn tira una excepción real para un documento pero uno POSTERIOR de la
+  //    misma tanda se aplica bien, el cursor igual avanza más allá del que falló.
+  //
+  // Herramientas de una sola vez, de solo lectura salvo que se pida explícitamente
+  // reparar — igual espíritu que diagnosticarSaldoInicial/prepararAdopcionLedger.
+  // No cubren 'eliminaciones' (borrados, no hay "faltante" que auditar así) ni
+  // 'producto_codigo_proveedor' (clave compuesta, no tiene un solo id).
+  //
+  // Uso:
+  //   1. En el POS:       await SGA_Sync.auditarHuerfanosPOS()
+  //   2. En Admin-POS:    await SGA_Sync.auditarHuerfanosAdmin()
+  //   3. Revisar la lista que devuelve cada una (arrays, [] = nada para reparar).
+  //   4. Recién si hace falta reparar, en la MISMA compu donde se corrió el
+  //      diagnóstico: await SGA_Sync.repararHuerfanosPOS(lista) /
+  //      await SGA_Sync.repararHuerfanosAdmin(lista) — pasándole el array devuelto
+  //      por el diagnóstico (o un subconjunto, si se quiere reparar de a poco).
+
+  const AUDITORIA_EXCLUYE = new Set(['eliminaciones', 'producto_codigo_proveedor']);
+
+  async function auditarHuerfanosPOS() {
+    if (window.ADMIN_MODE) {
+      throw new Error('auditarHuerfanosPOS() se corre desde el POS — compara Firestore contra SU base local.');
+    }
+    if (!firestoreDb) throw new Error('Firebase no conectado');
+
+    const huerfanos = [];
+    for (const { collection } of PULL_SOURCES) {
+      if (AUDITORIA_EXCLUYE.has(collection)) continue;
+      let existeTabla = true;
+      try { window.SGA_DB.query(`SELECT 1 FROM ${collection} LIMIT 1`); }
+      catch (e) { existeTabla = false; }
+      if (!existeTabla) continue; // la colección no tiene una tabla 1:1 local (embebida en otra)
+
+      // orderBy('updated_at') en vez del pseudo-campo __name__: toda tabla
+      // sincronizable tiene esta columna (convención del repo, a diferencia de
+      // `_pulled`, que sí puede faltar en un push viejo), y sirve igual de bien
+      // como cursor de paginación para un barrido de una sola vez.
+      let lastDoc = null, batchSize;
+      do {
+        let q = firestoreDb.collection(collection).orderBy('updated_at').limit(300);
+        if (lastDoc) q = q.startAfter(lastDoc);
+        const snap = await q.get();
+        batchSize = snap.size;
+        for (const doc of snap.docs) {
+          const data = doc.data();
+          if (data._pulled === false) continue; // en cola normal, no es huérfano
+          const existeLocal = window.SGA_DB.query(
+            `SELECT 1 FROM ${collection} WHERE id = ? LIMIT 1`, [doc.id]
+          )[0];
+          if (!existeLocal) {
+            huerfanos.push({
+              collection, id: doc.id,
+              _pulled: data._pulled === undefined ? '(ausente)' : data._pulled,
+              updated_at: data.updated_at || null,
+            });
+          }
+        }
+        lastDoc = snap.docs[snap.docs.length - 1];
+      } while (batchSize >= 300);
+    }
+    return huerfanos;
+  }
+
+  async function repararHuerfanosPOS(lista) {
+    if (window.ADMIN_MODE) throw new Error('repararHuerfanosPOS() se corre desde el POS.');
+    if (!firestoreDb) throw new Error('Firebase no conectado');
+    let ok = 0;
+    for (const item of lista) {
+      try {
+        await firestoreDb.collection(item.collection).doc(item.id).update({ _pulled: false });
+        ok++;
+      } catch (err) {
+        console.warn(`No se pudo reparar ${item.collection}/${item.id}:`, err.message);
+      }
+    }
+    console.log(`🔧 ${ok}/${lista.length} documentos marcados _pulled:false — el próximo pull los baja solo`);
+    return ok;
+  }
+
+  async function auditarHuerfanosAdmin() {
+    if (!window.ADMIN_MODE) {
+      throw new Error('auditarHuerfanosAdmin() se corre desde Admin-POS — compara Firestore contra SU base local.');
+    }
+    if (!firestoreDb) throw new Error('Firebase no conectado');
+
+    const huerfanos = [];
+    for (const { name: collection } of MONITOR_SOURCES) {
+      if (AUDITORIA_EXCLUYE.has(collection)) continue;
+      let existeTabla = true;
+      try { window.SGA_DB.query(`SELECT 1 FROM ${collection} LIMIT 1`); }
+      catch (e) { existeTabla = false; }
+      if (!existeTabla) continue;
+
+      // Solo interesan documentos con _synced_at YA VIEJO (más de 1 hora): uno
+      // recién pusheado todavía no tuvo su ciclo normal, no es un huérfano.
+      const haceUnaHora = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      let lastDoc = null, batchSize;
+      do {
+        let q = firestoreDb.collection(collection).orderBy('_synced_at').limit(300);
+        if (lastDoc) q = q.startAfter(lastDoc);
+        const snap = await q.get();
+        batchSize = snap.size;
+        for (const doc of snap.docs) {
+          const data = doc.data();
+          if (!data._synced_at || data._synced_at > haceUnaHora) continue;
+          const existeLocal = window.SGA_DB.query(
+            `SELECT 1 FROM ${collection} WHERE id = ? LIMIT 1`, [doc.id]
+          )[0];
+          if (!existeLocal) {
+            huerfanos.push({ collection, id: doc.id, _synced_at: data._synced_at, data });
+          }
+        }
+        lastDoc = snap.docs[snap.docs.length - 1];
+      } while (batchSize >= 300);
+    }
+    // El campo `data` (documento completo) viaja para que repararHuerfanosAdmin
+    // pueda aplicarlo directo, sin tener que volver a pedirlo a Firestore.
+    return huerfanos;
+  }
+
+  async function repararHuerfanosAdmin(lista) {
+    if (!window.ADMIN_MODE) throw new Error('repararHuerfanosAdmin() se corre desde Admin-POS.');
+    const porColeccion = new Map(MONITOR_SOURCES.map(s => [s.name, s.applyFn]));
+    let ok = 0;
+    for (const item of lista) {
+      const applyFn = porColeccion.get(item.collection);
+      if (!applyFn || !item.data) continue;
+      try {
+        applyFn(item.data);
+        ok++;
+      } catch (err) {
+        console.warn(`No se pudo aplicar ${item.collection}/${item.id}:`, err.message);
+      }
+    }
+    console.log(`🔧 ${ok}/${lista.length} documentos aplicados localmente`);
+    return ok;
+  }
+
   // ─── API pública ─────────────────────────────────────────────────────────────
 
   window.SGA_Sync = {
@@ -2126,6 +2280,10 @@
     wipeFirestoreCollections,
     diagnosticarSaldoInicial,
     prepararAdopcionLedger,
+    auditarHuerfanosPOS,
+    repararHuerfanosPOS,
+    auditarHuerfanosAdmin,
+    repararHuerfanosAdmin,
     getFirestore: () => firestoreDb,
     isInitialized: () => initialized,
     getStatus: () => ({ initialized, lastSyncAt }),
