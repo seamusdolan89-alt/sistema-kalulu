@@ -7,6 +7,26 @@ const OperacionesStock = (() => {
   const fmt$ = n => window.SGA_Utils.formatCurrency(n);
   const db   = () => window.SGA_DB;
 
+  // Ajuste de precios pendiente (compras_v2.js post-compra) — un solo pendiente
+  // a la vez por sucursal (ids random, no determinísticos — ver comentario en
+  // compras_v2.js sobre por qué un id fijo reusable choca con el borrado-con-marca).
+  function hayAjustePendiente() {
+    const suc = window.SGA_Auth?.getCurrentUser?.()?.sucursal_id;
+    if (!suc) return false;
+    return !!db().query(
+      `SELECT 1 FROM ajustes_precio_pendientes WHERE sucursal_id = ? LIMIT 1`, [suc]
+    )[0];
+  }
+  function descartarAjustePendiente() {
+    const suc = window.SGA_Auth?.getCurrentUser?.()?.sucursal_id;
+    if (!suc) return;
+    for (const row of db().query(`SELECT id FROM ajustes_precio_pendientes WHERE sucursal_id = ?`, [suc])) {
+      db().run(`DELETE FROM ajustes_precio_pendientes WHERE id = ?`, [row.id]);
+      window.SGA_DB.registrarEliminacion('ajustes_precio_pendientes', row.id);
+    }
+    window.SGA_Sync?.pushPending?.();
+  }
+
   // Estado de pago REAL de una compra: compras.condicion_pago es un campo fijo
   // que se carga una sola vez al confirmar la compra (siempre 'pendiente' hoy
   // — compras_v2.js no tiene toggle para marcarla pagada en el momento, ver
@@ -447,10 +467,10 @@ const OperacionesStock = (() => {
     renderKpis();
     renderActividadReciente();
 
-    // Mostrar/ocultar card de ajuste pendiente
+    // Mostrar/ocultar card de ajuste pendiente (propio o sincronizado de otra compu)
     const pendingCard = document.getElementById('ops-pending-card');
     if (pendingCard) {
-      pendingCard.style.display = localStorage.getItem('compras_resumen_pending') ? 'block' : 'none';
+      pendingCard.style.display = hayAjustePendiente() ? 'block' : 'none';
     }
 
     // Historial overlays
@@ -503,7 +523,7 @@ const OperacionesStock = (() => {
           break;
         case 'descartar-pendiente':
           if (!confirm('¿Descartás el ajuste de precios pendiente? Esta acción no se puede deshacer.')) return;
-          localStorage.removeItem('compras_resumen_pending');
+          descartarAjustePendiente();
           localStorage.removeItem('compras_resumen_editados');
           if (pendingCard) pendingCard.style.display = 'none';
           break;
