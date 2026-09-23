@@ -87,6 +87,15 @@ def main():
             f"BUG: marco como huerfano uno que esta sano, en cola normal: {huerfanos_pos}")
         print(f"   OK - detecto los 2 huerfanos reales y NO el sano ({len(huerfanos_pos)} huerfanos totales)")
 
+        print("--- El filtro soloColecciones acota el barrido (para no gastar cuota de mas) ---")
+        acotado = pos.js("() => window.SGA_Sync.auditarHuerfanosPOS(['ventas'])")
+        assert acotado == [], f"Con soloColecciones=['ventas'] no deberia mirar 'gastos' en absoluto: {acotado}"
+        acotado2 = pos.js("() => window.SGA_Sync.auditarHuerfanosPOS(['gastos'])")
+        assert {h['id'] for h in acotado2} == ids_encontrados, (
+            f"Con soloColecciones=['gastos'] deberia encontrar los mismos huerfanos que el barrido completo: {acotado2}"
+        )
+        print("   OK - acotar a una coleccion funciona y no rompe el resultado")
+
         print("--- Reparar: marca _pulled:false, el proximo pull normal los trae ---")
         lista_gastos = [h for h in huerfanos_pos if h["collection"] == "gastos"
                         and h["id"] in ("gasto-huerfano-sin-pulled", "gasto-huerfano-pulled-true")]

@@ -2036,6 +2036,14 @@
   //      diagnóstico: await SGA_Sync.repararHuerfanosPOS(lista) /
   //      await SGA_Sync.repararHuerfanosAdmin(lista) — pasándole el array devuelto
   //      por el diagnóstico (o un subconjunto, si se quiere reparar de a poco).
+  //
+  // Costo de lectura: sin filtro, recorre TODAS las colecciones documento por
+  // documento (paginado) — con meses de historial real (ventas, compras) puede
+  // ser bastante lectura de Firestore (plan gratuito, cuota diaria). Si ya se
+  // sospecha una tabla puntual (ej. después de una discrepancia de saldo),
+  // pasar un array para acotar el barrido y gastar mucha menos cuota:
+  //   await SGA_Sync.auditarHuerfanosPOS(['gastos'])
+  //   await SGA_Sync.auditarHuerfanosAdmin(['remitos'])
 
   const AUDITORIA_EXCLUYE = new Set(['eliminaciones', 'producto_codigo_proveedor']);
 
@@ -2053,7 +2061,7 @@
     console.table(Object.entries(porColeccion).map(([collection, cantidad]) => ({ collection, cantidad })));
   }
 
-  async function auditarHuerfanosPOS() {
+  async function auditarHuerfanosPOS(soloColecciones = null) {
     if (window.ADMIN_MODE) {
       throw new Error('auditarHuerfanosPOS() se corre desde el POS — compara Firestore contra SU base local.');
     }
@@ -2062,6 +2070,7 @@
     const huerfanos = [];
     for (const { collection } of PULL_SOURCES) {
       if (AUDITORIA_EXCLUYE.has(collection)) continue;
+      if (soloColecciones && !soloColecciones.includes(collection)) continue;
       let existeTabla = true;
       try { window.SGA_DB.query(`SELECT 1 FROM ${collection} LIMIT 1`); }
       catch (e) { existeTabla = false; }
@@ -2114,7 +2123,7 @@
     return ok;
   }
 
-  async function auditarHuerfanosAdmin() {
+  async function auditarHuerfanosAdmin(soloColecciones = null) {
     if (!window.ADMIN_MODE) {
       throw new Error('auditarHuerfanosAdmin() se corre desde Admin-POS — compara Firestore contra SU base local.');
     }
@@ -2123,6 +2132,7 @@
     const huerfanos = [];
     for (const { name: collection } of MONITOR_SOURCES) {
       if (AUDITORIA_EXCLUYE.has(collection)) continue;
+      if (soloColecciones && !soloColecciones.includes(collection)) continue;
       let existeTabla = true;
       try { window.SGA_DB.query(`SELECT 1 FROM ${collection} LIMIT 1`); }
       catch (e) { existeTabla = false; }
