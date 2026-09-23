@@ -2039,6 +2039,20 @@
 
   const AUDITORIA_EXCLUYE = new Set(['eliminaciones', 'producto_codigo_proveedor']);
 
+  // Resumen legible en consola además del array crudo — esto lo corre el dueño
+  // a mano en DevTools, no tiene sentido devolverle solo JSON para que lo
+  // procese él mismo.
+  function resumirHuerfanos(huerfanos, label) {
+    if (huerfanos.length === 0) {
+      console.log(`✅ ${label}: no se encontraron documentos huérfanos.`);
+      return;
+    }
+    const porColeccion = {};
+    for (const h of huerfanos) porColeccion[h.collection] = (porColeccion[h.collection] || 0) + 1;
+    console.log(`⚠️ ${label}: ${huerfanos.length} documento(s) huérfano(s) encontrado(s):`);
+    console.table(Object.entries(porColeccion).map(([collection, cantidad]) => ({ collection, cantidad })));
+  }
+
   async function auditarHuerfanosPOS() {
     if (window.ADMIN_MODE) {
       throw new Error('auditarHuerfanosPOS() se corre desde el POS — compara Firestore contra SU base local.');
@@ -2080,6 +2094,7 @@
         lastDoc = snap.docs[snap.docs.length - 1];
       } while (batchSize >= 300);
     }
+    resumirHuerfanos(huerfanos, 'POS');
     return huerfanos;
   }
 
@@ -2137,6 +2152,7 @@
     }
     // El campo `data` (documento completo) viaja para que repararHuerfanosAdmin
     // pueda aplicarlo directo, sin tener que volver a pedirlo a Firestore.
+    resumirHuerfanos(huerfanos, 'Admin-POS');
     return huerfanos;
   }
 
