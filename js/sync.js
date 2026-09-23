@@ -108,6 +108,9 @@
     // viaja con marca (registrarEliminacion), si no reaparecerian.
     { table: 'pedidos_abiertos',  collection: 'pedidos_abiertos',  pk: 'id',   denormalize: null },
     { table: 'compras_pausadas',  collection: 'compras_pausadas',  pk: 'id',   denormalize: null },
+    // "Ajuste de precios" post-compra pausado: antes vivía solo en localStorage de
+    // la compu donde se pausó, nunca se veía desde la otra (ver CLAUDE.md, 23/9/2026).
+    { table: 'ajustes_precio_pendientes', collection: 'ajustes_precio_pendientes', pk: 'id', denormalize: null },
     // posPush:false — son admin-authoritative (solo se crean/editan desde ADMIN POS,
     // ver Configuración). El POS no debe re-pushear su copia local: si lo hiciera,
     // una fila local vieja podría pisar en Firestore un cambio recién hecho desde admin.
@@ -137,6 +140,7 @@
     'consumo_interno',           // pantalla desktop-only
     'pedidos_abiertos',          // ventas pausadas del POS — pantalla desktop-only
     'compras_pausadas',          // compras pausadas — pantalla desktop-only
+    'ajustes_precio_pendientes', // ajuste de precios post-compra — mismo módulo Compras, desktop-only
     'clientes',                  // pedido explícito del usuario (17/9) — no lo necesita desde el celular
   ];
 
@@ -189,6 +193,7 @@
     { collection: 'consumo_interno',   applyFn: applyConsumoInternoFull },
     { collection: 'pedidos_abiertos',  applyFn: applyPedidoAbierto },
     { collection: 'compras_pausadas',  applyFn: applyCompraPausada },
+    { collection: 'ajustes_precio_pendientes', applyFn: applyAjustePrecioPendiente },
     { collection: 'medios_cobro',      applyFn: applyMedioCobroFull },
     { collection: 'sucursales',        applyFn: applySucursalFull },
     { collection: 'cuenta_corriente',  applyFn: applyCuentaCorriente },
@@ -986,6 +991,22 @@
     );
   }
 
+  // Ajuste de precios post-compra pausado (compras_v2.js showSuccessScreen/
+  // showResumenFinal). Un solo pendiente a la vez por sucursal — INSERT OR REPLACE
+  // lo pisa igual que hacía la clave única de localStorage que reemplaza.
+  function applyAjustePrecioPendiente(data) {
+    if (window.SGA_DB.fueEliminado('ajustes_precio_pendientes', data.id)) return;
+    if (tienePendienteLocal('ajustes_precio_pendientes', 'id = ?', [data.id])) return;
+    const now = new Date().toISOString();
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO ajustes_precio_pendientes
+        (id, sucursal_id, usuario_id, snapshot, created_at, updated_at, sync_status)
+      VALUES (?,?,?,?,?,?,'synced')`,
+      [data.id, data.sucursal_id || null, data.usuario_id || null, data.snapshot ?? '{}',
+       data.created_at || now, data.updated_at || now]
+    );
+  }
+
   function applyConsumoInternoFull(data) {
     if (tienePendienteLocal('consumo_interno', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
@@ -1629,6 +1650,7 @@
       { name: 'consumo_interno',   applyFn: applyConsumoInternoFull },
       { name: 'pedidos_abiertos',  applyFn: applyPedidoAbierto },
       { name: 'compras_pausadas',  applyFn: applyCompraPausada },
+      { name: 'ajustes_precio_pendientes', applyFn: applyAjustePrecioPendiente },
       { name: 'ingresos_caja',     applyFn: applyIngresoCaja },
       { name: 'cuenta_corriente',  applyFn: applyCuentaCorriente },
     ];
@@ -1860,6 +1882,7 @@
       { name: 'consumo_interno',   applyFn: applyConsumoInternoFull, label: 'Consumo interno' },
       { name: 'pedidos_abiertos',  applyFn: applyPedidoAbierto,    label: 'Ventas pausadas' },
       { name: 'compras_pausadas',  applyFn: applyCompraPausada,    label: 'Compras pausadas' },
+      { name: 'ajustes_precio_pendientes', applyFn: applyAjustePrecioPendiente, label: 'Ajustes de precio pendientes' },
       { name: 'ingresos_caja',     applyFn: applyIngresoCaja,      label: 'Ingresos de caja' },
       { name: 'cuenta_corriente',  applyFn: applyCuentaCorriente,  label: 'Cuenta corriente' },
       { name: 'medios_cobro',      applyFn: applyMedioCobroFull,   label: 'Medios de pago' },

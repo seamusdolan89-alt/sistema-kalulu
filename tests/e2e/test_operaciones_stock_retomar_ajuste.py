@@ -44,10 +44,11 @@ def main():
         print("--- Login admin-pos + seed in place (sga-admin.db) ---")
         login_via_seed(page, admin_pos=True)
 
-        print("--- Simular un ajuste de precios pausado (localStorage) ---")
+        print("--- Simular un ajuste de precios pausado (ajustes_precio_pendientes, ya no localStorage) ---")
         page.evaluate("""
           () => {
-            localStorage.setItem('compras_resumen_pending', JSON.stringify({
+            const suc = window.SGA_Auth.getCurrentUser().sucursal_id;
+            const snapshot = JSON.stringify({
               step: 'post-compra',
               items: [],
               herenciaSincs: [],
@@ -55,7 +56,14 @@ def main():
                 proveedorNombre: 'Bimbo', facturaPv: '1', numeroFactura: '123',
                 totalCompra: 10000, neto: 10000
               }
-            }));
+            });
+            window.SGA_DB.run(
+              `INSERT OR REPLACE INTO ajustes_precio_pendientes
+                 (id, sucursal_id, usuario_id, snapshot, created_at, updated_at, sync_status)
+               VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+              [`ajuste_precio_pendiente:${suc}`, suc, window.SGA_Auth.getCurrentUser().id,
+               snapshot, new Date().toISOString(), new Date().toISOString()]
+            );
           }
         """)
 
@@ -65,7 +73,7 @@ def main():
 
         print("--- El banner 'Ajuste de precios pendiente' esta visible ---")
         assert page.locator("#ops-pending-card").is_visible(), (
-            "El banner de ajuste pendiente deberia mostrarse con el localStorage seteado"
+            "El banner de ajuste pendiente deberia mostrarse con la fila de ajustes_precio_pendientes"
         )
 
         print("--- Click en 'Retomar ahora ->' ---")

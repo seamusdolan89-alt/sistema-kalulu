@@ -1137,6 +1137,26 @@
       `);
     } catch(e) { console.warn('compras_pausadas:', e.message); }
 
+    try {
+      // "Ajuste de precios" post-compra pausado (compras_v2.js showSuccessScreen/
+      // showResumenFinal): antes vivía SOLO en localStorage de la compu donde se
+      // pausó ("Podés retomarlo desde Operaciones de Stock" — nunca desde otra
+      // compu). Un solo pendiente a la vez por sucursal (mismo comportamiento que
+      // tenía la clave única de localStorage): id determinístico, INSERT OR
+      // REPLACE lo pisa si ya había uno.
+      database.run(`
+        CREATE TABLE IF NOT EXISTS ajustes_precio_pendientes (
+          id TEXT PRIMARY KEY,
+          sucursal_id TEXT REFERENCES sucursales(id),
+          usuario_id TEXT REFERENCES usuarios(id),
+          snapshot TEXT NOT NULL,
+          created_at TEXT,
+          updated_at TEXT,
+          sync_status TEXT DEFAULT 'pending'
+        )
+      `);
+    } catch(e) { console.warn('ajustes_precio_pendientes:', e.message); }
+
     // Los borradores (ventas pausadas del POS y compras pausadas) ahora se
     // sincronizan: se pueden retomar desde OTRA caja y verse desde Admin-POS. Para
     // eso necesitan sync_status/updated_at. Las filas que ya existian quedan
@@ -1542,6 +1562,7 @@
     // Borradores: se retoman/borran desde cualquier caja o desde Admin-POS.
     pedidos_abiertos: [],
     compras_pausadas: [],
+    ajustes_precio_pendientes: [],
   };
 
   /**

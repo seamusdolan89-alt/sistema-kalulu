@@ -65,6 +65,7 @@ const ComprasV2 = (() => {
     percepcionIibb:     0,
     items:              [],     // cart items
     pausadaId:          null,
+    ajustePendienteId:  null,
     sesionActiva:       null,
     currentUser:        null,
     // provider fiscal info (read-only, from DB)
@@ -91,6 +92,75 @@ const ComprasV2 = (() => {
     // se editan las dos a la vez.
     editandoRemitoId:    null,
   };
+
+  // ── Ajuste de precios pendiente (post-compra) ───────────────────────────────
+  // Reemplaza la clave única de localStorage 'compras_resumen_pending': ahora es
+  // una fila sincronizable, así se puede ver y retomar desde otra computadora
+  // (antes solo se podía "desde Operaciones de Stock" en la MISMA máquina donde
+  // se pausó — bug real reportado 22/9/2026, ver CLAUDE.md). Un solo pendiente a
+  // la vez por sucursal, igual que el comportamiento anterior.
+  //
+  // El id es un uuid random, NO determinístico por sucursal: un id fijo
+  // reutilizable choca con el borrado-con-marca de siempre (fueEliminado no
+  // tiene "undo") — al descartar un pendiente y pausar otro reusando el MISMO
+  // id, cualquier compu que ya hubiera visto el borrado del primero ignoraría
+  // el segundo para siempre en silencio (el mismo bug real que motivó esta
+  // tarea, esta vez en compras_pausadas). state.ajustePendienteId recuerda el
+  // id de la fila activa durante la sesión (se completa al leerla con
+  // getAjustePendiente) para que un guardado posterior actualice esa fila en
+  // vez de crear una nueva.
+  function getAjustePendiente() {
+    const suc = state.currentUser?.sucursal_id;
+    if (!suc) return null;
+    const row = db().query(
+      `SELECT id, snapshot FROM ajustes_precio_pendientes WHERE sucursal_id = ? ORDER BY updated_at DESC LIMIT 1`,
+      [suc]
+    )[0];
+    if (!row) return null;
+    try {
+      const parsed = JSON.parse(row.snapshot);
+      state.ajustePendienteId = row.id;
+      return parsed;
+    } catch (e) { return null; }
+  }
+  function hayAjustePendiente() {
+    return !!getAjustePendiente();
+  }
+  function saveAjustePendiente(payloadObj) {
+    if (!state.currentUser) return;
+    const suc = state.currentUser.sucursal_id;
+    if (!state.ajustePendienteId) {
+      // ¿ya había uno (de otra sesión/máquina) para esta sucursal? lo reemplaza
+      // -- mismo comportamiento que tenía la clave única de localStorage.
+      const existing = db().query(
+        `SELECT id FROM ajustes_precio_pendientes WHERE sucursal_id = ?`, [suc]
+      );
+      for (const row of existing) {
+        db().run(`DELETE FROM ajustes_precio_pendientes WHERE id = ?`, [row.id]);
+        window.SGA_DB.registrarEliminacion('ajustes_precio_pendientes', row.id);
+      }
+      state.ajustePendienteId = uuid();
+    }
+    const ts = nowISO();
+    db().run(`
+      INSERT OR REPLACE INTO ajustes_precio_pendientes
+        (id, sucursal_id, usuario_id, snapshot, created_at, updated_at, sync_status)
+      VALUES (?, ?, ?, ?, COALESCE((SELECT created_at FROM ajustes_precio_pendientes WHERE id = ?), ?), ?, 'pending')`,
+      [state.ajustePendienteId, suc, state.currentUser.id, JSON.stringify(payloadObj),
+       state.ajustePendienteId, ts, ts]
+    );
+    window.SGA_Sync?.pushPending?.();
+  }
+  function clearAjustePendiente() {
+    const suc = state.currentUser?.sucursal_id;
+    const id = state.ajustePendienteId
+      || (suc && db().query(`SELECT id FROM ajustes_precio_pendientes WHERE sucursal_id = ?`, [suc])[0]?.id);
+    if (!id) return;
+    db().run(`DELETE FROM ajustes_precio_pendientes WHERE id = ?`, [id]);
+    window.SGA_DB.registrarEliminacion('ajustes_precio_pendientes', id);
+    state.ajustePendienteId = null;
+    window.SGA_Sync?.pushPending?.();
+  }
 
   // ── DB helpers ───────────────────────────────────────────────────────────────
   // Saldo neto con el proveedor: positivo = le debemos, negativo = a favor.
@@ -1983,6 +2053,7 @@ const ComprasV2 = (() => {
     state.proveedorAgRetIibb    = 0;
     state.items                 = [];
     state.pausadaId             = null;
+    state.ajustePendienteId     = null;
 
     // Reset cabecera UI
     const card = ge('cv2-prov-card');
@@ -2229,6 +2300,7 @@ const ComprasV2 = (() => {
     state.modoRemito         = false;
     state.vinculandoRemitoId = null;
     state.pausadaId           = null;
+    state.ajustePendienteId   = null;
     state.aplicarSaldo        = false; // el crédito ya aplicado (si lo hay) no se vuelve a tocar acá
     state.proveedorSaldo             = state.proveedorId ? getProveedorSaldo(state.proveedorId) : 0;
     state.proveedorCreditoDisponible = state.proveedorId ? getCreditoDisponibleProveedor(state.proveedorId) : 0;
@@ -2890,6 +2962,7 @@ const ComprasV2 = (() => {
     state.editandoSucursalId = remito.sucursal_id || state.currentUser.sucursal_id;
     state.vinculandoRemitoId = null;
     state.pausadaId          = null;
+    state.ajustePendienteId  = null;
     state.pendingAjustes     = [];
     state.proveedorId        = remito.proveedor_id;
     state.proveedorNombre    = remito.razon_social || '(proveedor eliminado)';
@@ -3872,7 +3945,7 @@ const ComprasV2 = (() => {
 
     // Helper: construye el objeto a guardar en localStorage con el step y snap
     function buildPendingPayload() {
-      return JSON.stringify({
+      return {
         step: 'post-compra',
         items,
         herenciaSincs: state.herenciaSincronizados,
@@ -3888,14 +3961,17 @@ const ComprasV2 = (() => {
           saldoAplicado,
           totalCompra,
         }
-      });
+      };
     }
 
 
-    // Pausar → guardar estado actual en localStorage y volver al POS
+    // Pausar → guardar estado actual (sincroniza) y volver al POS. Antes esto
+    // solo se podía retomar "desde Operaciones de Stock" en la MISMA compu
+    // donde se pausó (localStorage) — ahora es una fila que llega a cualquier
+    // otra máquina, incluido Admin-POS.
     ge('cv2-post-btn-pausar')?.addEventListener('click', () => {
-      localStorage.setItem('compras_resumen_pending', buildPendingPayload());
-      window.SGA_Utils.showNotification('Ajuste pausado. Podés retomarlo desde Operaciones de Stock.', 'info');
+      saveAjustePendiente(buildPendingPayload());
+      window.SGA_Utils.showNotification('Ajuste pausado. Podés retomarlo desde Operaciones de Stock (en esta u otra computadora).', 'info');
       setTimeout(() => { window.location.hash = '#pos'; }, 1200);
     });
 
@@ -3911,7 +3987,8 @@ const ComprasV2 = (() => {
     if (!root) return;
 
     // Persistir para poder restaurar al volver del editor o reanudar más tarde
-    localStorage.setItem('compras_resumen_pending', JSON.stringify({ step: 'resumen-final', items, herenciaSincs }));
+    // (sincroniza, igual que el paso anterior — ver saveAjustePendiente).
+    saveAjustePendiente({ step: 'resumen-final', items, herenciaSincs });
 
     // ── Preparar datos ────────────────────────────────────────────────────────
     const esNuevo = (it) => it.isNuevo === true || (parseFloat(it.pvActual) || 0) === 0;
@@ -4102,10 +4179,9 @@ const ComprasV2 = (() => {
 
     root.querySelector('#cv2-rf-btn-volver')?.addEventListener('click', () => {
       // Volver al paso anterior (ajuste de precios) usando los items guardados
-      const raw = localStorage.getItem('compras_resumen_pending');
-      if (raw) {
+      const saved = getAjustePendiente();
+      if (saved) {
         try {
-          const saved = JSON.parse(raw);
           showSuccessScreen({
             total: saved.snap?.neto ?? 0,
             neto: saved.snap?.neto ?? 0,
@@ -4128,7 +4204,7 @@ const ComprasV2 = (() => {
     });
 
     root.querySelector('#cv2-rf-btn-pos')?.addEventListener('click', () => {
-      localStorage.removeItem('compras_resumen_pending');
+      clearAjustePendiente();
       localStorage.removeItem('compras_resumen_editados');
       window.location.hash = '#pos';
     });
@@ -4251,11 +4327,10 @@ const ComprasV2 = (() => {
     if (fromEditor || fromRetomar) {
       sessionStorage.removeItem('compras_resumen_editor_return');
       sessionStorage.removeItem('compras_v2_retomar');
-      const raw = localStorage.getItem('compras_resumen_pending');
-      if (raw) {
+      state.currentUser = window.SGA_Auth.getCurrentUser();
+      const saved = getAjustePendiente();
+      if (saved) {
         try {
-          const saved = JSON.parse(raw);
-          state.currentUser = window.SGA_Auth.getCurrentUser();
           if (fromEditor || saved.step === 'resumen-final') {
             // Retomar en el resumen final (último paso o retorno del editor)
             showResumenFinal({ items: saved.items, herenciaSincs: saved.herenciaSincs || [] });
@@ -4302,6 +4377,7 @@ const ComprasV2 = (() => {
     state.proveedorAgRetIibb    = 0;
     state.items                 = [];
     state.pausadaId             = null;
+    state.ajustePendienteId     = null;
     state.searchResults         = [];
     state.searchHighlight       = -1;
     state.searchQuerySaved      = '';
@@ -4313,25 +4389,25 @@ const ComprasV2 = (() => {
     state.remitoNumero          = '';
 
     // Mostrar banner si hay ajuste de precios pendiente de una compra anterior
+    // (propia o de otra compu — ver ajustes_precio_pendientes / saveAjustePendiente)
     const pendingBanner = ge('cv2-pending-resumen-banner');
-    const pendingRaw = localStorage.getItem('compras_resumen_pending');
+    const pendingSaved = getAjustePendiente();
     if (pendingBanner) {
-      if (pendingRaw) {
+      if (pendingSaved) {
         pendingBanner.style.display = 'flex';
         // Usar onclick para evitar listeners acumulados en recargas del módulo
         const btnRetomar = ge('cv2-pending-resumen-btn');
         const btnDescartar = ge('cv2-pending-resumen-descartar');
         if (btnRetomar) btnRetomar.onclick = () => {
-          const raw = localStorage.getItem('compras_resumen_pending');
-          if (!raw) return;
+          const saved = getAjustePendiente();
+          if (!saved) return;
           try {
-            const { items, herenciaSincs } = JSON.parse(raw);
-            showResumenFinal({ items, herenciaSincs });
+            showResumenFinal({ items: saved.items, herenciaSincs: saved.herenciaSincs || [] });
           } catch(e) { alert('No se pudo restaurar el ajuste pendiente.'); }
         };
         if (btnDescartar) btnDescartar.onclick = () => {
           if (!confirm('¿Descartás el ajuste de precios pendiente? Esta acción no se puede deshacer.')) return;
-          localStorage.removeItem('compras_resumen_pending');
+          clearAjustePendiente();
           localStorage.removeItem('compras_resumen_editados');
           pendingBanner.style.display = 'none';
         };

@@ -317,7 +317,12 @@
       { name: 'configuracion', icon: 'configuracion', text: 'Configuración', adminOnly: true, adminPosOnly: true },
     ];
 
-    const hasPendingResumen = !!localStorage.getItem('compras_resumen_pending');
+    // Sincroniza entre compus (ver ajustes_precio_pendientes en sync.js) — antes
+    // vivía solo en localStorage y esta badge nunca se veía desde otra máquina.
+    const _sucPendiente = window.SGA_Auth.getCurrentUser()?.sucursal_id;
+    const hasPendingResumen = !!(_sucPendiente && window.SGA_DB.query(
+      `SELECT 1 FROM ajustes_precio_pendientes WHERE sucursal_id = ? LIMIT 1`, [_sucPendiente]
+    )[0]);
     const allowedModules = getAllowedModules();
     const currentHash = window.location.hash.slice(1) || '';
     const [currentRoute, currentMedio] = currentHash.split('/');
