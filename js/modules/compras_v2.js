@@ -596,9 +596,13 @@ const ComprasV2 = (() => {
     if (confirmBtn) confirmBtn.textContent = state.editandoRemitoId ? '💾 Guardar Cambios'
       : state.modoRemito ? '✓ Confirmar Ingreso' : '→ Siguiente · F10';
 
-    // In vincular mode with pre-loaded items, hide search bar (quantities are locked to the remito)
+    // Al vincular, la barra de búsqueda (+ Envío / + Descuento / + Muestra) se
+    // ve igual que en una compra normal: la factura puede traer productos que no
+    // venían en el remito, o un envío/descuento. Lo que sigue bloqueado son las
+    // cantidades de los ítems que SÍ vinieron del remito (it.deRemito) — su stock
+    // ya se sumó al cargar el remito.
     const searchBarRow = document.querySelector('.cv2-search-bar-row');
-    if (searchBarRow) searchBarRow.style.display = (state.vinculandoRemitoId && state.items.length > 0) ? 'none' : '';
+    if (searchBarRow) searchBarRow.style.display = '';
 
     renderCollapsedBar();
     renderProveedorPanel();
@@ -669,6 +673,12 @@ const ComprasV2 = (() => {
 
       const costoChanged = Math.abs((parseFloat(it.costoNuevo) || 0) - (parseFloat(it.costoActual) || 0)) > 0.001;
       const pendiente    = it.confirmado === false;
+      // Al vincular una factura a un remito, solo las líneas que vinieron del
+      // remito quedan con la cantidad bloqueada (su stock ya se sumó). Las que se
+      // agregan acá (productos que la factura trae de más) se editan y se quitan
+      // como en cualquier compra, y al confirmar SÍ suman stock.
+      const bloqueadoRemito = !!(state.vinculandoRemitoId && it.deRemito);
+      const agregadoAlVincular = !!(state.vinculandoRemitoId && !it.deRemito && !it.esMuestra);
       return `
         <tr class="cv2-cart-row${pendiente ? ' cv2-cart-row-pendiente' : ''}${it.esMuestra ? ' cv2-cart-row-muestra' : ''}" data-idx="${i}">
           <td class="cv2-td-num">${i + 1}</td>
@@ -680,13 +690,16 @@ const ComprasV2 = (() => {
             ${it.esMuestra
               ? `<span class="cv2-muestra-badge" title="Muestra: no pisa el costo del producto">🎁 Muestra</span>`
               : (costoChanged ? `<span class="cv2-costo-changed" title="Costo modificado">↑</span>` : '')}
+            ${agregadoAlVincular
+              ? `<span class="cv2-agregado-badge" title="No venía en el remito: al confirmar suma stock" style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:9px;background:#e3f2fd;color:#1565c0;font-size:10px;font-weight:700;vertical-align:middle">＋ Agregado</span>`
+              : ''}
           </td>
           <td class="cv2-td-present">${parseFloat(it.udsPaquete) || 1} × ${esc(it.unidadCompra || 'Unidad')}</td>
           <td class="cv2-td-right">
             <input type="number" class="cv2-num-input" value="${it.cantidad}"
-                   min="0.001" step="any" style="width:62px${state.vinculandoRemitoId ? ';background:#f0f4f8;color:#546e7a' : ''}"
+                   min="0.001" step="any" style="width:62px${bloqueadoRemito ? ';background:#f0f4f8;color:#546e7a' : ''}"
                    data-idx="${i}" data-field="cantidad"
-                   ${state.vinculandoRemitoId ? 'readonly tabindex="-1" title="Cantidad bloqueada (del remito)"' : ''}>
+                   ${bloqueadoRemito ? 'readonly tabindex="-1" title="Cantidad bloqueada (del remito)"' : ''}>
           </td>
           <td class="cv2-td-costo-actual cv2-td-costo-actual">${fmt$(it.costoActual)}</td>
           <td class="cv2-td-right cv2-td-nuevo-costo">
@@ -714,7 +727,7 @@ const ComprasV2 = (() => {
           <td class="cv2-subtotal cv2-td-right cv2-td-subtotal">${fmt$(sub)}</td>
           <td class="cv2-td-center">
             <button class="cv2-remove-btn" data-idx="${i}" aria-label="Quitar" title="Quitar"
-                    ${state.vinculandoRemitoId ? 'style="visibility:hidden"' : ''}>×</button>
+                    ${bloqueadoRemito ? 'style="visibility:hidden"' : ''}>×</button>
           </td>
         </tr>
       `;
@@ -1002,7 +1015,15 @@ const ComprasV2 = (() => {
   // ── Cart mutations ───────────────────────────────────────────────────────────
   function addToCart(prod) {
     let targetIdx;
-    const existing = state.items.findIndex(it => it.productoId === prod.productoId && !it.esMuestra);
+    // Nunca fusionar con una línea que vino del remito (su cantidad está
+    // bloqueada y su stock ya se sumó): si la factura trae más unidades de ese
+    // mismo producto, van en una línea aparte que SÍ suma stock al confirmar.
+    const existing = state.items.findIndex(it => it.productoId === prod.productoId && !it.esMuestra && !it.deRemito);
+    if (state.vinculandoRemitoId && existing < 0
+        && state.items.some(it => it.deRemito && it.productoId === prod.productoId)) {
+      window.SGA_Utils.showNotification(
+        'Ese producto ya viene en el remito: se agrega como una línea aparte (unidades extra de la factura).', 'info');
+    }
     if (existing >= 0) {
       state.items[existing].cantidad = parseFloat(state.items[existing].cantidad) + 1;
       targetIdx = existing;
@@ -2603,8 +2624,11 @@ const ComprasV2 = (() => {
             parseFloat(item.descuento) || 0, parseFloat(item.descuentoMonto) || 0,
             item.iva || null, item.esMuestra ? 'muestra' : 'producto']);
 
-        // Stock: only increment if NOT vinculando (remito already updated stock)
-        if (!state.vinculandoRemitoId) {
+        // Stock: al vincular una factura a un remito, solo se saltea lo que VINO
+        // del remito (ya sumó stock al cargarlo). Un producto agregado al vincular
+        // (la factura trae de más, o el remito no tenía ítems) no pasó por el
+        // remito, así que SÍ tiene que sumar — antes se salteaba todo por igual.
+        if (!(state.vinculandoRemitoId && item.deRemito)) {
           db().moverStock({
             productoId: item.productoId, sucursalId: user.sucursal_id, delta: cantUds,
             tipo: 'compra', refTipo: 'compras', refId: compraId, fecha: ts,
@@ -3350,6 +3374,9 @@ const ComprasV2 = (() => {
       costoNuevo:    parseFloat(ri.costo) || 0,
       descuento:     0,
       descuentoMonto: 0,
+      // Vino del remito: su stock ya se sumó al cargarlo (ver commitCompra) y su
+      // cantidad queda bloqueada. Lo que se agregue después NO lleva esta marca.
+      deRemito:      true,
     }));
 
     if (state.items.length === 0) {
