@@ -2026,7 +2026,20 @@
   // Herramientas de una sola vez, de solo lectura salvo que se pida explícitamente
   // reparar.
   // No cubren 'eliminaciones' (borrados, no hay "faltante" que auditar así) ni
-  // 'producto_codigo_proveedor' (clave compuesta, no tiene un solo id).
+  // 'producto_codigo_proveedor' (clave compuesta, no tiene un solo id). Tampoco
+  // las colecciones sin tabla local propia o sin columna `id` (ej. system_config,
+  // que es clave/valor): el barrido las lista aparte como "sin auditar".
+  //
+  // Cada documento se clasifica de dos formas (campo `tipo` de cada resultado):
+  //  - 'falta':          no hay fila local (y tampoco una marca de borrado que lo
+  //                      explique — un registro borrado a propósito no es huérfano).
+  //  - 'desactualizado': la fila existe pero el `updated_at` del documento es
+  //                      posterior al local, y la fila local no tiene cambios
+  //                      propios sin subir. Es el caso de una modificación (ej. una
+  //                      factura vinculada a un remito en Admin-POS antes del
+  //                      arreglo del 18/9) cuyo documento quedó sin `_pulled:false`:
+  //                      la fila YA existe, así que "falta" nunca lo ve (remitos de
+  //                      Sueño verde y Maschwitz, 24/9/2026).
   //
   // Uso:
   //   1. En el POS:       await SGA_Sync.auditarHuerfanosPOS()
@@ -2047,18 +2060,70 @@
 
   const AUDITORIA_EXCLUYE = new Set(['eliminaciones', 'producto_codigo_proveedor']);
 
+  // Diferencia mínima para considerar "más nuevo" el documento: los relojes de
+  // las dos compus y el redondeo de milisegundos no son un cambio real.
+  const AUDITORIA_TOLERANCIA_MS = 1000;
+
+  function fechaAMs(v) {
+    if (!v) return NaN;
+    if (typeof v.toDate === 'function') return v.toDate().getTime(); // Timestamp de Firestore
+    let s = String(v);
+    // datetime('now') de SQLite guarda UTC sin zona ("2026-09-11 22:11:51"): sin
+    // esto Date.parse lo leería como hora local y correría el resultado horas.
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) s = s.replace(' ', 'T') + 'Z';
+    return Date.parse(s);
+  }
+
+  // window.SGA_DB.query() traga los errores y devuelve [] — una tabla que no
+  // existe, o que no tiene columna `id` (system_config es clave/valor), se veía
+  // igual que "no hay fila con ese id" y salía como falso faltante en cada
+  // documento. PRAGMA table_info sí distingue (devuelve [] solo si no hay tabla).
+  function columnasDeTabla(tabla) {
+    return new Set(window.SGA_DB.query(`PRAGMA table_info(${tabla})`).map(c => c.name));
+  }
+
+  // Compara un documento de Firestore contra su fila local. null = no hay nada
+  // que reportar; si no, { tipo: 'falta' | 'desactualizado', ... }.
+  function clasificarDocumento(collection, cols, docId, data) {
+    const comparaFechas = cols.has('updated_at') && cols.has('sync_status');
+    const local = window.SGA_DB.query(
+      `SELECT ${comparaFechas ? 'sync_status, updated_at' : '1 AS x'} FROM ${collection} WHERE id = ? LIMIT 1`,
+      [docId]
+    )[0];
+    if (!local) {
+      if (window.SGA_DB.fueEliminado(collection, docId)) return null; // borrado a propósito
+      return { tipo: 'falta' };
+    }
+    if (!comparaFechas || local.sync_status === 'pending') return null; // pendiente = cambio propio sin subir, no se pisa
+    const remoto = fechaAMs(data.updated_at);
+    const propio = fechaAMs(local.updated_at);
+    if (isNaN(remoto) || isNaN(propio) || remoto - propio <= AUDITORIA_TOLERANCIA_MS) return null;
+    return { tipo: 'desactualizado', updated_at_local: local.updated_at };
+  }
+
   // Resumen legible en consola además del array crudo — esto lo corre el dueño
   // a mano en DevTools, no tiene sentido devolverle solo JSON para que lo
-  // procese él mismo.
-  function resumirHuerfanos(huerfanos, label) {
+  // procese él mismo. `escaneados` (colección → cantidad de documentos leídos)
+  // también sirve para ver cuánta cuota de lectura gastó el barrido.
+  function resumirHuerfanos(huerfanos, label, escaneados = {}, sinAuditar = []) {
+    const colecciones = Object.keys(escaneados);
+    const totalLeidos = colecciones.reduce((suma, c) => suma + escaneados[c], 0);
+    console.log(`🔎 ${label}: se leyeron ${totalLeidos} documentos de ${colecciones.length} colecciones.`);
+    if (sinAuditar.length) {
+      console.log(`   Sin auditar (sin tabla local propia o sin columna id): ${sinAuditar.join(', ')}`);
+    }
     if (huerfanos.length === 0) {
-      console.log(`✅ ${label}: no se encontraron documentos huérfanos.`);
+      console.log(`✅ ${label}: no se encontraron documentos huérfanos ni desactualizados.`);
       return;
     }
     const porColeccion = {};
-    for (const h of huerfanos) porColeccion[h.collection] = (porColeccion[h.collection] || 0) + 1;
-    console.log(`⚠️ ${label}: ${huerfanos.length} documento(s) huérfano(s) encontrado(s):`);
-    console.table(Object.entries(porColeccion).map(([collection, cantidad]) => ({ collection, cantidad })));
+    for (const h of huerfanos) {
+      if (!porColeccion[h.collection]) porColeccion[h.collection] = { collection: h.collection, faltan: 0, desactualizados: 0 };
+      if (h.tipo === 'desactualizado') porColeccion[h.collection].desactualizados++;
+      else porColeccion[h.collection].faltan++;
+    }
+    console.log(`⚠️ ${label}: ${huerfanos.length} documento(s) para revisar:`);
+    console.table(Object.values(porColeccion));
   }
 
   async function auditarHuerfanosPOS(soloColecciones = null) {
@@ -2068,13 +2133,14 @@
     if (!firestoreDb) throw new Error('Firebase no conectado');
 
     const huerfanos = [];
+    const escaneados = {};
+    const sinAuditar = [];
     for (const { collection } of PULL_SOURCES) {
       if (AUDITORIA_EXCLUYE.has(collection)) continue;
       if (soloColecciones && !soloColecciones.includes(collection)) continue;
-      let existeTabla = true;
-      try { window.SGA_DB.query(`SELECT 1 FROM ${collection} LIMIT 1`); }
-      catch (e) { existeTabla = false; }
-      if (!existeTabla) continue; // la colección no tiene una tabla 1:1 local (embebida en otra)
+      const cols = columnasDeTabla(collection);
+      if (!cols.has('id')) { sinAuditar.push(collection); continue; } // sin tabla 1:1 local, o clave que no es `id`
+      escaneados[collection] = 0;
 
       // orderBy('updated_at') en vez del pseudo-campo __name__: toda tabla
       // sincronizable tiene esta columna (convención del repo, a diferencia de
@@ -2087,14 +2153,13 @@
         const snap = await q.get();
         batchSize = snap.size;
         for (const doc of snap.docs) {
+          escaneados[collection]++;
           const data = doc.data();
           if (data._pulled === false) continue; // en cola normal, no es huérfano
-          const existeLocal = window.SGA_DB.query(
-            `SELECT 1 FROM ${collection} WHERE id = ? LIMIT 1`, [doc.id]
-          )[0];
-          if (!existeLocal) {
+          const c = clasificarDocumento(collection, cols, doc.id, data);
+          if (c) {
             huerfanos.push({
-              collection, id: doc.id,
+              ...c, collection, id: doc.id,
               _pulled: data._pulled === undefined ? '(ausente)' : data._pulled,
               updated_at: data.updated_at || null,
             });
@@ -2103,7 +2168,7 @@
         lastDoc = snap.docs[snap.docs.length - 1];
       } while (batchSize >= 300);
     }
-    resumirHuerfanos(huerfanos, 'POS');
+    resumirHuerfanos(huerfanos, 'POS', escaneados, sinAuditar);
     return huerfanos;
   }
 
@@ -2130,13 +2195,14 @@
     if (!firestoreDb) throw new Error('Firebase no conectado');
 
     const huerfanos = [];
+    const escaneados = {};
+    const sinAuditar = [];
     for (const { name: collection } of MONITOR_SOURCES) {
       if (AUDITORIA_EXCLUYE.has(collection)) continue;
       if (soloColecciones && !soloColecciones.includes(collection)) continue;
-      let existeTabla = true;
-      try { window.SGA_DB.query(`SELECT 1 FROM ${collection} LIMIT 1`); }
-      catch (e) { existeTabla = false; }
-      if (!existeTabla) continue;
+      const cols = columnasDeTabla(collection);
+      if (!cols.has('id')) { sinAuditar.push(collection); continue; } // sin tabla 1:1 local, o clave que no es `id`
+      escaneados[collection] = 0;
 
       // Solo interesan documentos con _synced_at YA VIEJO (más de 1 hora): uno
       // recién pusheado todavía no tuvo su ciclo normal, no es un huérfano.
@@ -2148,13 +2214,15 @@
         const snap = await q.get();
         batchSize = snap.size;
         for (const doc of snap.docs) {
+          escaneados[collection]++;
           const data = doc.data();
           if (!data._synced_at || data._synced_at > haceUnaHora) continue;
-          const existeLocal = window.SGA_DB.query(
-            `SELECT 1 FROM ${collection} WHERE id = ? LIMIT 1`, [doc.id]
-          )[0];
-          if (!existeLocal) {
-            huerfanos.push({ collection, id: doc.id, _synced_at: data._synced_at, data });
+          const c = clasificarDocumento(collection, cols, doc.id, data);
+          if (c) {
+            huerfanos.push({
+              ...c, collection, id: doc.id,
+              _synced_at: data._synced_at, updated_at: data.updated_at || null, data,
+            });
           }
         }
         lastDoc = snap.docs[snap.docs.length - 1];
@@ -2162,7 +2230,7 @@
     }
     // El campo `data` (documento completo) viaja para que repararHuerfanosAdmin
     // pueda aplicarlo directo, sin tener que volver a pedirlo a Firestore.
-    resumirHuerfanos(huerfanos, 'Admin-POS');
+    resumirHuerfanos(huerfanos, 'Admin-POS', escaneados, sinAuditar);
     return huerfanos;
   }
 

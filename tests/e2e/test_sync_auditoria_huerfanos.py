@@ -136,10 +136,84 @@ def main():
         assert row and abs(row[0]["monto"] - 400000) < 0.01, f"BUG: no quedo aplicado en Admin-POS: {row}"
         print("   OK - el huerfano ya esta en Admin-POS despues de reparar")
 
+        # ------------------------------------------------------------------
+        # "Existe pero desactualizado": el caso real de los remitos de Sueño
+        # verde y Maschwitz (24/9/2026) — la fila YA esta en el POS, asi que
+        # "falta" no la ve, pero el documento de Firestore es mas nuevo y nunca
+        # se aplico (Admin lo subio sin _pulled:false).
+        # ------------------------------------------------------------------
+        print("--- Desactualizado (Admin->POS): la fila existe, el doc es mas nuevo y sin _pulled ---")
+        store_gastos = sim.store.cols["gastos"]
+        base = store_gastos["gasto-huerfano-sin-pulled"]  # ya aplicado en el POS (monto 400000)
+        assert pos.q("SELECT monto FROM gastos WHERE id = ?", ["gasto-huerfano-sin-pulled"])[0]["monto"] == 400000
+        base["monto"] = 500000
+        base["updated_at"] = "2026-09-10T10:00:00.000Z"
+        base.pop("_pulled", None)
+        base.pop("_pulled_at", None)
+
+        print("--- Control 1: doc mas nuevo, pero la fila local tiene un cambio propio SIN subir (pending) ---")
+        pos.run("UPDATE gastos SET sync_status = 'pending' WHERE id = ?", ["gasto-huerfano-pulled-true"])
+        store_gastos["gasto-huerfano-pulled-true"]["updated_at"] = "2026-09-11T10:00:00.000Z"
+        store_gastos["gasto-huerfano-pulled-true"].pop("_pulled", None)
+
+        print("--- Control 2: doc IGUAL al local (sincronizado y sano) ---")
+        assert pos.q("SELECT 1 FROM gastos WHERE id = ?", ["gasto-sano-en-cola"]), "el sano deberia haberse aplicado en el pull"
+
+        print("--- Control 3: doc faltante pero con marca de borrado local (borrado a proposito) ---")
+        store_gastos["gasto-borrado-a-proposito"] = gasto_dict(
+            "gasto-borrado-a-proposito", suc, user_admin["id"], "2026-09-04T10:00:00.000Z")
+        pos.js("() => window.SGA_DB.registrarEliminacion('gastos', 'gasto-borrado-a-proposito')")
+
+        print("--- Control 4: coleccion sin columna id (system_config es clave/valor) — no es un faltante ---")
+        sim.store.cols.setdefault("system_config", {})["tope_test_auditoria"] = {
+            "key": "tope_test_auditoria", "value": "1", "updated_at": "2026-09-05T10:00:00.000Z"}
+
+        res = pos.js("() => window.SGA_Sync.auditarHuerfanosPOS()")
+        por_id = {h["id"]: h for h in res}
+        assert "gasto-huerfano-sin-pulled" in por_id, f"BUG: no detecto el doc desactualizado: {res}"
+        assert por_id["gasto-huerfano-sin-pulled"]["tipo"] == "desactualizado", por_id["gasto-huerfano-sin-pulled"]
+        assert por_id["gasto-huerfano-sin-pulled"]["updated_at_local"] == "2026-09-01T10:00:00.000Z"
+        assert "gasto-huerfano-pulled-true" not in por_id, (
+            f"BUG: marco desactualizado una fila con cambio local sin subir (se le pisaria): {res}")
+        assert "gasto-sano-en-cola" not in por_id, f"BUG: marco un doc igual al local: {res}"
+        assert "gasto-borrado-a-proposito" not in por_id, (
+            f"BUG: marco faltante un registro borrado a proposito (lo resucitaria): {res}")
+        assert not [h for h in res if h["collection"] == "system_config"], (
+            f"BUG: colecciones sin columna id salen como faltantes falsos: {res}")
+        print("   OK - detecta el desactualizado; NO marca pending, iguales, borrados ni claves que no son id")
+
+        print("--- Reparar el desactualizado: el proximo pull lo trae y la fila queda al dia ---")
+        n3 = pos.js("(lista) => window.SGA_Sync.repararHuerfanosPOS(lista)",
+                    [por_id["gasto-huerfano-sin-pulled"]])
+        assert n3 == 1, f"deberia reparar 1, reparo {n3}"
+        pos.pull()
+        fila = pos.q("SELECT monto, updated_at FROM gastos WHERE id = ?", ["gasto-huerfano-sin-pulled"])[0]
+        assert abs(fila["monto"] - 500000) < 0.01, f"BUG: el POS no recibio la version nueva: {fila}"
+        res2 = pos.js("() => window.SGA_Sync.auditarHuerfanosPOS(['gastos'])")
+        assert "gasto-huerfano-sin-pulled" not in {h["id"] for h in res2}, (
+            f"BUG: sigue apareciendo despues de repararlo: {res2}")
+        print("   OK - el POS ya tiene la version nueva y la auditoria ya no lo lista")
+
+        print("--- Desactualizado (POS->Admin): fila en Admin vieja, doc mas nuevo con _synced_at viejo ---")
+        doc_admin = store_gastos["gasto-huerfano-admin-viejo"]  # ya aplicado en Admin (monto 400000, 2020)
+        doc_admin["monto"] = 123
+        doc_admin["updated_at"] = "2021-06-01T00:00:00.000Z"
+        res_a = admin.js("() => window.SGA_Sync.auditarHuerfanosAdmin(['gastos'])")
+        fila_a = [h for h in res_a if h["id"] == "gasto-huerfano-admin-viejo"]
+        assert fila_a and fila_a[0]["tipo"] == "desactualizado", (
+            f"BUG: Admin no detecto el desactualizado: {res_a}")
+        n4 = admin.js("(lista) => window.SGA_Sync.repararHuerfanosAdmin(lista)", fila_a)
+        assert n4 == 1, f"deberia aplicar 1, aplico {n4}"
+        assert abs(admin.q("SELECT monto FROM gastos WHERE id = ?", ["gasto-huerfano-admin-viejo"])[0]["monto"] - 123) < 0.01
+        res_a2 = admin.js("() => window.SGA_Sync.auditarHuerfanosAdmin(['gastos'])")
+        assert "gasto-huerfano-admin-viejo" not in {h["id"] for h in res_a2}, (
+            f"BUG: Admin lo sigue listando despues de aplicarlo: {res_a2}")
+        print("   OK - Admin detecta el desactualizado, lo aplica y ya no lo lista")
+
         errs = pos.errores + admin.errores
         assert not errs, f"Errores JS: {errs}"
-        print("\nOK - test_sync_auditoria_huerfanos: detecta y repara huérfanos en los dos sentidos, "
-              "sin falsos positivos sobre lo que esta sano o recien pusheado.")
+        print("\nOK - test_sync_auditoria_huerfanos: detecta y repara huérfanos y desactualizados en los dos "
+              "sentidos, sin falsos positivos sobre lo que esta sano, recien pusheado, pendiente o borrado.")
 
 
 if __name__ == "__main__":
