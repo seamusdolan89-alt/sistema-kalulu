@@ -16,6 +16,12 @@
  * rechaza, no pasa nada. Aprobar además crea el registro en
  * consumo_interno (mismo patrón que ajuste_stock.js) para que quede en el
  * historial de movimientos de stock y en los reportes que ya lo leen.
+ *
+ * EXCEPCION: "Producto no entregado" NO es consumo propio sino un faltante del
+ * proveedor. Ahí no se crea consumo_interno: en su lugar se le acredita al
+ * proveedor lo que no llego con una NOTA DE CRÉDITO PROVISORIA (una por compra,
+ * ver acreditarNoEntregado en cuenta_corriente_proveedores.js), que después se
+ * completa con la NC real.
  */
 
 const AprobacionesPendientes = (() => {
@@ -27,6 +33,12 @@ const AprobacionesPendientes = (() => {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const fmt$ = n => window.SGA_Utils.formatCurrency(n);
   const nowISO = () => window.SGA_Utils.formatISODate(new Date());
+
+  // Nombre del motivo (compras_v2.js lo ofrece con el mismo texto). Los ajustes
+  // pedidos antes del cambio de nombre dicen "Producto no entregado por proveedor":
+  // por eso se compara por prefijo.
+  const MOTIVO_NO_ENTREGADO = 'Producto no entregado';
+  const esNoEntregado = a => !!a.compra_id && String(a.motivo || '').startsWith(MOTIVO_NO_ENTREGADO);
 
   const MOTIVO_LABEL = {
     devolucion_vencido:    'Devolución — producto vencido',
@@ -103,10 +115,24 @@ const AprobacionesPendientes = (() => {
     );
   }
 
-  function aprobar(id) {
+  async function aprobar(id) {
     const a = db().query('SELECT * FROM stock_ajustes WHERE id = ?', [id])[0];
     if (!a) return;
-    if (!confirm(`¿Aprobar este ajuste? Se van a descontar ${a.cantidad} unidad(es) del stock.`)) return;
+
+    const noEntregado = esNoEntregado(a);
+    let aviso = `¿Aprobar este ajuste? Se van a descontar ${a.cantidad} unidad(es) del stock.`;
+    if (noEntregado) {
+      // La capa de datos de Cuentas Corrientes hace el calculo (costo x cantidad + IVA si la factura es A)
+      if (!window.SGA_PagosProveedores) await import('./cuenta_corriente_proveedores.js');
+      const c = window.SGA_PagosProveedores.calcularNoEntregado({
+        compraId: a.compra_id, productoId: a.producto_id, cantidad: a.cantidad, costoUnitario: a.costo_unitario,
+      });
+      if (c.success && c.total > 0.01) {
+        aviso += `\n\nAdemás se le acredita al proveedor ${fmt$(c.total)} con una nota de crédito provisoria ` +
+                 `(no queda como consumo interno).`;
+      }
+    }
+    if (!confirm(aviso)) return;
 
     const admin = window.SGA_Auth.getCurrentUser();
     const ts = nowISO();
@@ -121,15 +147,24 @@ const AprobacionesPendientes = (() => {
         motivo: MOTIVO_LABEL[a.motivo] || a.motivo || 'Ajuste de stock', usuarioId: admin.id, fecha: ts,
         crearSiNoExiste: false,
       });
-      db().run(
-        `INSERT INTO consumo_interno
-           (id, producto_id, sucursal_id, usuario_id, registrado_por_usuario_id,
-            cantidad, costo_unitario, precio_venta_unitario, motivo, observaciones, fecha, sync_status, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-        [window.SGA_Utils.generateUUID(), a.producto_id, a.sucursal_id,
-         a.usuario_id, admin.id, a.cantidad, costo, parseFloat(prod.precio_venta) || 0,
-         MOTIVO_LABEL[a.motivo] || a.motivo || 'Ajuste de stock', 'Aprobado desde Aprobaciones Pendientes', ts, ts]
-      );
+      if (noEntregado) {
+        // Faltante del proveedor: no es consumo interno, se le acredita con una NC provisoria.
+        const r = window.SGA_PagosProveedores.acreditarNoEntregado({
+          compraId: a.compra_id, productoId: a.producto_id, cantidad: a.cantidad,
+          costoUnitario: a.costo_unitario, usuarioId: admin.id,
+        }, { sinLote: true });
+        if (!r.success) throw new Error(r.error || 'No se pudo generar la nota de crédito provisoria');
+      } else {
+        db().run(
+          `INSERT INTO consumo_interno
+             (id, producto_id, sucursal_id, usuario_id, registrado_por_usuario_id,
+              cantidad, costo_unitario, precio_venta_unitario, motivo, observaciones, fecha, sync_status, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+          [window.SGA_Utils.generateUUID(), a.producto_id, a.sucursal_id,
+           a.usuario_id, admin.id, a.cantidad, costo, parseFloat(prod.precio_venta) || 0,
+           MOTIVO_LABEL[a.motivo] || a.motivo || 'Ajuste de stock', 'Aprobado desde Aprobaciones Pendientes', ts, ts]
+        );
+      }
       db().run(
         `UPDATE stock_ajustes SET estado = 'aprobado', aprobado_por = ?, fecha_aprobacion = ?,
            sync_status = 'pending', updated_at = ? WHERE id = ?`,

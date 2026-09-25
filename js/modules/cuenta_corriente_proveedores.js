@@ -378,6 +378,8 @@ const SGA_PagosProveedores = (() => {
       numero_comprobante = null, condicion_nc = '', compra_origen_id = null,
       items = [], fiscal = {}, provisoria = false,
       imputaciones, imputar_a_compra_id = null, auto_imputar = false,
+      // sinLote: quien llama ya abrio un lote (beginBatch) y lo cierra el: no hay lotes anidados.
+      sinLote = false,
     } = opts;
     if (!proveedor_id) return { success: false, error: 'proveedor_id requerido' };
 
@@ -419,7 +421,7 @@ const SGA_PagosProveedores = (() => {
     const motivoStock = `Devolución a proveedor — NC${numero_comprobante ? ' ' + numero_comprobante : ''}`;
 
     try {
-      db().beginBatch();
+      if (!sinLote) db().beginBatch();
 
       db().run(
         `INSERT INTO pagos_proveedores
@@ -484,14 +486,182 @@ const SGA_PagosProveedores = (() => {
       const okMet = db().query(`SELECT COUNT(*) AS n FROM pagos_proveedores_metodos WHERE pago_id = ?`, [pagoId])[0]?.n || 0;
       const okIt = db().query(`SELECT COUNT(*) AS n FROM pagos_proveedores_items WHERE pago_id = ?`, [pagoId])[0]?.n || 0;
       if (!okPago || !okMet || okIt !== lineas.length) {
-        db().rollbackBatch();
+        if (!sinLote) db().rollbackBatch();
         return { success: false, error: 'No se pudo guardar la nota de crédito (revisá la consola)' };
       }
-      db().commitBatch();
+      if (!sinLote) db().commitBatch();
       return { success: true, id: pagoId, total, credito_sobrante: Math.max(0, restante) };
     } catch (e) {
-      db().rollbackBatch();
+      if (!sinLote) db().rollbackBatch();
       console.error('SGA_PagosProveedores.crearNotaCredito:', e);
+      return { success: false, error: e.message };
+    }
+  }
+
+  // ── NC provisoria por "Producto no entregado" ──────────────────────────────
+  //
+  // Cuando el admin aprueba un ajuste "Producto no entregado" (Aprobaciones
+  // Pendientes) el stock baja Y se le acredita al proveedor lo que no llego: una
+  // NC PROVISORIA (sin N° de comprobante todavia) que reduce la deuda de esa
+  // factura desde ese momento. Es UNA por compra: las aprobaciones siguientes de
+  // la misma compra le suman lineas mientras siga provisoria, como una NC real del
+  // proveedor. Cuando llega la real se completa (completarNotaCredito). Sus lineas
+  // NO vuelven a mover stock (el ajuste ya lo bajo).
+
+  function _letraDe(condicionCompra) {
+    return { 'Factura A': 'A', 'Factura B': 'B', 'Factura C': 'C' }[condicionCompra] || '';
+  }
+
+  // Lo que vale acreditar por esas unidades: costo neto x cantidad y, si la factura
+  // es A, mas el IVA de la alicuota de esa linea de la compra.
+  function calcularNoEntregado({ compraId, productoId, cantidad, costoUnitario }) {
+    const compra = db().query(
+      `SELECT id, proveedor_id, sucursal_id, condicion_compra FROM compras WHERE id = ?`, [compraId]
+    )[0];
+    if (!compra) return { success: false, error: 'Compra no encontrada' };
+    const item = db().query(
+      `SELECT costo_unitario, descuento_pct, iva FROM compra_items
+       WHERE compra_id = ? AND producto_id = ? AND COALESCE(tipo, 'producto') != 'muestra' LIMIT 1`,
+      [compraId, productoId]
+    )[0];
+    let costo = costoUnitario != null && costoUnitario !== '' ? parseFloat(costoUnitario) || 0 : null;
+    if (costo == null) {
+      const desc = Math.min(100, Math.max(0, parseFloat(item?.descuento_pct) || 0));
+      costo = (parseFloat(item?.costo_unitario) || 0) * (1 - desc / 100);
+    }
+    const letra = _letraDe(compra.condicion_compra);
+    const iva = letra === 'A' && (item?.iva === '10.5' || item?.iva === '21') ? item.iva : null;
+    const cant = parseFloat(cantidad) || 0;
+    const neto = cant * costo;
+    const ivaMonto = iva ? neto * parseFloat(iva) / 100 : 0;
+    return { success: true, compra, letra, iva, costo, cantidad: cant, neto, ivaMonto, total: neto + ivaMonto };
+  }
+
+  /**
+   * Acredita al proveedor lo que no llego. `sinLote`: el que llama ya abrio un lote.
+   * Devuelve { success, id, agregada, total, sinImporte }.
+   */
+  function acreditarNoEntregado(o, { sinLote = false } = {}) {
+    const c = calcularNoEntregado(o);
+    if (!c.success) return c;
+    if (c.total <= 0.01) return { success: true, sinImporte: true, total: 0 };   // sin costo cargado: nada que acreditar
+    const ts = now();
+    const compraId = o.compraId;
+
+    const existente = db().query(
+      `SELECT id FROM pagos_proveedores
+       WHERE tipo = 'nota_credito' AND nc_provisoria = 1 AND compra_origen_id = ?
+       ORDER BY updated_at DESC LIMIT 1`, [compraId]
+    )[0];
+
+    // Primera aprobacion de la compra: nace la NC provisoria, aplicada a su factura.
+    if (!existente) {
+      return crearNotaCredito({
+        proveedor_id: c.compra.proveedor_id, fecha: ts.slice(0, 10), usuario_id: o.usuarioId || null,
+        sucursal_id: c.compra.sucursal_id, condicion_nc: c.letra, compra_origen_id: compraId,
+        provisoria: true, observaciones: 'Producto no entregado',
+        items: [{ tipo: 'producto', producto_id: o.productoId, cantidad: c.cantidad,
+                  costo_unitario: c.costo, iva: c.iva, mueve_stock: false }],
+        imputar_a_compra_id: compraId, sinLote,
+      });
+    }
+
+    // Ya hay una provisoria de esta compra: se le suma la linea (y la diferencia se
+    // aplica a la misma factura, hasta su saldo pendiente).
+    try {
+      if (!sinLote) db().beginBatch();
+      db().run(
+        `INSERT INTO pagos_proveedores_items
+           (id, pago_id, tipo, producto_id, concepto, cantidad, costo_unitario, subtotal, iva, mueve_stock)
+         VALUES (?, ?, 'producto', ?, NULL, ?, ?, ?, ?, 0)`,
+        [uid(), existente.id, o.productoId, c.cantidad, c.costo, c.neto, c.iva]
+      );
+      db().run(
+        `UPDATE pagos_proveedores SET subtotal_neto = COALESCE(subtotal_neto, 0) + ?,
+           iva_105 = COALESCE(iva_105, 0) + ?, iva_21 = COALESCE(iva_21, 0) + ?,
+           sync_status = 'pending', updated_at = ? WHERE id = ?`,
+        [c.neto, c.iva === '10.5' ? c.ivaMonto : 0, c.iva === '21' ? c.ivaMonto : 0, ts, existente.id]
+      );
+      db().run(
+        `UPDATE pagos_proveedores_metodos SET monto = monto + ? WHERE pago_id = ? AND metodo = 'nota_credito'`,
+        [c.total, existente.id]
+      );
+      const pendiente = getComprasPendientes(c.compra.proveedor_id).find(x => x.id === compraId);
+      const aplicar = pendiente ? Math.min(c.total, pendiente.saldo) : 0;
+      if (aplicar > 0.01) {
+        db().run(
+          `INSERT INTO imputaciones_pagos (id, pago_id, compra_id, gasto_id, monto_imputado, fecha) VALUES (?, ?, ?, NULL, ?, ?)`,
+          [uid(), existente.id, compraId, aplicar, ts.slice(0, 10)]
+        );
+      }
+      if (!sinLote) db().commitBatch();
+      const total = db().query(
+        `SELECT COALESCE(SUM(monto), 0) AS t FROM pagos_proveedores_metodos WHERE pago_id = ?`, [existente.id])[0]?.t || 0;
+      return { success: true, id: existente.id, agregada: true, total };
+    } catch (e) {
+      if (!sinLote) db().rollbackBatch();
+      console.error('SGA_PagosProveedores.acreditarNoEntregado:', e);
+      return { success: false, error: e.message };
+    }
+  }
+
+  /**
+   * Completar una NC provisoria con los datos de la NC REAL del proveedor: su N° de
+   * comprobante y su importe (puede no coincidir centavo a centavo con lo calculado).
+   * Si estaba aplicada a la factura de origen, se vuelve a aplicar por el importe real.
+   */
+  function completarNotaCredito(pagoId, { numero_comprobante, total } = {}) {
+    if (!window.ADMIN_MODE) return { success: false, error: 'Completar una NC solo se puede desde Admin-POS' };
+    const numero = String(numero_comprobante || '').trim();
+    const nuevoTotal = parseFloat(total) || 0;
+    if (!numero) return { success: false, error: 'Ingresá el N° de la nota de crédito' };
+    if (nuevoTotal <= 0.01) return { success: false, error: 'Ingresá el importe de la nota de crédito' };
+
+    const pago = db().query(
+      `SELECT id, proveedor_id, compra_origen_id, fecha FROM pagos_proveedores
+       WHERE id = ? AND tipo = 'nota_credito' AND nc_provisoria = 1`, [pagoId]
+    )[0];
+    if (!pago) return { success: false, error: 'No es una nota de crédito provisoria' };
+
+    const ts = now();
+    try {
+      db().beginBatch();
+      db().run(
+        `UPDATE pagos_proveedores SET numero_comprobante = ?, nc_provisoria = 0, sync_status = 'pending', updated_at = ? WHERE id = ?`,
+        [numero, ts, pagoId]
+      );
+      db().run(
+        `UPDATE pagos_proveedores_metodos SET monto = ?, referencia = ? WHERE pago_id = ? AND metodo = 'nota_credito'`,
+        [nuevoTotal, numero, pagoId]
+      );
+
+      const imps = db().query(`SELECT id FROM imputaciones_pagos WHERE pago_id = ?`, [pagoId]);
+      if (pago.compra_origen_id && imps.length) {
+        // Se re-aplica por el importe real: la imputacion vieja se borra (con marca) y nace una nueva.
+        for (const i of imps) {
+          db().run(`DELETE FROM imputaciones_pagos WHERE id = ?`, [i.id]);
+          db().registrarEliminacion('imputaciones_pagos', i.id);
+        }
+        const compra = db().query(`SELECT total FROM compras WHERE id = ?`, [pago.compra_origen_id])[0];
+        const yaImputado = db().query(
+          `SELECT COALESCE(SUM(monto_imputado), 0) AS t FROM imputaciones_pagos WHERE compra_id = ?`, [pago.compra_origen_id])[0]?.t || 0;
+        const saldo = (parseFloat(compra?.total) || 0) - yaImputado;
+        const aplicar = Math.min(nuevoTotal, saldo);
+        if (aplicar > 0.01) {
+          db().run(
+            `INSERT INTO imputaciones_pagos (id, pago_id, compra_id, gasto_id, monto_imputado, fecha) VALUES (?, ?, ?, NULL, ?, ?)`,
+            [uid(), pagoId, pago.compra_origen_id, aplicar, ts.slice(0, 10)]
+          );
+        }
+      }
+
+      const ok = db().query(`SELECT nc_provisoria FROM pagos_proveedores WHERE id = ?`, [pagoId])[0]?.nc_provisoria;
+      if (ok !== 0) { db().rollbackBatch(); return { success: false, error: 'No se pudo completar la nota de crédito' }; }
+      db().commitBatch();
+      return { success: true, total: nuevoTotal };
+    } catch (e) {
+      db().rollbackBatch();
+      console.error('SGA_PagosProveedores.completarNotaCredito:', e);
       return { success: false, error: e.message };
     }
   }
@@ -553,7 +723,7 @@ const SGA_PagosProveedores = (() => {
   // (columna compra_id) que para un gasto (columna gasto_id).
   function _impsDeComprobante(campo, id) {
     return db().query(
-      `SELECT ip.fecha, ip.monto_imputado, ip.pago_id, p.observaciones, p.tipo
+      `SELECT ip.fecha, ip.monto_imputado, ip.pago_id, p.observaciones, p.tipo, p.nc_provisoria
        FROM imputaciones_pagos ip
        JOIN pagos_proveedores p ON p.id = ip.pago_id
        WHERE ip.${campo} = ?
@@ -569,7 +739,7 @@ const SGA_PagosProveedores = (() => {
         (MLBL[m.metodo] || m.metodo) + (m.referencia ? ` (${m.referencia})` : '')
       ).join(' + ') || i.observaciones || 'Pago';
       return { fecha: i.fecha, monto: parseFloat(i.monto_imputado) || 0, desc, pago_id: i.pago_id,
-               es_nc: i.tipo === 'nota_credito' };
+               es_nc: i.tipo === 'nota_credito', provisoria: i.tipo === 'nota_credito' && !!i.nc_provisoria };
     });
   }
 
@@ -639,6 +809,7 @@ const SGA_PagosProveedores = (() => {
         fecha:             p.fecha,
         desc:              p.tipo === 'nota_credito' ? _refNC(p) : desc,
         es_nc:             p.tipo === 'nota_credito',
+        provisoria:        p.tipo === 'nota_credito' && !!p.nc_provisoria,
         total_pago:        parseFloat(p.total_pago) || 0,
         credito_disponible: _getCreditoDisponibleDePago(p.id),
       };
@@ -849,6 +1020,9 @@ const SGA_PagosProveedores = (() => {
     getLedgerAgrupado,
     crearPago,
     crearNotaCredito,
+    calcularNoEntregado,
+    acreditarNoEntregado,
+    completarNotaCredito,
     imputar,
     getResumenProveedores,
     getSesionActiva,
@@ -1140,6 +1314,10 @@ const CuentaCorrienteProveedores = (() => {
   const btnAnular = (pagoId) => puedeAnularPagos()
     ? `<button class="ledger-btn-anular" data-anular-pago="${esc(pagoId)}" title="Anular este pago">Anular</button>`
     : '';
+  // Una NC provisoria (la que genera "Producto no entregado") se completa con la NC real del proveedor.
+  const btnCompletar = (pagoId, provisoria) => provisoria && puedeAnularPagos()
+    ? `<button class="ledger-btn-completar" data-completar-nc="${esc(pagoId)}" title="Cargar el N° y el importe de la NC real del proveedor">Completar NC</button>`
+    : '';
 
   function buildTablaPlana(ledger, saldo) {
     if (!ledger.length) return `
@@ -1163,6 +1341,7 @@ const CuentaCorrienteProveedores = (() => {
               <td>
                 ${esc(e.referencia)}
                 ${e.tipo === 'compra' && e.saldo_item > 0.01 ? `<span class="ledger-saldo-parcial"> · Saldo: ${fmt$(e.saldo_item)}</span>` : ''}
+                ${e.tipo === 'nc' ? btnCompletar(e.id, e.provisoria) : ''}
                 ${e.tipo === 'pago' || e.tipo === 'nc' ? btnAnular(e.id) : ''}
               </td>
               <td class="right">${e.debe > 0 ? `<span class="ledger-debe">${fmt$(e.debe)}</span>` : '—'}</td>
@@ -1227,7 +1406,7 @@ const CuentaCorrienteProveedores = (() => {
                 <tr class="ledger-row-imp">
                   <td>${fmtFecha(i.fecha)}</td>
                   <td><span class="ledger-type-badge ${i.es_nc ? 'ledger-type-nc' : 'ledger-type-pago'}">${i.es_nc ? 'NC' : 'Pago'}</span></td>
-                  <td><span class="ledger-imp-ref">${esc(i.desc)}</span> ${btnAnular(i.pago_id)}</td>
+                  <td><span class="ledger-imp-ref">${esc(i.desc)}</span> ${btnCompletar(i.pago_id, i.provisoria)}${btnAnular(i.pago_id)}</td>
                   <td class="right">—</td>
                   <td class="right"><span class="ledger-haber">${fmt$(i.monto)}</span></td>
                   <td class="right">—</td>
@@ -1266,7 +1445,7 @@ const CuentaCorrienteProveedores = (() => {
                     <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center">
                       <button class="ledger-btn-imputar" data-imputar-pago="${esc(p.id)}"
                               data-credito="${p.credito_disponible}">Imputar…</button>
-                      ${btnAnular(p.id)}
+                      ${btnCompletar(p.id, p.provisoria)}${btnAnular(p.id)}
                     </div>
                   </td>
                 </tr>`).join('')}
@@ -1466,6 +1645,81 @@ const CuentaCorrienteProveedores = (() => {
     });
   }
 
+  // Completar una NC provisoria (la que genera "Producto no entregado") con los datos
+  // de la NC REAL del proveedor: su numero y su importe, que puede no coincidir con lo
+  // calculado. Si estaba aplicada a la factura de origen, se re-aplica por el importe real.
+  function openModalCompletarNC(pagoId, proveedorId, proveedorNombre) {
+    PagoWizard.ensureCss();
+    const overlay = ge('ccprov-overlay');
+    if (!overlay) return;
+
+    const pago = window.SGA_DB.query(
+      `SELECT p.id, p.fecha, p.compra_origen_id, p.condicion_nc,
+              COALESCE((SELECT SUM(m.monto) FROM pagos_proveedores_metodos m WHERE m.pago_id = p.id), 0) AS total
+       FROM pagos_proveedores p WHERE p.id = ? AND p.tipo = 'nota_credito' AND p.nc_provisoria = 1`, [pagoId]
+    )[0];
+    if (!pago) { alert('Esta nota de crédito ya no es provisoria.'); renderDetalle(proveedorId, proveedorNombre); return; }
+    const lineas = window.SGA_DB.query(
+      `SELECT i.cantidad, i.costo_unitario, i.iva, pr.nombre
+       FROM pagos_proveedores_items i LEFT JOIN productos pr ON pr.id = i.producto_id
+       WHERE i.pago_id = ? ORDER BY i.rowid`, [pagoId]
+    );
+    const total = parseFloat(pago.total) || 0;
+
+    overlay.innerHTML = `
+      <div class="ccprov-modal" style="max-width:560px">
+        <div class="ccprov-modal-hdr">
+          <span>\u{1F9FE} Completar nota de crédito \u2014 ${esc(proveedorNombre)}</span>
+          <button class="ccprov-modal-close" id="btn-comp-close" aria-label="Cerrar" title="Cerrar">\u2715</button>
+        </div>
+        <div class="ccprov-modal-body" style="font-size:13px">
+          <p style="margin:0">NC provisoria por <strong>${fmt$(total)}</strong> (calculada al aprobar los productos no entregados):</p>
+          <ul style="margin:0 0 4px 18px;padding:0">
+            ${lineas.map(l => `<li>${esc(l.nombre || 'Producto')} — ${l.cantidad} × ${fmt$(l.costo_unitario)}${l.iva ? ` + IVA ${String(l.iva).replace('.', ',')}%` : ''}</li>`).join('')}
+          </ul>
+          <p style="margin:0;color:var(--color-text-secondary)">Cuando llegue la NC real del proveedor, cargá su número y su importe (puede no coincidir centavo a centavo).</p>
+          <div class="ccprov-field-row">
+            <div class="ccprov-field">
+              <label for="comp-numero">N° de la NC del proveedor</label>
+              <input type="text" class="ccprov-input" id="comp-numero" placeholder="0001-00000123" autocomplete="off">
+            </div>
+            <div class="ccprov-field">
+              <label for="comp-total">Importe de la NC</label>
+              <input type="number" class="ccprov-input" id="comp-total" min="0" step="any" value="${Math.round(total * 100) / 100}">
+            </div>
+          </div>
+          <div id="comp-error" style="display:none;color:#c62828;font-size:13px"></div>
+        </div>
+        <div class="ccprov-modal-ftr">
+          <button class="btn btn-outline" id="btn-comp-cancel">Cancelar</button>
+          <button class="btn btn-primary" id="btn-comp-ok">Guardar</button>
+        </div>
+      </div>`;
+    overlay.classList.remove('hidden');
+    setTimeout(() => ge('comp-numero')?.focus(), 50);
+
+    const close = () => { overlay.classList.add('hidden'); overlay.innerHTML = ''; };
+    ge('btn-comp-close').addEventListener('click', close);
+    ge('btn-comp-cancel').addEventListener('click', close);
+    ge('btn-comp-ok').addEventListener('click', () => {
+      const res = data().completarNotaCredito(pagoId, {
+        numero_comprobante: ge('comp-numero').value,
+        total: ge('comp-total').value,
+      });
+      if (!res.success) {
+        const err = ge('comp-error');
+        err.textContent = res.error || 'No se pudo completar la nota de crédito.';
+        err.style.display = 'block';
+        return;
+      }
+      close();
+      window.SGA_Sync?.pushPending?.();
+      renderDetalle(proveedorId, proveedorNombre);
+      if (window.SGA_Utils?.showToast) window.SGA_Utils.showToast('Nota de crédito completada', 'success');
+      else window.SGA_Utils?.showNotification?.('Nota de crédito completada', 'success');
+    });
+  }
+
   function renderLedgerContent(proveedorId, saldo) {
     const wrap = ge('ccprov-ledger-wrap');
     if (!wrap) return;
@@ -1485,6 +1739,11 @@ const CuentaCorrienteProveedores = (() => {
       ));
     });
 
+    wrap.querySelectorAll('[data-completar-nc]').forEach(btn => {
+      btn.addEventListener('click', () => openModalCompletarNC(
+        btn.dataset.completarNc, proveedorId, state.proveedorNombre
+      ));
+    });
     wrap.querySelectorAll('[data-anular-pago]').forEach(btn => {
       btn.addEventListener('click', () => openModalAnularPago(
         btn.dataset.anularPago, proveedorId, state.proveedorNombre
