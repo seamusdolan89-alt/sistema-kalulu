@@ -174,6 +174,7 @@ const Informes = (() => {
           JOIN compras c2 ON ci2.compra_id = c2.id
           WHERE ci2.producto_id = p.id
             AND c2.sucursal_id = ?
+            AND COALESCE(c2.estado,'confirmada') != 'anulada'
             AND c2.fecha >= ? AND c2.fecha < ?
         ) AS recibido_compras,
         (

@@ -124,6 +124,270 @@ const OperacionesStock = (() => {
     return compra;
   }
 
+  // ── ANULAR UNA COMPRA (cargada por error) ──────────────────────────────────
+  //
+  // Para facturas mal cargadas (monto o proveedor equivocado, duplicada...). NO
+  // es una nota de credito: no hay documento del proveedor de por medio. La
+  // compra queda como historial (estado 'anulada', con motivo/quien/cuando) y
+  // se deshace todo lo que hizo:
+  //  - deuda: las consultas de saldo ya excluyen las compras anuladas;
+  //  - stock: se revierte lo que ESTA compra sumo, segun el registro de
+  //    movimientos (refTipo 'compras') — sirve igual para una compra editada o
+  //    para una vinculada a un remito (lo que vino del remito no lo sumo la
+  //    factura). Las compras de antes del registro se revierten por sus items;
+  //  - pagos aplicados: se borran SOLO las imputaciones (con marca de borrado);
+  //    el pago sigue y su credito vuelve a estar disponible;
+  //  - ajustes de stock pendientes de aprobacion: se rechazan;
+  //  - remito vinculado: vuelve a quedar pendiente de factura;
+  //  - costo: solo se revierte si esta era la ultima compra de ese producto Y
+  //    el costo actual es justo el que esta compra puso (nunca el precio de venta).
+
+  function puedeAnularCompras() {
+    return !!window.ADMIN_MODE && window.SGA_Auth?.getCurrentUser?.()?.rol === 'admin';
+  }
+
+  function getResumenAnulacionCompra(compraId) {
+    const compra = db().query(
+      `SELECT c.*, p.razon_social AS proveedor_nombre
+       FROM compras c LEFT JOIN proveedores p ON p.id = c.proveedor_id
+       WHERE c.id = ?`, [compraId]
+    )[0];
+    if (!compra) return { success: false, error: 'Compra no encontrada' };
+    if ((compra.estado || 'confirmada') === 'anulada') return { success: false, error: 'La compra ya está anulada' };
+
+    const remito = db().query(
+      `SELECT id, numero_remito FROM remitos WHERE compra_id = ? LIMIT 1`, [compraId]
+    )[0] || null;
+
+    // Stock: lo que esta compra sumo de verdad (neto de ediciones)
+    const movs = db().query(
+      `SELECT m.producto_id, m.sucursal_id, SUM(m.delta) AS neto, pr.nombre AS producto_nombre
+       FROM stock_movimientos m LEFT JOIN productos pr ON pr.id = m.producto_id
+       WHERE m.ref_tipo = 'compras' AND m.ref_id = ?
+       GROUP BY m.producto_id, m.sucursal_id`, [compraId]
+    );
+    let stock = movs
+      .filter(m => Math.abs(parseFloat(m.neto) || 0) > 1e-9)
+      .map(m => ({ productoId: m.producto_id, sucursalId: m.sucursal_id,
+                   nombre: m.producto_nombre || '(producto eliminado)', cantidad: parseFloat(m.neto) }));
+    if (!movs.length && !remito) {
+      // Compra de antes del registro de movimientos: se revierte por sus items.
+      stock = db().query(
+        `SELECT ci.producto_id, SUM(ci.cantidad * COALESCE(ci.unidades_por_paquete, 1)) AS cant, pr.nombre AS producto_nombre
+         FROM compra_items ci LEFT JOIN productos pr ON pr.id = ci.producto_id
+         WHERE ci.compra_id = ? AND ci.producto_id IS NOT NULL AND COALESCE(ci.tipo, 'producto') IN ('producto', 'muestra')
+         GROUP BY ci.producto_id`, [compraId]
+      ).map(r => ({ productoId: r.producto_id, sucursalId: compra.sucursal_id,
+                    nombre: r.producto_nombre || '(producto eliminado)', cantidad: parseFloat(r.cant) || 0 }))
+       .filter(s => s.cantidad > 1e-9);
+    }
+
+    // Pagos aplicados a esta factura
+    const imputaciones = db().query(
+      `SELECT ip.id, ip.pago_id, ip.monto_imputado, p.fecha AS pago_fecha
+       FROM imputaciones_pagos ip LEFT JOIN pagos_proveedores p ON p.id = ip.pago_id
+       WHERE ip.compra_id = ? ORDER BY ip.fecha ASC`, [compraId]
+    ).map(i => ({ id: i.id, pagoId: i.pago_id, monto: parseFloat(i.monto_imputado) || 0, pagoFecha: i.pago_fecha }));
+
+    // Ajustes de stock pedidos desde Revision para esta compra
+    const ajustes = db().query(
+      `SELECT sa.id, sa.cantidad, sa.motivo, sa.estado, pr.nombre AS producto_nombre
+       FROM stock_ajustes sa LEFT JOIN productos pr ON pr.id = sa.producto_id
+       WHERE sa.compra_id = ?`, [compraId]
+    );
+    const ajustesPendientes = ajustes.filter(a => a.estado === 'pendiente_aprobacion');
+    const ajustesAprobados  = ajustes.filter(a => a.estado === 'aprobado');
+
+    // Costos que esta compra puso y que se pueden devolver sin pisar nada mas
+    const costos = [];
+    const vistos = new Set();
+    for (const it of db().query(
+      `SELECT ci.producto_id, ci.costo_unitario, ci.descuento_pct, ci.costo_anterior,
+              COALESCE(ci.unidades_por_paquete, 1) AS uds, pr.nombre, pr.costo AS costo_actual
+       FROM compra_items ci JOIN productos pr ON pr.id = ci.producto_id
+       WHERE ci.compra_id = ? AND COALESCE(ci.tipo, 'producto') = 'producto' AND ci.costo_modificado = 1`, [compraId]
+    )) {
+      if (vistos.has(it.producto_id)) continue;
+      vistos.add(it.producto_id);
+      const desc = Math.min(100, Math.max(0, parseFloat(it.descuento_pct) || 0));
+      const costoNeto = (parseFloat(it.costo_unitario) || 0) * (1 - desc / 100);
+      const anterior = parseFloat(it.costo_anterior) || 0;
+      if (anterior <= 0 || Math.abs((parseFloat(it.costo_actual) || 0) - costoNeto) >= 0.01) continue;
+      const posterior = db().query(
+        `SELECT 1 FROM compra_items ci2 JOIN compras c2 ON c2.id = ci2.compra_id
+         WHERE ci2.producto_id = ? AND c2.id != ? AND c2.fecha > ?
+           AND COALESCE(c2.estado, 'confirmada') != 'anulada' LIMIT 1`,
+        [it.producto_id, compraId, compra.fecha]
+      );
+      if (posterior.length) continue;
+      costos.push({ productoId: it.producto_id, nombre: it.nombre, de: parseFloat(it.costo_actual) || 0,
+                    a: anterior, udsPaq: parseFloat(it.uds) || 1 });
+    }
+
+    const bloqueos = [];
+    if (ajustesAprobados.length) {
+      bloqueos.push(
+        `Esta compra tiene ${ajustesAprobados.length} ajuste(s) de stock ya aprobado(s) ` +
+        `(${ajustesAprobados.map(a => `${a.motivo || 'ajuste'}: ${a.cantidad} de ${a.producto_nombre || 'producto'}`).join('; ')}). ` +
+        `Su stock ya se descontó: devolvelo primero con un "Ajuste de stock positivo" y después anulá la compra, ` +
+        `o el descuento quedaría duplicado.`
+      );
+    }
+
+    return { success: true, compra, remito, stock, imputaciones, ajustesPendientes, ajustesAprobados, costos, bloqueos };
+  }
+
+  function anularCompra(compraId, motivo) {
+    if (!window.ADMIN_MODE) return { success: false, error: 'Anular una compra solo se puede desde Admin-POS' };
+    motivo = String(motivo || '').trim();
+    if (!motivo) return { success: false, error: 'El motivo es obligatorio' };
+
+    const r = getResumenAnulacionCompra(compraId);
+    if (!r.success) return r;
+    if (r.bloqueos.length) return { success: false, error: r.bloqueos.join(' ') };
+
+    const user = window.SGA_Auth.getCurrentUser();
+    const ts = new Date().toISOString();
+
+    try {
+      db().beginBatch();
+
+      // 1. La compra queda como historial
+      db().run(
+        `UPDATE compras SET estado = 'anulada', motivo_anulacion = ?, anulada_en = ?, anulada_por = ?,
+           sync_status = 'pending', updated_at = ? WHERE id = ?`,
+        [motivo, ts, user?.id || null, ts, compraId]
+      );
+
+      // 2. Stock: movimiento de signo contrario por lo que la compra sumo
+      for (const s of r.stock) {
+        db().moverStock({
+          productoId: s.productoId, sucursalId: s.sucursalId, delta: -s.cantidad,
+          tipo: 'anulacion_compra', refTipo: 'compras', refId: compraId,
+          motivo: `Anulación de compra: ${motivo}`, fecha: ts, crearSiNoExiste: false,
+        });
+      }
+
+      // 3. Pagos aplicados: se libera la imputacion (el pago sigue, su credito vuelve a estar disponible)
+      for (const i of r.imputaciones) {
+        db().run(`DELETE FROM imputaciones_pagos WHERE id = ?`, [i.id]);
+        db().registrarEliminacion('imputaciones_pagos', i.id);
+      }
+
+      // 4. Ajustes de stock que esperaban aprobacion: ya no tienen sentido
+      db().run(
+        `UPDATE stock_ajustes SET estado = 'rechazado', aprobado_por = ?, fecha_aprobacion = ?,
+           sync_status = 'pending', updated_at = ?
+         WHERE compra_id = ? AND estado = 'pendiente_aprobacion'`,
+        [user?.id || null, ts, ts, compraId]
+      );
+
+      // 5. Remito vinculado: vuelve a quedar pendiente de factura
+      if (r.remito) {
+        db().run(
+          `UPDATE remitos SET estado = 'pendiente', compra_id = NULL, sync_status = 'pending', updated_at = ? WHERE id = ?`,
+          [ts, r.remito.id]
+        );
+      }
+
+      // 6. Costo: solo donde esta era la ultima compra y nada lo movio despues
+      for (const c of r.costos) {
+        db().run(
+          `UPDATE productos SET costo = ?, costo_paquete = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
+          [c.a, c.a * c.udsPaq, ts, c.productoId]
+        );
+      }
+
+      // db().run() no propaga errores: se comprueba antes de dar la anulacion por buena
+      const est = db().query(`SELECT estado FROM compras WHERE id = ?`, [compraId])[0]?.estado;
+      const quedan = db().query(`SELECT COUNT(*) AS n FROM imputaciones_pagos WHERE compra_id = ?`, [compraId])[0]?.n || 0;
+      if (est !== 'anulada' || quedan) {
+        db().rollbackBatch();
+        return { success: false, error: 'No se pudo anular la compra (revisá la consola)' };
+      }
+      db().commitBatch();
+    } catch (e) {
+      db().rollbackBatch();
+      console.error('anularCompra:', e);
+      return { success: false, error: e.message };
+    }
+
+    window.SGA_Sync?.pushPending?.();
+    return {
+      success: true,
+      unidadesRevertidas: r.stock.reduce((s, x) => s + x.cantidad, 0),
+      pagosLiberados: r.imputaciones.length,
+      ajustesRechazados: r.ajustesPendientes.length,
+      remitoReabierto: !!r.remito,
+      costosRevertidos: r.costos.length,
+    };
+  }
+
+  function abrirAnularCompra(compraId) {
+    const overlay = ge('ops-anular-overlay');
+    const body = ge('ops-anular-body');
+    if (!overlay || !body) return;
+    const r = getResumenAnulacionCompra(compraId);
+    if (!r.success) { window.SGA_Utils.showNotification(r.error, 'error'); return; }
+
+    const c = r.compra;
+    const factRef = c.factura_pv && c.numero_factura ? `${c.factura_pv}-${c.numero_factura}` : (c.numero_factura || '—');
+    const fecha = c.fecha ? c.fecha.slice(0, 10) : '—';
+    const li = t => `<li style="margin:3px 0">${t}</li>`;
+    const efectos = [];
+
+    efectos.push(li(`La deuda con <strong>${esc(c.proveedor_nombre || 'el proveedor')}</strong> baja en <strong>${fmt$(c.total || 0)}</strong>.`));
+    if (r.stock.length) {
+      efectos.push(li(`Se descuenta el stock que sumó esta compra: ` +
+        r.stock.map(s => `${esc(s.nombre)} (−${s.cantidad})`).join(', ') + '.'));
+    } else {
+      efectos.push(li(`Esta compra no sumó stock propio${r.remito ? ' (el stock ya lo había sumado el remito)' : ''}: no se toca el stock.`));
+    }
+    if (r.imputaciones.length) {
+      const tot = r.imputaciones.reduce((s, i) => s + i.monto, 0);
+      efectos.push(li(`Se liberan <strong>${fmt$(tot)}</strong> de pagos aplicados a esta factura: vuelven a quedar como crédito a favor del proveedor.`));
+    }
+    if (r.ajustesPendientes.length) {
+      efectos.push(li(`Se rechazan ${r.ajustesPendientes.length} ajuste(s) de stock que esperaban aprobación.`));
+    }
+    if (r.remito) {
+      efectos.push(li(`El remito <strong>${esc(r.remito.numero_remito || '')}</strong> vuelve a quedar pendiente de factura.`));
+    }
+    for (const k of r.costos) {
+      efectos.push(li(`El costo de <strong>${esc(k.nombre)}</strong> vuelve de ${fmt$(k.de)} a ${fmt$(k.a)} (esta era su última compra).`));
+    }
+
+    body.innerHTML = `
+      <div style="font-size:13px;color:#2d3748">
+        <div style="margin-bottom:10px"><strong>${esc(c.proveedor_nombre || '—')}</strong> · Fact. ${esc(factRef)} · ${esc(fecha)} · <strong>${fmt$(c.total || 0)}</strong></div>
+        ${r.bloqueos.length ? `<div style="background:#ffebee;border:1px solid #ef9a9a;color:#b71c1c;border-radius:6px;padding:9px 12px;margin-bottom:10px">${esc(r.bloqueos.join(' '))}</div>` : ''}
+        <div style="font-weight:700;margin-bottom:2px">Al anularla:</div>
+        <ul style="margin:0 0 12px 18px;padding:0">${efectos.join('')}</ul>
+        <label for="ops-anular-motivo" style="display:block;font-size:11px;font-weight:700;color:#607080;text-transform:uppercase;margin-bottom:3px">Motivo (obligatorio)</label>
+        <textarea id="ops-anular-motivo" rows="2" placeholder="Ej.: cargada con el proveedor equivocado" style="width:100%;padding:7px 9px;border:1px solid #c8d0dc;border-radius:5px;font-size:13px;font-family:inherit"></textarea>
+        <div id="ops-anular-error" style="display:none;color:#c62828;font-size:12px;margin-top:6px"></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+          <button id="ops-anular-cancelar" style="padding:7px 16px;background:#eef0f3;color:#445566;border:none;border-radius:5px;cursor:pointer;font-size:13px">Cancelar</button>
+          <button id="ops-anular-confirmar" ${r.bloqueos.length ? 'disabled' : ''} style="padding:7px 16px;background:#c62828;color:#fff;border:none;border-radius:5px;cursor:${r.bloqueos.length ? 'not-allowed' : 'pointer'};font-size:13px;font-weight:700;${r.bloqueos.length ? 'opacity:.5' : ''}">Anular compra</button>
+        </div>
+      </div>`;
+    overlay.style.display = 'flex';
+    setTimeout(() => ge('ops-anular-motivo')?.focus(), 50);
+
+    const cerrar = () => { overlay.style.display = 'none'; body.innerHTML = ''; };
+    ge('ops-anular-cancelar').addEventListener('click', cerrar);
+    ge('ops-anular-confirmar').addEventListener('click', () => {
+      const motivo = ge('ops-anular-motivo').value.trim();
+      const err = ge('ops-anular-error');
+      if (!motivo) { err.textContent = 'Escribí el motivo de la anulación.'; err.style.display = 'block'; return; }
+      const res = anularCompra(compraId, motivo);
+      if (!res.success) { err.textContent = res.error || 'No se pudo anular la compra.'; err.style.display = 'block'; return; }
+      cerrar();
+      window.SGA_Utils.showNotification('Compra anulada', 'success');
+      renderHistorial(leerFiltrosHistorial());
+    });
+  }
+
   // Proveedores que tienen al menos una compra en esta sucursal — el filtro no
   // lista todo el catálogo (decenas de proveedores sin compras no aportan).
   // Se rearma cada vez que se abre el historial: una compra recién cargada
@@ -211,6 +475,9 @@ const OperacionesStock = (() => {
                 ${estado !== 'anulada' && !c.de_remito && (puedeEditarAdmin || (puedeEditarPos && c.sesion_caja_id && c.sesion_caja_id === sesionActualId)) ? `
                   <button style="padding:3px 12px;margin-left:4px;background:#fff;color:#1a5c2e;border:1px solid #1a5c2e;border-radius:4px;cursor:pointer;font-size:12px" data-editar-compra="${esc(c.id)}">✏️ Editar</button>
                 ` : ''}
+                ${estado !== 'anulada' && puedeAnularCompras() ? `
+                  <button style="padding:3px 12px;margin-left:4px;background:#fff;color:#c62828;border:1px solid #ef9a9a;border-radius:4px;cursor:pointer;font-size:12px" data-anular-compra="${esc(c.id)}" title="Anular esta compra (cargada por error)">🚫 Anular</button>
+                ` : ''}
               </td>
             </tr>`;
           }).join('')}
@@ -220,6 +487,9 @@ const OperacionesStock = (() => {
 
     body.querySelectorAll('[data-ver-compra]').forEach(btn => {
       btn.addEventListener('click', () => renderDetalleCompra(btn.dataset.verCompra));
+    });
+    body.querySelectorAll('[data-anular-compra]').forEach(btn => {
+      btn.addEventListener('click', () => abrirAnularCompra(btn.dataset.anularCompra));
     });
     body.querySelectorAll('[data-editar-compra]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -296,6 +566,11 @@ const OperacionesStock = (() => {
           </div>
         ` : ''}
       </div>
+      ${estadoCompra === 'anulada' ? `
+        <div style="margin:0 0 10px;padding:8px 12px;background:#ffebee;border:1px solid #ef9a9a;border-radius:6px;font-size:12px;color:#b71c1c">
+          <strong>Compra anulada</strong>${compra.anulada_en ? ` el ${esc(String(compra.anulada_en).slice(0, 10))}` : ''}${compra.motivo_anulacion ? ` — ${esc(compra.motivo_anulacion)}` : ''}
+        </div>
+      ` : ''}
       ${isAdmin ? `
         <div style="margin:0 0 10px;padding:7px 12px;background:#f0f6ff;border:1px solid #cfe0fb;border-radius:6px;font-size:12px;color:#2c4a72;display:flex;align-items:center;gap:6px">
           <span style="font-size:14px">✏️</span>
@@ -592,6 +867,12 @@ const OperacionesStock = (() => {
       if (ge('ops-hist-proveedor')) ge('ops-hist-proveedor').value = '';
       renderHistorial();
     });
+    ge('ops-anular-close')?.addEventListener('click', () => {
+      ge('ops-anular-overlay').style.display = 'none';
+    });
+    ge('ops-anular-overlay')?.addEventListener('click', e => {
+      if (e.target === ge('ops-anular-overlay')) ge('ops-anular-overlay').style.display = 'none';
+    });
     ge('ops-detalle-close')?.addEventListener('click', () => {
       ge('ops-detalle-overlay').style.display = 'none';
     });
@@ -663,7 +944,7 @@ const OperacionesStock = (() => {
     });
   }
 
-  return { init };
+  return { init, getResumenAnulacionCompra, anularCompra };
 })();
 
 export default OperacionesStock;

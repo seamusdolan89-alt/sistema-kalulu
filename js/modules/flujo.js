@@ -60,7 +60,8 @@ const FlujoModule = (() => {
     // Proveedores activos que tienen dia_entrega o compras recientes
     const recentProvIds = new Set(
       DB().query(
-        `SELECT DISTINCT proveedor_id FROM compras WHERE fecha >= date('now', '-90 days') AND proveedor_id IS NOT NULL`
+        `SELECT DISTINCT proveedor_id FROM compras WHERE fecha >= date('now', '-90 days') AND proveedor_id IS NOT NULL
+           AND COALESCE(estado,'confirmada') != 'anulada'`
       ).map(r => r.proveedor_id)
     );
 
@@ -75,6 +76,7 @@ const FlujoModule = (() => {
       `SELECT proveedor_id, DATE(fecha) as dia, SUM(total) as total
        FROM compras
        WHERE fecha >= ? AND fecha <= ? AND proveedor_id IS NOT NULL
+         AND COALESCE(estado,'confirmada') != 'anulada'
        GROUP BY proveedor_id, dia`,
       [fechaMin, fechaMax + 'T23:59:59']
     ).forEach(r => { comprasProv[r.proveedor_id + '|' + r.dia] = r.total || 0; });
@@ -101,7 +103,8 @@ const FlujoModule = (() => {
     promedios = {};
     proveedores.forEach(p => {
       const rows = DB().query(
-        `SELECT total FROM compras WHERE proveedor_id = ? AND total > 0 ORDER BY fecha DESC LIMIT 3`,
+        `SELECT total FROM compras WHERE proveedor_id = ? AND total > 0
+           AND COALESCE(estado,'confirmada') != 'anulada' ORDER BY fecha DESC LIMIT 3`,
         [p.id]
       );
       if (rows.length) {
