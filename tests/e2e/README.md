@@ -128,6 +128,7 @@ sale "vacío" inesperadamente.
 | `test_editor_producto.py` | Editor de Producto (página completa, no confundir con la lista de `productos.js`): crear producto nuevo, editar uno existente, y que el margen se recalcule automáticamente al cambiar el precio |
 | `test_editor_producto_sustitutos_cadena.py` | Sustitutos: elegir como referencia un producto que ya pertenece a otro grupo (o cambiar de grupo a uno al que otros ya apuntaban) avisa antes de escribir la cadena, se puede cancelar, y al confirmar repunta a todos los afectados sin dejar huérfanos — además marca sync_status='pending' en los productos que realmente cambiaron |
 | `test_input_number_rueda.py` | La rueda del mouse NO cambia el valor de un campo numérico enfocado (cantidad/precio): listener global `wheel` en `app.js` que le saca el foco al `type="number"`, así el valor no cambia y el scroll sigue de largo. POS y Admin-POS |
+| `test_compras_remito_enter_foco.py` | Compras "Sin Factura" (remito): Enter en la cantidad devuelve el foco al buscador (antes se quedaba en la cantidad: intentaba enfocar el "Nuevo costo", oculto en modo remito, y no caía al buscador). También verifica que en una compra normal Enter sigue saltando al costo |
 
 Nota: toda compra en este sistema queda "Cta. Cte." — la condición de pago
 está fija en `compras_v2.js` (`state.condicionPago = 'pendiente'`, sin

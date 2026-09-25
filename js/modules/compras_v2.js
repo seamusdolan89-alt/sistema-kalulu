@@ -5064,7 +5064,15 @@ const ComprasV2 = (() => {
             const costoInp = document.querySelector(
               `.cv2-cart-row[data-idx="${idx}"] input[data-field="costoNuevo"]`
             );
-            if (costoInp) { costoInp.select(); costoInp.focus(); return; }
+            // En modo remito esa columna está oculta (display:none): el input
+            // existe en el DOM pero .focus() sobre algo oculto no hace nada.
+            // Por eso se comprueba que el foco REALMENTE llegó; si no, cae al
+            // buscador como en cualquier otro caso.
+            if (costoInp) {
+              costoInp.select();
+              costoInp.focus();
+              if (document.activeElement === costoInp) return;
+            }
           }
           // costoNuevo, udsPaquete, or item removed → back to search
           ge('cv2-search')?.focus();
