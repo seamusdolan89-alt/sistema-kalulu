@@ -60,12 +60,13 @@ const OperacionesStock = (() => {
 
   // ── HISTORIAL DE COMPRAS ───────────────────────────────────────────────────
 
-  function getHistorialCompras({ fechaDesde, fechaHasta } = {}) {
+  function getHistorialCompras({ fechaDesde, fechaHasta, proveedorId } = {}) {
     const user = window.SGA_Auth.getCurrentUser();
     const where = ['c.sucursal_id = ?'];
     const params = [user.sucursal_id];
     if (fechaDesde) { where.push('c.fecha >= ?'); params.push(fechaDesde); }
     if (fechaHasta) { where.push('c.fecha <= ?'); params.push(fechaHasta + 'T23:59:59'); }
+    if (proveedorId) { where.push('c.proveedor_id = ?'); params.push(proveedorId); }
     return db().query(`
       SELECT c.id, c.fecha, c.numero_factura, c.factura_pv, c.total, c.condicion_pago, c.estado,
              c.sesion_caja_id,
@@ -123,11 +124,41 @@ const OperacionesStock = (() => {
     return compra;
   }
 
-  function renderHistorial({ fechaDesde, fechaHasta } = {}) {
+  // Proveedores que tienen al menos una compra en esta sucursal — el filtro no
+  // lista todo el catálogo (decenas de proveedores sin compras no aportan).
+  // Se rearma cada vez que se abre el historial: una compra recién cargada
+  // puede haber sumado un proveedor nuevo a la lista.
+  function cargarProveedoresHistorial() {
+    const sel = ge('ops-hist-proveedor');
+    if (!sel) return;
+    const user = window.SGA_Auth.getCurrentUser();
+    const previo = sel.value;
+    const provs = db().query(
+      `SELECT DISTINCT p.id, p.razon_social
+       FROM compras c
+       JOIN proveedores p ON p.id = c.proveedor_id
+       WHERE c.sucursal_id = ?
+       ORDER BY p.razon_social COLLATE NOCASE`,
+      [user.sucursal_id]
+    );
+    sel.innerHTML = '<option value="">Todos los proveedores</option>' +
+      provs.map(p => `<option value="${esc(p.id)}">${esc(p.razon_social)}</option>`).join('');
+    if (previo && provs.some(p => p.id === previo)) sel.value = previo;
+  }
+
+  function leerFiltrosHistorial() {
+    return {
+      fechaDesde:  ge('ops-hist-desde')?.value || undefined,
+      fechaHasta:  ge('ops-hist-hasta')?.value || undefined,
+      proveedorId: ge('ops-hist-proveedor')?.value || undefined,
+    };
+  }
+
+  function renderHistorial({ fechaDesde, fechaHasta, proveedorId } = {}) {
     const body = ge('ops-historial-body');
     if (!body) return;
 
-    const compras = getHistorialCompras({ fechaDesde, fechaHasta });
+    const compras = getHistorialCompras({ fechaDesde, fechaHasta, proveedorId });
 
     if (!compras.length) {
       body.innerHTML = '<p style="color:#8090a0;text-align:center;padding:30px 0">Sin compras en el período seleccionado.</p>';
@@ -548,14 +579,17 @@ const OperacionesStock = (() => {
       if (e.target === ge('ops-historial-overlay')) ge('ops-historial-overlay').style.display = 'none';
     });
     ge('ops-hist-filtrar')?.addEventListener('click', () => {
-      renderHistorial({
-        fechaDesde: ge('ops-hist-desde').value || undefined,
-        fechaHasta: ge('ops-hist-hasta').value || undefined,
-      });
+      renderHistorial(leerFiltrosHistorial());
+    });
+    // El proveedor filtra apenas se elige (no hace falta apretar "Filtrar"),
+    // y respeta el rango de fechas que ya esté cargado.
+    ge('ops-hist-proveedor')?.addEventListener('change', () => {
+      renderHistorial(leerFiltrosHistorial());
     });
     ge('ops-hist-limpiar')?.addEventListener('click', () => {
       ge('ops-hist-desde').value = '';
       ge('ops-hist-hasta').value = '';
+      if (ge('ops-hist-proveedor')) ge('ops-hist-proveedor').value = '';
       renderHistorial();
     });
     ge('ops-detalle-close')?.addEventListener('click', () => {
@@ -600,6 +634,8 @@ const OperacionesStock = (() => {
         case 'historial_compras':
           ge('ops-hist-desde').value = '';
           ge('ops-hist-hasta').value = '';
+          cargarProveedoresHistorial();
+          if (ge('ops-hist-proveedor')) ge('ops-hist-proveedor').value = '';
           renderHistorial();
           ge('ops-historial-overlay').style.display = 'flex';
           break;
