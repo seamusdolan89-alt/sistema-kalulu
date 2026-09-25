@@ -594,6 +594,18 @@
     // local — ver css/layout.css, body.admin-pos .admin-tabbar.
     if (window.ADMIN_MODE) document.body.classList.add('admin-pos');
 
+    // La rueda del mouse NO debe cambiar cantidades ni precios. Con un
+    // type="number" enfocado, el navegador le suma/resta al valor cuando pasa
+    // la rueda por encima (y encima se traga el scroll de la página) — un
+    // riesgo real de dejar una cantidad o un precio mal sin darse cuenta. Un
+    // solo listener delegado cubre todos los campos, los de hoy y los que se
+    // creen después; sacarle el foco (en vez de preventDefault) deja que el
+    // scroll siga de largo.
+    document.addEventListener('wheel', e => {
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement && el.type === 'number' && el === e.target) el.blur();
+    }, { passive: true });
+
     try {
       // Initialize database
       console.log('🔄 Initializing database...');

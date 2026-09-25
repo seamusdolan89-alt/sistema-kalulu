@@ -127,6 +127,7 @@ sale "vacío" inesperadamente.
 | `test_sync_skip_no_pierde_cambios.py` | Guarda anti-pisada (`tienePendienteLocal`): un documento entrante descartado por choque con un cambio local sin subir queda marcado "sin resolver" (`ultimoSkipPorPendiente`) en vez de darse por entregado — sin esto, ese cambio remoto (ej. el estado de una Orden de Compra) se perdía para siempre en vez de reintentarse |
 | `test_editor_producto.py` | Editor de Producto (página completa, no confundir con la lista de `productos.js`): crear producto nuevo, editar uno existente, y que el margen se recalcule automáticamente al cambiar el precio |
 | `test_editor_producto_sustitutos_cadena.py` | Sustitutos: elegir como referencia un producto que ya pertenece a otro grupo (o cambiar de grupo a uno al que otros ya apuntaban) avisa antes de escribir la cadena, se puede cancelar, y al confirmar repunta a todos los afectados sin dejar huérfanos — además marca sync_status='pending' en los productos que realmente cambiaron |
+| `test_input_number_rueda.py` | La rueda del mouse NO cambia el valor de un campo numérico enfocado (cantidad/precio): listener global `wheel` en `app.js` que le saca el foco al `type="number"`, así el valor no cambia y el scroll sigue de largo. POS y Admin-POS |
 
 Nota: toda compra en este sistema queda "Cta. Cte." — la condición de pago
 está fija en `compras_v2.js` (`state.condicionPago = 'pendiente'`, sin
