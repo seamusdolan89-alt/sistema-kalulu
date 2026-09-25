@@ -10,8 +10,9 @@ a ir a otra pantalla: asignar un producto de referencia (sustituto) y
 asignar una madre.
 
 Cubre:
-  1. El botón "⋯" de una fila abre un panel con "Asociar sustituto" y
-     "Asignar madre".
+  1. El botón "Familia" de una fila abre un menú con "Asociar sustituto" y
+     "Asignar madre" (el botón "Desincorporar" tiene el suyo, ver
+     test_compras_revision_menu_sin_recorte.py).
   2. Ambos buscadores navegan con ArrowUp/ArrowDown + Enter, igual que el
      resto de los buscadores del sistema (Buscador.attachDropdownKeyboard).
   3. "Asociar sustituto": buscar, elegir, y un paso de confirmación deja
@@ -123,8 +124,8 @@ def main():
         page.wait_for_timeout(500)
 
         print("--- Abrir el panel de acciones rapidas de la fila ---")
-        assert page.locator("[data-rev-mas]").count() == 1, "No aparecio el boton de acciones rapidas en Revision"
-        page.locator("[data-rev-mas]").click()
+        assert page.locator("[data-rev-menu]").count() == 2, "No aparecieron los 2 botones (Familia / Desincorporar) en Revision"
+        page.locator('[data-rev-menu="familia"]').click()
         page.wait_for_timeout(200)
         assert page.locator(".cv2-rev-panel").count() == 1, "El panel de acciones rapidas no se abrio"
 
@@ -174,7 +175,7 @@ def main():
         )
 
         print("--- Asignar madre: navegar con flechas hasta la 2da opcion ---")
-        page.locator("[data-rev-mas]").click()
+        page.locator('[data-rev-menu="familia"]').click()
         page.wait_for_timeout(200)
         page.locator('[data-rev-accion="madre"]').click()
         page.wait_for_timeout(300)
