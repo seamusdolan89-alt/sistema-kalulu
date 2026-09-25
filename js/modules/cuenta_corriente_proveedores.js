@@ -508,6 +508,154 @@ const SGA_PagosProveedores = (() => {
     return r[0] || null;
   }
 
+  // ── Anular un pago ─────────────────────────────────────────────────────────
+  //
+  // Un pago cargado por error (proveedor equivocado, monto mal) no tenia como
+  // revertirse. Anular = BORRAR el pago con sus medios e imputaciones y dejar
+  // la marca de borrado para que viaje al otro dispositivo (mismo patron que
+  // clientes.js eliminarPago). No se marca "anulado" en vez de borrar porque el
+  // saldo y el credito disponible se calculan en varios lugares; con el pago
+  // borrado todos se corrigen solos y las facturas que saldaba vuelven a quedar
+  // pendientes (sus imputaciones desaparecen con el).
+  //
+  // Caja (solo un pago en EFECTIVO tiene egreso en la caja):
+  //  - caja abierta  -> se borra tambien el egreso: la caja esperada se corrige sola.
+  //  - caja cerrada  -> el arqueo ya se hizo con esa plata adentro; reescribirlo
+  //    le inventaria una diferencia a un cierre que estaba bien. Se pide
+  //    confirmacion explicita y, si se acepta, se anula solo en la cuenta
+  //    corriente del proveedor: el egreso queda en esa caja.
+  //  - transferencia / MercadoPago / Caja Seamus: no tocan la caja.
+
+  // El egreso no guarda el id del pago (hueco del diseno original), asi que se
+  // lo busca por sesion + proveedor + tipo + monto + fecha: crearPago() sella el
+  // pago y su egreso con los mismos valores.
+  function _buscarEgresoDePago(pago, metodo) {
+    if (!metodo.sesion_caja_id) return null;
+    const monto = parseFloat(metodo.monto) || 0;
+    const estricto = db().query(
+      `SELECT id FROM egresos_caja
+       WHERE sesion_caja_id = ? AND tipo = 'pago_proveedor' AND proveedor_id = ?
+         AND monto = ? AND fecha = ? LIMIT 1`,
+      [metodo.sesion_caja_id, pago.proveedor_id, monto, pago.fecha]
+    )[0];
+    if (estricto) return estricto;
+    // Egresos viejos, de antes de que existieran las columnas tipo/proveedor_id.
+    return db().query(
+      `SELECT id FROM egresos_caja
+       WHERE sesion_caja_id = ? AND monto = ? AND fecha = ? AND descripcion LIKE 'Pago%' LIMIT 1`,
+      [metodo.sesion_caja_id, monto, pago.fecha]
+    )[0] || null;
+  }
+
+  function getResumenAnulacionPago(pagoId) {
+    const pago = db().query(
+      `SELECT p.*, pr.razon_social AS proveedor_nombre
+       FROM pagos_proveedores p LEFT JOIN proveedores pr ON pr.id = p.proveedor_id
+       WHERE p.id = ?`, [pagoId]
+    )[0];
+    if (!pago) return { success: false, error: 'Pago no encontrado' };
+
+    const metodos = db().query(
+      `SELECT id, metodo, monto, referencia, sesion_caja_id FROM pagos_proveedores_metodos WHERE pago_id = ?`,
+      [pagoId]
+    );
+    const total = metodos.reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
+
+    const imputaciones = db().query(
+      `SELECT ip.id, ip.compra_id, ip.gasto_id, ip.monto_imputado, ip.fecha,
+              c.factura_pv, c.numero_factura, g.comprobante, g.descripcion
+       FROM imputaciones_pagos ip
+       LEFT JOIN compras c ON c.id = ip.compra_id
+       LEFT JOIN gastos  g ON g.id = ip.gasto_id
+       WHERE ip.pago_id = ? ORDER BY ip.fecha ASC`, [pagoId]
+    ).map(i => ({
+      id: i.id,
+      tipo: i.gasto_id && !i.compra_id ? 'gasto' : 'compra',
+      monto: parseFloat(i.monto_imputado) || 0,
+      referencia: i.gasto_id && !i.compra_id
+        ? (i.comprobante || i.descripcion || 'Gasto')
+        : ([i.factura_pv, i.numero_factura].filter(Boolean).join('-') || '(compra sin número)'),
+    }));
+
+    // estado de la caja de la que salio el efectivo: 'abierta' | 'cerrada' | null
+    // (null = esa sesion no esta en esta base; se trata como cerrada, no se toca).
+    const efectivo = metodos.filter(m => m.metodo === 'efectivo').map(m => {
+      const ses = m.sesion_caja_id
+        ? db().query(`SELECT id, estado, fecha_apertura FROM sesiones_caja WHERE id = ?`, [m.sesion_caja_id])[0]
+        : null;
+      const egreso = _buscarEgresoDePago(pago, m);
+      return {
+        monto: parseFloat(m.monto) || 0,
+        sesion_caja_id: m.sesion_caja_id || null,
+        sesion_estado: ses ? ses.estado : null,
+        sesion_fecha: ses ? ses.fecha_apertura : null,
+        egreso_id: egreso ? egreso.id : null,
+      };
+    });
+
+    return {
+      success: true,
+      pago: { id: pago.id, proveedor_id: pago.proveedor_id, proveedor_nombre: pago.proveedor_nombre,
+              fecha: pago.fecha, observaciones: pago.observaciones },
+      metodos, total, imputaciones, efectivo,
+      hayCajaCerrada: efectivo.some(e => e.sesion_estado !== 'abierta'),
+    };
+  }
+
+  function anularPago(pagoId, opts = {}) {
+    // Toca plata y a veces la caja: solo desde Admin-POS (la UI ya oculta el
+    // boton en el POS del local; esto cierra la puerta por si alguien lo llama).
+    if (!window.ADMIN_MODE) return { success: false, error: 'Anular un pago solo se puede desde Admin-POS' };
+    const r = getResumenAnulacionPago(pagoId);
+    if (!r.success) return r;
+
+    if (r.hayCajaCerrada && !opts.aceptarCajaCerrada) {
+      return { success: false, requiereConfirmacionCaja: true,
+               error: 'El pago salió de una caja ya cerrada: hace falta confirmar que no se toca la caja' };
+    }
+
+    let egresosRevertidos = 0;
+    try {
+      db().beginBatch();
+
+      // 1. Egreso del efectivo, solo si esa caja sigue abierta.
+      for (const e of r.efectivo) {
+        if (e.sesion_estado === 'abierta' && e.egreso_id) {
+          db().run(`DELETE FROM egresos_caja WHERE id = ?`, [e.egreso_id]);
+          db().registrarEliminacion('egresos_caja', e.egreso_id);
+          egresosRevertidos++;
+        }
+      }
+
+      // 2. El pago con sus medios e imputaciones (las facturas vuelven a quedar pendientes).
+      db().run(`DELETE FROM imputaciones_pagos WHERE pago_id = ?`, [pagoId]);
+      db().run(`DELETE FROM pagos_proveedores_metodos WHERE pago_id = ?`, [pagoId]);
+      db().run(`DELETE FROM pagos_proveedores WHERE id = ?`, [pagoId]);
+      db().registrarEliminacion('pagos_proveedores', pagoId);
+
+      // db().run() no propaga errores: se comprueba que de verdad se borro antes de dar por buena la anulacion.
+      const quedan = db().query(`SELECT COUNT(*) AS n FROM pagos_proveedores WHERE id = ?`, [pagoId])[0]?.n || 0;
+      const quedanImp = db().query(`SELECT COUNT(*) AS n FROM imputaciones_pagos WHERE pago_id = ?`, [pagoId])[0]?.n || 0;
+      if (quedan || quedanImp) {
+        db().rollbackBatch();
+        return { success: false, error: 'No se pudo borrar el pago (revisá la consola)' };
+      }
+      db().commitBatch();
+    } catch (e) {
+      db().rollbackBatch();
+      console.error('SGA_PagosProveedores.anularPago:', e);
+      return { success: false, error: e.message };
+    }
+
+    return {
+      success: true,
+      total: r.total,
+      facturasLiberadas: r.imputaciones.length,
+      egresosRevertidos,
+      cajaSinTocar: r.hayCajaCerrada,
+    };
+  }
+
   return {
     getSaldoProveedor,
     getComprasPendientes,
@@ -518,6 +666,8 @@ const SGA_PagosProveedores = (() => {
     imputar,
     getResumenProveedores,
     getSesionActiva,
+    getResumenAnulacionPago,
+    anularPago,
   };
 })();
 
@@ -790,6 +940,15 @@ const CuentaCorrienteProveedores = (() => {
 
   // ── VISTA DETALLE ────────────────────────────────────────────────────────────
 
+  // Anular un pago toca plata (y a veces la caja): solo el admin, y solo desde
+  // Admin-POS. En el POS del local la cajera no ve el boton.
+  function puedeAnularPagos() {
+    return !!window.ADMIN_MODE && window.SGA_Auth?.getCurrentUser?.()?.rol === 'admin';
+  }
+  const btnAnular = (pagoId) => puedeAnularPagos()
+    ? `<button class="ledger-btn-anular" data-anular-pago="${esc(pagoId)}" title="Anular este pago">Anular</button>`
+    : '';
+
   function buildTablaPlana(ledger, saldo) {
     if (!ledger.length) return `
       <div class="ccprov-empty">
@@ -812,6 +971,7 @@ const CuentaCorrienteProveedores = (() => {
               <td>
                 ${esc(e.referencia)}
                 ${e.tipo === 'compra' && e.saldo_item > 0.01 ? `<span class="ledger-saldo-parcial"> · Saldo: ${fmt$(e.saldo_item)}</span>` : ''}
+                ${e.tipo === 'pago' ? btnAnular(e.id) : ''}
               </td>
               <td class="right">${e.debe > 0 ? `<span class="ledger-debe">${fmt$(e.debe)}</span>` : '—'}</td>
               <td class="right">${e.haber > 0 ? `<span class="ledger-haber">${fmt$(e.haber)}</span>` : '—'}</td>
@@ -875,7 +1035,7 @@ const CuentaCorrienteProveedores = (() => {
                 <tr class="ledger-row-imp">
                   <td>${fmtFecha(i.fecha)}</td>
                   <td><span class="ledger-type-badge ledger-type-pago">Pago</span></td>
-                  <td><span class="ledger-imp-ref">${esc(i.desc)}</span></td>
+                  <td><span class="ledger-imp-ref">${esc(i.desc)}</span> ${btnAnular(i.pago_id)}</td>
                   <td class="right">—</td>
                   <td class="right"><span class="ledger-haber">${fmt$(i.monto)}</span></td>
                   <td class="right">—</td>
@@ -911,8 +1071,11 @@ const CuentaCorrienteProveedores = (() => {
                   <td class="right">—</td>
                   <td class="right"><span class="ledger-haber">${fmt$(p.credito_disponible)}</span></td>
                   <td class="right">
-                    <button class="ledger-btn-imputar" data-imputar-pago="${esc(p.id)}"
-                            data-credito="${p.credito_disponible}">Imputar…</button>
+                    <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center">
+                      <button class="ledger-btn-imputar" data-imputar-pago="${esc(p.id)}"
+                              data-credito="${p.credito_disponible}">Imputar…</button>
+                      ${btnAnular(p.id)}
+                    </div>
                   </td>
                 </tr>`).join('')}
             </tbody>
@@ -1010,6 +1173,101 @@ const CuentaCorrienteProveedores = (() => {
     });
   }
 
+  // Anular un pago cargado por error. Muestra que se va a deshacer ANTES de
+  // hacerlo: las facturas que ese pago saldaba y, si fue en efectivo, que pasa
+  // con la caja (abierta: se revierte el egreso; cerrada: no se toca).
+  async function openModalAnularPago(pagoId, proveedorId, proveedorNombre) {
+    PagoWizard.ensureCss();
+    const overlay = ge('ccprov-overlay');
+    if (!overlay) return;
+
+    let r = data().getResumenAnulacionPago(pagoId);
+    if (!r.success) { alert(r.error); return; }
+
+    // Un pago en efectivo depende del estado REAL de su caja. Si esta compu es
+    // Admin-POS, se trae lo ultimo del POS antes de decidir: la caja pudo
+    // cerrarse hace un rato y la copia local todavia decir 'abierta'.
+    if (r.efectivo.length && window.ADMIN_MODE && window.SGA_Sync?.isInitialized?.()) {
+      try {
+        await Promise.race([
+          window.SGA_Sync.syncMonitoringData(),
+          new Promise(res => setTimeout(res, 8000)),
+        ]);
+        r = data().getResumenAnulacionPago(pagoId);
+        if (!r.success) { alert(r.error); return; }
+      } catch (e) { console.warn('anular pago: no se pudo refrescar el estado de la caja:', e.message); }
+    }
+
+    const LBL = { efectivo: 'Efectivo', transferencia: 'Transferencia', caja_seamus: 'Caja Seamus', mercadopago: 'MercadoPago' };
+    const medios = r.metodos.map(m =>
+      `${LBL[m.metodo] || esc(m.metodo)}: ${fmt$(m.monto)}${m.referencia ? ` (${esc(m.referencia)})` : ''}`
+    ).join(' · ');
+
+    const impHtml = r.imputaciones.length
+      ? `<p style="margin:12px 0 4px">Este pago está aplicado a:</p>
+         <ul style="margin:0 0 8px 18px;padding:0">
+           ${r.imputaciones.map(i => `<li>${i.tipo === 'gasto' ? 'Gasto' : 'Factura'} <strong>${esc(i.referencia)}</strong> — ${fmt$(i.monto)}</li>`).join('')}
+         </ul>
+         <p style="margin:0">Al anularlo, esos comprobantes <strong>vuelven a quedar pendientes</strong>.</p>`
+      : `<p style="margin:12px 0 0">Este pago no está aplicado a ningún comprobante: se pierden ${fmt$(r.total)} de crédito a favor.</p>`;
+
+    let cajaHtml;
+    if (!r.efectivo.length) {
+      cajaHtml = `<div class="ccprov-anular-caja">No afecta la caja.</div>`;
+    } else if (!r.hayCajaCerrada) {
+      const sinEgreso = r.efectivo.some(e => !e.egreso_id);
+      cajaHtml = `<div class="ccprov-anular-caja">Se revierte el egreso en efectivo de la caja abierta: la caja esperada se corrige sola.
+        ${sinEgreso ? '<br><strong>No se encontró el egreso de la caja</strong> para este pago; revisalo a mano.' : ''}</div>`;
+    } else {
+      const fechas = r.efectivo.filter(e => e.sesion_estado !== 'abierta')
+        .map(e => e.sesion_fecha ? fmtFecha(e.sesion_fecha) : 'una caja que no está en esta base').join(', ');
+      cajaHtml = `<div class="ccprov-anular-caja warn">
+        <strong>⚠ Este pago salió en efectivo de una caja que ya se cerró (${esc(fechas)}).</strong><br>
+        Si continuás, el pago se anula <strong>solo en la cuenta corriente del proveedor</strong>: la caja no se modifica,
+        porque el arqueo ya se hizo con esa plata adentro.<br>
+        Si volvés a cargar este pago en efectivo, se generará otro egreso en la caja actual.
+      </div>`;
+    }
+
+    overlay.innerHTML = `
+      <div class="ccprov-modal" style="max-width:560px">
+        <div class="ccprov-modal-hdr">
+          <span>\u{1F5D1} Anular pago \u2014 ${esc(proveedorNombre)}</span>
+          <button class="ccprov-modal-close" id="btn-anular-close" aria-label="Cerrar" title="Cerrar">\u2715</button>
+        </div>
+        <div class="ccprov-modal-body" style="font-size:13px">
+          <p style="margin:0">Pago del <strong>${fmtFecha(r.pago.fecha)}</strong> por <strong>${fmt$(r.total)}</strong><br>
+            <span style="color:var(--color-text-secondary)">${medios}</span></p>
+          ${impHtml}
+          ${cajaHtml}
+          <div id="anular-error" style="display:none;color:#c62828;font-size:13px;margin-top:8px"></div>
+        </div>
+        <div class="ccprov-modal-ftr">
+          <button class="btn btn-outline" id="btn-anular-cancel">Cancelar</button>
+          <button class="btn btn-danger" id="btn-anular-ok">${r.hayCajaCerrada ? 'Anular igualmente (sin tocar la caja)' : 'Anular pago'}</button>
+        </div>
+      </div>`;
+    overlay.classList.remove('hidden');
+
+    const close = () => { overlay.classList.add('hidden'); overlay.innerHTML = ''; };
+    ge('btn-anular-close').addEventListener('click', close);
+    ge('btn-anular-cancel').addEventListener('click', close);
+    ge('btn-anular-ok').addEventListener('click', () => {
+      const res = data().anularPago(pagoId, { aceptarCajaCerrada: r.hayCajaCerrada });
+      if (!res.success) {
+        const err = ge('anular-error');
+        if (err) { err.textContent = res.error || 'No se pudo anular el pago.'; err.style.display = 'block'; }
+        return;
+      }
+      close();
+      window.SGA_Sync?.pushPending?.();
+      renderDetalle(proveedorId, proveedorNombre);
+      const msg = 'Pago anulado' + (res.egresosRevertidos ? ' — egreso de caja revertido' : '');
+      if (window.SGA_Utils?.showToast) window.SGA_Utils.showToast(msg, 'success');
+      else window.SGA_Utils?.showNotification?.(msg, 'success');
+    });
+  }
+
   function renderLedgerContent(proveedorId, saldo) {
     const wrap = ge('ccprov-ledger-wrap');
     if (!wrap) return;
@@ -1026,6 +1284,12 @@ const CuentaCorrienteProveedores = (() => {
         parseFloat(btn.dataset.credito) || 0,
         proveedorId,
         state.proveedorNombre
+      ));
+    });
+
+    wrap.querySelectorAll('[data-anular-pago]').forEach(btn => {
+      btn.addEventListener('click', () => openModalAnularPago(
+        btn.dataset.anularPago, proveedorId, state.proveedorNombre
       ));
     });
 

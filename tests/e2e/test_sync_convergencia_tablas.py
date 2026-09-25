@@ -62,7 +62,9 @@ HIJOS_EMBEBIDOS = {
 
 # Hijos que la app REALMENTE borra (DELETE FROM <hijo> en js/, verificado leyendo
 # el codigo el 18/9/2026). imputaciones_pagos, pagos_proveedores_metodos,
-# devolucion_items y venta_promociones nunca se borran: son de solo-agregar.
+# devolucion_items y venta_promociones nunca se borran por su cuenta: son de solo-agregar.
+# (Desde el 25/9/2026 los medios e imputaciones de un pago SI se borran, pero siempre junto con el
+#  pago entero —anularPago— y viajan con la marca del pago: ver BORRADO_CON_MARCA.)
 HIJOS_CON_BORRADO_REAL = {
     ("ventas", "venta_items"), ("ventas", "venta_pagos"),          # pos.js:177 (editar venta)
     ("compras", "compra_items"),                                   # compras_v2.js (editar compra)
@@ -74,7 +76,10 @@ HIJOS_CON_BORRADO_REAL = {
 
 # Tablas cuyo borrado el codigo realmente registra con registrarEliminacion().
 BORRADO_CON_MARCA = ["productos", "promociones", "ordenes_compra", "cuenta_corriente", "ingresos_caja",
-                     "pedidos_abiertos", "compras_pausadas"]
+                     "pedidos_abiertos", "compras_pausadas",
+                     # Anular un pago a proveedor (SGA_PagosProveedores.anularPago): borra el pago con sus
+                     # medios e imputaciones (via HIJOS_DE) y, si salio efectivo de una caja abierta, el egreso.
+                     "pagos_proveedores", "egresos_caja"]
 
 # --- Excepciones ----------------------------------------------------------------
 # clave: (tabla, sentido). Valor: motivo.
