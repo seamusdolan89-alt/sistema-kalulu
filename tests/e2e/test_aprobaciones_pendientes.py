@@ -106,14 +106,16 @@ def main():
         page.get_by_text("Siguiente", exact=False).click()
         page.wait_for_timeout(500)
 
-        page.locator("[data-rev-mas]").click()
+        page.locator('[data-rev-menu="desinc"]').click()
         page.wait_for_timeout(200)
-        page.locator('[data-rev-accion="ajuste"]').click()
+        page.locator('[data-rev-accion="ajuste"]', has_text="Producto no entregado").click()
         page.wait_for_timeout(300)
         assert page.locator("#cv2-ajuste-overlay").is_visible(), "No se abrio el overlay de Ajuste de stock"
 
         page.fill("#cv2-ajuste-cantidad", "3")
-        page.select_option("#cv2-ajuste-motivo", label="Producto no entregado por proveedor")
+        # El menu "Desincorporar" ya abre el modal con el motivo elegido.
+        assert page.locator("#cv2-ajuste-motivo").input_value() == "Producto no entregado", (
+            "El modal no abrio con el motivo preseleccionado desde el menu Desincorporar")
         page.locator("#cv2-ajuste-btn-confirm").click()
         page.wait_for_timeout(300)
         assert not page.locator("#cv2-ajuste-overlay").is_visible(), "El overlay de ajuste no se cerro al confirmar"
@@ -179,7 +181,7 @@ def main():
         assert filas.count() == 2, f"Esperaba 2 pendientes (Compras + POS), hay {filas.count()}"
 
         texto_tabla = page.locator("#aprob-table").inner_text()
-        assert "Producto no entregado por proveedor" in texto_tabla, "No aparece el motivo del ajuste de Compras"
+        assert "Producto no entregado" in texto_tabla, "No aparece el motivo del ajuste de Compras"
         assert "Devolución" in texto_tabla, "No aparece el motivo del ajuste tipo POS"
         assert "Pepsico SA" in texto_tabla, "El origen no muestra el proveedor de la compra"
         assert "Devolución (POS)" in texto_tabla, "El origen del ajuste sin compra_id no se etiqueta como POS"

@@ -130,6 +130,7 @@ sale "vacío" inesperadamente.
 | `test_input_number_rueda.py` | La rueda del mouse NO cambia el valor de un campo numérico enfocado (cantidad/precio): listener global `wheel` en `app.js` que le saca el foco al `type="number"`, así el valor no cambia y el scroll sigue de largo. POS y Admin-POS |
 | `test_compras_remito_enter_foco.py` | Compras "Sin Factura" (remito): Enter en la cantidad devuelve el foco al buscador (antes se quedaba en la cantidad: intentaba enfocar el "Nuevo costo", oculto en modo remito, y no caía al buscador). También verifica que en una compra normal Enter sigue saltando al costo |
 | `test_operaciones_stock_historial_filtro_proveedor.py` | Historial de compras (Operaciones de Stock): filtro por proveedor — el select lista solo proveedores con compras, filtra al elegir, se combina con el rango de fechas y "Limpiar" lo resetea |
+| `test_compras_revision_menu_sin_recorte.py` | Compras — Revisión: los menús por fila ("Familia": sustituto/madre; "Desincorporar": rotura/consumo/producto no entregado) no se recortan en la última fila (antes el panel era absolute dentro de la tabla con overflow:hidden y la 3ra opción quedaba cortada), se abren hacia arriba si no entran, se cierran con 2º click / click afuera / scroll / Escape (sin cerrar Revisión) y cada opción de Desincorporar abre el modal de ajuste con su motivo elegido |
 
 Nota: toda compra en este sistema queda "Cta. Cte." — la condición de pago
 está fija en `compras_v2.js` (`state.condicionPago = 'pendiente'`, sin

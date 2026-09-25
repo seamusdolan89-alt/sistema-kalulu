@@ -2540,7 +2540,14 @@ const ComprasV2 = (() => {
           <td class="r">${descPct > 0.001 ? descPct.toFixed(1) + '%' : '—'}</td>
           <td class="r"><strong>${fmt$(subtotal)}</strong></td>
           <td class="c cv2-rev-acciones-cell">
-            <button class="cv2-rev-btn-mas" data-rev-mas="${i}" title="Acciones rápidas">⋯</button>
+            <div class="cv2-rev-acc-btns">
+              <button type="button" class="cv2-rev-btn-acc" data-rev-menu="familia" data-rev-idx="${i}"
+                      aria-haspopup="menu" aria-expanded="false"
+                      title="Asociar sustituto o asignar madre">👪 Familia</button>
+              <button type="button" class="cv2-rev-btn-acc" data-rev-menu="desinc" data-rev-idx="${i}"
+                      aria-haspopup="menu" aria-expanded="false"
+                      title="Rotura, consumo o producto no entregado">📦 Desincorporar</button>
+            </div>
           </td>
         </tr>`;
       }).join('');
@@ -2571,37 +2578,95 @@ const ComprasV2 = (() => {
   // y aunque se confirme la compra el stock no se toca hasta que el admin lo
   // aprueba desde Aprobaciones Pendientes.
 
+  // Dos botones por fila en vez de un "⋯" que no dejaba claro qué había
+  // adentro: "Familia" (sustituto / madre) y "Desincorporar" (rotura /
+  // consumo / producto no entregado). Cada uno abre su propio menú.
+  const MOTIVO_NO_ENTREGADO = 'Producto no entregado';
+  const REV_MENUS = {
+    familia: [
+      { accion: 'sust',  icono: '🔗', texto: 'Asociar sustituto' },
+      { accion: 'madre', icono: '👪', texto: 'Asignar madre' },
+    ],
+    desinc: [
+      { accion: 'ajuste', motivo: 'Rotura',              icono: '💥', texto: 'Rotura' },
+      { accion: 'ajuste', motivo: 'Consumo',             icono: '🍴', texto: 'Consumo' },
+      { accion: 'ajuste', motivo: MOTIVO_NO_ENTREGADO,   icono: '📦', texto: 'Producto no entregado' },
+    ],
+  };
+
+  // Handler activo mientras hay un menú abierto (scroll / resize lo cierran:
+  // el menú es position:fixed y quedaría flotando lejos de su botón).
+  let _revPanelCierre = null;
+
   function cerrarPanelRevAcciones() {
-    ge('cv2-rev-tbody')?.querySelector('.cv2-rev-panel')?.remove();
+    document.querySelectorAll('.cv2-rev-panel').forEach(p => p.remove());
+    document.querySelectorAll('[data-rev-menu][aria-expanded="true"]')
+      .forEach(b => b.setAttribute('aria-expanded', 'false'));
+    if (_revPanelCierre) {
+      document.removeEventListener('scroll', _revPanelCierre, true);
+      window.removeEventListener('resize', _revPanelCierre);
+      _revPanelCierre = null;
+    }
   }
 
-  function abrirPanelRevAcciones(idx, celda) {
+  // El menú va con position:fixed, calculado desde el botón, y no absoluto
+  // dentro de la celda: la tabla tiene overflow:hidden (esquinas redondeadas)
+  // y el scroll de .cv2-rev-body también recorta, así que en la última fila
+  // (o con pocos productos) el menú quedaba cortado y sus opciones ilegibles.
+  // Se abre hacia abajo y, si no entra, hacia arriba.
+  function posicionarPanelRev(panel, btn) {
+    const r = btn.getBoundingClientRect();
+    const w = panel.offsetWidth;
+    const h = panel.offsetHeight;
+    const margen = 8, sep = 4;
+    const left = Math.min(Math.max(margen, r.right - w), window.innerWidth - w - margen);
+    let top = r.bottom + sep;
+    if (top + h > window.innerHeight - margen) top = r.top - h - sep;
+    top = Math.max(margen, top);
+    panel.style.left = left + 'px';
+    panel.style.top  = top + 'px';
+  }
+
+  function abrirPanelRevAcciones(idx, tipoMenu, btn) {
+    const yaAbierto = document.querySelector('.cv2-rev-panel')?.dataset.revPara === `${idx}:${tipoMenu}`;
     cerrarPanelRevAcciones();
+    if (yaAbierto) return;   // segundo click en el mismo botón: lo cierra
+
     const it = state.items[idx];
-    if (!it || !it.productoId || !celda) return;
+    const opciones = REV_MENUS[tipoMenu];
+    const overlay = ge('cv2-review-overlay');
+    if (!it || !it.productoId || !opciones || !btn || !overlay) return;
 
     const panel = document.createElement('div');
     panel.className = 'cv2-rev-panel';
-    panel.innerHTML = `
-      <button class="cv2-rev-panel-acc" data-rev-accion="sust">🔗 Asociar sustituto</button>
-      <button class="cv2-rev-panel-acc" data-rev-accion="madre">👪 Asignar madre</button>
-      <button class="cv2-rev-panel-acc" data-rev-accion="ajuste">📦 Ajuste de stock</button>
-    `;
-    panel.querySelector('[data-rev-accion="sust"]').addEventListener('click', () => {
-      cerrarPanelRevAcciones();
-      openSustQuickModal(it.productoId, it.nombre);
+    panel.setAttribute('role', 'menu');
+    panel.dataset.revPara = `${idx}:${tipoMenu}`;
+    panel.innerHTML = opciones.map((o, k) => `
+      <button type="button" role="menuitem" class="cv2-rev-panel-acc" data-rev-accion="${o.accion}"
+              data-rev-opcion="${k}">${o.icono} ${esc(o.texto)}</button>
+    `).join('');
+
+    panel.querySelectorAll('[data-rev-opcion]').forEach(b => {
+      b.addEventListener('click', () => {
+        const o = opciones[parseInt(b.dataset.revOpcion, 10)];
+        cerrarPanelRevAcciones();
+        if (o.accion === 'sust')  openSustQuickModal(it.productoId, it.nombre);
+        if (o.accion === 'madre') openMadreQuickModal(it.productoId, it.nombre);
+        if (o.accion === 'ajuste') {
+          const cant   = parseFloat(it.cantidad)   || 0;
+          const udsPaq = parseFloat(it.udsPaquete) || 1;
+          openAjusteQuickModal(idx, it.productoId, it.nombre, cant * udsPaq, o.motivo);
+        }
+      });
     });
-    panel.querySelector('[data-rev-accion="madre"]').addEventListener('click', () => {
-      cerrarPanelRevAcciones();
-      openMadreQuickModal(it.productoId, it.nombre);
-    });
-    panel.querySelector('[data-rev-accion="ajuste"]').addEventListener('click', () => {
-      cerrarPanelRevAcciones();
-      const cant   = parseFloat(it.cantidad)   || 0;
-      const udsPaq = parseFloat(it.udsPaquete) || 1;
-      openAjusteQuickModal(idx, it.productoId, it.nombre, cant * udsPaq);
-    });
-    celda.appendChild(panel);
+
+    overlay.appendChild(panel);
+    posicionarPanelRev(panel, btn);
+    btn.setAttribute('aria-expanded', 'true');
+
+    _revPanelCierre = () => cerrarPanelRevAcciones();
+    document.addEventListener('scroll', _revPanelCierre, true);
+    window.addEventListener('resize', _revPanelCierre);
   }
 
   function openSustQuickModal(productoId, nombre) {
@@ -2791,12 +2856,14 @@ const ComprasV2 = (() => {
   // compraId. El stock en sí no se toca ni ahí ni acá — solo cuando el admin
   // lo aprueba desde Aprobaciones Pendientes.
   const AJUSTE_MOTIVOS = [
-    { value: 'Rotura',                                tipo: 'rotura' },
-    { value: 'Consumo',                               tipo: 'consumo_interno' },
-    { value: 'Producto no entregado por proveedor',   tipo: 'ajuste_negativo' },
+    { value: 'Rotura',               tipo: 'rotura' },
+    { value: 'Consumo',              tipo: 'consumo_interno' },
+    { value: MOTIVO_NO_ENTREGADO,    tipo: 'ajuste_negativo' },
   ];
 
-  function openAjusteQuickModal(idx, productoId, nombre, cantidadDefault) {
+  // motivoInicial: el menú "Desincorporar" ya sabe qué opción se eligió, así
+  // que el modal abre con ese motivo puesto (igual se puede cambiar).
+  function openAjusteQuickModal(idx, productoId, nombre, cantidadDefault, motivoInicial) {
     const overlay = ge('cv2-ajuste-overlay');
     overlay.dataset.idx    = idx;
     overlay.dataset.prodId = productoId;
@@ -2804,6 +2871,7 @@ const ComprasV2 = (() => {
     ge('cv2-ajuste-cantidad').value = cantidadDefault > 0 ? cantidadDefault : 1;
     const sel = ge('cv2-ajuste-motivo');
     sel.innerHTML = AJUSTE_MOTIVOS.map(m => `<option value="${esc(m.value)}">${esc(m.value)}</option>`).join('');
+    if (motivoInicial && AJUSTE_MOTIVOS.some(m => m.value === motivoInicial)) sel.value = motivoInicial;
     overlay.style.display = 'flex';
     setTimeout(() => ge('cv2-ajuste-cantidad')?.focus(), 60);
   }
@@ -4644,6 +4712,9 @@ const ComprasV2 = (() => {
       }
 
       if (e.key === 'Escape') {
+        // Con un menú de acciones abierto, Escape cierra solo el menú (no toda
+        // la pantalla de Revisión).
+        if (document.querySelector('.cv2-rev-panel')) { cerrarPanelRevAcciones(); return; }
         const reviewOverlay = ge('cv2-review-overlay');
         if (reviewOverlay && reviewOverlay.style.display !== 'none') {
           hideReviewOverlay();
@@ -4680,6 +4751,7 @@ const ComprasV2 = (() => {
   function teardownKeyboard() {
     if (_docKeydown) { document.removeEventListener('keydown', _docKeydown); _docKeydown = null; }
     if (_docClickRevPanel) { document.removeEventListener('click', _docClickRevPanel); _docClickRevPanel = null; }
+    cerrarPanelRevAcciones();   // saca también los listeners de scroll/resize del menú
   }
 
   // ── Init ─────────────────────────────────────────────────────────────────────
@@ -5184,14 +5256,14 @@ const ComprasV2 = (() => {
         clickBadgeAjuste(parseInt(chip.dataset.revBadgeIdx, 10));
         return;
       }
-      const btnMas = e.target.closest('[data-rev-mas]');
-      if (!btnMas) return;
+      const btnMenu = e.target.closest('[data-rev-menu]');
+      if (!btnMenu) return;
       e.stopPropagation();
-      const idx = parseInt(btnMas.dataset.revMas, 10);
-      abrirPanelRevAcciones(idx, btnMas.closest('.cv2-rev-acciones-cell'));
+      const idx = parseInt(btnMenu.dataset.revIdx, 10);
+      abrirPanelRevAcciones(idx, btnMenu.dataset.revMenu, btnMenu);
     });
     _docClickRevPanel = e => {
-      if (e.target.closest('.cv2-rev-panel') || e.target.closest('[data-rev-mas]')) return;
+      if (e.target.closest('.cv2-rev-panel') || e.target.closest('[data-rev-menu]')) return;
       cerrarPanelRevAcciones();
     };
     document.addEventListener('click', _docClickRevPanel);
