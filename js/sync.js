@@ -932,6 +932,9 @@
   }
 
   function applyPagoProveedor(data) {
+    // Un pago anulado (SGA_PagosProveedores.anularPago) deja marca de borrado:
+    // sin este chequeo, un documento viejo que siga en Firestore lo resucita.
+    if (window.SGA_DB.fueEliminado('pagos_proveedores', data.id)) return;
     if (tienePendienteLocal('pagos_proveedores', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
     // REPLACE y no IGNORE: con IGNORE un cambio en el pago (ej. observaciones)
@@ -1590,6 +1593,9 @@
   }
 
   function applyEgresoCajaFull(data) {
+    // El egreso de un pago en efectivo que se anulo con la caja abierta se
+    // borra con marca (ver anularPago): que un documento viejo no lo reviva.
+    if (window.SGA_DB.fueEliminado('egresos_caja', data.id)) return;
     if (tienePendienteLocal('egresos_caja', 'id = ?', [data.id])) return;
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO egresos_caja

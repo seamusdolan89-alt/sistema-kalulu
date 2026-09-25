@@ -1573,6 +1573,11 @@
     gastos:         [],
     cuenta_corriente: [],
     ingresos_caja:    [],
+    // Anular un pago a proveedor (SGA_PagosProveedores.anularPago): se borra el
+    // pago con sus medios e imputaciones, y —si salio efectivo de una caja
+    // abierta— el egreso que lo espejaba en esa caja.
+    pagos_proveedores: [['pagos_proveedores_metodos', 'pago_id'], ['imputaciones_pagos', 'pago_id']],
+    egresos_caja:      [],
     // Borradores: se retoman/borran desde cualquier caja o desde Admin-POS.
     pedidos_abiertos: [],
     compras_pausadas: [],
