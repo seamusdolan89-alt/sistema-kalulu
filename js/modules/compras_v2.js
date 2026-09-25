@@ -3267,7 +3267,8 @@ const ComprasV2 = (() => {
         if (!item.esMuestra && costoModificado && costoNeto > 0) {
           const masReciente = db().query(
             `SELECT 1 FROM compra_items ci JOIN compras c ON c.id = ci.compra_id
-             WHERE ci.producto_id = ? AND c.id != ? AND c.fecha > ? LIMIT 1`,
+             WHERE ci.producto_id = ? AND c.id != ? AND c.fecha > ?
+               AND COALESCE(c.estado,'confirmada') != 'anulada' LIMIT 1`,
             [item.productoId, compraId, state.fecha]
           );
           if (!masReciente.length) {

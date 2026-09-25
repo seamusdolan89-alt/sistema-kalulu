@@ -1910,6 +1910,7 @@ const EditorProducto = (() => {
     edicion_venta:     'Edición venta',
     devolucion:        'Devolución',
     compra_edicion:    'Edición compra',
+    anulacion_compra:  'Anulación compra',
     remito:            'Remito',
     remito_edicion:    'Edición remito',
     vencimiento:       'Vencimiento',
@@ -1923,7 +1924,8 @@ const EditorProducto = (() => {
   const TX_CATEGORIA = {
     venta: 'venta', anulacion_venta: 'venta', edicion_venta: 'venta',
     devolucion: 'devolucion',
-    compra: 'compra', compra_edicion: 'compra', remito: 'compra', remito_edicion: 'compra',
+    compra: 'compra', compra_edicion: 'compra', anulacion_compra: 'compra',
+    remito: 'compra', remito_edicion: 'compra',
   };
   // A que pantalla lleva el link de un movimiento, segun el documento que lo origino
   const TX_NAV = { ventas: 'venta', compras: 'compra', remitos: null, devoluciones: null, stock_ajustes: 'ajuste' };

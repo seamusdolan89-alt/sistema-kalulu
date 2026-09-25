@@ -854,6 +854,10 @@
       // poder ofrecer "Editar" desde el POS solo sobre compras de la caja
       // actual (en ADMIN POS no aplica esta restricción).
       "ALTER TABLE compras ADD COLUMN sesion_caja_id TEXT",
+      // Anular una compra cargada por error (operaciones_stock.js anularCompra): quien, cuando y por que.
+      "ALTER TABLE compras ADD COLUMN motivo_anulacion TEXT",
+      "ALTER TABLE compras ADD COLUMN anulada_en TEXT",
+      "ALTER TABLE compras ADD COLUMN anulada_por TEXT",
       // Un pago a proveedor puede imputarse contra una compra o contra un gasto
       // de servicios cargado como "queda a pagar" (ver cuenta corriente).
       "ALTER TABLE imputaciones_pagos ADD COLUMN gasto_id TEXT",
@@ -1578,6 +1582,9 @@
     // abierta— el egreso que lo espejaba en esa caja.
     pagos_proveedores: [['pagos_proveedores_metodos', 'pago_id'], ['imputaciones_pagos', 'pago_id']],
     egresos_caja:      [],
+    // Anular una compra libera lo que un pago le habia imputado: se borra SOLO la
+    // imputacion (el pago sigue, su credito vuelve a estar disponible).
+    imputaciones_pagos: [],
     // Borradores: se retoman/borran desde cualquier caja o desde Admin-POS.
     pedidos_abiertos: [],
     compras_pausadas: [],

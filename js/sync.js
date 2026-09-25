@@ -811,8 +811,9 @@
          condicion_pago, estado, factura_pv, procesado_por,
          subtotal_neto, iva_105, iva_21, imp_interno, percepcion_iva, percepcion_iibb,
          total_factura, condicion_compra, sesion_caja_id,
-         imagen_path, origen_carga, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+         imagen_path, origen_carga, motivo_anulacion, anulada_en, anulada_por,
+         sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.sucursal_id, data.proveedor_id, data.usuario_id, data.fecha,
        data.numero_factura, data.total, data.condicion_pago || null,
        data.estado || 'confirmada', data.factura_pv || null,
@@ -821,6 +822,7 @@
        data.percepcion_iva || 0, data.percepcion_iibb || 0,
        data.total_factura || 0, data.condicion_compra || null, data.sesion_caja_id || null,
        data.imagen_path || null, data.origen_carga || null,
+       data.motivo_anulacion || null, data.anulada_en || null, data.anulada_por || null,
        data.updated_at || now]
     );
 
@@ -858,10 +860,14 @@
       // el descuento de la linea (ver costoNetoUsado en compras_v2.js).
       const descPct   = Math.min(100, Math.max(0, parseFloat(item.descuento_pct) || 0));
       const costoNeto = (parseFloat(item.costo_unitario) || 0) * (1 - descPct / 100);
-      if (item.tipo !== 'muestra' && item.costo_modificado && costoNeto > 0) {
+      // Una compra ANULADA nunca actualiza el costo (anularCompra ya lo revirtio
+      // si correspondia) y tampoco cuenta como "compra mas reciente" de nadie.
+      if (item.tipo !== 'muestra' && item.costo_modificado && costoNeto > 0
+          && (data.estado || 'confirmada') !== 'anulada') {
         const masReciente = window.SGA_DB.query(
           `SELECT 1 FROM compra_items ci JOIN compras c ON c.id = ci.compra_id
-           WHERE ci.producto_id = ? AND c.id != ? AND c.fecha > ? LIMIT 1`,
+           WHERE ci.producto_id = ? AND c.id != ? AND c.fecha > ?
+             AND COALESCE(c.estado,'confirmada') != 'anulada' LIMIT 1`,
           [item.producto_id, data.id, data.fecha]
         );
         if (!masReciente.length) {
@@ -961,6 +967,9 @@
     }
 
     for (const imp of (data._imputaciones || [])) {
+      // Una imputacion liberada al anular una compra deja marca de borrado: el
+      // documento del pago que sigue en el otro lado no la puede revivir.
+      if (imp.id && window.SGA_DB.fueEliminado('imputaciones_pagos', imp.id)) continue;
       // gasto_id viaja igual que compra_id: una imputacion puede aplicarse
       // contra un gasto de servicios cargado como "queda a pagar". Sin esta
       // columna, del otro lado el gasto seguia figurando impago.
