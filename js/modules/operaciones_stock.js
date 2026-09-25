@@ -5,6 +5,9 @@
 // instancia vieja cacheada si otra ruta ya cargo familia.js antes (ver
 // CLAUDE.md, "otra excepcion real" del router).
 import Familia from './familia.js';
+// Import estatico por la misma razon que Familia (ver arriba). El wizard trae su
+// propia capa de datos (cuenta_corriente_proveedores.js) cuando la necesita.
+import NotaCreditoWizard from './nota_credito_wizard.js';
 
 const OperacionesStock = (() => {
 
@@ -225,6 +228,15 @@ const OperacionesStock = (() => {
     }
 
     const bloqueos = [];
+    const ncs = db().query(
+      `SELECT id FROM pagos_proveedores WHERE tipo = 'nota_credito' AND compra_origen_id = ?`, [compraId]
+    );
+    if (ncs.length) {
+      bloqueos.push(
+        `Esta compra tiene ${ncs.length} nota(s) de crédito asociada(s). Anulá primero la nota de crédito ` +
+        `(Cuentas Corrientes → Anular) y después la compra.`
+      );
+    }
     if (ajustesAprobados.length) {
       bloqueos.push(
         `Esta compra tiene ${ajustesAprobados.length} ajuste(s) de stock ya aprobado(s) ` +
@@ -475,6 +487,9 @@ const OperacionesStock = (() => {
                 ${estado !== 'anulada' && !c.de_remito && (puedeEditarAdmin || (puedeEditarPos && c.sesion_caja_id && c.sesion_caja_id === sesionActualId)) ? `
                   <button style="padding:3px 12px;margin-left:4px;background:#fff;color:#1a5c2e;border:1px solid #1a5c2e;border-radius:4px;cursor:pointer;font-size:12px" data-editar-compra="${esc(c.id)}">✏️ Editar</button>
                 ` : ''}
+                ${estado !== 'anulada' && NotaCreditoWizard.puede() ? `
+                  <button style="padding:3px 12px;margin-left:4px;background:#fff;color:#1565c0;border:1px solid #90caf9;border-radius:4px;cursor:pointer;font-size:12px" data-nc-compra="${esc(c.id)}" title="Registrar una nota de crédito de esta factura">🧾 NC</button>
+                ` : ''}
                 ${estado !== 'anulada' && puedeAnularCompras() ? `
                   <button style="padding:3px 12px;margin-left:4px;background:#fff;color:#c62828;border:1px solid #ef9a9a;border-radius:4px;cursor:pointer;font-size:12px" data-anular-compra="${esc(c.id)}" title="Anular esta compra (cargada por error)">🚫 Anular</button>
                 ` : ''}
@@ -487,6 +502,12 @@ const OperacionesStock = (() => {
 
     body.querySelectorAll('[data-ver-compra]').forEach(btn => {
       btn.addEventListener('click', () => renderDetalleCompra(btn.dataset.verCompra));
+    });
+    body.querySelectorAll('[data-nc-compra]').forEach(btn => {
+      btn.addEventListener('click', () => NotaCreditoWizard.abrir({
+        compraOrigenId: btn.dataset.ncCompra,
+        onSaved: () => renderHistorial(leerFiltrosHistorial()),
+      }));
     });
     body.querySelectorAll('[data-anular-compra]').forEach(btn => {
       btn.addEventListener('click', () => abrirAnularCompra(btn.dataset.anularCompra));

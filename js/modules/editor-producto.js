@@ -1911,6 +1911,8 @@ const EditorProducto = (() => {
     devolucion:        'Devolución',
     compra_edicion:    'Edición compra',
     anulacion_compra:  'Anulación compra',
+    nc_devolucion:     'Devolución a proveedor',
+    nc_anulacion:      'Anulación NC',
     remito:            'Remito',
     remito_edicion:    'Edición remito',
     vencimiento:       'Vencimiento',
@@ -1925,6 +1927,7 @@ const EditorProducto = (() => {
     venta: 'venta', anulacion_venta: 'venta', edicion_venta: 'venta',
     devolucion: 'devolucion',
     compra: 'compra', compra_edicion: 'compra', anulacion_compra: 'compra',
+    nc_devolucion: 'compra', nc_anulacion: 'compra',
     remito: 'compra', remito_edicion: 'compra',
   };
   // A que pantalla lleva el link de un movimiento, segun el documento que lo origino
