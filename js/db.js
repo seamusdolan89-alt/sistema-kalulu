@@ -1060,7 +1060,7 @@
         CREATE TABLE IF NOT EXISTS pagos_proveedores_metodos (
           id TEXT PRIMARY KEY,
           pago_id TEXT NOT NULL REFERENCES pagos_proveedores(id),
-          metodo TEXT NOT NULL CHECK(metodo IN ('efectivo','transferencia','caja_seamus','mercadopago')),
+          metodo TEXT NOT NULL CHECK(metodo IN ('efectivo','transferencia','caja_seamus','mercadopago','nota_credito')),
           monto REAL NOT NULL,
           referencia TEXT,
           sesion_caja_id TEXT REFERENCES sesiones_caja(id)
@@ -1068,7 +1068,8 @@
       `);
     } catch(e) { console.warn('pagos_proveedores_metodos:', e.message); }
 
-    // Migración: ampliar CHECK constraint de pagos_proveedores_metodos para incluir caja_seamus y mercadopago
+    // Migración: ampliar CHECK constraint de pagos_proveedores_metodos (caja_seamus, mercadopago y, desde las
+    // notas de credito de proveedor, 'nota_credito': una NC es un credito imputable, igual que un pago)
     try {
       const ppmSchema = database.prepare(
         `SELECT sql FROM sqlite_master WHERE type='table' AND name='pagos_proveedores_metodos'`
@@ -1076,13 +1077,13 @@
       let ppmSql = '';
       if (ppmSchema.step()) ppmSql = ppmSchema.getAsObject().sql || '';
       ppmSchema.free();
-      if (ppmSql && !ppmSql.includes('caja_seamus')) {
+      if (ppmSql && !ppmSql.includes('nota_credito')) {
         database.run(`ALTER TABLE pagos_proveedores_metodos RENAME TO pagos_proveedores_metodos_bak`);
         database.run(`
           CREATE TABLE pagos_proveedores_metodos (
             id TEXT PRIMARY KEY,
             pago_id TEXT NOT NULL REFERENCES pagos_proveedores(id),
-            metodo TEXT NOT NULL CHECK(metodo IN ('efectivo','transferencia','caja_seamus','mercadopago')),
+            metodo TEXT NOT NULL CHECK(metodo IN ('efectivo','transferencia','caja_seamus','mercadopago','nota_credito')),
             monto REAL NOT NULL,
             referencia TEXT,
             sesion_caja_id TEXT REFERENCES sesiones_caja(id)
@@ -1107,6 +1108,47 @@
         )
       `);
     } catch(e) { console.warn('imputaciones_pagos:', e.message); }
+
+    // ── Notas de credito de proveedor ─────────────────────────────────────────
+    // Una NC es un pago con metodo 'nota_credito' (su credito, sus imputaciones y el
+    // saldo salen solos de las mismas cuentas que ya usan los pagos). Estas columnas
+    // y la tabla de lineas guardan lo propio de la NC; los pagos comunes quedan con
+    // tipo='pago' y el resto en NULL/0.
+    const ncMigrations = [
+      "ALTER TABLE pagos_proveedores ADD COLUMN tipo TEXT DEFAULT 'pago'",
+      "ALTER TABLE pagos_proveedores ADD COLUMN numero_comprobante TEXT",
+      "ALTER TABLE pagos_proveedores ADD COLUMN condicion_nc TEXT",
+      "ALTER TABLE pagos_proveedores ADD COLUMN compra_origen_id TEXT",
+      "ALTER TABLE pagos_proveedores ADD COLUMN nc_provisoria INTEGER DEFAULT 0",
+      "ALTER TABLE pagos_proveedores ADD COLUMN subtotal_neto REAL DEFAULT 0",
+      "ALTER TABLE pagos_proveedores ADD COLUMN iva_105 REAL DEFAULT 0",
+      "ALTER TABLE pagos_proveedores ADD COLUMN iva_21 REAL DEFAULT 0",
+      "ALTER TABLE pagos_proveedores ADD COLUMN imp_interno REAL DEFAULT 0",
+      "ALTER TABLE pagos_proveedores ADD COLUMN percepcion_iva REAL DEFAULT 0",
+      "ALTER TABLE pagos_proveedores ADD COLUMN percepcion_iibb REAL DEFAULT 0",
+      "ALTER TABLE pagos_proveedores ADD COLUMN sucursal_id TEXT",
+    ];
+    for (const sql of ncMigrations) {
+      try { database.run(sql); } catch(e) { /* column already exists */ }
+    }
+    // Lineas de una NC: 'producto' (devolucion: baja stock salvo mueve_stock=0) o
+    // 'concepto' (descuento / bonificacion: solo plata). subtotal va NETO de IVA.
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS pagos_proveedores_items (
+          id TEXT PRIMARY KEY,
+          pago_id TEXT NOT NULL REFERENCES pagos_proveedores(id),
+          tipo TEXT NOT NULL DEFAULT 'producto',
+          producto_id TEXT,
+          concepto TEXT,
+          cantidad REAL DEFAULT 0,
+          costo_unitario REAL DEFAULT 0,
+          subtotal REAL DEFAULT 0,
+          iva TEXT,
+          mueve_stock INTEGER DEFAULT 1
+        )
+      `);
+    } catch(e) { console.warn('pagos_proveedores_items:', e.message); }
 
     // ── Remitos — albaranes de entrega sin factura ────────────────────────────
     try {
@@ -1580,7 +1622,8 @@
     // Anular un pago a proveedor (SGA_PagosProveedores.anularPago): se borra el
     // pago con sus medios e imputaciones, y —si salio efectivo de una caja
     // abierta— el egreso que lo espejaba en esa caja.
-    pagos_proveedores: [['pagos_proveedores_metodos', 'pago_id'], ['imputaciones_pagos', 'pago_id']],
+    pagos_proveedores: [['pagos_proveedores_metodos', 'pago_id'], ['imputaciones_pagos', 'pago_id'],
+                        ['pagos_proveedores_items', 'pago_id']],
     egresos_caja:      [],
     // Anular una compra libera lo que un pago le habia imputado: se borra SOLO la
     // imputacion (el pago sigue, su credito vuelve a estar disponible).

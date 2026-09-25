@@ -948,10 +948,19 @@
     // de arriba ya protege lo que esta sin subir.
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO pagos_proveedores
-        (id, proveedor_id, fecha, observaciones, usuario_id, sync_status, updated_at)
-      VALUES (?,?,?,?,?,'synced',?)`,
+        (id, proveedor_id, fecha, observaciones, usuario_id,
+         tipo, numero_comprobante, condicion_nc, compra_origen_id, nc_provisoria,
+         subtotal_neto, iva_105, iva_21, imp_interno, percepcion_iva, percepcion_iibb, sucursal_id,
+         sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.proveedor_id, data.fecha,
-       data.observaciones || null, data.usuario_id || null, data.updated_at || now]
+       data.observaciones || null, data.usuario_id || null,
+       // Lo propio de una nota de credito (un pago comun trae tipo 'pago' y el resto vacio).
+       data.tipo || 'pago', data.numero_comprobante || null, data.condicion_nc || null,
+       data.compra_origen_id || null, data.nc_provisoria ? 1 : 0,
+       data.subtotal_neto || 0, data.iva_105 || 0, data.iva_21 || 0, data.imp_interno || 0,
+       data.percepcion_iva || 0, data.percepcion_iibb || 0, data.sucursal_id || null,
+       data.updated_at || now]
     );
 
     // sesion_caja_id faltaba: dice de que caja salio un pago en efectivo, y
@@ -964,6 +973,23 @@
         [metodo.id, data.id, metodo.metodo, metodo.monto, metodo.referencia || null,
          metodo.sesion_caja_id || null]
       );
+    }
+
+    // Lineas de una nota de credito: reemplazo completo del conjunto (una NC
+    // provisoria puede ir sumando lineas). Un pago comun no trae _items.
+    if (Array.isArray(data._items)) {
+      window.SGA_DB.run(`DELETE FROM pagos_proveedores_items WHERE pago_id = ?`, [data.id]);
+      for (const it of data._items) {
+        window.SGA_DB.run(`
+          INSERT INTO pagos_proveedores_items
+            (id, pago_id, tipo, producto_id, concepto, cantidad, costo_unitario, subtotal, iva, mueve_stock)
+          VALUES (?,?,?,?,?,?,?,?,?,?)`,
+          [it.id, data.id, it.tipo || 'producto', it.producto_id || null, it.concepto || null,
+           it.cantidad || 0, it.costo_unitario || 0, it.subtotal || 0, it.iva || null,
+           // 0/1 tal cual viaja (un documento sin el campo = "baja stock", como el default)
+           it.mueve_stock == null ? 1 : Number(it.mueve_stock)]
+        );
+      }
     }
 
     for (const imp of (data._imputaciones || [])) {
@@ -1286,10 +1312,14 @@
     const imputaciones = window.SGA_DB.query(
       `SELECT * FROM imputaciones_pagos WHERE pago_id = ?`, [pago.id]
     ) || [];
+    const items = window.SGA_DB.query(
+      `SELECT * FROM pagos_proveedores_items WHERE pago_id = ?`, [pago.id]
+    ) || [];
     const proveedor = pago.proveedor_id
       ? (window.SGA_DB.query(`SELECT razon_social FROM proveedores WHERE id = ?`, [pago.proveedor_id])[0] || null)
       : null;
-    return { ...pago, _metodos: metodos, _imputaciones: imputaciones, proveedor_nombre: proveedor?.razon_social || null };
+    return { ...pago, _metodos: metodos, _imputaciones: imputaciones, _items: items,
+             proveedor_nombre: proveedor?.razon_social || null };
   }
 
   function denormalizeCuentaCorriente(cc) {

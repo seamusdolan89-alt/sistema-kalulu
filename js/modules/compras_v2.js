@@ -4116,7 +4116,7 @@ const ComprasV2 = (() => {
           const metodosRows = pagoIds.length
             ? db().query(`SELECT metodo, SUM(monto) as total FROM pagos_proveedores_metodos WHERE pago_id IN (${pagoIds}) GROUP BY metodo`)
             : [];
-          const METODO_LABEL = { efectivo: 'Efectivo', transferencia: 'Transferencia', caja_seamus: 'Caja Seamus', mercadopago: 'MercadoPago' };
+          const METODO_LABEL = { efectivo: 'Efectivo', transferencia: 'Transferencia', caja_seamus: 'Caja Seamus', mercadopago: 'MercadoPago', nota_credito: 'Nota de crédito' };
           const metodosLabel = metodosRows.map(m => `${METODO_LABEL[m.metodo] || m.metodo}: ${fmt$(m.total)}`).join(' · ');
 
           creditoWrap.innerHTML = `

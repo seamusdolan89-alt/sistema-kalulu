@@ -56,7 +56,8 @@ HIJOS_EMBEBIDOS = {
     "devoluciones":      [("devolucion_items", "devolucion_id")],
     "remitos":           [("remito_items", "remito_id")],
     "ordenes_compra":    [("orden_compra_items", "orden_id")],
-    "pagos_proveedores": [("pagos_proveedores_metodos", "pago_id"), ("imputaciones_pagos", "pago_id")],
+    "pagos_proveedores": [("pagos_proveedores_metodos", "pago_id"), ("imputaciones_pagos", "pago_id"),
+                          ("pagos_proveedores_items", "pago_id")],
     "promociones":       [("promocion_items", "promocion_id")],
 }
 
