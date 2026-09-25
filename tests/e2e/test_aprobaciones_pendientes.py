@@ -211,13 +211,25 @@ def main():
         assert estado_aprobado["estado"] == "aprobado", f"Estado inesperado tras aprobar: {estado_aprobado}"
         assert estado_aprobado["aprobado_por"], "aprobado_por deberia quedar seteado"
 
+        # "Producto no entregado" NO es consumo propio: es un faltante del proveedor. No deja
+        # consumo_interno; se le acredita con una NOTA DE CREDITO PROVISORIA (ver
+        # test_nc_provisoria_no_entregado.py para el circuito completo).
         consumo = page.evaluate("""
           () => window.SGA_DB.query(
             `SELECT * FROM consumo_interno WHERE motivo LIKE '%no entregado%' OR observaciones LIKE '%Aprobaciones Pendientes%'`
           )
         """)
-        assert len(consumo) >= 1, "No se creo el registro de consumo_interno al aprobar"
-        assert consumo[0]["costo_unitario"] == 50, f"costo_unitario del consumo_interno inesperado: {consumo[0]}"
+        assert len(consumo) == 0, f"BUG: un 'Producto no entregado' quedo registrado como consumo interno: {consumo}"
+        nc = page.evaluate("""
+          () => window.SGA_DB.query(
+            `SELECT p.nc_provisoria, p.compra_origen_id,
+                    (SELECT SUM(m.monto) FROM pagos_proveedores_metodos m WHERE m.pago_id = p.id) AS monto
+             FROM pagos_proveedores p WHERE p.tipo = 'nota_credito'`
+          )
+        """)
+        assert len(nc) == 1 and nc[0]["nc_provisoria"] == 1 and nc[0]["compra_origen_id"] == ajuste_compras["compra_id"], (
+            f"Aprobar 'Producto no entregado' debia generar una NC provisoria de esa compra: {nc}")
+        assert nc[0]["monto"] >= 150, f"La NC provisoria debia acreditar costo x cantidad (50 x 3 = 150): {nc[0]['monto']}"
 
         print("--- Rechazar el ajuste tipo POS: el stock NO debe cambiar ---")
         stock_pre_rechazo = stock_tras_aprobar
