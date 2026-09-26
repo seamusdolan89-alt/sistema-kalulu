@@ -361,7 +361,13 @@ const SGA_Clientes = (() => {
    * cliente_id + fecha + monto: registrarPago sella las dos filas con el
    * mismo timestamp exacto, así que ese trío alcanza en la práctica.
    */
-  function eliminarPago(cuentaCorrienteId) {
+  //
+  // Caja: si el cobro entro a una caja que sigue ABIERTA se borra tambien su ingreso (la caja
+  // esperada se corrige sola). Si esa caja ya se CERRO, el efectivo se conto con ese ingreso
+  // adentro y reescribirla le inventaria una diferencia a un cierre que estaba bien: hace falta
+  // confirmar (opts.aceptarCajaCerrada) y, si se acepta, solo se corrige la cuenta corriente del
+  // cliente y la caja no se toca.
+  function eliminarPago(cuentaCorrienteId, opts = {}) {
     const mov = db().query(
       `SELECT * FROM cuenta_corriente WHERE id = ?`, [cuentaCorrienteId]
     )[0];
@@ -369,23 +375,34 @@ const SGA_Clientes = (() => {
     if (mov.tipo !== 'pago') {
       throw new Error('Solo se puede eliminar un cobro (tipo "pago") desde acá.');
     }
+    if (mov.venta_id) {
+      // "Aplicado saldo a favor en venta", "Cancelación de deuda en venta"...: son parte de esa venta.
+      throw new Error('Este movimiento viene de una venta: se corrige anulando o editando la venta.');
+    }
 
     const ingreso = db().query(
-      `SELECT id FROM ingresos_caja
-       WHERE cliente_id = ? AND tipo = 'cobro_cliente' AND fecha = ? AND monto = ?
+      `SELECT i.id, s.estado AS sesion_estado
+       FROM ingresos_caja i LEFT JOIN sesiones_caja s ON s.id = i.sesion_caja_id
+       WHERE i.cliente_id = ? AND i.tipo = 'cobro_cliente' AND i.fecha = ? AND i.monto = ?
        LIMIT 1`,
       [mov.cliente_id, mov.fecha, Math.abs(mov.monto)]
     )[0];
+    const cajaCerrada = !!ingreso && ingreso.sesion_estado !== 'abierta';
+    if (cajaCerrada && !opts.aceptarCajaCerrada) {
+      const err = new Error('El cobro entró a una caja que ya se cerró: hace falta confirmar que la caja no se toca.');
+      err.requiereConfirmacionCaja = true;
+      throw err;
+    }
 
     db().run(`DELETE FROM cuenta_corriente WHERE id = ?`, [cuentaCorrienteId]);
     db().registrarEliminacion('cuenta_corriente', cuentaCorrienteId);
 
-    if (ingreso) {
+    if (ingreso && !cajaCerrada) {
       db().run(`DELETE FROM ingresos_caja WHERE id = ?`, [ingreso.id]);
       db().registrarEliminacion('ingresos_caja', ingreso.id);
     }
 
-    return { success: true, ingresoCajaEliminado: !!ingreso };
+    return { success: true, ingresoCajaEliminado: !!ingreso && !cajaCerrada, cajaCerradaSinTocar: cajaCerrada };
   }
 
   function getMovimientos(clienteId, { limit = 50, tipo = '', desde = '', hasta = '' } = {}) {
@@ -649,7 +666,7 @@ const ClientesUI = (() => {
         ? `<span class="mov-link" data-venta="${m.venta_id}">#${m.venta_id.slice(-6)}</span>`
         : '';
       const desc = esc(m.descripcion || '') + (ventaLink ? ` ${ventaLink}` : '');
-      const accion = puedeEliminarPago && m.tipo === 'pago'
+      const accion = puedeEliminarPago && m.tipo === 'pago' && !m.venta_id
         ? `<button class="btn-eliminar-mov" data-eliminar-mov="${esc(m.id)}" title="Eliminar este cobro (corrige el saldo del cliente y la caja)">🗑️</button>`
         : '';
       return `<tr>
@@ -1687,7 +1704,15 @@ const ClientesUI = (() => {
       const id = btn.dataset.eliminarMov;
       if (!confirm('¿Eliminar este cobro? Se corrige el saldo del cliente y, si sumó efectivo a alguna caja, también se descuenta de ahí. No se puede deshacer.')) return;
       try {
-        SGA_Clientes.eliminarPago(id);
+        try {
+          SGA_Clientes.eliminarPago(id);
+        } catch (err) {
+          if (!err.requiereConfirmacionCaja) throw err;
+          // El cobro entro a una caja ya cerrada y contada: no se reescribe.
+          if (!confirm('Este cobro entró a una caja que YA SE CERRÓ (el arqueo ya se hizo con esa plata).\n\n' +
+                       'Si continuás se corrige solo el saldo del cliente; la caja no se modifica.\n\n¿Continuar?')) return;
+          SGA_Clientes.eliminarPago(id, { aceptarCajaCerrada: true });
+        }
         loadFichaData();
       } catch (err) {
         alert(err.message);
