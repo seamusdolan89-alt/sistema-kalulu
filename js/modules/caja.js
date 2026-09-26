@@ -61,6 +61,15 @@ const Caja = (() => {
     reintegro_devolucion: 'Reintegro por devolución',
   };
 
+  // De donde vino cada ingreso de caja en efectivo. 'cobro_cliente' es plata de una deuda que
+  // el cliente paga; 'vuelto_a_favor' es el efectivo que dejo de mas en una venta y quedo como
+  // saldo a favor suyo (pos.js). Sin tipo = un ingreso extra cargado a mano.
+  const INGRESO_TIPO_LABEL = {
+    cobro_cliente:  'Cobranza de deuda',
+    vuelto_a_favor: 'Vuelto dejado a favor',
+  };
+  const ingresoTipoLabel = t => INGRESO_TIPO_LABEL[t] || 'Ingreso extra';
+
   const state = {
     sesion: null,
     totales: null,
@@ -185,6 +194,18 @@ const Caja = (() => {
     const totCobrosCC = {};
     for (const r of cobrosCC) totCobrosCC[r.medio] = r.total;
 
+    // De donde salieron los ingresos en efectivo: cobranza de deuda, vuelto que el cliente dejo
+    // a favor, u otro ingreso extra. Con esto el reporte muestra TODO lo que entro al cajon y los
+    // totales coinciden con el saldo esperado.
+    const ingPorTipo = {};
+    for (const r of window.SGA_DB.query(
+      `SELECT COALESCE(tipo, '') AS tipo, COALESCE(SUM(monto), 0) AS t FROM ingresos_caja
+       WHERE sesion_caja_id = ? AND (medio IS NULL OR medio = 'efectivo')
+       GROUP BY COALESCE(tipo, '')`, [sesionId]
+    )) ingPorTipo[r.tipo] = parseFloat(r.t) || 0;
+    const cobranzaDeudaEfectivo = ingPorTipo['cobro_cliente'] || 0;
+    const vueltoAFavorEfectivo  = ingPorTipo['vuelto_a_favor'] || 0;
+
     const nVentas = (window.SGA_DB.query(
       `SELECT COUNT(*) AS n FROM ventas WHERE sesion_caja_id = ? AND estado = 'completada'`,
       [sesionId]
@@ -198,7 +219,10 @@ const Caja = (() => {
     const saldoEsperado = saldoInicial + efectivo - parseFloat(egresos) + parseFloat(ingresos);
 
     return { totPagos, totCobrosCC, totalVentas, egresos, ingresos,
-             nVentas, saldoInicial, saldoEsperado };
+             nVentas, saldoInicial, saldoEsperado,
+             cobranzaDeudaEfectivo, vueltoAFavorEfectivo,
+             ingresosExtraEfectivo: Math.max(0, parseFloat(ingresos) - cobranzaDeudaEfectivo - vueltoAFavorEfectivo),
+             totalEfectivoRecibido: efectivo + parseFloat(ingresos) };
   }
 
   function getMovimientos(sesionId) {
@@ -310,7 +334,8 @@ const Caja = (() => {
       const lbl = { pago_proveedor: 'Pago Prov.', retiro: 'Retiro', gasto_operativo: 'Gasto', otro: 'Egreso' };
       return `<span class="mov-badge mov-egreso">${lbl[item.subtipo] || 'Egreso'}</span>`;
     }
-    return `<span class="mov-badge mov-ingreso">Ingreso</span>`;
+    const lblIng = { cobro_cliente: 'Cobro deuda', vuelto_a_favor: 'Vuelto a favor' };
+    return `<span class="mov-badge mov-ingreso">${lblIng[item.subtipo] || 'Ingreso'}</span>`;
   }
 
   function getEgresosIngresos(sesionId) {
@@ -321,11 +346,14 @@ const Caja = (() => {
        WHERE e.sesion_caja_id = ? ORDER BY e.fecha DESC`,
       [sesionId]
     );
+    // Solo los ingresos en EFECTIVO: son los que entran al cajon y suman al saldo esperado. Un
+    // cobro de deuda por MercadoPago o transferencia figura en el detalle de ese medio.
     const ingresos = window.SGA_DB.query(
-      `SELECT i.id, i.monto, i.descripcion, i.fecha, u.nombre AS usuario
+      `SELECT i.id, i.monto, i.descripcion, i.fecha, i.tipo, u.nombre AS usuario
        FROM ingresos_caja i
        LEFT JOIN usuarios u ON u.id = i.usuario_id
-       WHERE i.sesion_caja_id = ? ORDER BY i.fecha DESC`,
+       WHERE i.sesion_caja_id = ? AND (i.medio IS NULL OR i.medio = 'efectivo')
+       ORDER BY i.fecha DESC`,
       [sesionId]
     );
     return { egresos, ingresos };
@@ -805,6 +833,12 @@ case 'egresos':     renderEgresosIngresos(content);   break;
           <span>Total cobrado</span>
           <span>${fmtPeso(totalCC)}</span>
         </div>` : ''}
+      ${(tot.vueltoAFavorEfectivo || 0) > 0 ? `
+        <h3 style="margin-top:18px">Vuelto dejado a favor</h3>
+        <div class="caja-stat-row">
+          <span>${esc(getMedioLabel('efectivo'))}</span>
+          <span>${fmtPeso(tot.vueltoAFavorEfectivo)}</span>
+        </div>` : ''}
       <div class="caja-modal-footer">
         <button class="btn btn-outline" id="btn-close-medios2">Cerrar</button>
       </div>
@@ -868,6 +902,11 @@ case 'egresos':     renderEgresosIngresos(content);   break;
         <div class="caja-stat-card">
           <div class="caja-stat-label">Saldo inicial</div>
           <div class="caja-stat-value">${fmtPeso(tot.saldoInicial)}</div>
+        </div>
+        <div class="caja-stat-card">
+          <div class="caja-stat-label">Ingresos</div>
+          <div class="caja-stat-value text-success">${fmtPeso(tot.ingresos)}</div>
+          <div class="caja-stat-sub">Deuda ${fmtPeso(tot.cobranzaDeudaEfectivo)} · Vuelto a favor ${fmtPeso(tot.vueltoAFavorEfectivo)}${tot.ingresosExtraEfectivo > 0.005 ? ` · Extra ${fmtPeso(tot.ingresosExtraEfectivo)}` : ''}</div>
         </div>
         <div class="caja-stat-card">
           <div class="caja-stat-label">Egresos</div>
@@ -936,12 +975,13 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     const iHtml = ingresos.length ? `
       <table class="caja-table">
         <thead>
-          <tr><th>Fecha</th><th>Descripción</th><th>Monto</th><th>Usuario</th></tr>
+          <tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th>Monto</th><th>Usuario</th></tr>
         </thead>
         <tbody>
           ${ingresos.map(i => `
             <tr>
               <td>${fmtFecha(i.fecha)}</td>
+              <td>${esc(ingresoTipoLabel(i.tipo))}</td>
               <td>${esc(i.descripcion || '')}</td>
               <td class="text-success">${fmtPeso(i.monto)}</td>
               <td>${esc(i.usuario || '')}</td>
@@ -949,7 +989,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
           `).join('')}
         </tbody>
       </table>
-    ` : '<p class="caja-empty">Sin ingresos extra registrados.</p>';
+    ` : '<p class="caja-empty">Sin ingresos registrados.</p>';
 
     el.innerHTML = `
       <div class="caja-ei-header">
@@ -961,7 +1001,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       </div>
       ${eHtml}
       <div class="caja-ei-header" style="margin-top:24px">
-        <h3>Ingresos extra</h3>
+        <h3>Ingresos en efectivo</h3>
         ${!historico && P.registrarIngreso() ? `<button id="btn-nuevo-ingreso" class="btn btn-sm btn-success">+ Ingreso</button>` : ''}
       </div>
       ${iHtml}
@@ -1638,7 +1678,10 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       .map(m => ({
         id: m.id,
         label: `${m.icono || ''} ${m.nombre}`.trim(),
-        esperado: m.id === 'efectivo' ? tot.saldoEsperado : (tot.totPagos[m.id] || 0),
+        // Digitales: ventas + cobros de deuda hechos por ese medio (antes solo ventas, y un cobro
+        // de deuda por MercadoPago aparecia como diferencia al informar lo real).
+        esperado: m.id === 'efectivo' ? tot.saldoEsperado
+                  : ((tot.totPagos[m.id] || 0) + ((tot.totCobrosCC || {})[m.id] || 0)),
       }))
       .filter(m => m.id === 'efectivo' || m.esperado > 0);
 
@@ -1731,16 +1774,16 @@ case 'egresos':     renderEgresosIngresos(content);   break;
           <small style="color:#999;display:block;margin-top:6px">Si encontrás un error, cerrá este panel y corregilo en el módulo Caja.</small>
         </div>
         <a href="#" id="toggle-cierre-ingresos" class="cierre-ei-link">
-          📋 Ver ingresos extra del turno
+          📋 Ver ingresos en efectivo del turno
           (${ingresos.length} movimiento${ingresos.length !== 1 ? 's' : ''} — ${fmtPeso(totalIngresos)})
         </a>
         <div id="cierre-ingresos-panel" class="cierre-ei-panel" style="display:none">
           ${ingresos.length
             ? `<table class="caja-table">${ingresos.map(i =>
-                `<tr><td>${fmtFecha(i.fecha)}</td><td>${esc(i.descripcion || '')}</td>
+                `<tr><td>${fmtFecha(i.fecha)}</td><td>${esc(ingresoTipoLabel(i.tipo))}</td><td>${esc(i.descripcion || '')}</td>
                  <td style="text-align:right;color:var(--color-success)">${fmtPeso(i.monto)}</td></tr>`
               ).join('')}</table>`
-            : '<p style="color:#999;padding:8px 0;font-size:13px">Sin ingresos extra</p>'}
+            : '<p style="color:#999;padding:8px 0;font-size:13px">Sin ingresos en efectivo</p>'}
           <small style="color:#999;display:block;margin-top:6px">Si encontrás un error, cerrá este panel y corregilo en el módulo Caja.</small>
         </div>
       </div>
@@ -1941,13 +1984,29 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     const diferencia    = saldoReal - saldoEsperado;
     const difClass      = diferencia > 0.005 ? 'text-success' : diferencia < -0.005 ? 'text-danger' : '';
 
-    const mediosHtml = getMediosDynamic()
-      .filter(m => tot && (tot.totPagos[m.id] || 0) > 0)
-      .map(m => `
+    // Efectivo recibido, por origen: lo que se cobro de ventas, lo que se cobro de deuda de clientes
+    // y el vuelto que el cliente dejo a favor (mas cualquier otro ingreso cargado a mano). Con todo a
+    // la vista, saldo inicial + efectivo recibido - egresos = saldo esperado.
+    const efVentas  = tot ? (tot.totPagos['efectivo'] || 0) : 0;
+    const efDeuda   = tot ? (tot.cobranzaDeudaEfectivo || 0) : 0;
+    const efVuelto  = tot ? (tot.vueltoAFavorEfectivo || 0) : 0;
+    const efOtros   = tot ? (tot.ingresosExtraEfectivo || 0) : 0;
+    const efTotal   = efVentas + efDeuda + efVuelto + efOtros;
+
+    // Los otros medios (MercadoPago, transferencia, tarjeta...): ventas + deuda cobrada por ese medio.
+    // 'cuenta_corriente' y 'saldo_favor' no son plata recibida.
+    const idsOtros = new Set([...Object.keys((tot && tot.totPagos) || {}), ...Object.keys((tot && tot.totCobrosCC) || {})]);
+    ['efectivo', 'cuenta_corriente', 'saldo_favor'].forEach(id => idsOtros.delete(id));
+    const otrosMedios = [...idsOtros]
+      .map(id => ({ id, ventas: (tot.totPagos[id] || 0), deuda: ((tot.totCobrosCC || {})[id] || 0) }))
+      .filter(x => x.ventas > 0.005 || x.deuda > 0.005);
+    const totalOtros = otrosMedios.reduce((s, x) => s + x.ventas + x.deuda, 0);
+    const mediosHtml = otrosMedios.map(x => `
         <div class="caja-stat-row">
-          <span>${m.icono || ''} ${m.nombre}</span>
-          <span>${fmtPeso(tot.totPagos[m.id])}</span>
+          <span>${esc(getMedioLabel(x.id))}</span>
+          <span>${fmtPeso(x.ventas + x.deuda)}</span>
         </div>
+        ${x.deuda > 0.005 ? `<div class="caja-stat-row" style="font-size:12px;color:#888;padding-top:0"><span>&nbsp;&nbsp;Ventas ${fmtPeso(x.ventas)} · Cobranza de deuda ${fmtPeso(x.deuda)}</span><span></span></div>` : ''}
       `).join('');
 
     const explEfectivo = (state.cierre.explicaciones && state.cierre.explicaciones['efectivo']) || [];
@@ -1968,11 +2027,18 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       'VENTAS',
       `Total ventas: ${tot ? fmtPeso(tot.totalVentas) : '-'} (${tot ? tot.nVentas : 0} ventas)`,
       '',
+      'EFECTIVO RECIBIDO',
+      `Cobranza de ventas:    ${fmtPeso(efVentas)}`,
+      `Cobranza de deuda:     ${fmtPeso(efDeuda)}`,
+      `Vuelto dejado a favor: ${fmtPeso(efVuelto)}`,
+      efOtros > 0.005 ? `Otros ingresos:        ${fmtPeso(efOtros)}` : null,
+      `Total efectivo recibido: ${fmtPeso(efTotal)}`,
+      ...(otrosMedios.length ? ['', 'OTROS MEDIOS', ...otrosMedios.map(x => `${getMedioLabel(x.id)}: ${fmtPeso(x.ventas + x.deuda)}`)] : []),
+      '',
       'SALDO DE CAJA',
       `Saldo inicial:  ${tot ? fmtPeso(tot.saldoInicial) : '-'}`,
-      `Ventas efect.:  ${tot ? fmtPeso(tot.totPagos['efectivo'] || 0) : '-'}`,
-      tot && tot.ingresos > 0 ? `Ingresos extra: +${fmtPeso(tot.ingresos)}` : null,
-      tot && tot.egresos > 0  ? `Egresos:        -${fmtPeso(tot.egresos)}` : null,
+      `+ Efectivo recibido: ${fmtPeso(efTotal)}`,
+      tot && tot.egresos > 0  ? `- Egresos:        ${fmtPeso(tot.egresos)}` : null,
       `Saldo esperado: ${fmtPeso(saldoEsperado)}`,
       `Saldo contado:  ${fmtPeso(saldoReal)}`,
       `Diferencia:     ${diferencia >= 0 ? '+' : ''}${fmtPeso(diferencia)}`,
@@ -1996,20 +2062,31 @@ case 'egresos':     renderEgresosIngresos(content);   break;
           </div>
         </div>
 
-        <div class="postcaja-section">
-          <h3>Valores recibidos por medio de pago</h3>
-          ${mediosHtml || '<div class="caja-stat-row"><span style="color:#999">Sin ventas registradas</span></div>'}
+        <div class="postcaja-section" id="postcaja-efectivo-recibido">
+          <h3>Efectivo recibido</h3>
+          <div class="caja-stat-row"><span>Cobranza de ventas</span><span>${fmtPeso(efVentas)}</span></div>
+          <div class="caja-stat-row"><span>Cobranza de deuda</span><span>${fmtPeso(efDeuda)}</span></div>
+          <div class="caja-stat-row"><span>Vuelto dejado a favor</span><span>${fmtPeso(efVuelto)}</span></div>
+          ${efOtros > 0.005 ? `<div class="caja-stat-row"><span>Otros ingresos</span><span>${fmtPeso(efOtros)}</span></div>` : ''}
           <div class="caja-stat-row total-row">
-            <span>TOTAL RECIBIDO</span>
-            <span>${tot ? fmtPeso(tot.totalVentas) : '-'}</span>
+            <span>TOTAL EFECTIVO RECIBIDO</span>
+            <span>${fmtPeso(efTotal)}</span>
+          </div>
+        </div>
+
+        <div class="postcaja-section" id="postcaja-otros-medios">
+          <h3>Otros medios recibidos</h3>
+          ${mediosHtml || '<div class="caja-stat-row"><span style="color:#999">Sin cobros por otros medios</span></div>'}
+          <div class="caja-stat-row total-row">
+            <span>TOTAL OTROS MEDIOS</span>
+            <span>${fmtPeso(totalOtros)}</span>
           </div>
         </div>
 
         <div class="postcaja-section">
           <h3>Saldo de caja (efectivo)</h3>
           <div class="caja-stat-row"><span>Saldo inicial</span><span>${tot ? fmtPeso(tot.saldoInicial) : '-'}</span></div>
-          <div class="caja-stat-row"><span>+ Ventas en efectivo</span><span>${tot ? fmtPeso(tot.totPagos['efectivo'] || 0) : '-'}</span></div>
-          ${tot && tot.ingresos > 0 ? `<div class="caja-stat-row"><span>+ Ingresos extra</span><span class="text-success">${fmtPeso(tot.ingresos)}</span></div>` : ''}
+          <div class="caja-stat-row"><span>+ Efectivo recibido</span><span>${fmtPeso(efTotal)}</span></div>
           ${tot && tot.egresos > 0  ? `<div class="caja-stat-row"><span>− Egresos</span><span class="text-danger">-${fmtPeso(tot.egresos)}</span></div>` : ''}
           <div class="caja-stat-row highlight-row"><span>Saldo esperado</span><span>${fmtPeso(saldoEsperado)}</span></div>
           <div class="caja-stat-row"><span>Saldo informado (contado)</span><span>${fmtPeso(saldoReal)}</span></div>
@@ -2088,6 +2165,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
 
     const dif = parseFloat(s.diferencia) || 0;
     const difClass = dif > 0 ? 'text-success' : dif < 0 ? 'text-danger' : '';
+    const tEf = getTotalesSesion(sesionId);   // desglose del efectivo de esa sesion
 
     openModal(`
       <button class="caja-modal-close" id="btn-close-sesion" aria-label="Cerrar" title="Cerrar">✕</button>
@@ -2098,6 +2176,11 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       <div class="caja-stat-row"><span>Cerró</span><span>${esc(s.nombre_cierre || '—')}</span></div>
       <div class="caja-stat-row"><span>Total ventas</span><span>${fmtPeso(totalVentas)}</span></div>
       <div class="caja-stat-row"><span>Saldo inicial</span><span>${fmtPeso(s.saldo_inicial)}</span></div>
+      <div class="caja-stat-row"><span>+ Efectivo · cobranza de ventas</span><span>${fmtPeso(tEf.totPagos['efectivo'] || 0)}</span></div>
+      <div class="caja-stat-row"><span>+ Efectivo · cobranza de deuda</span><span>${fmtPeso(tEf.cobranzaDeudaEfectivo)}</span></div>
+      <div class="caja-stat-row"><span>+ Efectivo · vuelto dejado a favor</span><span>${fmtPeso(tEf.vueltoAFavorEfectivo)}</span></div>
+      ${tEf.ingresosExtraEfectivo > 0.005 ? `<div class="caja-stat-row"><span>+ Efectivo · otros ingresos</span><span>${fmtPeso(tEf.ingresosExtraEfectivo)}</span></div>` : ''}
+      <div class="caja-stat-row"><span>− Egresos</span><span>${fmtPeso(tEf.egresos)}</span></div>
       <div class="caja-stat-row"><span>Saldo esperado</span><span>${fmtPeso(s.saldo_final_esperado)}</span></div>
       <div class="caja-stat-row"><span>Saldo real (contado)</span><span>${fmtPeso(s.saldo_final_real)}</span></div>
       <div class="caja-stat-row highlight-row"><span>Diferencia</span><span class="${difClass}">${dif >= 0 ? '+' : ''}${fmtPeso(dif)}</span></div>
@@ -2310,12 +2393,12 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       icon: m.icono || '💰',
       label: m.nombre,
       value: tot
-        ? (m.id === 'efectivo' ? tot.saldoEsperado : (tot.totPagos[m.id] || 0))
+        ? (m.id === 'efectivo' ? tot.saldoEsperado : ((tot.totPagos[m.id] || 0) + ((tot.totCobrosCC || {})[m.id] || 0)))
         : (m.id === 'efectivo' ? ultimoSaldoEfectivo : 0),
       sub: tot
         ? (m.id === 'efectivo'
             ? `Cobrado: ${fmtPeso(tot.totPagos['efectivo'] || 0)} · Inicial: ${fmtPeso(tot.saldoInicial)}`
-            : ((tot.totPagos[m.id] || 0) > 0 ? 'Cobrado hoy' : 'Sin movimientos'))
+            : (((tot.totPagos[m.id] || 0) + ((tot.totCobrosCC || {})[m.id] || 0)) > 0 ? 'Cobrado hoy' : 'Sin movimientos'))
         : (m.id === 'efectivo' ? ultimoSaldoLabel : 'Sin sesión activa'),
     }));
 

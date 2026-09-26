@@ -299,7 +299,10 @@ const SGA_PagosProveedores = (() => {
             `INSERT INTO egresos_caja
                (id, sesion_caja_id, monto, descripcion, tipo, fecha, usuario_id, proveedor_id, sync_status, updated_at)
              VALUES (?, ?, ?, ?, 'pago_proveedor', ?, ?, ?, 'pending', ?)`,
-            [uid(), m.sesion_caja_id, parseFloat(m.monto), desc, fechaPago, usuario_id, proveedor_id, ts]
+            // fecha CON hora: la plata salio del cajon AHORA. Con solo el dia (fechaPago) la caja lo
+            // mostraba el dia anterior a las 21:00 (un "2026-09-26" sin hora se lee como UTC) y quedaba
+            // desordenado entre los demas movimientos del turno.
+            [uid(), m.sesion_caja_id, parseFloat(m.monto), desc, ts, usuario_id, proveedor_id, ts]
           );
           // La caja esperada se calcula sumando las filas de egresos_caja
           // (caja.js getTotalesSesion): NO se incrementa sesiones_caja.total_egresos.
@@ -859,18 +862,21 @@ const SGA_PagosProveedores = (() => {
   function _buscarEgresoDePago(pago, metodo) {
     if (!metodo.sesion_caja_id) return null;
     const monto = parseFloat(metodo.monto) || 0;
+    // Sin comparar la fecha: el pago puede haberse cargado con una fecha pasada, y el egreso lleva
+    // el momento en que salio la plata (y los viejos, solo el dia). Si hubiera dos egresos iguales
+    // (misma caja, proveedor y monto) da lo mismo cual se borra.
     const estricto = db().query(
       `SELECT id FROM egresos_caja
        WHERE sesion_caja_id = ? AND tipo = 'pago_proveedor' AND proveedor_id = ?
-         AND monto = ? AND fecha = ? LIMIT 1`,
-      [metodo.sesion_caja_id, pago.proveedor_id, monto, pago.fecha]
+         AND monto = ? LIMIT 1`,
+      [metodo.sesion_caja_id, pago.proveedor_id, monto]
     )[0];
     if (estricto) return estricto;
     // Egresos viejos, de antes de que existieran las columnas tipo/proveedor_id.
     return db().query(
       `SELECT id FROM egresos_caja
-       WHERE sesion_caja_id = ? AND monto = ? AND fecha = ? AND descripcion LIKE 'Pago%' LIMIT 1`,
-      [metodo.sesion_caja_id, monto, pago.fecha]
+       WHERE sesion_caja_id = ? AND monto = ? AND descripcion LIKE 'Pago%' LIMIT 1`,
+      [metodo.sesion_caja_id, monto]
     )[0] || null;
   }
 
