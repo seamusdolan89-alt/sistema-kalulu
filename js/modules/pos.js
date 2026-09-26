@@ -91,6 +91,26 @@ export const POS = (() => {
    * }
    * @returns {Object} { success: boolean, ventaId?: string, ticketData?: {} }
    */
+  // Ingresos de caja que nacieron de una venta: el efectivo que el cliente dejo de mas
+  // (vuelto dejado a favor, o vuelto con el que cancelo deuda). Se borran con marca para que
+  // el borrado viaje. Solo de cajas ABIERTAS: en una caja ya cerrada el efectivo se conto con
+  // ese ingreso adentro y reescribirla le inventaria una diferencia a un cierre que estaba bien.
+  function borrarIngresosDeVenta(ventaId) {
+    const filas = window.SGA_DB.query(
+      `SELECT i.id, s.estado AS sesion_estado
+       FROM ingresos_caja i LEFT JOIN sesiones_caja s ON s.id = i.sesion_caja_id
+       WHERE i.venta_id = ?`, [ventaId]
+    );
+    let borrados = 0;
+    for (const f of filas) {
+      if (f.sesion_estado !== 'abierta') continue;
+      window.SGA_DB.run(`DELETE FROM ingresos_caja WHERE id = ?`, [f.id]);
+      window.SGA_DB.registrarEliminacion('ingresos_caja', f.id);
+      borrados++;
+    }
+    return borrados;
+  }
+
   function registrarVenta(ventaData) {
     try {
       const {
@@ -175,6 +195,13 @@ export const POS = (() => {
         }
         window.SGA_DB.run('DELETE FROM venta_items WHERE venta_id = ?', [ventaId]);
         window.SGA_DB.run('DELETE FROM venta_pagos WHERE venta_id = ?', [ventaId]);
+        // Al confirmar la edicion se vuelven a crear los movimientos de la venta (deuda, saldo a
+        // favor, ingreso por vuelto): si no se sacan los de antes, quedan duplicados.
+        borrarIngresosDeVenta(ventaId);
+        for (const cc of window.SGA_DB.query(`SELECT id FROM cuenta_corriente WHERE venta_id = ?`, [ventaId])) {
+          window.SGA_DB.run(`DELETE FROM cuenta_corriente WHERE id = ?`, [cc.id]);
+          window.SGA_DB.registrarEliminacion('cuenta_corriente', cc.id);
+        }
       }
 
       // INSERT venta_items
@@ -3402,17 +3429,41 @@ export const POS = (() => {
           // y el excedente de cualquier otro medio de pago.
           const vuelto = getSobranteSimple();
           if (vuelto > 0.001) {
+            // El EFECTIVO que el cliente dejo de mas entra a la caja: si paga $20.000 una venta de
+            // $15.000 y deja el vuelto a favor, en el cajon hay $20.000, no $15.000. La venta solo
+            // registra su total como efectivo, asi que el resto se registra como INGRESO de caja
+            // (ligado a esta venta) — sin esto el saldo esperado queda corto y la caja cierra con
+            // un sobrante igual al vuelto dejado. Con otro medio el excedente ya viaja dentro del
+            // propio pago de ese medio (pagosAmounts), no hace falta nada.
+            const enEfectivo = !state.cobroMultiple && [...state.activeMedios][0] === 'efectivo';
+            const ingresoCaja = (tipo, monto, desc) => {
+              if (!enEfectivo || monto <= 0.001) return;
+              const quien = state.clienteNombre ? ` — ${state.clienteNombre}` : '';
+              window.SGA_DB.run(
+                `INSERT INTO ingresos_caja
+                   (id, sesion_caja_id, monto, descripcion, fecha, usuario_id, medio, tipo, cliente_id, venta_id, sync_status, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, 'efectivo', ?, ?, ?, 'pending', ?)`,
+                [window.SGA_Utils.generateUUID(), state.sesionActiva.id, monto, desc + quien, now,
+                 state.currentUser.id, tipo, state.clienteId, result.ventaId, now]
+              );
+            };
             const saldoResidual = state.ccCobrarDeuda ? 0 : state.clienteSaldo;
             if (saldoResidual > 0.001) {
               if (vuelto >= saldoResidual) {
                 ccInsert('pago', -saldoResidual, 'Cancelación de deuda con vuelto');
+                ingresoCaja('cobro_cliente', saldoResidual, 'Cobranza de deuda con vuelto');
                 const sobrante = vuelto - saldoResidual;
-                if (sobrante > 0.001) ccInsert('saldo_favor', -sobrante, 'Saldo a favor del vuelto');
+                if (sobrante > 0.001) {
+                  ccInsert('saldo_favor', -sobrante, 'Saldo a favor del vuelto');
+                  ingresoCaja('vuelto_a_favor', sobrante, 'Vuelto dejado a favor');
+                }
               } else {
                 ccInsert('pago', -vuelto, 'Cancelación parcial de deuda con vuelto');
+                ingresoCaja('cobro_cliente', vuelto, 'Cobranza de deuda con vuelto');
               }
             } else {
               ccInsert('saldo_favor', -vuelto, 'Vuelto dejado como saldo a favor');
+              ingresoCaja('vuelto_a_favor', vuelto, 'Vuelto dejado a favor');
             }
           }
         }
@@ -3904,6 +3955,11 @@ export const POS = (() => {
           ]);
         }
       }
+
+      // El efectivo que el cliente habia dejado de mas (vuelto a favor / deuda cancelada con el
+      // vuelto) entro a la caja como ingreso de esta venta: al anular, esa plata se devuelve. La
+      // reversion de cuenta corriente de arriba ya le saca el credito al cliente.
+      borrarIngresosDeVenta(ventaId);
 
       // Revertir los totales guardados de la sesion de caja. caja.js recalcula
       // estos numeros al vuelo desde venta_pagos filtrando estado='completada',
