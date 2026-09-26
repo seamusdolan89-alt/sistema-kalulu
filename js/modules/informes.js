@@ -262,55 +262,104 @@ const Informes = (() => {
     `, [sid]);
   }
 
+  // Resumen diario de CAJA: todo lo que entro cada dia, con su origen y por medio, para que coincida
+  // con las cajas del sistema y con el reporte de cada medio (ej. el de MercadoPago). Tres fuentes:
+  //   - venta_pagos: lo que pago cada venta (SIN el fiado ni el saldo a favor que el cliente ya tenia:
+  //     no son plata que entra hoy);
+  //   - ingresos_caja: cobranza de deuda, vuelto que el cliente dejo a favor y otros ingresos, por
+  //     el medio con que se cobraron (antes este reporte los ignoraba y no cerraba contra la caja);
+  //   - egresos_caja: lo que salio del cajon.
   function queryResumenDiario() {
     const desde = toUTC(state.desde);
     const hasta = toUTC(addOneDay(state.hasta));
     const sid   = state.sucursalId;
+    // El dia es el LOCAL, no el UTC de la fecha guardada: una venta de las 22:00 es de ese dia aunque
+    // en UTC ya sea el siguiente. Asi cada dia se compara contra el reporte del medio.
+    const dia = col => `SUBSTR(DATETIME(${col}, 'localtime'), 1, 10)`;
 
-    const cobros = window.SGA_DB.query(`
-      SELECT
-        SUBSTR(v.fecha, 1, 10) AS dia,
-        SUM(CASE WHEN vp.medio = 'efectivo'         THEN vp.monto ELSE 0 END) AS efectivo,
-        SUM(CASE WHEN vp.medio = 'mercadopago'      THEN vp.monto ELSE 0 END) AS mercadopago,
-        SUM(CASE WHEN vp.medio = 'tarjeta'          THEN vp.monto ELSE 0 END) AS tarjeta,
-        SUM(CASE WHEN vp.medio = 'transferencia'    THEN vp.monto ELSE 0 END) AS transferencia,
-        SUM(CASE WHEN vp.medio = 'cuenta_corriente' THEN vp.monto ELSE 0 END) AS cuenta_corriente,
-        -- "Otros": cualquier medio_cobro custom agregado desde Configuración
-        -- (ej. "Link de Pago") que no sea uno de los 4 fijos de arriba. Sin este
-        -- bucket esa plata sumaba a total_cobrado pero no aparecía en ninguna
-        -- columna del desglose — quedaba invisible aunque el total cuadrara.
-        SUM(CASE WHEN vp.medio NOT IN ('efectivo','mercadopago','tarjeta','transferencia','cuenta_corriente')
-                 THEN vp.monto ELSE 0 END) AS otros,
-        SUM(CASE WHEN vp.medio != 'cuenta_corriente' THEN vp.monto ELSE 0 END) AS total_cobrado,
-        COUNT(DISTINCT v.id) AS num_ventas
+    const ventas = window.SGA_DB.query(`
+      SELECT ${dia('v.fecha')} AS dia, vp.medio AS medio, SUM(vp.monto) AS monto
       FROM ventas v
       JOIN venta_pagos vp ON vp.venta_id = v.id
       WHERE v.estado = 'completada'
         AND v.sucursal_id = ?
         AND v.fecha >= ? AND v.fecha < ?
-      GROUP BY SUBSTR(v.fecha, 1, 10)
-      ORDER BY dia ASC
+      GROUP BY ${dia('v.fecha')}, vp.medio
+    `, [sid, desde, hasta]);
+
+    const nVentas = window.SGA_DB.query(`
+      SELECT ${dia('v.fecha')} AS dia, COUNT(*) AS n
+      FROM ventas v
+      WHERE v.estado = 'completada'
+        AND v.sucursal_id = ?
+        AND v.fecha >= ? AND v.fecha < ?
+      GROUP BY ${dia('v.fecha')}
+    `, [sid, desde, hasta]);
+
+    const ingresos = window.SGA_DB.query(`
+      SELECT ${dia('i.fecha')} AS dia, COALESCE(i.medio, 'efectivo') AS medio,
+             COALESCE(i.tipo, '') AS tipo, SUM(i.monto) AS monto
+      FROM ingresos_caja i
+      JOIN sesiones_caja sc ON sc.id = i.sesion_caja_id
+      WHERE sc.sucursal_id = ?
+        AND i.fecha >= ? AND i.fecha < ?
+      GROUP BY ${dia('i.fecha')}, COALESCE(i.medio, 'efectivo'), COALESCE(i.tipo, '')
     `, [sid, desde, hasta]);
 
     const egresos = window.SGA_DB.query(`
-      SELECT
-        SUBSTR(e.fecha, 1, 10) AS dia,
-        SUM(e.monto) AS egresos
+      SELECT ${dia('e.fecha')} AS dia, SUM(e.monto) AS egresos
       FROM egresos_caja e
       JOIN sesiones_caja sc ON e.sesion_caja_id = sc.id
       WHERE sc.sucursal_id = ?
         AND e.fecha >= ? AND e.fecha < ?
-      GROUP BY SUBSTR(e.fecha, 1, 10)
+      GROUP BY ${dia('e.fecha')}
     `, [sid, desde, hasta]);
 
-    const egresoMap = {};
-    egresos.forEach(r => { egresoMap[r.dia] = r.egresos; });
+    const dias = {};
+    const fila = d => dias[d] || (dias[d] = {
+      dia: d, num_ventas: 0,
+      cobranza_ventas: 0, cobranza_deuda: 0, vuelto_favor: 0, otros_ingresos: 0,
+      efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0,
+      // "Otros": cualquier medio_cobro custom agregado desde Configuración (ej. "Link de Pago")
+      // que no sea uno de los 4 fijos. Sin este bucket esa plata sumaría al total pero no
+      // aparecería en ninguna columna del desglose.
+      otros: 0,
+      cuenta_corriente: 0, egresos: 0,
+    });
+    const FIJOS = ['efectivo', 'mercadopago', 'tarjeta', 'transferencia'];
+    const porMedio = (r, medio, monto) => { if (FIJOS.includes(medio)) r[medio] += monto; else r.otros += monto; };
 
-    return cobros.map(r => ({
-      ...r,
-      egresos: egresoMap[r.dia] || 0,
-      neto: r.total_cobrado - (egresoMap[r.dia] || 0),
-    }));
+    nVentas.forEach(x => { fila(x.dia).num_ventas = x.n; });
+    ventas.forEach(x => {
+      const r = fila(x.dia);
+      const monto = parseFloat(x.monto) || 0;
+      if (x.medio === 'cuenta_corriente') { r.cuenta_corriente += monto; return; }   // fiado: no entra plata
+      if (x.medio === 'saldo_favor') return;                                          // credito que ya estaba
+      r.cobranza_ventas += monto;
+      porMedio(r, x.medio, monto);
+    });
+    ingresos.forEach(x => {
+      const r = fila(x.dia);
+      const monto = parseFloat(x.monto) || 0;
+      if (x.tipo === 'cobro_cliente')        r.cobranza_deuda += monto;
+      else if (x.tipo === 'vuelto_a_favor')  r.vuelto_favor   += monto;
+      else                                   r.otros_ingresos += monto;
+      porMedio(r, x.medio, monto);
+    });
+    egresos.forEach(x => { fila(x.dia).egresos += parseFloat(x.egresos) || 0; });
+
+    return Object.values(dias)
+      .sort((a, b) => a.dia.localeCompare(b.dia))
+      .map(r => {
+        const total_recibido = r.cobranza_ventas + r.cobranza_deuda + r.vuelto_favor + r.otros_ingresos;
+        return {
+          ...r,
+          total_recibido,
+          neto: total_recibido - r.egresos,
+          // lo que cambia el cajon en el dia: el efectivo que entro menos lo que salio
+          efectivo_neto: r.efectivo - r.egresos,
+        };
+      });
   }
 
   function queryStockMuerto() {
@@ -1139,52 +1188,54 @@ const Informes = (() => {
   // ── REPORT 7: Resumen Diario de Caja ─────────────────────────────────────────
 
   function renderResumenDiario(rows) {
-    const tot = rows.reduce((acc, r) => ({
-      efectivo:        acc.efectivo        + (r.efectivo        || 0),
-      mercadopago:     acc.mercadopago     + (r.mercadopago     || 0),
-      tarjeta:         acc.tarjeta         + (r.tarjeta         || 0),
-      transferencia:   acc.transferencia   + (r.transferencia   || 0),
-      cuenta_corriente:acc.cuenta_corriente+ (r.cuenta_corriente|| 0),
-      otros:           acc.otros           + (r.otros           || 0),
-      total_cobrado:   acc.total_cobrado   + (r.total_cobrado   || 0),
-      egresos:         acc.egresos         + (r.egresos         || 0),
-      neto:            acc.neto            + (r.neto            || 0),
-      num_ventas:      acc.num_ventas      + (r.num_ventas      || 0),
-    }), { efectivo:0, mercadopago:0, tarjeta:0, transferencia:0, cuenta_corriente:0, otros:0, total_cobrado:0, egresos:0, neto:0, num_ventas:0 });
+    const CAMPOS = ['num_ventas', 'cobranza_ventas', 'cobranza_deuda', 'vuelto_favor', 'otros_ingresos',
+      'total_recibido', 'efectivo', 'mercadopago', 'tarjeta', 'transferencia', 'otros',
+      'cuenta_corriente', 'egresos', 'neto', 'efectivo_neto'];
+    const tot = {};
+    CAMPOS.forEach(k => { tot[k] = rows.reduce((a, r) => a + (r[k] || 0), 0); });
+    const celda = v => `<td class="num">${v > 0.005 ? fmtPeso(v) : '—'}</td>`;
 
     return `
-      ${reportHeader('Resumen Diario de Caja (Cobranzas)')}
+      ${reportHeader('Resumen Diario de Caja')}
       <div class="inf-kpi-row">
-        <div class="inf-kpi"><div class="inf-kpi-label">Días con actividad</div><div class="inf-kpi-value">${rows.length}</div></div>
         <div class="inf-kpi"><div class="inf-kpi-label">Ventas totales</div><div class="inf-kpi-value">${fmtNum(tot.num_ventas)}</div></div>
-        <div class="inf-kpi highlight"><div class="inf-kpi-label">Total cobrado</div><div class="inf-kpi-value">${fmtPeso(tot.total_cobrado)}</div></div>
+        <div class="inf-kpi highlight"><div class="inf-kpi-label">Total recibido</div><div class="inf-kpi-value">${fmtPeso(tot.total_recibido)}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Cobranza de ventas</div><div class="inf-kpi-value">${fmtPeso(tot.cobranza_ventas)}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Cobranza de deuda</div><div class="inf-kpi-value">${fmtPeso(tot.cobranza_deuda)}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Vuelto dejado a favor</div><div class="inf-kpi-value">${fmtPeso(tot.vuelto_favor)}</div></div>
         <div class="inf-kpi"><div class="inf-kpi-label">Egresos</div><div class="inf-kpi-value text-danger">${fmtPeso(tot.egresos)}</div></div>
         <div class="inf-kpi"><div class="inf-kpi-label">Neto de caja</div><div class="inf-kpi-value ${tot.neto >= 0 ? 'text-success' : 'text-danger'}">${fmtPeso(tot.neto)}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Efectivo neto (recibido − egresos)</div><div class="inf-kpi-value ${tot.efectivo_neto >= 0 ? 'text-success' : 'text-danger'}">${fmtPeso(tot.efectivo_neto)}</div></div>
       </div>
       ${rows.length === 0 ? `<div class="inf-empty">No hay movimientos en el período seleccionado.</div>` : `
         <div class="inf-table-wrap">
-          <table class="inf-table">
-            <thead><tr>
-              <th>Fecha</th><th class="num">Ventas</th>
-              <th class="num">Efectivo</th><th class="num">Mercado Pago</th>
-              <th class="num">Tarjeta</th><th class="num">Transferencia</th>
-              <th class="num">Otros</th>
-              <th class="num">Cta. Cte. (fiada)</th>
-              <th class="num">Total cobrado</th>
-              <th class="num">Egresos</th><th class="num">Neto</th>
-            </tr></thead>
+          <table class="inf-table" id="inf-resumen-diario">
+            <thead>
+              <tr>
+                <th rowspan="2">Fecha</th><th class="num" rowspan="2">N.º ventas</th>
+                <th class="num" colspan="4" style="text-align:center">Origen de lo recibido</th>
+                <th class="num" rowspan="2">Total recibido</th>
+                <th class="num" colspan="5" style="text-align:center">Recibido por medio</th>
+                <th class="num" rowspan="2">Fiado</th>
+                <th class="num" rowspan="2">Egresos</th><th class="num" rowspan="2">Neto</th>
+              </tr>
+              <tr>
+                <th class="num">Ventas</th><th class="num">Deuda</th>
+                <th class="num">Vuelto a favor</th><th class="num">Otros</th>
+                <th class="num">Efectivo</th><th class="num">Mercado Pago</th>
+                <th class="num">Tarjeta</th><th class="num">Transf.</th>
+                <th class="num">Otros</th>
+              </tr>
+            </thead>
             <tbody>
               ${rows.map(r => `
                 <tr>
                   <td>${fmtFechaCorta(r.dia)}</td>
                   <td class="num">${r.num_ventas}</td>
-                  <td class="num">${r.efectivo     > 0 ? fmtPeso(r.efectivo)     : '—'}</td>
-                  <td class="num">${r.mercadopago  > 0 ? fmtPeso(r.mercadopago)  : '—'}</td>
-                  <td class="num">${r.tarjeta      > 0 ? fmtPeso(r.tarjeta)      : '—'}</td>
-                  <td class="num">${r.transferencia> 0 ? fmtPeso(r.transferencia): '—'}</td>
-                  <td class="num">${r.otros        > 0 ? fmtPeso(r.otros)       : '—'}</td>
+                  ${celda(r.cobranza_ventas)}${celda(r.cobranza_deuda)}${celda(r.vuelto_favor)}${celda(r.otros_ingresos)}
+                  <td class="num bold">${fmtPeso(r.total_recibido)}</td>
+                  ${celda(r.efectivo)}${celda(r.mercadopago)}${celda(r.tarjeta)}${celda(r.transferencia)}${celda(r.otros)}
                   <td class="num text-muted">${r.cuenta_corriente > 0 ? fmtPeso(r.cuenta_corriente) : '—'}</td>
-                  <td class="num bold">${fmtPeso(r.total_cobrado)}</td>
                   <td class="num text-danger">${r.egresos > 0 ? '- ' + fmtPeso(r.egresos) : '—'}</td>
                   <td class="num bold ${r.neto >= 0 ? 'text-success' : 'text-danger'}">${fmtPeso(r.neto)}</td>
                 </tr>
@@ -1193,18 +1244,28 @@ const Informes = (() => {
             <tfoot><tr>
               <td>TOTAL</td>
               <td class="num">${fmtNum(tot.num_ventas)}</td>
+              <td class="num">${fmtPeso(tot.cobranza_ventas)}</td>
+              <td class="num">${fmtPeso(tot.cobranza_deuda)}</td>
+              <td class="num">${fmtPeso(tot.vuelto_favor)}</td>
+              <td class="num">${fmtPeso(tot.otros_ingresos)}</td>
+              <td class="num bold">${fmtPeso(tot.total_recibido)}</td>
               <td class="num">${fmtPeso(tot.efectivo)}</td>
               <td class="num">${fmtPeso(tot.mercadopago)}</td>
               <td class="num">${fmtPeso(tot.tarjeta)}</td>
               <td class="num">${fmtPeso(tot.transferencia)}</td>
               <td class="num">${fmtPeso(tot.otros)}</td>
               <td class="num text-muted">${fmtPeso(tot.cuenta_corriente)}</td>
-              <td class="num bold">${fmtPeso(tot.total_cobrado)}</td>
               <td class="num text-danger">- ${fmtPeso(tot.egresos)}</td>
               <td class="num bold ${tot.neto >= 0 ? 'text-success' : 'text-danger'}">${fmtPeso(tot.neto)}</td>
             </tr></tfoot>
           </table>
         </div>
+        <p class="inf-nota" style="font-size:12px;color:var(--color-text-secondary);margin:10px 2px 0">
+          Total recibido = cobranza de ventas + cobranza de deuda + vuelto dejado a favor + otros ingresos, y es la
+          suma de los medios: cada columna de medio es lo que tiene que coincidir con el reporte de ese medio
+          (ej. Mercado Pago) y con su caja. "Fiado" (cuenta corriente) y el saldo a favor que el cliente ya tenía
+          no son plata que entra ese día, así que no suman al total. Egresos = lo que salió del cajón en efectivo.
+        </p>
       `}
     `;
   }
@@ -1514,11 +1575,13 @@ const Informes = (() => {
       return { title, periodo, headers, data };
     }
     if (rep === 'resumen_diario') {
-      const headers = ['Fecha','Ventas','Efectivo','Mercado Pago','Tarjeta',
-                       'Transferencia','Otros','Cta. Cte. (fiada)','Total cobrado','Egresos','Neto'];
+      const headers = ['Fecha','Ventas','Cobranza de ventas','Cobranza de deuda','Vuelto a favor','Otros ingresos',
+                       'Total recibido','Efectivo','Mercado Pago','Tarjeta','Transferencia','Otros medios',
+                       'Cta. Cte. (fiada)','Egresos','Neto'];
       const data = rows.map(r => [fmtFechaCorta(r.dia), r.num_ventas,
-        r.efectivo, r.mercadopago, r.tarjeta, r.transferencia, r.otros,
-        r.cuenta_corriente, r.total_cobrado, r.egresos, r.neto]);
+        r.cobranza_ventas, r.cobranza_deuda, r.vuelto_favor, r.otros_ingresos,
+        r.total_recibido, r.efectivo, r.mercadopago, r.tarjeta, r.transferencia, r.otros,
+        r.cuenta_corriente, r.egresos, r.neto]);
       return { title, periodo, headers, data };
     }
     if (rep === 'salidas_stock') {

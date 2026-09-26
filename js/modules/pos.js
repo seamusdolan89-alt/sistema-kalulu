@@ -79,6 +79,49 @@ export const POS = (() => {
     }
   }
 
+  // Reparte `total` entre los medios de `base` en proporcion a lo que aporto cada uno. El ultimo
+  // absorbe el redondeo para que la suma de exacto.
+  function distribuirProporcional(base, total) {
+    const r2 = x => Math.round(x * 100) / 100;
+    const medios = Object.keys(base).filter(m => base[m] > 0.001);
+    const suma = medios.reduce((a, m) => a + base[m], 0);
+    const out = {};
+    if (total <= 0.001 || suma <= 0.001) return out;
+    let asignado = 0;
+    medios.forEach((m, i) => {
+      const monto = i === medios.length - 1
+        ? Math.max(0, r2(total - asignado))
+        : r2(total * base[m] / suma);
+      asignado += monto;
+      if (monto > 0.001) out[m] = monto;
+    });
+    return out;
+  }
+
+  // Lo que el cliente entrego en una venta tiene tres destinos, y cada uno se registra distinto:
+  //   1. la VENTA misma (venta_pagos), hasta `ventaNeta`;
+  //   2. la DEUDA vieja que salda en el mismo ticket (ingresos_caja tipo 'cobro_cliente'), hasta
+  //      `deudaACobrar`;
+  //   3. lo que sobra y el cliente deja a favor (ingresos_caja tipo 'vuelto_a_favor').
+  // Si un cliente debia $1.000 y paga una compra de $9.000 con $10.000, esta saldando $1.000 de
+  // deuda Y pagando $9.000 de compra: es lo que tiene que decir la caja. `recibido` es
+  // { medio: monto } de lo que QUEDA en el negocio por cada medio (sin el vuelto devuelto en mano).
+  // Se llena en el orden venta -> deuda -> a favor; si hay varios medios, cada destino se reparte
+  // en proporcion a lo que aporto cada medio.
+  function repartirCobro({ recibido, ventaNeta, deudaACobrar }) {
+    const total = Object.values(recibido).reduce((a, b) => a + b, 0);
+    const ventaPagada = Math.min(total, ventaNeta);
+    const deudaPagada = Math.min(Math.max(0, total - ventaPagada), deudaACobrar);
+    const sobranteTotal = Math.max(0, total - ventaPagada - deudaPagada);
+    return {
+      venta: distribuirProporcional(recibido, ventaPagada),
+      deuda: distribuirProporcional(recibido, deudaPagada),
+      sobrante: distribuirProporcional(recibido, sobranteTotal),
+      ventaPagada, deudaPagada, sobranteTotal,
+      ventaFiada: Math.max(0, ventaNeta - ventaPagada),
+    };
+  }
+
   /**
    * Register or update a sale with items, payments, and stock deduction
    * 
@@ -2069,6 +2112,8 @@ export const POS = (() => {
         <div class="ticket-trow ticket-grand"><span>TOTAL</span><span>${formatCurrency(ticketData.total)}</span></div>
         <hr class="ticket-hr">
         ${ticketData.pagos.map(p => { const m = MEDIOS.find(x => x.id === p.medio); return `<div class="ticket-trow"><span>${m ? `${esc(m.icon)} ${esc(m.nombre)}` : esc(p.medio)}</span><span>${formatCurrency(p.monto)}</span></div>`; }).join('')}
+        ${ticketData.deudaCobrada > 0.005 ? `<div class="ticket-trow"><span>Cobranza de deuda anterior</span><span>${formatCurrency(ticketData.deudaCobrada)}</span></div>` : ''}
+        ${ticketData.vueltoAFavor > 0.005 ? `<div class="ticket-trow"><span>Vuelto dejado a favor</span><span>${formatCurrency(ticketData.vueltoAFavor)}</span></div>` : ''}
         <hr class="ticket-hr">
         <div class="ticket-center"><small>¡Gracias por su compra!</small></div>
       `;
@@ -3291,19 +3336,39 @@ export const POS = (() => {
       const effTotal = getEffectiveTotal();
 
       let pagos;
-      let saldoFavorApplied = 0;
+      // Saldo a favor del cliente que se aplica a esta venta (el credito que ya tenia). Vale tanto
+      // en cobro simple como en cobro multiple: en multiple el total a cobrar ya viene reducido por
+      // ese credito y, si no se descontaba de la cuenta, el cliente lo usaba y lo seguia teniendo.
+      const saldoFavorApplied = (state.ccAplicarFavor && state.clienteSaldo < -0.01)
+        ? Math.min(Math.abs(state.clienteSaldo), getCartTotal())
+        : 0;
+      // Lo que el cliente dejo en el negocio por cada medio (sin el vuelto que se le devuelve en
+      // mano): de ahi sale el reparto entre venta / deuda vieja / vuelto a favor.
+      const recibido = {};
+      const dejaFavor = !state.cobroMultiple && !!ge('chk-saldo-favor')?.checked;
       if (state.cobroMultiple) {
         if (asig < effTotal - 0.01 && !state.ccRegistrarDeuda) {
           alert('Pago insuficiente. La suma de los medios no cubre el total.');
           return;
         }
-        pagos = MEDIOS.map(m => m.id)
-          .filter(m => (state.pagosAmounts[m] || 0) > 0.001)
-          .map(m => ({ medio: m, monto: state.pagosAmounts[m], referencia: null }));
-        if (state.ccRegistrarDeuda) {
-          const collected = pagos.reduce((s, p) => s + p.monto, 0);
-          const debtAmount = Math.max(0, effTotal - collected);
-          if (debtAmount > 0.001) pagos.push({ medio: 'cuenta_corriente', monto: debtAmount, referencia: null });
+        for (const m of MEDIOS.map(x => x.id)) {
+          if ((state.pagosAmounts[m] || 0) > 0.001) recibido[m] = state.pagosAmounts[m];
+        }
+        // Lo que pasa del total es vuelto que se le devuelve al cliente EN MANO, asi que sale del
+        // efectivo. Antes se guardaba el monto tipeado entero y la caja esperaba plata que ya se
+        // habia ido con el cliente (faltante). Si el excedente esta en un medio que no es efectivo
+        // no hay forma de devolverlo en mano ni de dejarlo a favor desde aca: se frena.
+        const exceso = Math.max(0, asig - effTotal);
+        if (exceso > 0.01) {
+          const vueltoEnMano = Math.min(exceso, recibido['efectivo'] || 0);
+          if (exceso - vueltoEnMano > 0.01) {
+            alert(
+              `Los medios sin efectivo superan el total en ${formatCurrency(exceso - vueltoEnMano)}.\n\n` +
+              'Corregí los montos (el vuelto solo se puede devolver en efectivo).'
+            );
+            return;
+          }
+          if (vueltoEnMano > 0.001) recibido['efectivo'] -= vueltoEnMano;
         }
       } else {
         // Final safety: catch efectivo shortfall regardless of how confirm was triggered (click, F10, etc.)
@@ -3320,7 +3385,6 @@ export const POS = (() => {
         // eligio dejarlo a favor del cliente. Si no lo dejo a favor sigue
         // siendo un error de tipeo y hay que frenarlo, pero diciendo cuanto
         // sobra en vez del generico "no coincide con el total".
-        const dejaFavor = !!ge('chk-saldo-favor')?.checked;
         const excedente = asig - effTotal;
         if (excedente > 0.01 && !dejaFavor) {
           alert(
@@ -3332,32 +3396,32 @@ export const POS = (() => {
         }
         if (!dejaFavor && Math.abs(asig - effTotal) > 0.01 && !state.ccRegistrarDeuda) { alert('El monto asignado no coincide con el total'); return; }
 
-        saldoFavorApplied = (state.ccAplicarFavor && state.clienteSaldo < -0.01)
-          ? Math.min(Math.abs(state.clienteSaldo), getCartTotal())
-          : 0;
-
-        pagos = [...state.activeMedios]
-          .filter(m => {
-            if (m === 'efectivo' && state.ccRegistrarDeuda && state.recibeEfectivo !== null) {
-              return state.recibeEfectivo > 0.001;
-            }
-            return (state.pagosAmounts[m] || 0) > 0.001;
-          })
-          .map(m => {
-            if (m === 'efectivo' && state.ccRegistrarDeuda && state.recibeEfectivo !== null) {
-              return { medio: 'efectivo', monto: Math.min(state.recibeEfectivo, effTotal), referencia: null };
-            }
-            return { medio: m, monto: state.pagosAmounts[m], referencia: null };
-          });
-
-        if (saldoFavorApplied > 0.001) {
-          pagos.push({ medio: 'saldo_favor', monto: saldoFavorApplied, referencia: null });
+        for (const m of state.activeMedios) {
+          if (m === 'efectivo') {
+            // Lo que se cuenta es la plata que el cliente entrego; el vuelto que se le devuelve en
+            // mano no queda en el cajon, salvo que lo deje a favor.
+            const entregado = state.recibeEfectivo !== null ? state.recibeEfectivo : (state.pagosAmounts[m] || 0);
+            const queda = dejaFavor ? entregado : Math.min(entregado, effTotal);
+            if (queda > 0.001) recibido[m] = queda;
+          } else if ((state.pagosAmounts[m] || 0) > 0.001) {
+            recibido[m] = state.pagosAmounts[m];
+          }
         }
-        if (state.ccRegistrarDeuda) {
-          const collected = pagos.filter(p => p.medio !== 'saldo_favor').reduce((s, p) => s + p.monto, 0);
-          const debtAmount = Math.max(0, effTotal - collected);
-          if (debtAmount > 0.001) pagos.push({ medio: 'cuenta_corriente', monto: debtAmount, referencia: null });
-        }
+      }
+
+      const ventaNeta = Math.max(0, getCartTotal() - saldoFavorApplied);
+      const deudaACobrar = (state.ccCobrarDeuda && state.clienteSaldo > 0.001) ? state.clienteSaldo : 0;
+      const rep = repartirCobro({ recibido, ventaNeta, deudaACobrar });
+
+      // venta_pagos = solo lo que pago ESTA venta. La deuda vieja que se salda en el mismo ticket y
+      // el vuelto dejado a favor no son parte de la venta: van a ingresos_caja mas abajo, asi la
+      // suma de los pagos coincide con el total vendido y cada peso queda con su origen.
+      pagos = Object.keys(rep.venta).map(m => ({ medio: m, monto: rep.venta[m], referencia: null }));
+      if (saldoFavorApplied > 0.001) {
+        pagos.push({ medio: 'saldo_favor', monto: saldoFavorApplied, referencia: null });
+      }
+      if (state.ccRegistrarDeuda && rep.ventaFiada > 0.001) {
+        pagos.push({ medio: 'cuenta_corriente', monto: rep.ventaFiada, referencia: null });
       }
 
       const ventaData = {
@@ -3415,55 +3479,57 @@ export const POS = (() => {
           );
         }
 
-        // Cobrar deuda existente: the full debt was included in effTotal, so cancel it now.
-        // The cash already entered the register via pagos; this just clears the ledger.
-        if (state.ccCobrarDeuda && state.clienteSaldo > 0.001) {
-          ccInsert('pago', -state.clienteSaldo,
+        // Deuda vieja saldada dentro de esta venta. Se registra como lo que es: una cobranza de deuda
+        // (ingreso de caja por el medio con el que se pago), separada de lo que costo la venta. Si
+        // no alcanzo para toda la deuda, solo se cancela lo que efectivamente se pago.
+        const ingresoCaja = (tipo, porMedio, desc) => {
+          const quien = state.clienteNombre ? ` — ${state.clienteNombre}` : '';
+          for (const [medio, monto] of Object.entries(porMedio)) {
+            if (monto <= 0.001) continue;
+            window.SGA_DB.run(
+              `INSERT INTO ingresos_caja
+                 (id, sesion_caja_id, monto, descripcion, fecha, usuario_id, medio, tipo, cliente_id, venta_id, sync_status, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+              [window.SGA_Utils.generateUUID(), state.sesionActiva.id, monto, desc + quien, now,
+               state.currentUser.id, medio, tipo, state.clienteId, result.ventaId, now]
+            );
+          }
+        };
+        if (rep.deudaPagada > 0.001) {
+          ccInsert('pago', -rep.deudaPagada,
             `Cancelación de deuda en venta #${result.ventaId.slice(-6)}`);
+          ingresoCaja('cobro_cliente', rep.deuda, 'Cobranza de deuda en la venta');
         }
 
-        // Vuelto como saldo a favor
+        // Vuelto como saldo a favor.
         // If ccCobrarDeuda was used, the debt is already fully paid above → treat residual balance as 0.
-        if (ge('chk-saldo-favor')?.checked) {
-          // getSobranteSimple() resuelve los dos casos: el vuelto del efectivo
-          // y el excedente de cualquier otro medio de pago.
-          const vuelto = getSobranteSimple();
+        if (dejaFavor) {
+          // El excedente sale de rep.sobrante: vale igual para el vuelto del efectivo y para lo que
+          // se pago de mas con cualquier otro medio.
+          const vuelto = rep.sobranteTotal;
           if (vuelto > 0.001) {
-            // El EFECTIVO que el cliente dejo de mas entra a la caja: si paga $20.000 una venta de
-            // $15.000 y deja el vuelto a favor, en el cajon hay $20.000, no $15.000. La venta solo
-            // registra su total como efectivo, asi que el resto se registra como INGRESO de caja
-            // (ligado a esta venta) — sin esto el saldo esperado queda corto y la caja cierra con
-            // un sobrante igual al vuelto dejado. Con otro medio el excedente ya viaja dentro del
-            // propio pago de ese medio (pagosAmounts), no hace falta nada.
-            const enEfectivo = !state.cobroMultiple && [...state.activeMedios][0] === 'efectivo';
-            const ingresoCaja = (tipo, monto, desc) => {
-              if (!enEfectivo || monto <= 0.001) return;
-              const quien = state.clienteNombre ? ` — ${state.clienteNombre}` : '';
-              window.SGA_DB.run(
-                `INSERT INTO ingresos_caja
-                   (id, sesion_caja_id, monto, descripcion, fecha, usuario_id, medio, tipo, cliente_id, venta_id, sync_status, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, 'efectivo', ?, ?, ?, 'pending', ?)`,
-                [window.SGA_Utils.generateUUID(), state.sesionActiva.id, monto, desc + quien, now,
-                 state.currentUser.id, tipo, state.clienteId, result.ventaId, now]
-              );
-            };
+            // Lo que el cliente dejo de mas ENTRA a la caja del medio con el que lo pago: si paga
+            // $20.000 una venta de $15.000 (en efectivo, MercadoPago o lo que sea) y deja el resto a
+            // favor, en esa caja hay $20.000, no $15.000. La venta solo registra su total, asi que
+            // el resto va como INGRESO de caja ligado a esta venta — sin esto el saldo esperado
+            // queda corto y la caja/el reporte del medio no cierran contra lo real.
             const saldoResidual = state.ccCobrarDeuda ? 0 : state.clienteSaldo;
             if (saldoResidual > 0.001) {
               if (vuelto >= saldoResidual) {
                 ccInsert('pago', -saldoResidual, 'Cancelación de deuda con vuelto');
-                ingresoCaja('cobro_cliente', saldoResidual, 'Cobranza de deuda con vuelto');
+                ingresoCaja('cobro_cliente', distribuirProporcional(rep.sobrante, saldoResidual), 'Cobranza de deuda con vuelto');
                 const sobrante = vuelto - saldoResidual;
                 if (sobrante > 0.001) {
                   ccInsert('saldo_favor', -sobrante, 'Saldo a favor del vuelto');
-                  ingresoCaja('vuelto_a_favor', sobrante, 'Vuelto dejado a favor');
+                  ingresoCaja('vuelto_a_favor', distribuirProporcional(rep.sobrante, sobrante), 'Vuelto dejado a favor');
                 }
               } else {
                 ccInsert('pago', -vuelto, 'Cancelación parcial de deuda con vuelto');
-                ingresoCaja('cobro_cliente', vuelto, 'Cobranza de deuda con vuelto');
+                ingresoCaja('cobro_cliente', rep.sobrante, 'Cobranza de deuda con vuelto');
               }
             } else {
               ccInsert('saldo_favor', -vuelto, 'Vuelto dejado como saldo a favor');
-              ingresoCaja('vuelto_a_favor', vuelto, 'Vuelto dejado a favor');
+              ingresoCaja('vuelto_a_favor', rep.sobrante, 'Vuelto dejado a favor');
             }
           }
         }
@@ -3472,6 +3538,8 @@ export const POS = (() => {
       // Reset editing state
       state.editingVentaId = null;
 
+      result.ticketData.deudaCobrada = rep.deudaPagada;
+      result.ticketData.vueltoAFavor = dejaFavor ? rep.sobranteTotal : 0;
       showModalTicket(result.ticketData);
       window.SGA_Sync?.pushPending?.();
     });

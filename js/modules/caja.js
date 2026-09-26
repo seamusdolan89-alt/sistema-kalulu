@@ -194,6 +194,29 @@ const Caja = (() => {
     const totCobrosCC = {};
     for (const r of cobrosCC) totCobrosCC[r.medio] = r.total;
 
+    // Todo lo que entro por cada medio ademas de las ventas: cobranza de deuda, vuelto que el
+    // cliente dejo a favor y cualquier otro ingreso. Asi la caja de MercadoPago (o de cualquier
+    // medio) cuenta lo mismo que la de efectivo: lo que ese medio realmente recibio, que es lo que
+    // tiene que coincidir con el reporte del propio medio.
+    const totVueltoAFavor = {};
+    const totIngresosMedio = {};
+    for (const r of window.SGA_DB.query(
+      `SELECT COALESCE(medio, 'efectivo') AS medio, COALESCE(tipo, '') AS tipo, SUM(monto) AS t
+       FROM ingresos_caja WHERE sesion_caja_id = ?
+       GROUP BY COALESCE(medio, 'efectivo'), COALESCE(tipo, '')`, [sesionId]
+    )) {
+      const t = parseFloat(r.t) || 0;
+      totIngresosMedio[r.medio] = (totIngresosMedio[r.medio] || 0) + t;
+      if (r.tipo === 'vuelto_a_favor') totVueltoAFavor[r.medio] = (totVueltoAFavor[r.medio] || 0) + t;
+    }
+    // Recibido por medio = ventas + ingresos. 'cuenta_corriente' (fiado) y 'saldo_favor' (credito
+    // que el cliente ya tenia) no son plata que entra.
+    const totRecibido = {};
+    for (const m of new Set([...Object.keys(totPagos), ...Object.keys(totIngresosMedio)])) {
+      if (m === 'cuenta_corriente' || m === 'saldo_favor') continue;
+      totRecibido[m] = (parseFloat(totPagos[m]) || 0) + (totIngresosMedio[m] || 0);
+    }
+
     // De donde salieron los ingresos en efectivo: cobranza de deuda, vuelto que el cliente dejo
     // a favor, u otro ingreso extra. Con esto el reporte muestra TODO lo que entro al cajon y los
     // totales coinciden con el saldo esperado.
@@ -218,12 +241,29 @@ const Caja = (() => {
     const efectivo = parseFloat(totPagos['efectivo'] || 0);
     const saldoEsperado = saldoInicial + efectivo - parseFloat(egresos) + parseFloat(ingresos);
 
-    return { totPagos, totCobrosCC, totalVentas, egresos, ingresos,
+    return { totPagos, totCobrosCC, totVueltoAFavor, totIngresosMedio, totRecibido,
+             totalVentas, egresos, ingresos,
              nVentas, saldoInicial, saldoEsperado,
              cobranzaDeudaEfectivo, vueltoAFavorEfectivo,
              ingresosExtraEfectivo: Math.max(0, parseFloat(ingresos) - cobranzaDeudaEfectivo - vueltoAFavorEfectivo),
              totalEfectivoRecibido: efectivo + parseFloat(ingresos) };
   }
+
+  // Desglose de lo recibido por un medio: cobranza de ventas, de deuda, vuelto que el cliente dejo a
+  // favor y otros ingresos. La suma es `total` (lo que tiene que coincidir con el reporte del medio).
+  function desgloseMedio(tot, m) {
+    const ventas = parseFloat((tot.totPagos || {})[m]) || 0;
+    const deuda  = parseFloat((tot.totCobrosCC || {})[m]) || 0;
+    const vuelto = parseFloat((tot.totVueltoAFavor || {})[m]) || 0;
+    const total  = parseFloat((tot.totRecibido || {})[m]) || 0;
+    return { ventas, deuda, vuelto, otros: Math.max(0, total - ventas - deuda - vuelto), total };
+  }
+  const textoDesglose = d => [
+    `Ventas ${fmtPeso(d.ventas)}`,
+    d.deuda  > 0.005 ? `Cobranza de deuda ${fmtPeso(d.deuda)}`   : null,
+    d.vuelto > 0.005 ? `Vuelto a favor ${fmtPeso(d.vuelto)}`      : null,
+    d.otros  > 0.005 ? `Otros ingresos ${fmtPeso(d.otros)}`       : null,
+  ].filter(Boolean).join(' · ');
 
   function getMovimientos(sesionId) {
     return window.SGA_DB.query(
@@ -297,7 +337,7 @@ const Caja = (() => {
         tipo: 'ingreso', id: i.id, fecha: i.fecha,
         monto: parseFloat(i.monto) || 0,
         descripcion: i.descripcion
-          || (i.tipo === 'cobro_cliente' ? 'Cobro de cuenta corriente' : 'Ingreso extra'),
+          || ingresoTipoLabel(i.tipo),
         subtipo: i.tipo,
         usuario: i.usuario,
         medios: [medio],
@@ -524,42 +564,49 @@ const Caja = (() => {
     } catch(e) {}
 
     const hoy = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
-    const todayISO = new Date().toISOString().slice(0, 10);
+    // El dia es el LOCAL: con la fecha UTC, despues de las 21:00 (Argentina) "hoy" ya era manana y esta
+    // caja mostraba $0 justo cuando se compara contra el reporte del medio al final del dia.
+    const d0 = new Date();
+    const todayISO = `${d0.getFullYear()}-${String(d0.getMonth() + 1).padStart(2, '0')}-${String(d0.getDate()).padStart(2, '0')}`;
 
     // Cobros del día completo
     let pagos = [];
     let total = 0;
     try {
-      // Dos fuentes: las ventas cobradas con este medio y los cobros de cuenta
-      // corriente. Antes solo miraba venta_pagos, asi que cobrarle la deuda a
-      // un cliente por MercadoPago no aparecia por ningun lado en esta caja.
+      // Dos fuentes: las ventas cobradas con este medio y todo lo que entro por el (cobranza de deuda
+      // y vuelto que el cliente dejo a favor). Antes solo miraba venta_pagos, asi que cobrarle la
+      // deuda a un cliente por MercadoPago, o dejarle plata a favor, no aparecia por ningun lado en
+      // esta caja y el total no coincidia con el reporte del propio medio.
       pagos = window.SGA_DB.query(`
         SELECT vp.monto AS monto, vp.referencia AS referencia, v.fecha AS fecha,
-               COALESCE(c.nombre, 'Consumidor final') AS cliente,
+               COALESCE(NULLIF(TRIM(c.nombre || ' ' || COALESCE(c.apellido, '')), ''),
+                        'Consumidor final') AS cliente,
                'venta' AS origen
         FROM venta_pagos vp
         JOIN ventas v ON v.id = vp.venta_id
         LEFT JOIN clientes c ON c.id = v.cliente_id
         WHERE vp.medio = ?
           AND v.estado = 'completada'
-          AND DATE(v.fecha) = ?
+          AND DATE(v.fecha, 'localtime') = ?
 
         UNION ALL
 
         SELECT i.monto AS monto, NULL AS referencia, i.fecha AS fecha,
                COALESCE(NULLIF(TRIM(cl.nombre || ' ' || COALESCE(cl.apellido, '')), ''),
                         'Cliente') AS cliente,
-               'cta_cte' AS origen
+               CASE COALESCE(i.tipo, '') WHEN 'cobro_cliente' THEN 'cta_cte'
+                                         WHEN 'vuelto_a_favor' THEN 'vuelto' ELSE 'extra' END AS origen
         FROM ingresos_caja i
         LEFT JOIN clientes cl ON cl.id = i.cliente_id
         WHERE COALESCE(i.medio, 'efectivo') = ?
-          AND i.tipo = 'cobro_cliente'
-          AND DATE(i.fecha) = ?
+          AND DATE(i.fecha, 'localtime') = ?
 
         ORDER BY fecha DESC
       `, [medio, todayISO, medio, todayISO]);
       total = pagos.reduce((s, p) => s + (parseFloat(p.monto) || 0), 0);
     } catch(e) {}
+    const porOrigen = o => pagos.filter(p => p.origen === o).reduce((s, p) => s + (parseFloat(p.monto) || 0), 0);
+    const desgloseHoy = `Ventas ${fmtPeso(porOrigen('venta'))} · Cobranza de deuda ${fmtPeso(porOrigen('cta_cte'))} · Vuelto a favor ${fmtPeso(porOrigen('vuelto'))}${porOrigen('extra') > 0.005 ? ` · Otros ${fmtPeso(porOrigen('extra'))}` : ''}`;
 
     // Cobros de la sesión activa (caja actual)
     let totalSesion = 0;
@@ -581,7 +628,6 @@ const Caja = (() => {
             SELECT i.monto AS monto
             FROM ingresos_caja i
             WHERE COALESCE(i.medio, 'efectivo') = ?
-              AND i.tipo = 'cobro_cliente'
               AND i.sesion_caja_id = ?
           )
         `, [medio, sesionActiva.id, medio, sesionActiva.id]);
@@ -597,7 +643,9 @@ const Caja = (() => {
             <td style="padding:10px 8px;font-size:13px">${esc(p.cliente)}</td>
             <td style="padding:10px 8px;font-size:13px;text-align:right;font-weight:600">${fmtPeso(p.monto)}</td>
             <td style="padding:10px 8px;font-size:12px;color:#999">${
-              p.origen === 'cta_cte' ? 'Cuenta corriente' : esc(p.referencia || '')
+              p.origen === 'venta' ? esc(p.referencia || 'Venta') : (
+                p.origen === 'cta_cte' ? 'Cobranza de deuda'
+                : p.origen === 'vuelto' ? 'Vuelto dejado a favor' : 'Ingreso extra')
             }</td>
           </tr>`).join('')
       : `<tr><td colspan="4" style="padding:24px;text-align:center;color:#aaa;font-size:13px">Sin cobros registrados hoy</td></tr>`;
@@ -614,9 +662,10 @@ const Caja = (() => {
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px">
           <div style="background:linear-gradient(135deg,#e3f2fd,#bbdefb);border-radius:12px;padding:20px;text-align:center">
-            <div style="font-size:11px;color:#1565c0;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Total cobrado hoy</div>
+            <div style="font-size:11px;color:#1565c0;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Total recibido hoy</div>
             <div style="font-size:28px;font-weight:700;color:#1565c0;line-height:1">${fmtPeso(total)}</div>
             <div style="font-size:11px;color:#1976d2;margin-top:6px">${pagos.length} cobro${pagos.length !== 1 ? 's' : ''}</div>
+            <div id="digital-desglose-hoy" style="font-size:11px;color:#1976d2;margin-top:4px">${desgloseHoy}</div>
           </div>
           <div style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border-radius:12px;padding:20px;text-align:center">
             <div style="font-size:11px;color:#2e7d32;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Caja actual</div>
@@ -635,7 +684,7 @@ const Caja = (() => {
 
         <div style="background:#fff;border-radius:8px;border:1px solid #e8e8e8;overflow:hidden">
           <div style="padding:14px 16px;border-bottom:1px solid #f0f0f0;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#666">
-            Cobros del día
+            Movimientos del día
           </div>
           <table style="width:100%;border-collapse:collapse">
             <thead>
@@ -802,19 +851,25 @@ case 'egresos':     renderEgresosIngresos(content);   break;
         </div>
       `).join('');
 
-    // Los cobros de cuenta corriente van en su propio bloque: son plata que
-    // entro hoy, pero no son ventas de hoy —ya se vendieron fiadas antes—, asi
+    // La deuda cobrada y el vuelto dejado a favor van en sus propios bloques: son plata que entro
+    // hoy, pero no son ventas de hoy —ya se vendieron fiadas antes, o es credito del cliente—, asi
     // que sumarlos arriba descuadraria el total contra lo vendido.
-    const cobrosCC = tot.totCobrosCC || {};
-    const cobrosRows = Object.keys(cobrosCC)
-      .filter(m => (cobrosCC[m] || 0) > 0)
-      .map(m => `
-        <div class="caja-stat-row">
-          <span>${esc(getMedioLabel(m))}</span>
-          <span>${fmtPeso(cobrosCC[m])}</span>
-        </div>
-      `).join('');
-    const totalCC = Object.values(cobrosCC).reduce((a, b) => a + (parseFloat(b) || 0), 0);
+    const bloque = (titulo, mapa, totalLabel) => {
+      const ms = Object.keys(mapa || {}).filter(m => (mapa[m] || 0) > 0.005);
+      if (!ms.length) return '';
+      const total = ms.reduce((a, m) => a + (parseFloat(mapa[m]) || 0), 0);
+      return `
+        <h3 style="margin-top:18px">${titulo}</h3>
+        ${ms.map(m => `
+          <div class="caja-stat-row">
+            <span>${esc(getMedioLabel(m))}</span>
+            <span>${fmtPeso(mapa[m])}</span>
+          </div>`).join('')}
+        <div class="caja-stat-row total-row" style="margin-top:8px">
+          <span>${totalLabel}</span>
+          <span>${fmtPeso(total)}</span>
+        </div>`;
+    };
 
     openModal(`
       <button class="caja-modal-close" id="btn-close-medios" aria-label="Cerrar" title="Cerrar">✕</button>
@@ -826,19 +881,9 @@ case 'egresos':     renderEgresosIngresos(content);   break;
             <span>${fmtPeso(tot.totalVentas)}</span>
           </div>`
         : '<p class="caja-empty">Sin ventas registradas en esta sesión.</p>'}
-      ${cobrosRows ? `
-        <h3 style="margin-top:18px">Cobros de cuenta corriente</h3>
-        ${cobrosRows}
-        <div class="caja-stat-row total-row" style="margin-top:8px">
-          <span>Total cobrado</span>
-          <span>${fmtPeso(totalCC)}</span>
-        </div>` : ''}
-      ${(tot.vueltoAFavorEfectivo || 0) > 0 ? `
-        <h3 style="margin-top:18px">Vuelto dejado a favor</h3>
-        <div class="caja-stat-row">
-          <span>${esc(getMedioLabel('efectivo'))}</span>
-          <span>${fmtPeso(tot.vueltoAFavorEfectivo)}</span>
-        </div>` : ''}
+      ${bloque('Cobranza de deuda', tot.totCobrosCC, 'Total cobrado')}
+      ${bloque('Vuelto dejado a favor', tot.totVueltoAFavor, 'Total dejado a favor')}
+      ${bloque('Total recibido por medio (ventas + deuda + vuelto)', tot.totRecibido, 'Total recibido')}
       <div class="caja-modal-footer">
         <button class="btn btn-outline" id="btn-close-medios2">Cerrar</button>
       </div>
@@ -917,14 +962,26 @@ case 'egresos':     renderEgresosIngresos(content);   break;
           <div class="caja-stat-value">${fmtPeso(tot.saldoEsperado)}</div>
         </div>`;
     } else {
-      const medioTotal = tot.totPagos[medio] || 0;
+      const d = desgloseMedio(tot, medio);
       const label = esc(getMedioLabel(medio));
       const nVentas = movimientos.filter(m => m.tipo === 'venta').length;
       kpisHtml = `
         <div class="caja-stat-card highlight">
-          <div class="caja-stat-label">Cobrado por ${label}</div>
-          <div class="caja-stat-value">${fmtPeso(medioTotal)}</div>
+          <div class="caja-stat-label">Recibido por ${label}</div>
+          <div class="caja-stat-value">${fmtPeso(d.total)}</div>
           <div class="caja-stat-sub">${nVentas} transacción${nVentas !== 1 ? 'es' : ''}</div>
+        </div>
+        <div class="caja-stat-card">
+          <div class="caja-stat-label">Cobranza de ventas</div>
+          <div class="caja-stat-value">${fmtPeso(d.ventas)}</div>
+        </div>
+        <div class="caja-stat-card">
+          <div class="caja-stat-label">Cobranza de deuda</div>
+          <div class="caja-stat-value">${fmtPeso(d.deuda)}</div>
+        </div>
+        <div class="caja-stat-card">
+          <div class="caja-stat-label">Vuelto dejado a favor</div>
+          <div class="caja-stat-value">${fmtPeso(d.vuelto)}</div>
         </div>`;
     }
 
@@ -1678,10 +1735,9 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       .map(m => ({
         id: m.id,
         label: `${m.icono || ''} ${m.nombre}`.trim(),
-        // Digitales: ventas + cobros de deuda hechos por ese medio (antes solo ventas, y un cobro
-        // de deuda por MercadoPago aparecia como diferencia al informar lo real).
-        esperado: m.id === 'efectivo' ? tot.saldoEsperado
-                  : ((tot.totPagos[m.id] || 0) + ((tot.totCobrosCC || {})[m.id] || 0)),
+        // Digitales: todo lo que entro por ese medio —ventas, cobranza de deuda y vuelto dejado a
+        // favor—; si faltara algo, aparecia como diferencia al informar lo real.
+        esperado: m.id === 'efectivo' ? tot.saldoEsperado : ((tot.totRecibido || {})[m.id] || 0),
       }))
       .filter(m => m.id === 'efectivo' || m.esperado > 0);
 
@@ -1993,20 +2049,20 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     const efOtros   = tot ? (tot.ingresosExtraEfectivo || 0) : 0;
     const efTotal   = efVentas + efDeuda + efVuelto + efOtros;
 
-    // Los otros medios (MercadoPago, transferencia, tarjeta...): ventas + deuda cobrada por ese medio.
-    // 'cuenta_corriente' y 'saldo_favor' no son plata recibida.
-    const idsOtros = new Set([...Object.keys((tot && tot.totPagos) || {}), ...Object.keys((tot && tot.totCobrosCC) || {})]);
-    ['efectivo', 'cuenta_corriente', 'saldo_favor'].forEach(id => idsOtros.delete(id));
-    const otrosMedios = [...idsOtros]
-      .map(id => ({ id, ventas: (tot.totPagos[id] || 0), deuda: ((tot.totCobrosCC || {})[id] || 0) }))
-      .filter(x => x.ventas > 0.005 || x.deuda > 0.005);
-    const totalOtros = otrosMedios.reduce((s, x) => s + x.ventas + x.deuda, 0);
+    // Los otros medios (MercadoPago, transferencia, tarjeta...): todo lo que entro por cada uno —ventas,
+    // cobranza de deuda y vuelto dejado a favor—, que es lo que tiene que coincidir con el reporte del
+    // propio medio. 'cuenta_corriente' y 'saldo_favor' no son plata recibida.
+    const otrosMedios = Object.keys((tot && tot.totRecibido) || {})
+      .filter(id => id !== 'efectivo')
+      .map(id => ({ id, d: desgloseMedio(tot, id) }))
+      .filter(x => x.d.total > 0.005);
+    const totalOtros = otrosMedios.reduce((s, x) => s + x.d.total, 0);
     const mediosHtml = otrosMedios.map(x => `
         <div class="caja-stat-row">
           <span>${esc(getMedioLabel(x.id))}</span>
-          <span>${fmtPeso(x.ventas + x.deuda)}</span>
+          <span>${fmtPeso(x.d.total)}</span>
         </div>
-        ${x.deuda > 0.005 ? `<div class="caja-stat-row" style="font-size:12px;color:#888;padding-top:0"><span>&nbsp;&nbsp;Ventas ${fmtPeso(x.ventas)} · Cobranza de deuda ${fmtPeso(x.deuda)}</span><span></span></div>` : ''}
+        ${(x.d.deuda + x.d.vuelto + x.d.otros) > 0.005 ? `<div class="caja-stat-row" style="font-size:12px;color:#888;padding-top:0"><span>&nbsp;&nbsp;${textoDesglose(x.d)}</span><span></span></div>` : ''}
       `).join('');
 
     const explEfectivo = (state.cierre.explicaciones && state.cierre.explicaciones['efectivo']) || [];
@@ -2033,7 +2089,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       `Vuelto dejado a favor: ${fmtPeso(efVuelto)}`,
       efOtros > 0.005 ? `Otros ingresos:        ${fmtPeso(efOtros)}` : null,
       `Total efectivo recibido: ${fmtPeso(efTotal)}`,
-      ...(otrosMedios.length ? ['', 'OTROS MEDIOS', ...otrosMedios.map(x => `${getMedioLabel(x.id)}: ${fmtPeso(x.ventas + x.deuda)}`)] : []),
+      ...(otrosMedios.length ? ['', 'OTROS MEDIOS RECIBIDOS', ...otrosMedios.map(x => `${getMedioLabel(x.id)}: ${fmtPeso(x.d.total)}  (${textoDesglose(x.d)})`)] : []),
       '',
       'SALDO DE CAJA',
       `Saldo inicial:  ${tot ? fmtPeso(tot.saldoInicial) : '-'}`,
@@ -2166,6 +2222,10 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     const dif = parseFloat(s.diferencia) || 0;
     const difClass = dif > 0 ? 'text-success' : dif < 0 ? 'text-danger' : '';
     const tEf = getTotalesSesion(sesionId);   // desglose del efectivo de esa sesion
+    const otrosDetalleHtml = Object.keys(tEf.totRecibido || {})
+      .filter(id => id !== 'efectivo' && (tEf.totRecibido[id] || 0) > 0.005)
+      .map(id => `<div class="caja-stat-row"><span>${esc(getMedioLabel(id))}</span><span>${fmtPeso(tEf.totRecibido[id])}</span></div>`)
+      .join('');
 
     openModal(`
       <button class="caja-modal-close" id="btn-close-sesion" aria-label="Cerrar" title="Cerrar">✕</button>
@@ -2184,6 +2244,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       <div class="caja-stat-row"><span>Saldo esperado</span><span>${fmtPeso(s.saldo_final_esperado)}</span></div>
       <div class="caja-stat-row"><span>Saldo real (contado)</span><span>${fmtPeso(s.saldo_final_real)}</span></div>
       <div class="caja-stat-row highlight-row"><span>Diferencia</span><span class="${difClass}">${dif >= 0 ? '+' : ''}${fmtPeso(dif)}</span></div>
+      ${otrosDetalleHtml ? `<h4 style="margin:16px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.03em;color:#666">Otros medios recibidos</h4>${otrosDetalleHtml}` : ''}
       <h4 style="margin:16px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.03em;color:#666">Detalle billetes</h4>
       ${billetesHtml}
       <div class="caja-modal-footer">
@@ -2393,12 +2454,12 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       icon: m.icono || '💰',
       label: m.nombre,
       value: tot
-        ? (m.id === 'efectivo' ? tot.saldoEsperado : ((tot.totPagos[m.id] || 0) + ((tot.totCobrosCC || {})[m.id] || 0)))
+        ? (m.id === 'efectivo' ? tot.saldoEsperado : ((tot.totRecibido || {})[m.id] || 0))
         : (m.id === 'efectivo' ? ultimoSaldoEfectivo : 0),
       sub: tot
         ? (m.id === 'efectivo'
             ? `Cobrado: ${fmtPeso(tot.totPagos['efectivo'] || 0)} · Inicial: ${fmtPeso(tot.saldoInicial)}`
-            : (((tot.totPagos[m.id] || 0) + ((tot.totCobrosCC || {})[m.id] || 0)) > 0 ? 'Cobrado hoy' : 'Sin movimientos'))
+            : ((((tot.totRecibido || {})[m.id]) || 0) > 0 ? 'Recibido hoy' : 'Sin movimientos'))
         : (m.id === 'efectivo' ? ultimoSaldoLabel : 'Sin sesión activa'),
     }));
 
