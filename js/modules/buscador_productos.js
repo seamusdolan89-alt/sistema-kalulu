@@ -84,7 +84,13 @@ const SGA_Buscador = (() => {
 
     const variantes = variantesCodigo(texto);
     const ph = variantes.length ? variantes.map(() => '?').join(',') : "''";
+    const minusculas = texto.toLowerCase();
 
+    // Orden: primero el nombre IGUAL a lo tipeado, despues los que EMPIEZAN con
+    // eso y por ultimo los que solo lo contienen (cada grupo alfabetico). Con
+    // solo `ORDER BY nombre` + LIMIT, un producto llamado exactamente "Naranja"
+    // quedaba fuera de los resultados si habia mas de `limite` productos que
+    // contienen "naranja" y van antes en el alfabeto (gaseosas, jugos, dulces).
     return db().query(`
       SELECT DISTINCT p.*,
              (SELECT codigo FROM codigos_barras
@@ -95,9 +101,12 @@ const SGA_Buscador = (() => {
       LEFT JOIN codigos_barras cb ON cb.producto_id = p.id
       WHERE p.activo = 1
         AND (LOWER(p.nombre) LIKE ? OR cb.codigo IN (${ph}))
-      ORDER BY p.nombre
+      ORDER BY CASE WHEN LOWER(p.nombre) = ? THEN 0
+                    WHEN LOWER(p.nombre) LIKE ? THEN 1
+                    ELSE 2 END,
+               p.nombre
       LIMIT ${Number(limite) || 20}
-    `, [sucursalId, '%' + texto.toLowerCase() + '%', ...variantes]) || [];
+    `, [sucursalId, '%' + minusculas + '%', ...variantes, minusculas, minusculas + '%']) || [];
   }
 
   /**
