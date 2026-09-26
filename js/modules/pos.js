@@ -675,6 +675,11 @@ export const POS = (() => {
     // ── PRODUCT SEARCH ─────────────────────────────────────────────
     const searchProductos = (q) => {
       const like = `%${q}%`;
+      const minusculas = q.toLowerCase();
+      // Primero el nombre IGUAL a lo tipeado, despues los que EMPIEZAN con eso y
+      // por ultimo los que solo lo contienen. Con solo `ORDER BY nombre` + LIMIT
+      // 12, un producto llamado exactamente "Naranja" no aparecia si habia mas de
+      // 12 productos con "naranja" en el nombre que van antes en el alfabeto.
       return window.SGA_DB.query(`
         SELECT DISTINCT p.id, p.nombre, p.precio_venta, p.costo,
           p.stock_minimo,
@@ -684,8 +689,12 @@ export const POS = (() => {
         LEFT JOIN codigos_barras cb ON cb.producto_id = p.id
         LEFT JOIN stock st ON st.producto_id = p.id AND st.sucursal_id = ?
         WHERE p.activo = 1 AND (p.nombre LIKE ? OR cb.codigo LIKE ?)
-        ORDER BY p.nombre LIMIT 12
-      `, [state.currentSucursal.id, like, like]);
+        ORDER BY CASE WHEN LOWER(p.nombre) = ? THEN 0
+                      WHEN LOWER(p.nombre) LIKE ? THEN 1
+                      ELSE 2 END,
+                 p.nombre
+        LIMIT 12
+      `, [state.currentSucursal.id, like, like, minusculas, minusculas + '%']);
     };
 
     // Etiqueta de stock disponible para el dropdown de busqueda.
