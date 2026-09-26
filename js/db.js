@@ -890,6 +890,9 @@
       "ALTER TABLE ingresos_caja ADD COLUMN medio TEXT",
       "ALTER TABLE ingresos_caja ADD COLUMN tipo TEXT",
       "ALTER TABLE ingresos_caja ADD COLUMN cliente_id TEXT",
+      // De que venta salio (vuelto en efectivo que el cliente dejo a favor o con el que cancelo
+      // deuda): anular o editar esa venta tiene que poder deshacer este ingreso.
+      "ALTER TABLE ingresos_caja ADD COLUMN venta_id TEXT",
     ];
     // Las marcas de impresion de etiquetas se guardaban con un espacio donde va
     // la T ("2026-09-08 14:30:00"), mientras que ultima_modificacion_precio usa

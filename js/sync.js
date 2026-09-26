@@ -1016,13 +1016,13 @@
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO ingresos_caja
         (id, sesion_caja_id, monto, descripcion, fecha, usuario_id,
-         medio, tipo, cliente_id, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,'synced',?)`,
+         medio, tipo, cliente_id, venta_id, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.sesion_caja_id || null, data.monto || 0,
        data.descripcion || null, data.fecha || null, data.usuario_id || null,
        // Sin medio, del otro lado un cobro con tarjeta se contaba como
        // efectivo y descuadraba el arqueo de esa caja.
-       data.medio || null, data.tipo || null, data.cliente_id || null,
+       data.medio || null, data.tipo || null, data.cliente_id || null, data.venta_id || null,
        data.updated_at || now]
     );
   }
