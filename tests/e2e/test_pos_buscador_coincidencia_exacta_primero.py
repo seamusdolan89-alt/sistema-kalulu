@@ -59,6 +59,12 @@ def main():
           }
         """)
 
+        # El motor compartido (window.SGA_Buscador) lo carga la primera pantalla que lo importa
+        # (el POS, no la pantalla de inicio): ir al POS antes de consultarlo.
+        page.evaluate("window.location.hash = 'pos'")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_function("() => !!window.SGA_Buscador", timeout=10000)
+
         print("--- Buscar por el motor compartido (porTexto): la coincidencia exacta va primera ---")
         orden = page.evaluate("""
           () => window.SGA_Buscador.porTexto('naranja', { sucursalId: null, limite: 20 }).map(p => p.nombre)
@@ -70,8 +76,6 @@ def main():
         assert len(orden) == 20, f"el limite sigue rigiendo: {len(orden)}"
 
         print("--- Buscar en el carrito del POS tipeando 'naranja' ---")
-        page.evaluate("window.location.hash = 'pos'")
-        page.wait_for_load_state("networkidle")
         abrir_caja_si_hace_falta(page)
         page.locator("#btn-nueva-venta").click()
         page.wait_for_timeout(400)
