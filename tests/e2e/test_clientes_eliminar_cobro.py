@@ -81,7 +81,8 @@ def main():
         page = context.new_page()
         errors = []
         page.on("pageerror", lambda exc: errors.append(str(exc)))
-        page.on("dialog", lambda d: d.accept())
+        dialogos = []
+        page.on("dialog", lambda d: (dialogos.append(d.message), d.accept()))
 
         print("--- Login admin-pos + seed in place (sga-admin.db) ---")
         login_via_seed(page, admin_pos=True)
@@ -210,6 +211,68 @@ def main():
         """)
         print(f"Intento sobre venta_fiada: {rechazo!r}")
         assert rechazo != 'NO_ERROR', "eliminarPago no deberia aceptar una fila que no sea tipo 'pago'"
+
+        print("--- Cobro de una caja YA CERRADA: pide confirmar y NO toca la caja ---")
+        page.evaluate("""
+          () => {
+            const now = new Date().toISOString();
+            window.SGA_DB.run(
+              `INSERT INTO sesiones_caja (id, sucursal_id, usuario_apertura_id, fecha_apertura, fecha_cierre, saldo_inicial, estado, sync_status, updated_at)
+               VALUES ('sesion-cobro-2', '1', (SELECT id FROM usuarios LIMIT 1), ?, ?, 0, 'cerrada', 'pending', ?)`,
+              [now, now, now]
+            );
+            const f = new Date(Date.now() + 5000).toISOString();
+            window.SGA_DB.run(
+              `INSERT INTO cuenta_corriente (id, cliente_id, sucursal_id, tipo, monto, descripcion, fecha, medio_pago, sesion_caja_id, sync_status, updated_at)
+               VALUES ('cc-cobro-cerrado', 'cliente-cobro-1', '1', 'pago', -300, 'Pago', ?, 'efectivo', 'sesion-cobro-2', 'pending', ?)`, [f, f]);
+            window.SGA_DB.run(
+              `INSERT INTO ingresos_caja (id, sesion_caja_id, monto, descripcion, fecha, medio, tipo, cliente_id, sync_status, updated_at)
+               VALUES ('ing-cobro-cerrado', 'sesion-cobro-2', 300, 'Cobro cta. cte. — Rosa Diaz', ?, 'efectivo', 'cobro_cliente', 'cliente-cobro-1', 'pending', ?)`, [f, f]);
+            // un movimiento tipo 'pago' que es parte de una venta (ej. saldo a favor aplicado en la venta)
+            window.SGA_DB.run(
+              `INSERT INTO cuenta_corriente (id, cliente_id, sucursal_id, tipo, monto, venta_id, descripcion, fecha, sync_status, updated_at)
+               VALUES ('cc-de-venta', 'cliente-cobro-1', '1', 'pago', 50, 'venta-x', 'Aplicado saldo a favor en venta #x', ?, 'pending', ?)`, [f, f]);
+          }
+        """)
+        sin_ok = page.evaluate("""
+          () => { try { window.SGA_Clientes.eliminarPago('cc-cobro-cerrado'); return 'NO_ERROR'; }
+                  catch (e) { return { msg: e.message, requiere: !!e.requiereConfirmacionCaja }; } }
+        """)
+        assert sin_ok != 'NO_ERROR' and sin_ok["requiere"], f"Con la caja cerrada tiene que pedir confirmación: {sin_ok}"
+        assert page.evaluate("() => window.SGA_DB.query(`SELECT COUNT(*) AS n FROM cuenta_corriente WHERE id='cc-cobro-cerrado'`)[0].n") == 1, (
+            "Borró el cobro sin que se confirmara")
+
+        page.evaluate("window.location.hash = 'inicio'")
+        page.wait_for_timeout(200)
+        page.evaluate("window.location.hash = 'clientes'")
+        page.wait_for_timeout(500)
+        page.locator("tr", has_text="Rosa Diaz").locator("text=👁️").click()
+        page.wait_for_timeout(400)
+        page.locator(".ficha-nav-item[data-section='cc']").click()
+        page.wait_for_timeout(400)
+        assert page.locator('[data-eliminar-mov="cc-de-venta"]').count() == 0, (
+            "Un movimiento que viene de una venta no debe ofrecer el botón de eliminar")
+        rechazo_venta = page.evaluate("""
+          () => { try { window.SGA_Clientes.eliminarPago('cc-de-venta'); return 'NO_ERROR'; } catch (e) { return e.message; } }
+        """)
+        assert rechazo_venta != 'NO_ERROR' and 'venta' in rechazo_venta, f"Debe rechazar un movimiento de una venta: {rechazo_venta!r}"
+
+        n_dialogos = len(dialogos)
+        page.locator('[data-eliminar-mov="cc-cobro-cerrado"]').click()
+        page.wait_for_timeout(500)
+        nuevos = dialogos[n_dialogos:]
+        print(f"Diálogos: {[d[:80] for d in nuevos]}")
+        assert len(nuevos) >= 2 and "YA SE CERRÓ" in nuevos[1], f"Falta el aviso de caja cerrada: {nuevos}"
+        chk = page.evaluate("""
+          () => ({
+            cc: window.SGA_DB.query(`SELECT COUNT(*) AS n FROM cuenta_corriente WHERE id='cc-cobro-cerrado'`)[0].n,
+            ing: window.SGA_DB.query(`SELECT COUNT(*) AS n FROM ingresos_caja WHERE id='ing-cobro-cerrado'`)[0].n,
+            ses: window.SGA_DB.query(`SELECT estado FROM sesiones_caja WHERE id='sesion-cobro-2'`)[0].estado,
+          })
+        """)
+        assert chk["cc"] == 0, "Al confirmar, el cobro debía borrarse de la cuenta corriente del cliente"
+        assert chk["ing"] == 1, "BUG: se tocó una caja CERRADA (el ingreso debía quedar intacto)"
+        assert chk["ses"] == "cerrada"
 
         assert not errors, f"Errores JS no capturados en pagina: {errors}"
 
