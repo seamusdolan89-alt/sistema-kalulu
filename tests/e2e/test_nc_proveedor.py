@@ -117,12 +117,19 @@ def main():
         assert aplicar == "ref", f"Con factura de referencia debería venir 'aplicar a la factura': {aplicar}"
         page.fill("#ncw-numero", "0001-00099")
 
-        page.fill("#ncw-buscar", "Coca-Cola")
-        page.wait_for_timeout(300)
-        page.locator(".ncw-dd .sri").first.click()
-        page.wait_for_timeout(200)
+        # Con una factura de referencia elegida, el buscador libre desaparece:
+        # la única línea posible es la de la propia factura (Coca-Cola 2L x10),
+        # precargada (destildada) con su cantidad y costo de ESA compra.
+        assert not page.locator("#ncw-buscador-wrap").is_visible(), "El buscador libre debería ocultarse con factura de referencia"
+        filas = page.locator('#ncw-prod-wrap tr[data-i]')
+        assert filas.count() == 1, f"Debería precargar 1 línea (la de la factura): {filas.count()}"
+        assert "Coca-Cola 2L" in filas.inner_text(), f"No precargó el producto de la factura: {filas.inner_text()!r}"
+        assert not page.locator('#ncw-prod-wrap input[data-f="checked"]').is_checked(), "La línea no debería venir tildada por default"
+        assert page.locator('#ncw-prod-wrap input[data-f="cantidad"]').input_value() == "10", "Cantidad precargada: la comprada completa"
+        assert page.locator('#ncw-prod-wrap input[data-f="costo"]').input_value() == "100", "Costo precargado: el de la factura"
+
+        page.locator('#ncw-prod-wrap input[data-f="checked"]').check()
         page.fill('#ncw-prod-wrap input[data-f="cantidad"]', "4")
-        page.fill('#ncw-prod-wrap input[data-f="costo"]', "100")
         page.select_option('#ncw-prod-wrap select[data-f="iva"]', "21")
         page.locator("#ncw-add-conc").click()
         page.wait_for_timeout(100)
