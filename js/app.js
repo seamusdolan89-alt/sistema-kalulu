@@ -309,6 +309,10 @@
         })(),
       },
       { name: 'operaciones_stock', icon: 'operaciones_stock', text: 'Operaciones de Stock' },
+      // Antes estaba pegada a Configuración, al fondo del todo: quedaba invisible pese a
+      // acumular pedidos sin aprobar (reportado por el usuario probando en dev, 28/9/2026).
+      // Va al lado de Operaciones de Stock, de donde salen la mayoría de los pedidos.
+      { name: 'aprobaciones_pendientes', icon: 'aprobaciones', text: 'Aprobaciones Pendientes', adminOnly: true, adminPosOnly: true },
       { name: 'proveedores', icon: 'proveedores', text: 'Proveedores' },
       { name: 'promociones', icon: 'tag', text: 'Promociones' },
       { name: 'etiquetas', icon: 'tag', text: 'Etiquetas' },
@@ -316,7 +320,6 @@
       { name: 'gastos', icon: 'gastos', text: 'Gastos Generales' },
       { name: 'usuarios', icon: 'usuarios', text: 'Usuarios' },
       { name: 'flujo', icon: 'flujo', text: 'Flujo de Fondos', adminPosOnly: true },
-      { name: 'aprobaciones_pendientes', icon: 'aprobaciones', text: 'Aprobaciones Pendientes', adminOnly: true, adminPosOnly: true },
       { name: 'configuracion', icon: 'configuracion', text: 'Configuración', adminOnly: true, adminPosOnly: true },
     ];
 
@@ -359,6 +362,11 @@
     const hasPendingResumen = !!(_sucPendiente && window.SGA_DB.query(
       `SELECT 1 FROM ajustes_precio_pendientes WHERE sucursal_id = ? LIMIT 1`, [_sucPendiente]
     )[0]);
+    // Cuántos ajustes de stock (Compras-Revisión o devoluciones del POS) siguen sin aprobar,
+    // para que el ítem del menú avise (antes quedaba invisible hasta entrar — 28/9/2026).
+    const nPendientesAprobacion = window.ADMIN_MODE ? ((window.SGA_DB.query(
+      `SELECT COUNT(*) AS n FROM stock_ajustes WHERE estado = 'pendiente_aprobacion'`
+    )[0] || {}).n || 0) : 0;
     const allowedModules = getAllowedModules();
     const currentHash = window.location.hash.slice(1) || '';
     const [currentRoute, currentMedio] = currentHash.split('/');
@@ -397,9 +405,12 @@
             </li>`;
         }
         const { name, icon, text } = item;
-        const badge = (name === 'operaciones_stock' && hasPendingResumen)
-          ? ' <span style="display:inline-block;background:#ff8f00;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;vertical-align:middle;margin-left:4px;white-space:nowrap;">● Ajuste pendiente</span>'
-          : '';
+        let badge = '';
+        if (name === 'operaciones_stock' && hasPendingResumen) {
+          badge = ' <span style="display:inline-block;background:#ff8f00;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;vertical-align:middle;margin-left:4px;white-space:nowrap;">● Ajuste pendiente</span>';
+        } else if (name === 'aprobaciones_pendientes' && nPendientesAprobacion > 0) {
+          badge = ` <span style="display:inline-block;background:#ff8f00;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;vertical-align:middle;margin-left:4px;white-space:nowrap;">● ${nPendientesAprobacion} pendiente${nPendientesAprobacion !== 1 ? 's' : ''}</span>`;
+        }
         return `<li><a href="#${name}" data-module="${name}" class="nav-link">${ic(icon)}${text}${badge}</a></li>`;
       }).join('');
 
