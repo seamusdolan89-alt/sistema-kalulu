@@ -1020,8 +1020,30 @@
       database.run(`CREATE INDEX IF NOT EXISTS idx_stock_mov_ref
                     ON stock_movimientos(ref_tipo, ref_id)`);
       // Bases que ya tenian la tabla de la etapa 1 (sin estas columnas): agregarlas.
-      try { database.run(`ALTER TABLE stock_movimientos ADD COLUMN sync_status TEXT DEFAULT 'pending'`); } catch(e) {}
-      try { database.run(`ALTER TABLE stock_movimientos ADD COLUMN updated_at TEXT`); } catch(e) {}
+      // OJO, bug real encontrado antes de promover esto (confirmado con sync_sim.py y
+      // contra dev-kalulu): en SQLite, `ALTER TABLE ... ADD COLUMN col DEFAULT 'pending'`
+      // le pone ese default a TODAS las filas que ya existian, no solo a las nuevas. En
+      // una base de etapa 1, ese historial viejo incluye movimientos tipo 'sync' que
+      // aplicarStockSync (ya eliminada) creaba SOLO para que la cache local siguiera
+      // cuadrando con la suma de movimientos cuando llegaba el valor absoluto de `stock`
+      // por el canal viejo — no son un hecho de negocio nuevo, son el reflejo local de
+      // algo que YA viajo. Si ese historial queda 'pending', el push generico de esta
+      // tabla lo sube por primera vez y la otra compu lo aplica (INSERT OR IGNORE +
+      // recalculo de cache) como si fuera un movimiento REAL nuevo — descontando dos
+      // veces algo que ya estaba reflejado en su numero actual (un stock real de 7
+      // termino en 4 en las dos compus). Por eso, en el mismo try y ANTES de que
+      // cualquier otra cosa de esta carga de la app pueda crear un movimiento nuevo,
+      // marcamos 'synced' todo lo que el ALTER recien dejo en 'pending': en este punto
+      // exacto lo unico que puede estar pending es ese historial viejo backfilleado por
+      // el DEFAULT de arriba (un movimiento de esta sesion todavia no existe). Una base
+      // NUEVA ya trae sync_status en el CREATE TABLE de arriba: el ALTER tira "column
+      // already exists" de una y ni este UPDATE ni el ALTER de updated_at llegan a
+      // correr — correcto, una base nueva no tiene historial viejo que corregir.
+      try {
+        database.run(`ALTER TABLE stock_movimientos ADD COLUMN sync_status TEXT DEFAULT 'pending'`);
+        database.run(`UPDATE stock_movimientos SET sync_status = 'synced' WHERE sync_status = 'pending'`);
+        database.run(`ALTER TABLE stock_movimientos ADD COLUMN updated_at TEXT`);
+      } catch(e) { /* las columnas ya existen: esta migracion ya corrio antes */ }
       backfillSaldoInicial();
     } catch(e) { console.warn('stock_movimientos:', e.message); }
 
