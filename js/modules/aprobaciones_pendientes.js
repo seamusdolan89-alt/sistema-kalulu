@@ -115,9 +115,26 @@ const AprobacionesPendientes = (() => {
     );
   }
 
+  // Alguien más ya resolvió este ajuste (otra pestaña de Admin-POS con la lista sin refrescar,
+  // o llegó por sync desde la otra compu) — avisa y refresca en vez de actuar sobre algo que ya
+  // no está pendiente. Sin este chequeo, aprobar()/rechazar() descontaban el stock de nuevo
+  // (bug real: con dos pestañas abiertas, aprobar en una no le avisaba nada a la otra).
+  function yaResuelto(id, verbo) {
+    const fresco = db().query('SELECT estado FROM stock_ajustes WHERE id = ?', [id])[0];
+    if (fresco && fresco.estado === 'pendiente_aprobacion') return false;
+    alert(
+      fresco
+        ? `Este ajuste ya se ${fresco.estado === 'aprobado' ? 'aprobó' : 'rechazó'} (probablemente desde otra pestaña o la otra compu). No se ${verbo} de nuevo — actualizando la lista.`
+        : 'Este ajuste ya no existe (puede haber sido eliminado junto con su compra). Actualizando la lista.'
+    );
+    renderLista();
+    return true;
+  }
+
   async function aprobar(id) {
     const a = db().query('SELECT * FROM stock_ajustes WHERE id = ?', [id])[0];
     if (!a) return;
+    if (yaResuelto(id, 'vuelve a aprobar')) return;
 
     const noEntregado = esNoEntregado(a);
     let aviso = `¿Aprobar este ajuste? Se van a descontar ${a.cantidad} unidad(es) del stock.`;
@@ -133,6 +150,9 @@ const AprobacionesPendientes = (() => {
       }
     }
     if (!confirm(aviso)) return;
+    // El dialogo de confirmacion queda abierto un rato: si en el medio otra pestaña/compu ya
+    // resolvio este mismo ajuste, se vuelve a chequear antes de tocar stock.
+    if (yaResuelto(id, 'vuelve a aprobar')) return;
 
     const admin = window.SGA_Auth.getCurrentUser();
     const ts = nowISO();
@@ -183,7 +203,9 @@ const AprobacionesPendientes = (() => {
   }
 
   function rechazar(id) {
+    if (yaResuelto(id, 'vuelve a rechazar')) return;
     if (!confirm('¿Rechazar este ajuste? El stock no se modifica.')) return;
+    if (yaResuelto(id, 'vuelve a rechazar')) return;
     const admin = window.SGA_Auth.getCurrentUser();
     const ts = nowISO();
     db().run(
@@ -211,7 +233,13 @@ const AprobacionesPendientes = (() => {
     renderLista();
   }
 
-  return { init };
+  return {
+    init,
+    // Expuestas para poder simular en un test la segunda pestaña con la lista sin refrescar
+    // (llamar aprobar/rechazar de nuevo sobre un id que otra pestaña ya resolvió), sin depender
+    // de un click real sobre un botón — son las mismas funciones que usan los botones de la UI.
+    aprobar, rechazar,
+  };
 })();
 
 window.SGA_AprobacionesPendientes = AprobacionesPendientes;
