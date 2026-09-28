@@ -64,6 +64,8 @@ const SGA_NotaCreditoWizard = (() => {
   .ncw-lineas .ncw-concepto { width: 100%; min-width: 160px; }
   .ncw-sin-lineas { padding: 10px 6px; color: var(--color-text-secondary); font-size: 13px; }
   .ncw-del { background: none; border: none; color: #c62828; cursor: pointer; font-size: 15px; padding: 2px 6px; }
+  .ncw-lineas tr.ncw-fila-off { opacity: .5; }
+  .ncw-lineas td.ncw-chk { text-align: center; width: 28px; }
   .ncw-buscador { position: relative; }
   .ncw-dd {
     position: absolute; left: 0; right: 0; top: 100%; z-index: 30; display: none; max-height: 220px; overflow-y: auto;
@@ -139,7 +141,11 @@ const SGA_NotaCreditoWizard = (() => {
     }
 
     const st = {
-      prod: [],          // { productoId, nombre, cantidad, costo, iva, bajaStock }
+      // modoProd 'libre': buscador de cualquier producto del catalogo (default, sin referencia).
+      // modoProd 'compra': lista fija = compra_items (tipo='producto') de la factura de referencia,
+      // con checkbox + cantidad tope (no se puede devolver mas de lo comprado).
+      modoProd: 'libre',
+      prod: [],          // { productoId, nombre, cantidad, costo, iva, bajaStock, max?, checked? }
       conc: [],          // { concepto, monto, iva }
       tocado: new Set(), // campos que el usuario edito a mano y no hay que pisar al recalcular
       aplicarTocado: false, // el usuario eligio a mano "como aplicar": deja de seguir el valor por defecto
@@ -189,7 +195,7 @@ const SGA_NotaCreditoWizard = (() => {
 
           <div id="ncw-cuerpo">
             <div class="ccprov-section-title">Productos devueltos (bajan el stock)</div>
-            <div class="ncw-buscador">
+            <div class="ncw-buscador" id="ncw-buscador-wrap">
               <input type="text" class="ccprov-input" id="ncw-buscar" placeholder="Buscar producto por nombre o código…" autocomplete="off">
               <div class="ncw-dd" id="ncw-dd"></div>
             </div>
@@ -271,6 +277,7 @@ const SGA_NotaCreditoWizard = (() => {
       }).join('');
       if (compraOrigenId && compras.some(c => c.id === compraOrigenId)) sel.value = compraOrigenId;
       actualizarAplicar();
+      actualizarModoProductos();
     };
 
     // "Aplicar a la factura de referencia" solo tiene sentido si hay una elegida
@@ -287,27 +294,96 @@ const SGA_NotaCreditoWizard = (() => {
       }
     };
 
+    const showError = m => { const el = ge('ncw-error'); el.textContent = m; el.classList.add('visible'); };
+    const fmtCant = n => { const x = Math.round((parseFloat(n) || 0) * 1000) / 1000; return String(x); };
+
+    // Solo las lineas de producto tildadas (en modo 'compra') entran a la NC.
+    // En modo 'libre' entran todas (no hay checkbox: agregarla a la lista ya es la eleccion).
+    const lineasProdActivas = () => st.modoProd === 'compra' ? st.prod.filter(l => l.checked) : st.prod;
+
+    // ── Productos: libre (cualquiera) vs. acotado a la compra de referencia ──
+    //
+    // Con una factura de referencia elegida, SOLO se puede devolver lo que esa
+    // factura tiene cargado (compra_items tipo='producto'), precargado con su
+    // cantidad y costo de ESA compra — no el costo actual del producto, que
+    // puede haber cambiado desde entonces. Sin referencia (o "— Sin referencia
+    // (crédito libre) —"), sigue el buscador libre de siempre.
+    const cargarProductosDeCompra = compraId => {
+      const rows = window.SGA_DB.query(
+        `SELECT ci.producto_id, pr.nombre, ci.cantidad, COALESCE(ci.unidades_por_paquete, 1) AS uds,
+                ci.costo_unitario, COALESCE(ci.descuento_pct, 0) AS descuento_pct, ci.iva
+         FROM compra_items ci LEFT JOIN productos pr ON pr.id = ci.producto_id
+         WHERE ci.compra_id = ? AND COALESCE(ci.tipo, 'producto') = 'producto' AND ci.producto_id IS NOT NULL
+         ORDER BY ci.rowid ASC`, [compraId]);
+      // Muta el array en el lugar (no lo reasigna): "onEditLinea" cerró sobre la
+      // referencia original de st.prod al engancharse — reasignar st.prod acá
+      // dejaria esos listeners escribiendo en un array viejo y huerfano.
+      st.prod.length = 0;
+      st.prod.push(...rows.map(r => {
+        const max = (parseFloat(r.cantidad) || 0) * (parseFloat(r.uds) || 1);
+        const desc = Math.min(100, Math.max(0, parseFloat(r.descuento_pct) || 0));
+        const costoNeto = (parseFloat(r.costo_unitario) || 0) * (1 - desc / 100);
+        return {
+          productoId: r.producto_id, nombre: r.nombre || '(producto eliminado)',
+          cantidad: max, max, costo: Math.round(costoNeto * 100) / 100,
+          iva: r.iva === '10.5' || r.iva === '21' ? r.iva : '',
+          bajaStock: true, checked: false,
+        };
+      }));
+    };
+
+    const actualizarModoProductos = () => {
+      const refId = ge('ncw-ref').value;
+      st.modoProd = refId ? 'compra' : 'libre';
+      if (refId) cargarProductosDeCompra(refId);
+      else st.prod.length = 0;
+      pintarLineas();
+    };
+
     // ── Lineas ──────────────────────────────────────────────────────────────
     const esA = () => ge('ncw-letra').value === 'A';
 
     const pintarLineas = () => {
+      const modoCompra = st.modoProd === 'compra';
+      ge('ncw-buscador-wrap').style.display = modoCompra ? 'none' : '';
       const pw = ge('ncw-prod-wrap');
-      pw.innerHTML = st.prod.length ? `
-        <table class="ncw-lineas"><thead><tr>
-          <th>Producto</th><th class="r">Cant.</th><th class="r">Costo neto u.</th>
-          <th class="ncw-col-iva">IVA</th><th class="r">Subtotal</th><th title="Baja el stock">Baja stock</th><th></th>
-        </tr></thead><tbody>
-        ${st.prod.map((l, i) => `<tr data-i="${i}">
-          <td>${esc(l.nombre)}</td>
-          <td class="r"><input type="number" data-f="cantidad" min="0.001" step="any" value="${l.cantidad}" aria-label="Cantidad"></td>
-          <td class="r"><input type="number" data-f="costo" min="0" step="any" value="${l.costo}" aria-label="Costo neto unitario"></td>
-          <td class="ncw-col-iva"><select data-f="iva" aria-label="IVA">${IVA_OPTS}</select></td>
-          <td class="r ncw-sub">${fmt$(l.cantidad * l.costo)}</td>
-          <td style="text-align:center"><input type="checkbox" data-f="baja" ${l.bajaStock ? 'checked' : ''} aria-label="Baja el stock"></td>
-          <td><button type="button" class="ncw-del" data-del="prod" aria-label="Quitar" title="Quitar">✕</button></td>
-        </tr>`).join('')}
-        </tbody></table>`
-        : `<div class="ncw-sin-lineas">Sin productos: buscá arriba lo que se le devuelve al proveedor.</div>`;
+      if (modoCompra) {
+        pw.innerHTML = st.prod.length ? `
+          <table class="ncw-lineas"><thead><tr>
+            <th></th><th>Producto</th><th class="r">Comprado</th><th class="r">Cant. a devolver</th>
+            <th class="r">Costo neto u.</th><th class="ncw-col-iva">IVA</th><th class="r">Subtotal</th>
+            <th title="Baja el stock">Baja stock</th>
+          </tr></thead><tbody>
+          ${st.prod.map((l, i) => `<tr data-i="${i}" class="${l.checked ? '' : 'ncw-fila-off'}">
+            <td class="ncw-chk"><input type="checkbox" data-f="checked" ${l.checked ? 'checked' : ''} aria-label="Incluir en la nota de crédito"></td>
+            <td>${esc(l.nombre)}</td>
+            <td class="r">${fmtCant(l.max)}</td>
+            <td class="r"><input type="number" data-f="cantidad" min="0.001" max="${l.max}" step="any" value="${l.cantidad}" aria-label="Cantidad a devolver"></td>
+            <td class="r"><input type="number" data-f="costo" min="0" step="any" value="${l.costo}" aria-label="Costo neto unitario"></td>
+            <td class="ncw-col-iva"><select data-f="iva" aria-label="IVA">${IVA_OPTS}</select></td>
+            <td class="r ncw-sub">${fmt$(l.cantidad * l.costo)}</td>
+            <td style="text-align:center"><input type="checkbox" data-f="baja" ${l.bajaStock ? 'checked' : ''} aria-label="Baja el stock"></td>
+          </tr>`).join('')}
+          </tbody></table>`
+          : `<div class="ncw-sin-lineas">Esta factura no tiene productos para devolver.</div>`;
+      } else {
+        pw.innerHTML = st.prod.length ? `
+          <table class="ncw-lineas"><thead><tr>
+            <th>Producto</th><th class="r">Cant.</th><th class="r">Costo neto u.</th>
+            <th class="ncw-col-iva">IVA</th><th class="r">Subtotal</th><th title="Baja el stock">Baja stock</th><th></th>
+          </tr></thead><tbody>
+          ${st.prod.map((l, i) => `<tr data-i="${i}">
+            <td>${esc(l.nombre)}</td>
+            <td class="r"><input type="number" data-f="cantidad" min="0.001" step="any" value="${l.cantidad}" aria-label="Cantidad"></td>
+            <td class="r"><input type="number" data-f="costo" min="0" step="any" value="${l.costo}" aria-label="Costo neto unitario"></td>
+            <td class="ncw-col-iva"><select data-f="iva" aria-label="IVA">${IVA_OPTS}</select></td>
+            <td class="r ncw-sub">${fmt$(l.cantidad * l.costo)}</td>
+            <td style="text-align:center"><input type="checkbox" data-f="baja" ${l.bajaStock ? 'checked' : ''} aria-label="Baja el stock"></td>
+            <td><button type="button" class="ncw-del" data-del="prod" aria-label="Quitar" title="Quitar">✕</button></td>
+          </tr>`).join('')}
+          </tbody></table>`
+          : `<div class="ncw-sin-lineas">Sin productos: buscá arriba lo que se le devuelve al proveedor.</div>`;
+      }
       pw.querySelectorAll('tr[data-i]').forEach(tr => {
         const sel = tr.querySelector('select[data-f="iva"]');
         if (sel) sel.value = st.prod[+tr.dataset.i].iva || '';
@@ -337,7 +413,7 @@ const SGA_NotaCreditoWizard = (() => {
     const recalcular = () => {
       modal.classList.toggle('ncw-es-a', esA());
       const lineas = [
-        ...st.prod.map(l => ({ sub: l.cantidad * l.costo, iva: l.iva })),
+        ...lineasProdActivas().map(l => ({ sub: l.cantidad * l.costo, iva: l.iva })),
         ...st.conc.map(l => ({ sub: num(l.monto), iva: l.iva })),
       ];
       const neto = lineas.reduce((s, l) => s + l.sub, 0);
@@ -367,6 +443,9 @@ const SGA_NotaCreditoWizard = (() => {
       const c = window.SGA_DB.query(`SELECT condicion_compra FROM compras WHERE id = ?`, [ge('ncw-ref').value])[0];
       const letra = { 'Factura A': 'A', 'Factura B': 'B', 'Factura C': 'C' }[c?.condicion_compra];
       if (letra && !ge('ncw-letra').value) { ge('ncw-letra').value = letra; recalcular(); }
+      // La referencia puede cambiar despues de abierto el wizard (no solo al abrirlo):
+      // vuelve a acotar (o libera) la lista de productos devolvibles.
+      actualizarModoProductos();
     });
     ge('ncw-letra').addEventListener('change', recalcular);
     modal.querySelectorAll('input[name="ncw-aplicar"]').forEach(r => r.addEventListener('change', () => { st.aplicarTocado = true; }));
@@ -381,10 +460,19 @@ const SGA_NotaCreditoWizard = (() => {
       if (!tr || !campo) return;
       const l = lista[+tr.dataset.i];
       if (!l) return;
-      if (campo === 'cantidad') l.cantidad = num(e.target.value);
+      if (campo === 'cantidad') {
+        let v = num(e.target.value);
+        if (l.max != null && v > l.max + 1e-9) {
+          v = l.max;
+          e.target.value = fmtCant(v);
+          showError(`No podés devolver más de lo comprado de "${l.nombre}" (máximo ${fmtCant(l.max)}).`);
+        }
+        l.cantidad = v;
+      }
       else if (campo === 'costo') l.costo = num(e.target.value);
       else if (campo === 'iva') l.iva = e.target.value;
       else if (campo === 'baja') l.bajaStock = e.target.checked;
+      else if (campo === 'checked') { l.checked = e.target.checked; tr.classList.toggle('ncw-fila-off', !l.checked); }
       else if (campo === 'concepto') l.concepto = e.target.value;
       else if (campo === 'monto') l.monto = num(e.target.value);
       const sub = tr.querySelector('.ncw-sub');
@@ -436,14 +524,16 @@ const SGA_NotaCreditoWizard = (() => {
     });
 
     // ── Guardar ─────────────────────────────────────────────────────────────
-    const showError = m => { const el = ge('ncw-error'); el.textContent = m; el.classList.add('visible'); };
     ge('ncw-guardar').addEventListener('click', () => {
       ge('ncw-error').classList.remove('visible');
       const provId = ge('ncw-proveedor').value;
       if (!provId) return showError('Seleccioná un proveedor.');
       const total = num(ge('ncw-total').value);
       if (total <= 0.01) return showError('La nota de crédito no tiene importe: cargá líneas o escribí el total.');
-      if (st.prod.some(l => l.cantidad <= 0)) return showError('Hay un producto con cantidad 0.');
+      const prodActivos = lineasProdActivas();
+      if (prodActivos.some(l => l.cantidad <= 0)) return showError('Hay un producto con cantidad 0.');
+      const excedido = prodActivos.find(l => l.max != null && l.cantidad > l.max + 1e-9);
+      if (excedido) return showError(`"${excedido.nombre}": no podés devolver más de lo comprado (máximo ${fmtCant(excedido.max)}).`);
       if (st.conc.some(l => !String(l.concepto).trim() && num(l.monto) > 0)) return showError('Un concepto tiene monto pero no descripción.');
 
       const letra = ge('ncw-letra').value;
@@ -458,8 +548,8 @@ const SGA_NotaCreditoWizard = (() => {
         compra_origen_id: ge('ncw-ref').value || null,
         total,
         items: [
-          ...st.prod.map(l => ({ tipo: 'producto', producto_id: l.productoId, cantidad: l.cantidad,
-                                 costo_unitario: l.costo, iva: l.iva || null, mueve_stock: l.bajaStock })),
+          ...prodActivos.map(l => ({ tipo: 'producto', producto_id: l.productoId, cantidad: l.cantidad,
+                                     costo_unitario: l.costo, iva: l.iva || null, mueve_stock: l.bajaStock })),
           ...st.conc.filter(l => String(l.concepto).trim() || num(l.monto) > 0)
                     .map(l => ({ tipo: 'concepto', concepto: l.concepto, subtotal: num(l.monto), iva: l.iva || null })),
         ],
