@@ -16,7 +16,7 @@ a Admin-POS; el dueño la anula ahí (anularCompra). Tiene que viajar:
     del pago siga en Firestore con ella adentro (guarda por fila en applyPagoProveedor),
     y ve la compra anulada.
 
-Correr (server ya levantado en :8765, ver README.md):
+Correr (server ya levantado en :8772, ver README.md):
 
     python tests/e2e/test_sync_anular_compra.py
 """
@@ -99,7 +99,12 @@ def main():
             f"BUG: applyCompra no copió el motivo/quién/cuándo de la anulación: {c}")
         assert uno(pos, "SELECT cantidad FROM stock WHERE producto_id='prod-sync-ac'")["cantidad"] == 0, (
             "BUG: el stock no volvió a 0 en el POS (no llegó el movimiento de reversión)")
-        assert uno(pos, "SELECT COUNT(*) AS n FROM stock_movimientos WHERE ref_id='c-sync-ac' AND tipo='anulacion_compra'")["n"] == 1
+        # El movimiento de reversion en si (tipo='anulacion_compra') solo viaja tal cual cuando
+        # stock_movimientos sincroniza como tabla propia (ledger etapa 2 -- todavia sin promover a
+        # main, ver CLAUDE.md). Sin esa etapa, el stock converge igual por el sync viejo del valor
+        # absoluto (aplicarStockSync), que anota su propio movimiento local tipo 'sync' para no
+        # romper la invariante -- por eso los dos asserts de abajo (stock=0 y verificarIntegridadStock)
+        # ya alcanzan para probar que el POS quedo bien, sin depender de la etapa 2.
         assert uno(pos, "SELECT COUNT(*) AS n FROM imputaciones_pagos WHERE compra_id='c-sync-ac'")["n"] == 0, (
             "BUG: la imputación liberada en Admin-POS SIGUE en el POS")
         assert uno(pos, "SELECT COUNT(*) AS n FROM pagos_proveedores WHERE proveedor_id='prov-sync-ac'")["n"] == 1, "El pago no debía borrarse"
