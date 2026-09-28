@@ -78,7 +78,7 @@ const OperacionesStock = (() => {
       FROM compras c
       LEFT JOIN proveedores p ON p.id = c.proveedor_id
       WHERE ${where.join(' AND ')}
-      ORDER BY c.fecha DESC
+      ORDER BY c.fecha DESC, c.updated_at DESC
     `, params);
   }
 

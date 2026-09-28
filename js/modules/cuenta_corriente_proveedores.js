@@ -1294,9 +1294,19 @@ const CuentaCorrienteProveedores = (() => {
     });
 
     wrap.querySelectorAll('[data-anular-pago]').forEach(btn => {
-      btn.addEventListener('click', () => openModalAnularPago(
-        btn.dataset.anularPago, proveedorId, state.proveedorNombre
-      ));
+      btn.addEventListener('click', () => {
+        // Un pago en efectivo, en Admin-POS, espera un sync real (hasta 8s) antes de mostrar
+        // el modal, para no anular contra un estado de caja desactualizado (ver mas arriba en
+        // openModalAnularPago). Sin este aviso el boton parecia colgado y tentaba a clickear
+        // de nuevo (reportado por el usuario probando en dev, 28/9/2026).
+        if (btn.disabled) return;
+        const original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Verificando…';
+        Promise.resolve(openModalAnularPago(btn.dataset.anularPago, proveedorId, state.proveedorNombre))
+          .catch(e => console.error('openModalAnularPago:', e))
+          .finally(() => { btn.disabled = false; btn.textContent = original; });
+      });
     });
 
     // Sync toggle buttons
