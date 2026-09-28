@@ -386,13 +386,17 @@ const Caja = (() => {
        WHERE e.sesion_caja_id = ? ORDER BY e.fecha DESC`,
       [sesionId]
     );
-    // Solo los ingresos en EFECTIVO: son los que entran al cajon y suman al saldo esperado. Un
-    // cobro de deuda por MercadoPago o transferencia figura en el detalle de ese medio.
+    // Esta lista es para "lo que se carga a mano" (el boton "+ Ingreso": el dueño aporta
+    // cambio, etc.) -- por eso solo trae los ingresos SIN tipo. Los que genera el propio
+    // sistema (cobranza de deuda, vuelto dejado a favor) no son un aporte discrecional: ya
+    // se ven en la tarjeta "Ingresos" de Resumen y en el desglose de "Efectivo recibido" del
+    // cierre; listarlos tambien aca confundia (el dueño los leia como "ingreso extra", cuando
+    // en realidad es plata que entro por una venta o un cobro). Pedido del usuario, 28/9/2026.
     const ingresos = window.SGA_DB.query(
       `SELECT i.id, i.monto, i.descripcion, i.fecha, i.tipo, u.nombre AS usuario
        FROM ingresos_caja i
        LEFT JOIN usuarios u ON u.id = i.usuario_id
-       WHERE i.sesion_caja_id = ? AND (i.medio IS NULL OR i.medio = 'efectivo')
+       WHERE i.sesion_caja_id = ? AND (i.medio IS NULL OR i.medio = 'efectivo') AND i.tipo IS NULL
        ORDER BY i.fecha DESC`,
       [sesionId]
     );
@@ -1046,7 +1050,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
           `).join('')}
         </tbody>
       </table>
-    ` : '<p class="caja-empty">Sin ingresos registrados.</p>';
+    ` : '<p class="caja-empty">Sin aportes manuales registrados.</p>';
 
     el.innerHTML = `
       <div class="caja-ei-header">
@@ -1058,7 +1062,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       </div>
       ${eHtml}
       <div class="caja-ei-header" style="margin-top:24px">
-        <h3>Ingresos en efectivo</h3>
+        <h3>Aportes manuales a la caja</h3>
         ${!historico && P.registrarIngreso() ? `<button id="btn-nuevo-ingreso" class="btn btn-sm btn-success">+ Ingreso</button>` : ''}
       </div>
       ${iHtml}
@@ -1830,7 +1834,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
           <small style="color:#999;display:block;margin-top:6px">Si encontrás un error, cerrá este panel y corregilo en el módulo Caja.</small>
         </div>
         <a href="#" id="toggle-cierre-ingresos" class="cierre-ei-link">
-          📋 Ver ingresos en efectivo del turno
+          📋 Ver aportes manuales del turno
           (${ingresos.length} movimiento${ingresos.length !== 1 ? 's' : ''} — ${fmtPeso(totalIngresos)})
         </a>
         <div id="cierre-ingresos-panel" class="cierre-ei-panel" style="display:none">
@@ -1839,7 +1843,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
                 `<tr><td>${fmtFecha(i.fecha)}</td><td>${esc(ingresoTipoLabel(i.tipo))}</td><td>${esc(i.descripcion || '')}</td>
                  <td style="text-align:right;color:var(--color-success)">${fmtPeso(i.monto)}</td></tr>`
               ).join('')}</table>`
-            : '<p style="color:#999;padding:8px 0;font-size:13px">Sin ingresos en efectivo</p>'}
+            : '<p style="color:#999;padding:8px 0;font-size:13px">Sin aportes manuales</p>'}
           <small style="color:#999;display:block;margin-top:6px">Si encontrás un error, cerrá este panel y corregilo en el módulo Caja.</small>
         </div>
       </div>

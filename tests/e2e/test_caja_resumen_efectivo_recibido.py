@@ -161,16 +161,22 @@ def main():
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(500)
 
-        print("--- Pestaña 'Egresos e Ingresos': ingresos en efectivo con su tipo; el cobro por MP no figura ---")
+        print("--- Pestaña 'Egresos e Ingresos': 'Aportes manuales' solo trae el ingreso a mano, no los automáticos ---")
         page.get_by_text("Egresos e Ingresos", exact=True).click()
         page.wait_for_timeout(300)
         contenido = page.locator("#caja-tab-content").inner_text()
         print(contenido[:600].replace("\n", " | "))
-        for tipo in ("Cobranza de deuda", "Vuelto dejado a favor", "Ingreso extra"):
-            assert tipo in contenido, f"Falta el tipo de ingreso {tipo!r} en la lista: {contenido[:500]!r}"
-        assert "105,00" in contenido and "40,00" in contenido and "25,00" in contenido, "Faltan importes de los ingresos"
+        assert "Aportes manuales a la caja" in contenido, f"Falta el nuevo título de la sección: {contenido[:500]!r}"
+        assert "Ingreso extra" in contenido and "25,00" in contenido, f"Falta el aporte manual: {contenido[:500]!r}"
         ingresos_html = page.locator("#caja-tab-content table").nth(1).inner_text()
-        assert "15,00" not in ingresos_html, "El cobro por MercadoPago NO debe figurar entre los ingresos en efectivo"
+        assert "15,00" not in ingresos_html, "El cobro por MercadoPago NO debe figurar entre los aportes manuales"
+        # La cobranza de deuda ($40) y el vuelto dejado a favor ($105) son plata que entró por una
+        # venta/cobro, no un aporte discrecional: ya se ven en la tarjeta Ingresos de Resumen y en
+        # el cierre — pedido del usuario (28/9/2026), esta lista deja de mostrarlos.
+        assert "Cobranza de deuda" not in ingresos_html and "Vuelto dejado a favor" not in ingresos_html, (
+            f"Los ingresos automáticos (deuda/vuelto a favor) ya no deben listarse acá: {ingresos_html!r}")
+        assert "40,00" not in ingresos_html and "105,00" not in ingresos_html, (
+            f"Los importes de deuda/vuelto a favor no deben aparecer en 'Aportes manuales': {ingresos_html!r}")
         assert "Bolsas" in contenido, "Falta el egreso"
 
         print("--- Pestaña Resumen: tarjeta Ingresos con el desglose ---")

@@ -112,10 +112,12 @@ def probar_admin_pos_con_detalle(context):
           (id, sesion_caja_id, usuario_id, monto, descripcion, tipo, fecha, sync_status, updated_at)
           VALUES (?,?,?,?,?,?,?, 'synced', ?)`,
           ['egr-test-detalle', sesId, uid, 150, 'Compra de bolsas', 'otro', now, now]);
+        // tipo NULL = aporte manual (el que crea el boton "+ Ingreso" via registrarIngreso(),
+        // que nunca escribe esta columna) -- 'otro' no es un valor real que use el sistema acá.
         window.SGA_DB.run(`INSERT INTO ingresos_caja
-          (id, sesion_caja_id, usuario_id, monto, descripcion, tipo, fecha, sync_status, updated_at)
-          VALUES (?,?,?,?,?,?,?, 'synced', ?)`,
-          ['ing-test-detalle', sesId, uid, 200, 'Aporte extra', 'otro', now, now]);
+          (id, sesion_caja_id, usuario_id, monto, descripcion, fecha, sync_status, updated_at)
+          VALUES (?,?,?,?,?,?, 'synced', ?)`,
+          ['ing-test-detalle', sesId, uid, 200, 'Aporte extra', now, now]);
       }
     """)
 
