@@ -3646,6 +3646,17 @@ export const POS = (() => {
         return;
       }
 
+      // Mismo motivo que F2/F10 arriba: con el ticket en pantalla la venta YA
+      // esta registrada. Escape entraba por la rama generica de "cerrar el
+      // modal de encima" (más abajo) sin finalizar, dejando el carrito intacto
+      // y "Confirmar venta" listo para volver a clickearse — la via mas comun
+      // de venta duplicada, ahora tambien por teclado.
+      if (e.key === 'Escape' && _ticketVisible()) {
+        e.preventDefault();
+        ge('btn-ticket-confirmar')?.click();
+        return;
+      }
+
       // F2 dentro del buscador de clientes: confirma la seleccion. Es, junto al
       // ticket, el unico atajo que corresponde con un modal abierto.
       if (e.key === 'F2' && !ge('modal-buscar-cliente')?.classList.contains('hidden')) {
