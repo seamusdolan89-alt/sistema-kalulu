@@ -292,6 +292,23 @@ const ComprasV2 = (() => {
     return state.items.reduce((s, it) => s + itemSubtotal(it), 0);
   }
 
+  // Carrito, pero neto del Impuesto Interno declarado en la cabecera — SOLO
+  // para comparar contra "Subtotal Neto" (Factura A). El costo de cada línea
+  // se carga tal cual lo imprime el proveedor (con el interno adentro: es lo
+  // que de verdad se paga por unidad, y así tiene que quedar en costo/margen
+  // del producto), pero la propia factura excluye ese interno del "Neto" —
+  // sin este ajuste, cualquier compra con Impuesto Interno marca "≠ carrito"
+  // para siempre, aunque esté todo bien cargado, y la única forma de que
+  // cierre era simular un descuento que en realidad no existe (pedido real
+  // del usuario, 29/9/2026, factura de Oslé con Impuesto Interno en jugos).
+  // El Impuesto Interno en sí no da crédito fiscal (a diferencia del IVA):
+  // no hace falta discriminarlo por producto, alcanza con el total de la
+  // cabecera.
+  function calcNetoParaControl() {
+    const neto = calcTotal();
+    return isFacturaA() ? neto - (parseFloat(state.impInterno) || 0) : neto;
+  }
+
   // Monto real de la factura, CON impuestos incluidos. En Factura A el costo
   // de cada línea se carga neto de IVA (el IVA se agrega aparte en la
   // cabecera) — calcTotal() solo suma ese subtotal de productos, nunca lo que
@@ -890,7 +907,7 @@ const ComprasV2 = (() => {
     // Carrito vs factura, sin el saldo del proveedor en el medio: son dos cosas
     // independientes. Antes esto usaba calcNeto(), que resta el adelanto, y con
     // un adelanto que cubria la compra el control directamente desaparecia.
-    const neto    = calcTotal();
+    const neto    = calcNetoParaControl();
     const control = isFacturaA() ? state.subtotalNeto : state.totalFactura;
     const mismatch = control > 0.001 && Math.abs(control - neto) > TOLERANCIA_CONTROL && neto > 0.001;
     btn.classList.toggle('cv2-btn-confirmar-alert', mismatch && !btn.disabled);
@@ -909,7 +926,7 @@ const ComprasV2 = (() => {
     const cont = ge('cv2-col-control');
     if (!cont) return;
 
-    const neto    = calcTotal();
+    const neto    = calcNetoParaControl();
     const control = isFacturaA() ? state.subtotalNeto : state.totalFactura;
 
     if (!(control > 0.001 && neto > 0.001)) { cont.style.display = 'none'; return; }
@@ -2452,7 +2469,7 @@ const ComprasV2 = (() => {
     const revConfirmBtn = ge('cv2-rev-btn-confirmar');
     if (revConfirmBtn) revConfirmBtn.textContent = state.editandoCompraId ? '💾 Guardar Cambios · F10' : '✓ Confirmar Ingreso · F10';
 
-    const neto        = calcTotal();          // carrito pre-impuestos, para el chequeo contra la cabecera
+    const neto        = calcNetoParaControl(); // carrito pre-impuestos (neto del interno en Factura A), para el chequeo contra la cabecera
     // Lo que VALE la compra, no lo que queda a pagar. Antes esto mostraba
     // calcMontoAdeudado(), que descuenta el credito del proveedor aplicado: con
     // un credito que cubria la compra, la pantalla de confirmacion decia
@@ -2933,7 +2950,7 @@ const ComprasV2 = (() => {
     // AHORA (con IVA incluido en Factura A, y ya descontado el adelanto
     // aplicado) — se usa para la caja (efectivo) y la pantalla de éxito.
     const neto          = calcMontoAdeudado();
-    const netoSubtotal  = calcTotal(); // carrito pre-impuestos, para el chequeo "coincide con la factura"
+    const netoSubtotal  = calcNetoParaControl(); // carrito pre-impuestos (neto del interno en Factura A), para el chequeo "coincide con la factura"
     // compras.total tiene que ser el importe COMPLETO de la factura (sin
     // descontar el adelanto): el adelanto aplicado se registra aparte como
     // una imputación de pago (más abajo), y Cuentas Corrientes calcula solo
