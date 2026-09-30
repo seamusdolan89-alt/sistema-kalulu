@@ -62,7 +62,7 @@ const EditorProducto = (() => {
     categoria_id: null, categoria_nombre: null,
     proveedor_principal_id: null, proveedor_nombre: null, proveedor_alternativo_id: null,
     unidad_medida: 'unidad',
-    costo: 0, costo_paquete: 0, precio_venta: 0, iva: '',
+    costo: 0, costo_paquete: 0, precio_venta: 0, iva: '', markup_fijo: null,
     stock_minimo: 0, stock_alerta: 0,
     cant_pedido: 0, pedido_unidad: 'unidad', pedido_unidades_por_paquete: null,
     activo: 1, es_madre: 0, producto_madre_id: null, precio_independiente: 0,
@@ -367,6 +367,15 @@ const EditorProducto = (() => {
           <option value="21"   ${p.iva === '21'        ? 'selected' : ''}>21%</option>
         </select>
         <small class="ed-text-muted">Se precarga solo al agregar este producto a una compra Factura A; cada compra confirmada actualiza este valor.</small>
+      </div>
+      <div class="form-group">
+        <label for="ed-markup-fijo">Markup predeterminado</label>
+        <div class="ed-input-suffix-wrap">
+          <input type="number" id="ed-markup-fijo" class="input-full" step="0.01" min="0"
+                 placeholder="Sin markup fijo" value="${p.markup_fijo ?? ''}">
+          <span class="ed-input-affix">%</span>
+        </div>
+        <small class="ed-text-muted">Con esto completo, confirmar una compra que actualiza el costo de este producto recalcula el precio de venta solo (costo × (1 + este %)), sin pasar por la revisión manual de precios. Vacío = sigue el comportamiento de siempre (precio sugerido a revisar).</small>
       </div>
       <div class="form-group">
         <label for="ed-precio-venta">Precio de venta</label>
@@ -2412,7 +2421,7 @@ const EditorProducto = (() => {
     }
 
     // Dirty tracking
-    ['ed-nombre', 'ed-descripcion', 'ed-precio-venta', 'ed-stock-alerta', 'ed-cant-pedido', 'ed-pedido-unidades-paquete'].forEach(id => {
+    ['ed-nombre', 'ed-descripcion', 'ed-precio-venta', 'ed-markup-fijo', 'ed-stock-alerta', 'ed-cant-pedido', 'ed-pedido-unidades-paquete'].forEach(id => {
       const el = ge(id);
       if (el) el.addEventListener('input', markDirty);
     });
@@ -2714,7 +2723,10 @@ const EditorProducto = (() => {
     const newCosto = parseFloat((ge('ed-costo') || {}).value) || 0;
     const costoChanged = newCosto !== (state.producto.costo || 0);
 
-    // fieldValues: 28 items, nombre → iva (shared between INSERT and UPDATE)
+    const markupFijoRaw = (ge('ed-markup-fijo') || {}).value;
+    const markupFijo = markupFijoRaw !== '' && markupFijoRaw != null ? (parseFloat(markupFijoRaw) || null) : null;
+
+    // fieldValues: 29 items, nombre → markup_fijo (shared between INSERT and UPDATE)
     const fieldValues = [
       nombre,
       (ge('ed-descripcion') || {}).value || '',
@@ -2744,6 +2756,7 @@ const EditorProducto = (() => {
       (ge('ed-oferta-hasta') || {}).value || null,
       imagen,
       (ge('ed-iva') || {}).value || null,
+      markupFijo,
     ];
 
     if (state.isNew) {
@@ -2760,9 +2773,9 @@ const EditorProducto = (() => {
           unidad_compra, unidades_por_paquete_compra, unidad_venta,
           precio_lista_por, precio_lista_divisor,
           es_oferta, oferta_desde, oferta_hasta,
-          imagen, iva,
+          imagen, iva, markup_fijo,
           fecha_modificacion, sync_status, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
       `, [newId, ...fieldValues, now, now]);
 
       state.barcodes.forEach(bc => {
@@ -2790,7 +2803,7 @@ const EditorProducto = (() => {
         unidad_compra = ?, unidades_por_paquete_compra = ?, unidad_venta = ?,
         precio_lista_por = ?, precio_lista_divisor = ?,
         es_oferta = ?, oferta_desde = ?, oferta_hasta = ?,
-        imagen = ?, iva = ?,
+        imagen = ?, iva = ?, markup_fijo = ?,
         ultima_modificacion_precio = CASE WHEN ? THEN ? ELSE ultima_modificacion_precio END,
         fecha_modificacion = ?, sync_status = 'pending', updated_at = ?
       WHERE id = ?

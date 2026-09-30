@@ -265,6 +265,33 @@ const ComprasV2 = (() => {
     return costoUsado(item) * (1 - disc / 100);
   }
 
+  // Markup fijo (pedido del usuario, 30/9/2026): un producto con
+  // productos.markup_fijo seteado recalcula su precio_venta SOLO, cada vez
+  // que una compra confirmada le actualiza el costo — sin pasar por el paso
+  // de revisar/aceptar precio sugerido de showSuccessScreen(). Se llama
+  // siempre desde el mismo lugar (y en la misma transacción) que ya
+  // actualiza productos.costo, tanto en commitCompra() como en
+  // commitCompraEdicion(), para no duplicar la condición de "cuándo
+  // corresponde tocar el producto" en dos lugares.
+  // item: referencia viva dentro de state.items -- las propiedades que se
+  // le agregan acá sobreviven al spread {...it} de showSuccessScreen() y
+  // llegan hasta la fila de esa pantalla sin tener que volver a consultar
+  // la DB (evita el problema de orden: para cuando showSuccessScreen lee
+  // productos.precio_venta, este UPDATE ya corrió y lo pisó).
+  function aplicarMarkupFijo(item, costoNuevo, ts) {
+    const row = db().query('SELECT markup_fijo, precio_venta FROM productos WHERE id=?', [item.productoId])[0];
+    if (row?.markup_fijo == null) return;
+    const nuevoPrecio = Math.round(costoNuevo * (1 + row.markup_fijo / 100) * 100) / 100;
+    db().run(
+      `UPDATE productos SET precio_venta=?, ultima_modificacion_precio=?, sync_status='pending', updated_at=? WHERE id=?`,
+      [nuevoPrecio, ts, ts, item.productoId]
+    );
+    item.markupFijo      = row.markup_fijo;
+    item.markupPvAntes   = parseFloat(row.precio_venta) || 0;
+    item.markupPvNuevo   = nuevoPrecio;
+    item.markupAutoShown = true;
+  }
+
   function itemGross(item) {
     if (isAjuste(item)) {
       const m = Math.abs(parseFloat(item.monto) || 0);
@@ -3100,6 +3127,7 @@ const ComprasV2 = (() => {
             `UPDATE productos SET costo=?, costo_paquete=?, sync_status='pending', updated_at=? WHERE id=?`,
             [costoNeto, costoNeto * udsPaq, ts, item.productoId]
           );
+          aplicarMarkupFijo(item, costoNeto, ts);
         }
 
         // IVA: queda registrado en el producto para futuras compras (Factura A)
@@ -3354,6 +3382,7 @@ const ComprasV2 = (() => {
               `UPDATE productos SET costo=?, costo_paquete=?, sync_status='pending', updated_at=? WHERE id=?`,
               [costoNeto, costoNeto * udsPaq, ts, item.productoId]
             );
+            aplicarMarkupFijo(item, costoNeto, ts);
           }
         }
         if (item.iva) {
@@ -3938,16 +3967,22 @@ const ComprasV2 = (() => {
       // como "el costo no cambio" y sugeria un precio calculado sobre el doble.
       const costoNeto = costoNetoUsado(it);
       const costoNvo  = costoNeto > 0 ? costoNeto : costoAnt;
-      const pvActual  = parseFloat(row?.precio_venta) || 0;
+      // Markup fijo: aplicarMarkupFijo() (commitCompra/commitCompraEdicion) ya
+      // reescribió productos.precio_venta ANTES de llegar acá -- si se
+      // consultara row.precio_venta ahora, "pvActual" leería por error el
+      // precio NUEVO en vez del que había antes de esta compra. Los valores
+      // quedaron guardados en el item mismo (sobreviven el spread de arriba).
+      const tieneMarkup = it.markupFijo != null;
+      const pvActual  = tieneMarkup ? it.markupPvAntes : (parseFloat(row?.precio_venta) || 0);
       const cant      = parseFloat(it.cantidad) || 0;
       const udsPaq    = parseFloat(it.udsPaquete) || 1;
       const cantUds   = cant * udsPaq;
       const varPct    = costoAnt > 0.001
         ? ((costoNvo / costoAnt) - 1)
         : (costoNvo > 0 ? 1 : 0);
-      const pvSugerido = pvActual > 0
-        ? pvActual * (1 + varPct)
-        : costoNvo * 1.3;
+      const pvSugerido = tieneMarkup
+        ? it.markupPvNuevo
+        : (pvActual > 0 ? pvActual * (1 + varPct) : costoNvo * 1.3);
       return { ...it, costoAnt, costoNvo, pvActual, cantUds, varPct, pvSugerido };
     });
 
@@ -4013,8 +4048,20 @@ const ComprasV2 = (() => {
       // habia que rehacer todos los precios ya actualizados.
       const yaGuardada = it.pvGuardado != null;
       const yaIgnorada = it.ignorado === true;
+      // Markup fijo: el precio YA se recalculó y guardó solo al confirmar la
+      // compra (aplicarMarkupFijo) -- esta fila arranca resuelta, a modo
+      // informativo, no pide "Actualizar/Ignorar". markupAutoShown se apaga
+      // en doSaveRow() si el dueño corrige el precio a mano, para que esa
+      // corrección se vea como un "✓ Guardado" normal (ya no es el automático).
+      const markupAuto = it.markupFijo != null && it.markupAutoShown === true;
 
-      const actionHtml = yaGuardada
+      const actionHtml = markupAuto
+        ? `<div class="cv2-post-aldia-wrap">
+             <span class="cv2-post-badge-markup" title="Precio recalculado solo por el markup predeterminado de este producto">Markup fijo (${esc(String(it.markupFijo))}%)</span>
+             <button class="cv2-post-editar-aldia-btn" data-idx="${i}" data-prodid="${esc(it.productoId)}"
+                     data-volver="markup" title="Corregir este precio">✎</button>
+           </div>`
+        : yaGuardada
         ? `<div class="cv2-post-aldia-wrap">
              <span class="cv2-post-badge-guardado">✓ Guardado</span>
              <button class="cv2-post-editar-aldia-btn" data-idx="${i}" data-prodid="${esc(it.productoId)}"
@@ -4051,9 +4098,10 @@ const ComprasV2 = (() => {
             <div class="cv2-post-precio-input-wrap">
               <input type="number" class="cv2-post-precio-input" data-idx="${i}"
                      data-sugerido="${pvSugFmt}" data-pvactual="${it.pvActual.toFixed(2)}"
-                     value="${yaGuardada ? Number(it.pvGuardado).toFixed(2)
+                     value="${markupAuto ? pvSugFmt
+                            : yaGuardada ? Number(it.pvGuardado).toFixed(2)
                             : yaIgnorada ? it.pvActual.toFixed(2) : pvSugFmt}"
-                     ${yaGuardada || yaIgnorada ? 'disabled' : ''}
+                     ${markupAuto || yaGuardada || yaIgnorada ? 'disabled' : ''}
                      step="0.01" min="0">
               <button class="cv2-post-recalc-btn" data-idx="${i}" title="Recalcular precio sugerido">&#x21bb;</button>
             </div>
@@ -4316,6 +4364,26 @@ const ComprasV2 = (() => {
         </div>`;
     }
 
+    // Cancelar una edición sobre una fila "Markup fijo" sin llegar a guardar:
+    // vuelve a mostrar el precio que el markup calculó solo (it.pvSugerido),
+    // no lo que se haya tipeado antes de cancelar.
+    function markRowMarkupAuto(idx) {
+      const actWrap = root.querySelector(`.cv2-post-tr[data-idx="${idx}"] .cv2-post-td-accion`);
+      const input   = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
+      const item    = items[idx];
+      if (!item) return;
+      if (input) {
+        input.value = item.pvSugerido.toFixed(2);
+        input.disabled = true; input.style.opacity = '0.6';
+      }
+      if (actWrap) actWrap.innerHTML = `
+        <div class="cv2-post-aldia-wrap">
+          <span class="cv2-post-badge-markup" title="Precio recalculado solo por el markup predeterminado de este producto">Markup fijo (${esc(String(item.markupFijo))}%)</span>
+          <button class="cv2-post-editar-aldia-btn" data-idx="${idx}" data-prodid="${esc(item.productoId)}"
+                  data-volver="markup" title="Corregir este precio">✎</button>
+        </div>`;
+    }
+
     function markRowIgnorado(idx) {
       // Queda anotado en el item para que sobreviva a una pausa.
       if (items[idx]) items[idx].ignorado = true;
@@ -4341,6 +4409,31 @@ const ComprasV2 = (() => {
       const nuevoPrecio = parseFloat(input?.value) || 0;
       if (nuevoPrecio <= 0) { alert('Precio inválido'); return; }
       const item = items[idx];
+
+      // Markup fijo: si lo que se va a guardar difiere de lo que el markup
+      // predeterminado calculó solo, preguntar si esto cambia el markup de
+      // ahora en más o si es una excepción puntual de esta factura (pedido
+      // del usuario, 30/9/2026). Sin pregunta -> se asume "solo esta vez":
+      // el markup guardado no se toca, y la próxima compra que le cambie el
+      // costo a este producto vuelve a aplicar el de siempre.
+      if (item.markupFijo != null && Math.abs(nuevoPrecio - item.pvSugerido) > 0.01) {
+        const actualizarDefault = confirm(
+          `Este precio (${fmt$(nuevoPrecio)}) no coincide con el markup predeterminado de ` +
+          `${item.nombre} (${item.markupFijo}%, que da ${fmt$(item.pvSugerido)}).\n\n` +
+          `Aceptar = actualizar el markup predeterminado a partir de este precio (de ahora en más, las próximas compras van a calcular con el markup nuevo).\n` +
+          `Cancelar = usar este precio SOLO esta vez (la próxima compra que le cambie el costo a este producto vuelve a aplicar el ${item.markupFijo}% de siempre).`
+        );
+        if (actualizarDefault && item.costoNvo > 0) {
+          const nuevoMarkup = Math.round(((nuevoPrecio / item.costoNvo) - 1) * 10000) / 100;
+          db().run(`UPDATE productos SET markup_fijo=?, sync_status='pending', updated_at=? WHERE id=?`,
+                   [nuevoMarkup, nowISO(), prodId]);
+        }
+      }
+      // Ya sea que el markup predeterminado haya cambiado o no, esta fila deja
+      // de mostrarse como "recién auto-aplicada" -- lo que se ve ahora es una
+      // corrección manual, con su propio ✓ Guardado.
+      items[idx].markupAutoShown = false;
+
       db().run(`UPDATE productos SET precio_venta=?, ultima_modificacion_precio=?, sync_status='pending', updated_at=? WHERE id=?`,
                [nuevoPrecio, nowISO(), nowISO(), prodId]);
       items[idx].pvGuardado = nuevoPrecio;
@@ -4432,6 +4525,7 @@ const ComprasV2 = (() => {
         // dejarla siempre como "Al dia": una fila guardada sigue guardada.
         if (volver === 'guardado')  { markRowSaved(idx);     return; }
         if (volver === 'mantenido') { markRowIgnorado(idx);  return; }
+        if (volver === 'markup')    { markRowMarkupAuto(idx); return; }
 
         const actWrap = root.querySelector(`.cv2-post-tr[data-idx="${idx}"] .cv2-post-td-accion`);
         const input   = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);

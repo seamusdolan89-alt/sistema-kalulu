@@ -832,6 +832,11 @@
       "ALTER TABLE promociones ADD COLUMN medios_permitidos TEXT DEFAULT NULL",
       // IVA por producto (se completa/actualiza desde el carrito de compras, Factura A)
       "ALTER TABLE productos ADD COLUMN iva TEXT",
+      // Markup fijo (%): con este seteado, confirmar una compra que actualiza
+      // el costo recalcula precio_venta solo (costo * (1+markup/100)), sin
+      // pasar por el paso de aceptar/ignorar precio sugerido. NULL = sigue el
+      // comportamiento de siempre (sugerencia manual).
+      "ALTER TABLE productos ADD COLUMN markup_fijo REAL",
       // Compra_items: descuento aplicado por línea + alícuota de IVA usada
       "ALTER TABLE compra_items ADD COLUMN descuento_pct REAL DEFAULT 0",
       "ALTER TABLE compra_items ADD COLUMN descuento_monto REAL DEFAULT 0",
