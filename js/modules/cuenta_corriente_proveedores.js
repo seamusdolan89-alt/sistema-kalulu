@@ -1018,6 +1018,32 @@ const SGA_PagosProveedores = (() => {
     };
   }
 
+  // Pedido del usuario (30/9/2026): poder ver el detalle de una compra desde
+  // el ledger de Cuentas Corrientes, sin tener que ir a Historial de Compras.
+  // Misma consulta que getDetalleCompra() de operaciones_stock.js (privada
+  // ahí, no exportada) — se duplica acá en vez de importarla porque esa
+  // función además arma un panel propio ligado al DOM de esa pantalla.
+  function getDetalleCompra(compraId) {
+    const compra = db().query(`
+      SELECT c.*, p.razon_social AS proveedor_nombre, u.nombre AS usuario_nombre,
+             (SELECT COALESCE(SUM(monto_imputado), 0) FROM imputaciones_pagos
+              WHERE compra_id = c.id) AS pagado
+      FROM compras c
+      LEFT JOIN proveedores p ON p.id = c.proveedor_id
+      LEFT JOIN usuarios u ON u.id = c.usuario_id
+      WHERE c.id = ?
+    `, [compraId])[0];
+    if (!compra) return null;
+    compra.items = db().query(`
+      SELECT ci.*, pr.nombre AS producto_nombre
+      FROM compra_items ci
+      LEFT JOIN productos pr ON pr.id = ci.producto_id
+      WHERE ci.compra_id = ?
+      ORDER BY pr.nombre
+    `, [compraId]);
+    return compra;
+  }
+
   return {
     getSaldoProveedor,
     getComprasPendientes,
@@ -1034,6 +1060,7 @@ const SGA_PagosProveedores = (() => {
     getSesionActiva,
     getResumenAnulacionPago,
     anularPago,
+    getDetalleCompra,
   };
 })();
 
@@ -1347,6 +1374,7 @@ const CuentaCorrienteProveedores = (() => {
               <td>
                 ${esc(e.referencia)}
                 ${e.tipo === 'compra' && e.saldo_item > 0.01 ? `<span class="ledger-saldo-parcial"> · Saldo: ${fmt$(e.saldo_item)}</span>` : ''}
+                ${e.tipo === 'compra' ? `<button class="ledger-btn-ver" data-ver-compra="${esc(e.id)}" title="Ver el detalle de esta compra">Ver</button>` : ''}
                 ${e.tipo === 'nc' ? btnCompletar(e.id, e.provisoria) : ''}
                 ${e.tipo === 'pago' || e.tipo === 'nc' ? btnAnular(e.id) : ''}
               </td>
@@ -1398,7 +1426,7 @@ const CuentaCorrienteProveedores = (() => {
             <tr class="ledger-row-compra${c.saldo_item < 0.01 ? ' ledger-row-compra-saldada' : ''}">
               <td>${fmtFecha(c.fecha)}</td>
               <td><span class="ledger-type-badge ${c.tipo === 'gasto' ? 'ledger-type-gasto' : 'ledger-type-compra'}">${c.tipo === 'gasto' ? 'Gasto' : 'Compra'}</span></td>
-              <td>${esc(c.referencia)}</td>
+              <td>${esc(c.referencia)} ${c.tipo === 'compra' ? `<button class="ledger-btn-ver" data-ver-compra="${esc(c.id)}" title="Ver el detalle de esta compra">Ver</button>` : ''}</td>
               <td class="right"><span class="ledger-debe">${fmt$(c.total)}</span></td>
               <td class="right">—</td>
               <td class="right">
@@ -1458,6 +1486,62 @@ const CuentaCorrienteProveedores = (() => {
             </tbody>
           </table>
         </div>` : ''}`;
+  }
+
+  // Ver el detalle de una compra desde el ledger, sin ir a Historial de
+  // Compras (pedido del usuario, 30/9/2026). Solo lectura — a diferencia del
+  // detalle de operaciones_stock.js (que además deja editar precio de venta
+  // y anular), acá alcanza con mostrar qué se compró.
+  function openModalDetalleCompra(compraId) {
+    const overlay = ge('ccprov-overlay');
+    if (!overlay) return;
+    const compra = data().getDetalleCompra(compraId);
+    if (!compra) { alert('No se encontró esa compra.'); return; }
+
+    const fecha = compra.fecha ? compra.fecha.slice(0, 10) : '—';
+    const factRef = compra.factura_pv && compra.numero_factura
+      ? `${esc(compra.factura_pv)}-${esc(compra.numero_factura)}`
+      : esc(compra.numero_factura || '—');
+
+    overlay.innerHTML = `
+      <div class="ccprov-modal" style="max-width:600px">
+        <div class="ccprov-modal-hdr">
+          <span>🧾 Detalle de compra — ${esc(compra.proveedor_nombre || '—')}</span>
+          <button class="ccprov-modal-close" id="btn-detcompra-close" aria-label="Cerrar" title="Cerrar">✕</button>
+        </div>
+        <div class="ccprov-modal-body">
+          <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--color-text-secondary);margin-bottom:10px">
+            <span>${esc(fecha)}</span>
+            ${factRef !== '—' ? `<span>Fact. ${factRef}</span>` : ''}
+            <span>Cargada por: ${esc(compra.usuario_nombre || '—')}</span>
+          </div>
+          <table class="ccprov-table">
+            <thead>
+              <tr><th>Producto</th><th class="right">Cant.</th><th class="right">Costo unit.</th><th class="right">Subtotal</th></tr>
+            </thead>
+            <tbody>
+              ${compra.items.length ? compra.items.map(it => `
+                <tr>
+                  <td>${esc(it.producto_nombre || '(producto eliminado)')}</td>
+                  <td class="right">${it.cantidad}</td>
+                  <td class="right">${fmt$(it.costo_unitario)}</td>
+                  <td class="right">${fmt$(it.subtotal)}</td>
+                </tr>`).join('') : '<tr><td colspan="4" style="text-align:center;color:var(--color-text-secondary)">Sin productos</td></tr>'}
+            </tbody>
+            <tfoot>
+              <tr><td colspan="3" style="color:var(--color-text-secondary)">Total</td><td class="right">${fmt$(compra.total)}</td></tr>
+            </tfoot>
+          </table>
+        </div>
+        <div class="ccprov-modal-ftr">
+          <button class="btn btn-primary" id="btn-detcompra-ok">Cerrar</button>
+        </div>
+      </div>`;
+    overlay.classList.remove('hidden');
+
+    const close = () => { overlay.classList.add('hidden'); overlay.innerHTML = ''; };
+    ge('btn-detcompra-close').addEventListener('click', close);
+    ge('btn-detcompra-ok').addEventListener('click', close);
   }
 
   // Imputar un pago YA registrado contra los comprobantes pendientes. Antes la
@@ -1736,6 +1820,9 @@ const CuentaCorrienteProveedores = (() => {
       const ledger = data().getLedger(proveedorId);
       wrap.innerHTML = buildTablaPlana(ledger, saldo);
     }
+    wrap.querySelectorAll('[data-ver-compra]').forEach(btn => {
+      btn.addEventListener('click', () => openModalDetalleCompra(btn.dataset.verCompra));
+    });
     wrap.querySelectorAll('[data-imputar-pago]').forEach(btn => {
       btn.addEventListener('click', () => openModalImputar(
         btn.dataset.imputarPago,

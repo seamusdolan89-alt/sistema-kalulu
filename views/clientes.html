@@ -509,6 +509,34 @@
 
 </div><!-- /root -->
 
+<!-- MODAL: Detalle de venta -->
+<div class="modal-backdrop" id="modal-venta-detalle">
+  <div class="modal-box" style="max-width:560px">
+    <h3>🧾 Detalle de venta</h3>
+    <div style="display:flex;justify-content:space-between;margin-bottom:10px;font-size:0.9em;color:#555">
+      <span id="vd-fecha"></span>
+      <strong id="vd-total"></strong>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:0.88em">
+      <thead>
+        <tr style="text-align:left;border-bottom:2px solid #eee">
+          <th style="padding:6px 4px">Producto</th>
+          <th style="padding:6px 4px;text-align:right">Cant.</th>
+          <th style="padding:6px 4px;text-align:right">Precio</th>
+          <th style="padding:6px 4px;text-align:right">Subtotal</th>
+        </tr>
+      </thead>
+      <tbody id="vd-items"></tbody>
+    </table>
+    <div style="margin-top:12px;font-size:0.88em;color:#555">
+      <strong>Pagado con:</strong> <span id="vd-pagos"></span>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="btn-vd-close">Cerrar</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: Tope default -->
 <div class="modal-backdrop" id="modal-tope-config">
   <div class="modal-box">
