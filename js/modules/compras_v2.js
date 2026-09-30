@@ -2686,11 +2686,34 @@ const ComprasV2 = (() => {
     window.addEventListener('resize', _revPanelCierre);
   }
 
+  // Pedido del usuario (30/9/2026): antes de buscar un sustituto nuevo, ver
+  // primero si este producto YA pertenece a un grupo — quién es la
+  // referencia y quiénes más le apuntan. Sin esto se podía reasignar a
+  // ciegas sin saber que ya estaba agrupado.
+  function renderInfoSustQuick(productoId) {
+    const info = ge('cv2-sust-info');
+    if (!info) return;
+    const refActual = GruposSustitutos.referenciaRealDe(productoId);
+    const esReferencia = refActual === productoId;
+    const seguidores = refActual ? GruposSustitutos.seguidoresDe(refActual) : [];
+    if (!refActual || (esReferencia && !seguidores.length)) {
+      info.innerHTML = `<p style="margin:0 0 14px;font-size:12px;color:#8090a0">No pertenece a ningún grupo de sustitutos todavía.</p>`;
+      return;
+    }
+    const refNombre = db().query('SELECT nombre FROM productos WHERE id=?', [refActual])[0]?.nombre || '—';
+    info.innerHTML = `
+      <div style="margin:0 0 14px;font-size:12px;color:#e65100;background:#fff3e0;border:1px solid #ffcc80;border-radius:6px;padding:8px 12px">
+        <strong>Ya pertenece a un grupo de sustitutos.</strong> Producto de referencia: <strong>${esc(refNombre)}</strong>${esReferencia ? ' (este mismo producto)' : ''}.
+        ${seguidores.length ? `<div style="margin-top:6px">Le apuntan: ${seguidores.map(s => esc(s.nombre)).join(', ')}</div>` : ''}
+      </div>`;
+  }
+
   function openSustQuickModal(productoId, nombre) {
     const overlay = ge('cv2-sust-overlay');
     overlay.dataset.prodId = productoId;
     overlay.dataset.prodNombre = nombre || '';
     ge('cv2-sust-prod-nombre').textContent = nombre || '';
+    renderInfoSustQuick(productoId);
     ge('cv2-sust-search').value = '';
     ge('cv2-sust-results').innerHTML = '';
     ge('cv2-sust-search-wrap').style.display = '';
@@ -2788,10 +2811,48 @@ const ComprasV2 = (() => {
     });
   }
 
+  // Mismo pedido que renderInfoSustQuick: ver primero si el producto ya es
+  // hija (de quién, y quiénes son sus hermanos) o ya es madre (de quiénes) —
+  // asignarle una madre a algo que ya es madre lo deja con es_madre=0 pero
+  // sin tocar a sus propios hijos, que quedarían huérfanos de padre activo
+  // (encadenados a una madre que ahora también tiene madre); vale la pena
+  // que el usuario lo vea antes de confirmar.
+  function renderInfoMadreQuick(productoId) {
+    const info = ge('cv2-madre-info');
+    if (!info) return;
+    const prod = db().query('SELECT producto_madre_id, es_madre FROM productos WHERE id=?', [productoId])[0];
+    if (!prod) { info.innerHTML = ''; return; }
+    if (prod.producto_madre_id) {
+      const madre = db().query('SELECT nombre FROM productos WHERE id=?', [prod.producto_madre_id])[0];
+      const hermanos = db().query(
+        'SELECT nombre FROM productos WHERE producto_madre_id=? AND id!=? ORDER BY nombre',
+        [prod.producto_madre_id, productoId]
+      );
+      info.innerHTML = `
+        <div style="margin:0 0 14px;font-size:12px;color:#e65100;background:#fff3e0;border:1px solid #ffcc80;border-radius:6px;padding:8px 12px">
+          <strong>Ya pertenece a una familia.</strong> Madre: <strong>${esc(madre?.nombre || '—')}</strong>.
+          ${hermanos.length ? `<div style="margin-top:6px">Hermanos: ${hermanos.map(h => esc(h.nombre)).join(', ')}</div>` : ''}
+        </div>`;
+      return;
+    }
+    if (prod.es_madre) {
+      const hijos = db().query('SELECT nombre FROM productos WHERE producto_madre_id=? ORDER BY nombre', [productoId]);
+      info.innerHTML = `
+        <div style="margin:0 0 14px;font-size:12px;color:#e65100;background:#fff3e0;border:1px solid #ffcc80;border-radius:6px;padding:8px 12px">
+          <strong>Este producto YA ES madre</strong> de ${hijos.length} producto${hijos.length === 1 ? '' : 's'}.
+          ${hijos.length ? `<div style="margin-top:6px">Hijos: ${hijos.map(h => esc(h.nombre)).join(', ')}</div>` : ''}
+          <div style="margin-top:6px">Asignarle una madre a este producto no reasigna a sus propios hijos — quedan apuntando a él, que pasaría a tener madre también.</div>
+        </div>`;
+      return;
+    }
+    info.innerHTML = `<p style="margin:0 0 14px;font-size:12px;color:#8090a0">No pertenece a ninguna familia todavía.</p>`;
+  }
+
   function openMadreQuickModal(productoId, nombre) {
     const overlay = ge('cv2-madre-overlay');
     overlay.dataset.prodId = productoId;
     ge('cv2-madre-prod-nombre').textContent = nombre || '';
+    renderInfoMadreQuick(productoId);
     ge('cv2-madre-search').value = '';
     ge('cv2-madre-results').innerHTML = '';
     ge('cv2-madre-search-wrap').style.display = '';
