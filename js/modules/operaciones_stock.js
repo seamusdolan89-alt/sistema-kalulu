@@ -118,7 +118,8 @@ const OperacionesStock = (() => {
     `, [compraId])[0];
     if (!compra) return null;
     compra.items = db().query(`
-      SELECT ci.*, pr.nombre AS producto_nombre, pr.precio_venta AS producto_precio_venta
+      SELECT ci.*, pr.nombre AS producto_nombre, pr.precio_venta AS producto_precio_venta,
+             pr.markup_fijo AS producto_markup_fijo
       FROM compra_items ci
       LEFT JOIN productos pr ON pr.id = ci.producto_id
       WHERE ci.compra_id = ?
@@ -647,8 +648,10 @@ const OperacionesStock = (() => {
               ${isAdmin ? (
                 it.producto_id
                   ? `<td style="padding:5px 10px;text-align:right;white-space:nowrap">
+                       ${it.producto_markup_fijo != null ? `<span style="display:inline-block;background:#ede7f6;color:#5e35b1;border-radius:5px;padding:2px 7px;font-size:10px;font-weight:700;margin-right:5px" title="Este producto tiene un markup predeterminado — cambiarlo va a preguntar si se actualiza o es una excepción">Markup ${esc(String(it.producto_markup_fijo))}%</span>` : ''}
                        <input type="number" class="ops-precio-input" data-idx="${idx}" data-prodid="${esc(it.producto_id)}"
                               data-nombre="${esc(it.producto_nombre || '')}" data-costo="${it.costo_unitario || 0}"
+                              data-markup="${it.producto_markup_fijo ?? ''}"
                               value="${precioActual.toFixed(2)}" min="0" step="any"
                               title="Precio de venta — editable"
                               style="width:92px;padding:5px 6px;border:1.5px solid #90b8f0;border-radius:4px;text-align:right;font-size:13px;background:#f0f6ff;transition:background .15s,border-color .15s">
@@ -688,6 +691,35 @@ const OperacionesStock = (() => {
           return;
         }
         if (Math.abs(nuevoPrecio - (parseFloat(item.producto_precio_venta) || 0)) < 0.001) { settle(); return; } // sin cambios
+
+        // Markup fijo (pedido del usuario, 30/9/2026): si este producto tiene
+        // un markup predeterminado y el precio que se está por guardar no es
+        // el que ese markup calcularía a partir del costo de ESTA compra,
+        // preguntar lo mismo que en la pantalla de éxito post-compra: ¿esto
+        // actualiza el markup predeterminado o es una excepción puntual?
+        const markupFijo = parseFloat(inp.dataset.markup);
+        const costoLinea = parseFloat(inp.dataset.costo) || 0;
+        if (!isNaN(markupFijo) && costoLinea > 0) {
+          const pvEsperado = Math.round(costoLinea * (1 + markupFijo / 100) * 100) / 100;
+          if (Math.abs(nuevoPrecio - pvEsperado) > 0.01) {
+            const actualizarDefault = confirm(
+              `Este precio (${fmt$(nuevoPrecio)}) no coincide con el markup predeterminado de ` +
+              `${inp.dataset.nombre} (${markupFijo}%, que da ${fmt$(pvEsperado)}).\n\n` +
+              `Aceptar = actualizar el markup predeterminado a partir de este precio (de ahora en más, las próximas compras van a calcular con el markup nuevo).\n` +
+              `Cancelar = usar este precio SOLO esta vez (la próxima compra que le cambie el costo a este producto vuelve a aplicar el ${markupFijo}% de siempre).`
+            );
+            if (actualizarDefault) {
+              const nuevoMarkup = Math.round(((nuevoPrecio / costoLinea) - 1) * 10000) / 100;
+              const tsMarkup = window.SGA_Utils.formatISODate(new Date());
+              db().run(`UPDATE productos SET markup_fijo=?, sync_status='pending', updated_at=? WHERE id=?`,
+                       [nuevoMarkup, tsMarkup, prodId]);
+              item.producto_markup_fijo = nuevoMarkup;
+              inp.dataset.markup = String(nuevoMarkup);
+              const badge = inp.previousElementSibling;
+              if (badge && badge.tagName === 'SPAN') badge.textContent = `Markup ${nuevoMarkup}%`;
+            }
+          }
+        }
 
         const ts = window.SGA_Utils.formatISODate(new Date());
         db().run(

@@ -4575,6 +4575,31 @@ const ComprasV2 = (() => {
     ge('cv2-post-btn-finish')?.addEventListener('click', () => {
       showResumenFinal({ items, herenciaSincs: state.herenciaSincronizados });
     });
+
+    // Markup fijo + familia (pedido del usuario, 30/9/2026): si el precio se
+    // recalculó solo para un producto que tiene familia (madre/hijos con
+    // herencia), preguntar si sincronizarla -- mismo wizard que ya se abre al
+    // corregir un precio a mano, uno por uno (es un modal, no puede haber dos
+    // abiertos a la vez). showSuccessScreen() puede volver a renderizarse para
+    // los MISMOS items (retomar una compra pausada, o "Volver" desde el
+    // Resumen Final) -- sin esta marca, cada re-render volvería a preguntar
+    // por productos ya consultados. markupFamiliaPreguntado vive en el item
+    // mismo (como markupAutoShown), así que sobrevive tanto en memoria como
+    // en el localStorage de buildPendingPayload().
+    const familiaPendientesMarkup = items.filter(it =>
+      it.markupFijo != null && it.markupAutoShown === true
+      && !it.markupFamiliaPreguntado && checkHasFamily(it.productoId)
+    );
+    (function procesarFamiliaPendientesMarkup(cola) {
+      if (!cola.length) return;
+      const [it, ...resto] = cola;
+      it.markupFamiliaPreguntado = true;
+      showHerenciaModal({
+        prodId: it.productoId, prodNombre: it.nombre,
+        nuevoCosto: it.costoNvo, nuevoPrecio: it.pvSugerido,
+        onDone: () => procesarFamiliaPendientesMarkup(resto),
+      });
+    })(familiaPendientesMarkup);
   }
 
   // ── Resumen Final (paso previo al POS) ──────────────────────────────────────
