@@ -438,10 +438,24 @@ const SGA_Clientes = (() => {
     return rows;
   }
 
+  function getVentaDetalle(ventaId) {
+    const venta = db().query(`SELECT * FROM ventas WHERE id = ?`, [ventaId])[0];
+    if (!venta) return null;
+    venta.items = db().query(`
+      SELECT vi.*, p.nombre AS producto_nombre
+      FROM venta_items vi
+      LEFT JOIN productos p ON p.id = vi.producto_id
+      WHERE vi.venta_id = ?
+      ORDER BY p.nombre
+    `, [ventaId]);
+    venta.pagos = db().query(`SELECT * FROM venta_pagos WHERE venta_id = ?`, [ventaId]);
+    return venta;
+  }
+
   return {
     getAll, getById, search, crear, actualizar,
     getTopeDisponible, getSaldoActual, getSaldoLote,
-    registrarPago, eliminarPago, sesionAbierta, getMovimientos, getVentas,
+    registrarPago, eliminarPago, sesionAbierta, getMovimientos, getVentas, getVentaDetalle,
   };
 })();
 
@@ -1423,6 +1437,31 @@ const ClientesUI = (() => {
     }
   }
 
+  // ── MODAL: DETALLE DE VENTA ─────────────────────────────────────────────────
+  // Pedido del usuario (30/9/2026): el link "#<id>" de cada deuda en Cuenta
+  // Corriente, y cada fila de Historial de Compras, ya tenían el data-venta y
+  // el cursor:pointer puestos (venta-row/mov-link) pero sin ningún listener
+  // enganchado — no hacían nada al clickear.
+  function abrirDetalleVenta(ventaId) {
+    const v = SGA_Clientes.getVentaDetalle(ventaId);
+    if (!v) { alert('No se encontró esa venta.'); return; }
+    ge('vd-fecha').textContent = `${fmtDate(v.fecha)} ${fmtTime(v.fecha)}`;
+    ge('vd-total').textContent = fmt(v.total);
+    ge('vd-items').innerHTML = v.items.length
+      ? v.items.map(it => `
+          <tr>
+            <td>${esc(it.producto_nombre || '(producto eliminado)')}</td>
+            <td style="text-align:right">${it.cantidad}</td>
+            <td style="text-align:right">${fmt(it.precio_unitario)}</td>
+            <td style="text-align:right">${fmt(it.subtotal)}</td>
+          </tr>`).join('')
+      : '<tr><td colspan="4" style="text-align:center;color:#999;padding:10px">Sin productos</td></tr>';
+    ge('vd-pagos').textContent = v.pagos.length
+      ? v.pagos.map(p => `${esc(p.medio || 'efectivo')}: ${fmt(p.monto)}`).join(' + ')
+      : '—';
+    ge('modal-venta-detalle').classList.add('open');
+  }
+
   // ── MODAL: TOPE CONFIG ─────────────────────────────────────────────────────
   function openTopeConfig() {
     const r = window.SGA_DB.query(`SELECT value FROM system_config WHERE key = 'tope_deuda_default'`);
@@ -1617,6 +1656,18 @@ const ClientesUI = (() => {
       if (e.target === ge('modal-cliente-form')) closeModalCliente();
     });
 
+    // Detalle de venta
+    ge('btn-vd-close')?.addEventListener('click', () => {
+      ge('modal-venta-detalle').classList.remove('open');
+    });
+    ge('modal-venta-detalle')?.addEventListener('click', (e) => {
+      if (e.target === ge('modal-venta-detalle')) ge('modal-venta-detalle').classList.remove('open');
+    });
+    ge('compras-list')?.addEventListener('click', (e) => {
+      const row = e.target.closest('.venta-row');
+      if (row) abrirDetalleVenta(row.dataset.venta);
+    });
+
     // Tope config
     ge('btn-tope-config')?.addEventListener('click', () => {
       const u = user();
@@ -1699,6 +1750,8 @@ const ClientesUI = (() => {
     // Delegado sobre el tbody (no se re-crea entre renders, solo su innerHTML)
     // para no tener que reengancharlo cada vez que se filtra o se recarga.
     ge('cc-mov-tbody')?.addEventListener('click', (e) => {
+      const link = e.target.closest('.mov-link');
+      if (link) { abrirDetalleVenta(link.dataset.venta); return; }
       const btn = e.target.closest('[data-eliminar-mov]');
       if (!btn) return;
       const id = btn.dataset.eliminarMov;
