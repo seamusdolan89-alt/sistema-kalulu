@@ -25,6 +25,12 @@ Cubre:
      markup_fijo NO se toca — y la PRÓXIMA compra que le cambie el costo a
      ese producto vuelve a aplicar el markup predeterminado de siempre
      (pisando el precio puntual que se había puesto).
+  5. Pedido del usuario (30/9/2026): si el producto con markup fijo tiene
+     familia (madre/hijo con herencia), el recálculo automático abre SOLO
+     el wizard de sincronización (sin que el dueño tenga que tocar nada) —
+     y si la pantalla se vuelve a renderizar para los mismos items (acá:
+     "Finalizar" -> Resumen Final -> "Volver"), el wizard NO se vuelve a
+     abrir una segunda vez para ese mismo producto.
 
 Correr (server ya levantado en :8765, ver README.md):
 
@@ -55,6 +61,26 @@ SEMBRAR = """
   mk('prod-markup-a', 'Producto Markup A', 100, 130, 30);
   // B: para el escenario "solo esta vez".
   mk('prod-markup-b', 'Producto Markup B', 100, 130, 30);
+
+  // C (madre, con markup fijo) + Hijo C (hereda costo y precio): escenario
+  // "markup fijo + familia".
+  window.SGA_DB.run(
+    `INSERT INTO productos (id, nombre, costo, precio_venta, markup_fijo, stock_minimo, unidad_medida,
+       es_madre, precio_independiente, activo, fecha_alta, fecha_modificacion, sync_status, updated_at)
+     VALUES ('prod-markup-c', 'Producto Markup C', 100, 130, 30, 1, 'unidad', 1, 0, 1, ?, ?, 'pending', ?)`,
+    [now, now, now]
+  );
+  // Nombre sin el prefijo "Producto Markup C" a propósito -- si lo
+  // compartiera, tipear "Producto Markup C" en el buscador matchearía
+  // ambos (madre e hijo) por substring y el dropdown quedaría ambiguo.
+  window.SGA_DB.run(
+    `INSERT INTO productos (id, nombre, costo, precio_venta, stock_minimo, unidad_medida,
+       es_madre, producto_madre_id, hereda_costo, hereda_precio, precio_independiente, activo,
+       fecha_alta, fecha_modificacion, sync_status, updated_at)
+     VALUES ('prod-markup-c-hijo', 'Hijo de Markup C', 100, 130, 1, 'unidad',
+       0, 'prod-markup-c', 1, 1, 0, 1, ?, ?, 'pending', ?)`,
+    [now, now, now]
+  );
 }
 """
 
@@ -227,6 +253,51 @@ def main():
             f"ignorando el precio puntual de la vez anterior: {row_b2}"
         )
         print(f"OK - el precio puntual no persiste: la siguiente compra reaplica el markup de siempre: {row_b2}")
+
+        print("--- Cerrar el flujo de B antes de arrancar el de C ---")
+        page.locator("#cv2-post-btn-finish").click()
+        page.wait_for_timeout(400)
+        page.locator("#cv2-rf-btn-pos").click()
+        page.wait_for_timeout(400)
+
+        print("--- Producto C (con familia): el auto-cálculo de markup abre SOLO el wizard de familia ---")
+        prod_c      = q(page, "SELECT id FROM productos WHERE nombre='Producto Markup C'")[0]
+        prod_c_hijo = q(page, "SELECT id FROM productos WHERE nombre='Hijo de Markup C'")[0]
+        completar_compra_remito(page, "Producto Markup C", cantidad=10, costo=200)
+        page.wait_for_timeout(400)
+        page.screenshot(path=os.path.join(SCREENSHOT_DIR, "markup_fijo_familia_auto.png"), full_page=True)
+
+        fila_c = page.locator("#cv2-post-tbody tr[data-idx='0']")
+        assert fila_c.locator(".cv2-post-badge-markup").count() == 1, "Producto C no muestra el badge de markup fijo"
+        row_c0 = q(page, "SELECT precio_venta FROM productos WHERE id=?", [prod_c["id"]])[0]
+        assert float(row_c0["precio_venta"]) == 260.0, f"Precio auto de C (200 x 1.30): {row_c0}"
+
+        assert page.locator(".cv2-her-overlay").is_visible(), (
+            "BUG: el producto con markup fijo tiene familia y no se abrió SOLO el wizard de sincronización"
+        )
+        print("   OK - el wizard de familia se abrió solo, sin click, apenas se auto-aplicó el markup")
+
+        print("--- Sincronizar (Finalizar y aplicar cambios): el hijo hereda costo y precio ---")
+        page.locator(".cv2-her-btn-apply").click()
+        page.wait_for_timeout(300)
+        assert not page.locator(".cv2-her-overlay").is_visible(), "El wizard de familia debería haberse cerrado"
+
+        row_hijo = q(page, "SELECT costo, precio_venta FROM productos WHERE id=?", [prod_c_hijo["id"]])[0]
+        assert float(row_hijo["costo"]) == 200.0 and float(row_hijo["precio_venta"]) == 260.0, (
+            f"BUG: el hijo debería haber heredado costo=200/precio=260 al sincronizar: {row_hijo}"
+        )
+        print(f"   OK - el hijo heredó costo/precio: {row_hijo}")
+
+        print("--- Regresión: 'Finalizar' -> Resumen Final -> 'Volver' NO reabre el wizard para el mismo producto ---")
+        page.locator("#cv2-post-btn-finish").click()
+        page.wait_for_timeout(400)
+        page.locator("#cv2-rf-btn-volver").click()
+        page.wait_for_timeout(400)
+        assert not page.locator(".cv2-her-overlay").is_visible(), (
+            "BUG: al volver a renderizar la misma pantalla para los mismos items, el wizard de familia se reabrió "
+            "para un producto ya consultado (falta la marca markupFamiliaPreguntado)"
+        )
+        print("   OK - el wizard no se repite en un re-render de los mismos items")
 
         assert not errors, f"Errores JS no capturados en página: {errors}"
 
