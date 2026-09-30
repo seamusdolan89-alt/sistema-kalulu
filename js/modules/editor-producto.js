@@ -62,7 +62,7 @@ const EditorProducto = (() => {
     categoria_id: null, categoria_nombre: null,
     proveedor_principal_id: null, proveedor_nombre: null, proveedor_alternativo_id: null,
     unidad_medida: 'unidad',
-    costo: 0, costo_paquete: 0, precio_venta: 0,
+    costo: 0, costo_paquete: 0, precio_venta: 0, iva: '',
     stock_minimo: 0, stock_alerta: 0,
     cant_pedido: 0, pedido_unidad: 'unidad', pedido_unidades_por_paquete: null,
     activo: 1, es_madre: 0, producto_madre_id: null, precio_independiente: 0,
@@ -358,6 +358,15 @@ const EditorProducto = (() => {
           <input type="number" id="ed-costo-paquete" class="input-full" step="0.01" min="0" value="${p.costo_paquete || 0}">
         </div>
         <small class="ed-text-muted" id="ed-costo-paquete-hint"></small>
+      </div>
+      <div class="form-group">
+        <label for="ed-iva">IVA</label>
+        <select id="ed-iva" class="select-full">
+          <option value=""     ${!p.iva               ? 'selected' : ''}>—</option>
+          <option value="10.5" ${p.iva === '10.5'      ? 'selected' : ''}>10,5%</option>
+          <option value="21"   ${p.iva === '21'        ? 'selected' : ''}>21%</option>
+        </select>
+        <small class="ed-text-muted">Se precarga solo al agregar este producto a una compra Factura A; cada compra confirmada actualiza este valor.</small>
       </div>
       <div class="form-group">
         <label for="ed-precio-venta">Precio de venta</label>
@@ -2407,7 +2416,7 @@ const EditorProducto = (() => {
       const el = ge(id);
       if (el) el.addEventListener('input', markDirty);
     });
-    ['ed-categoria', 'ed-unidad', 'ed-proveedor-principal', 'ed-proveedor-alternativo'].forEach(id => {
+    ['ed-categoria', 'ed-unidad', 'ed-proveedor-principal', 'ed-proveedor-alternativo', 'ed-iva'].forEach(id => {
       const el = ge(id);
       if (el) el.addEventListener('change', markDirty);
     });
@@ -2705,7 +2714,7 @@ const EditorProducto = (() => {
     const newCosto = parseFloat((ge('ed-costo') || {}).value) || 0;
     const costoChanged = newCosto !== (state.producto.costo || 0);
 
-    // fieldValues: 27 items, nombre → imagen (shared between INSERT and UPDATE)
+    // fieldValues: 28 items, nombre → iva (shared between INSERT and UPDATE)
     const fieldValues = [
       nombre,
       (ge('ed-descripcion') || {}).value || '',
@@ -2734,6 +2743,7 @@ const EditorProducto = (() => {
       (ge('ed-oferta-desde') || {}).value || null,
       (ge('ed-oferta-hasta') || {}).value || null,
       imagen,
+      (ge('ed-iva') || {}).value || null,
     ];
 
     if (state.isNew) {
@@ -2750,9 +2760,9 @@ const EditorProducto = (() => {
           unidad_compra, unidades_por_paquete_compra, unidad_venta,
           precio_lista_por, precio_lista_divisor,
           es_oferta, oferta_desde, oferta_hasta,
-          imagen,
+          imagen, iva,
           fecha_modificacion, sync_status, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
       `, [newId, ...fieldValues, now, now]);
 
       state.barcodes.forEach(bc => {
@@ -2780,7 +2790,7 @@ const EditorProducto = (() => {
         unidad_compra = ?, unidades_por_paquete_compra = ?, unidad_venta = ?,
         precio_lista_por = ?, precio_lista_divisor = ?,
         es_oferta = ?, oferta_desde = ?, oferta_hasta = ?,
-        imagen = ?,
+        imagen = ?, iva = ?,
         ultima_modificacion_precio = CASE WHEN ? THEN ? ELSE ultima_modificacion_precio END,
         fecha_modificacion = ?, sync_status = 'pending', updated_at = ?
       WHERE id = ?
