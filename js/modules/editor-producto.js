@@ -197,7 +197,7 @@ const EditorProducto = (() => {
       ? ((p.precio_venta - p.costo) / p.precio_venta * 100).toFixed(2)
       : '0.00';
     const markupActual = p.costo > 0
-      ? (p.precio_venta / p.costo).toFixed(2)
+      ? (((p.precio_venta || 0) / p.costo - 1) * 100).toFixed(2)
       : '0.00';
 
     const tieneHijos = window.SGA_DB.query(
@@ -369,15 +369,6 @@ const EditorProducto = (() => {
         <small class="ed-text-muted">Se precarga solo al agregar este producto a una compra Factura A; cada compra confirmada actualiza este valor.</small>
       </div>
       <div class="form-group">
-        <label for="ed-markup-fijo">Markup predeterminado</label>
-        <div class="ed-input-suffix-wrap">
-          <input type="number" id="ed-markup-fijo" class="input-full" step="0.01" min="0"
-                 placeholder="Sin markup fijo" value="${p.markup_fijo ?? ''}">
-          <span class="ed-input-affix">%</span>
-        </div>
-        <small class="ed-text-muted">Con esto completo, confirmar una compra que actualiza el costo de este producto recalcula el precio de venta solo (costo × (1 + este %)), sin pasar por la revisión manual de precios. Vacío = sigue el comportamiento de siempre (precio sugerido a revisar).</small>
-      </div>
-      <div class="form-group">
         <label for="ed-precio-venta">Precio de venta</label>
         <div class="ed-input-prefix-wrap">
           <span class="ed-input-affix">$</span>
@@ -393,33 +384,23 @@ const EditorProducto = (() => {
       </div>
       <div class="form-group">
         <label for="ed-markup">Markup</label>
-        <input type="number" id="ed-markup" class="input-full" step="0.01" min="0" value="${markupActual}">
+        <div class="ed-input-suffix-wrap">
+          <input type="number" id="ed-markup" class="input-full" step="0.01" value="${markupActual}">
+          <span class="ed-input-affix">%</span>
+        </div>
       </div>
     </div>
 
-    <div class="ed-calculadora">
-      <h4 style="margin:0 0 10px;font-size:14px;color:var(--color-text-secondary)">Calculadora de precio</h4>
-      <div style="display:flex;gap:20px;margin-bottom:12px">
-        <label class="ed-radio-label">
-          <input type="radio" name="ed-calc-mode" value="margen" checked> Quiero margen %
+    <div style="margin-top:16px;padding:14px;border:1px solid var(--color-border);border-radius:8px">
+      <div class="ed-toggle-row" style="margin-bottom:0">
+        <span style="font-weight:600;font-size:15px">Markup predeterminado para este producto</span>
+        <label class="ed-toggle-switch">
+          <input type="checkbox" id="ed-markup-fijo-check" ${p.markup_fijo != null ? 'checked' : ''}>
+          <span class="ed-toggle-slider"></span>
         </label>
-        <label class="ed-radio-label">
-          <input type="radio" name="ed-calc-mode" value="markup"> Quiero markup
-        </label>
+        <span id="ed-markup-fijo-check-label">${p.markup_fijo != null ? 'Sí' : 'No'}</span>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label id="ed-calc-valor-label" for="ed-calc-valor">Margen objetivo %</label>
-          <input type="number" id="ed-calc-valor" class="input-full" placeholder="ej: 40" min="0">
-        </div>
-        <div class="form-group">
-          <label for="ed-precio-sugerido">Precio sugerido</label>
-          <input type="number" id="ed-precio-sugerido" class="input-full" readonly style="background:var(--color-background-secondary)">
-        </div>
-        <div class="form-group" style="padding-top:22px">
-          <button id="ed-btn-aplicar-precio" class="btn btn-secondary btn-sm">Aplicar →</button>
-        </div>
-      </div>
+      <small class="ed-text-muted">Tildado: el Markup de arriba queda fijo para este producto — la próxima compra que le cambie el costo recalcula el precio de venta solo (costo × (1 + ese %)), sin pasar por la revisión manual. Destildado: el Markup de arriba es solo para este precio de hoy.</small>
     </div>
 
     <div style="margin-top:16px;padding:14px;border:1px solid var(--color-border);border-radius:8px">
@@ -745,12 +726,6 @@ const EditorProducto = (() => {
   display: flex; align-items: center; white-space: nowrap; flex-shrink: 0;
 }
 .ed-input-suffix-wrap .ed-input-affix { border-right: none; border-left: 1px solid var(--color-border, #ddd); }
-.ed-calculadora {
-  background: var(--color-background-secondary); border: 1px solid var(--color-border);
-  border-radius: 8px; padding: 16px; margin: 16px 0;
-}
-.ed-radio-group { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
-.ed-radio-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; }
 .ed-sust-row {
   display: flex; align-items: center; justify-content: space-between;
   padding: 8px 12px; border: 1px solid var(--color-border);
@@ -2421,7 +2396,7 @@ const EditorProducto = (() => {
     }
 
     // Dirty tracking
-    ['ed-nombre', 'ed-descripcion', 'ed-precio-venta', 'ed-markup-fijo', 'ed-stock-alerta', 'ed-cant-pedido', 'ed-pedido-unidades-paquete'].forEach(id => {
+    ['ed-nombre', 'ed-descripcion', 'ed-precio-venta', 'ed-stock-alerta', 'ed-cant-pedido', 'ed-pedido-unidades-paquete'].forEach(id => {
       const el = ge(id);
       if (el) el.addEventListener('input', markDirty);
     });
@@ -2479,22 +2454,18 @@ const EditorProducto = (() => {
     ge('ed-precio-venta') && ge('ed-precio-venta').addEventListener('input', recalcMargen);
     ge('ed-margen') && ge('ed-margen').addEventListener('input', recalcFromMargen);
     ge('ed-markup') && ge('ed-markup').addEventListener('input', recalcFromMarkup);
-    ge('ed-calc-valor') && ge('ed-calc-valor').addEventListener('input', recalcPrecioSugerido);
-    document.querySelectorAll('input[name="ed-calc-mode"]').forEach(r => {
-      r.addEventListener('change', () => {
-        const lbl = ge('ed-calc-valor-label');
-        if (lbl) lbl.textContent = r.value === 'margen' ? 'Margen objetivo %' : 'Markup objetivo';
-        recalcPrecioSugerido();
-      });
-    });
-    ge('ed-btn-aplicar-precio') && ge('ed-btn-aplicar-precio').addEventListener('click', () => {
-      const val = ge('ed-precio-sugerido') && ge('ed-precio-sugerido').value;
-      if (val) {
-        ge('ed-precio-venta').value = val;
-        recalcMargen();
+
+    // Markup predeterminado: tildar/destildar no cambia el valor del campo
+    // Markup -- solo decide si ese % se guarda como markup_fijo al guardar
+    // el producto (ver saveAll()) o si fue "solo por esta vez".
+    const markupFijoChk = ge('ed-markup-fijo-check');
+    if (markupFijoChk) {
+      markupFijoChk.addEventListener('change', () => {
+        const label = ge('ed-markup-fijo-check-label');
+        if (label) label.textContent = markupFijoChk.checked ? 'Sí' : 'No';
         markDirty();
-      }
-    });
+      });
+    }
 
     // Familia: es-madre toggle
     const esMadreToggle = ge('ed-es-madre');
@@ -2646,16 +2617,19 @@ const EditorProducto = (() => {
 
   // ── PRICE CALCULATOR ───────────────────────────────────────────────────────
 
+  // Markup acá es SIEMPRE porcentaje (30 = 30%, precio = costo*1.30) -- misma
+  // convención que productos.markup_fijo (compras_v2.js aplicarMarkupFijo()),
+  // antes este campo usaba un multiplicador (1,30) y confundía con el valor
+  // persistido (pedido del usuario, 1/10/2026: unificar los dos conceptos).
   const recalcMargen = () => {
     const costo  = parseFloat((ge('ed-costo') || {}).value) || 0;
     const precio = parseFloat((ge('ed-precio-venta') || {}).value) || 0;
     const margen = precio > 0 ? ((precio - costo) / precio * 100).toFixed(2) : '0.00';
-    const markup = costo  > 0 ? (precio / costo).toFixed(2) : '0.00';
+    const markup = costo  > 0 ? (((precio / costo) - 1) * 100).toFixed(2) : '0.00';
     const elMargen = ge('ed-margen');
     if (elMargen) elMargen.value = margen;
     const elMarkup = ge('ed-markup');
     if (elMarkup) elMarkup.value = markup;
-    recalcPrecioSugerido();
   };
 
   const recalcFromMargen = () => {
@@ -2666,38 +2640,20 @@ const EditorProducto = (() => {
     const elPrecio = ge('ed-precio-venta');
     const elMarkup = ge('ed-markup');
     if (elPrecio) elPrecio.value = nuevoPrecio.toFixed(2);
-    if (elMarkup) elMarkup.value = costo > 0 ? (nuevoPrecio / costo).toFixed(2) : '0.00';
-    recalcPrecioSugerido();
+    if (elMarkup) elMarkup.value = costo > 0 ? (((nuevoPrecio / costo) - 1) * 100).toFixed(2) : '0.00';
     markDirty();
   };
 
   const recalcFromMarkup = () => {
     const costo  = parseFloat((ge('ed-costo') || {}).value) || 0;
     const markup = parseFloat((ge('ed-markup') || {}).value);
-    if (isNaN(markup) || markup <= 0) return;
-    const nuevoPrecio = costo * markup;
+    if (isNaN(markup) || markup < -100) return;
+    const nuevoPrecio = costo * (1 + markup / 100);
     const elPrecio = ge('ed-precio-venta');
     const elMargen = ge('ed-margen');
     if (elPrecio) elPrecio.value = nuevoPrecio.toFixed(2);
     if (elMargen) elMargen.value = nuevoPrecio > 0 ? ((nuevoPrecio - costo) / nuevoPrecio * 100).toFixed(2) : '0.00';
-    recalcPrecioSugerido();
     markDirty();
-  };
-
-  const recalcPrecioSugerido = () => {
-    const costo    = parseFloat((ge('ed-costo') || {}).value) || 0;
-    const el       = ge('ed-precio-sugerido');
-    if (!el) return;
-    const calcMode = document.querySelector('input[name="ed-calc-mode"]:checked');
-    const modeVal  = calcMode ? calcMode.value : 'margen';
-    const valor    = parseFloat((ge('ed-calc-valor') || {}).value);
-    if (modeVal === 'margen') {
-      el.value = (!isNaN(valor) && valor >= 0 && valor < 100 && costo > 0)
-        ? (costo / (1 - valor / 100)).toFixed(2) : '';
-    } else {
-      el.value = (!isNaN(valor) && valor > 0 && costo > 0)
-        ? (costo * valor).toFixed(2) : '';
-    }
   };
 
   // ── SAVE ALL ───────────────────────────────────────────────────────────────
@@ -2723,8 +2679,14 @@ const EditorProducto = (() => {
     const newCosto = parseFloat((ge('ed-costo') || {}).value) || 0;
     const costoChanged = newCosto !== (state.producto.costo || 0);
 
-    const markupFijoRaw = (ge('ed-markup-fijo') || {}).value;
-    const markupFijo = markupFijoRaw !== '' && markupFijoRaw != null ? (parseFloat(markupFijoRaw) || null) : null;
+    // Markup predeterminado: el checkbox decide si el % que quedó en el
+    // campo Markup (de arriba, unificado con la calculadora) se persiste
+    // como markup_fijo o si fue "solo por esta vez" (pedido del usuario,
+    // 1/10/2026 -- antes eran dos campos separados y con unidades distintas).
+    const usarMarkupFijo = (ge('ed-markup-fijo-check') || {}).checked;
+    const markupPctRaw = (ge('ed-markup') || {}).value;
+    const markupPct = markupPctRaw !== '' && markupPctRaw != null ? parseFloat(markupPctRaw) : NaN;
+    const markupFijo = usarMarkupFijo && !isNaN(markupPct) ? markupPct : null;
 
     // fieldValues: 29 items, nombre → markup_fijo (shared between INSERT and UPDATE)
     const fieldValues = [

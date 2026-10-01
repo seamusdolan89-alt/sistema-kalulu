@@ -13,8 +13,11 @@ corregirlo, y que el sistema pregunte si eso cambia el markup predeterminado
 para siempre o es una excepción puntual de esa factura.
 
 Cubre:
-  1. Editor de Producto (Precios y Costos): el select #ed-markup-fijo existe,
-     se puede setear y persiste en productos.markup_fijo con sync_status='pending'.
+  1. Editor de Producto (Precios y Costos): Markup unificado con la vieja
+     "calculadora de precio" (1/10/2026) — un solo campo #ed-markup (en %,
+     ya no multiplicador) + el checkbox #ed-markup-fijo-check deciden si ese
+     % se persiste en productos.markup_fijo ("predeterminado") o es solo
+     para el precio de hoy; destildar borra markup_fijo sin tocar el precio.
   2. Confirmar una compra que le cambia el costo a un producto con markup
      fijo recalcula precio_venta solo (sin click) y la fila de la pantalla
      de éxito aparece con el badge "Markup fijo (30%)", ya resuelta.
@@ -146,27 +149,82 @@ def main():
         login_via_seed(page, admin_pos=True)
         page.evaluate(SEMBRAR)
 
-        print("--- Editor de Producto: el select de markup fijo existe y persiste ---")
+        print("--- Editor de Producto: Markup unificado (campo + checkbox 'predeterminado') ---")
         prod_a = q(page, "SELECT id FROM productos WHERE nombre='Producto Markup A'")[0]
         page.evaluate(f"window.location.hash = 'editor-producto/{prod_a['id']}'")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(500)
         page.locator("[data-section='precios']").first.click()
         page.wait_for_timeout(300)
-        markup_input = page.locator("#ed-markup-fijo")
-        assert markup_input.count() == 1, "No aparece el campo de markup fijo en Precios y Costos"
-        assert markup_input.input_value() == "30", f"No vino precargado con el markup seedeado: {markup_input.input_value()!r}"
-        page.fill("#ed-markup-fijo", "35")
+
+        # Ya no hay un campo numérico separado "Markup predeterminado": el
+        # campo Markup (compartido con la calculadora de precio) viene
+        # precargado calculado desde costo/precio_venta -- que acá coincide
+        # con el 30% sembrado porque el seed los dejó consistentes a propósito
+        # (costo 100, precio_venta 130).
+        assert page.locator("#ed-markup-fijo").count() == 0, "El campo viejo #ed-markup-fijo debería haber desaparecido"
+        markup_input = page.locator("#ed-markup")
+        assert markup_input.count() == 1, "No aparece el campo Markup en Precios y Costos"
+        assert markup_input.input_value() == "30.00", f"El Markup debería venir calculado en 30.00% (costo 100, precio 130): {markup_input.input_value()!r}"
+        chk = page.locator("#ed-markup-fijo-check")
+        assert chk.is_checked(), "El checkbox 'predeterminado' debería venir tildado (el producto tiene markup_fijo=30 seedeado)"
+
+        print("--- Cambiar el Markup actualiza el precio de venta EN VIVO (unificado con la calculadora vieja) ---")
+        markup_input.click()
+        markup_input.fill("35")
+        page.wait_for_timeout(150)
+        precio_en_vivo = page.locator("#ed-precio-venta").input_value()
+        assert precio_en_vivo == "135.00", f"100 costo x 1.35 = 135, no se recalculó en vivo: {precio_en_vivo!r}"
+
         page.locator("#ed-btn-save").click()
         page.wait_for_timeout(500)
-        row = q(page, "SELECT markup_fijo, sync_status FROM productos WHERE id=?", [prod_a["id"]])[0]
-        assert float(row["markup_fijo"]) == 35.0, f"El markup editado no persistió: {row}"
+        row = q(page, "SELECT markup_fijo, precio_venta, sync_status FROM productos WHERE id=?", [prod_a["id"]])[0]
+        assert float(row["markup_fijo"]) == 35.0, f"El markup editado no persistió (checkbox seguía tildado): {row}"
+        assert abs(float(row["precio_venta"]) - 135.0) < 0.01, f"El precio recalculado en vivo no persistió: {row}"
         assert row["sync_status"] == "pending", f"El UPDATE no marcó sync_status='pending': {row}"
-        print(f"OK - markup_fijo editable y persistido: {row}")
-        # Vuelve a 30% para que el resto del test use el valor sembrado.
-        page.fill("#ed-markup-fijo", "30")
+        print(f"OK - markup_fijo + precio_venta editables desde el mismo campo, y persisten juntos: {row}")
+
+        print("--- Destildar 'predeterminado' y guardar: markup_fijo pasa a NULL (precio_venta no se toca) ---")
+        # El checkbox real queda con tamaño 0 (es un .ed-toggle-switch con el
+        # <input> visualmente oculto detrás del slider) -- Playwright no puede
+        # clickearlo/ni forzarlo de forma confiable dentro del viewport, así
+        # que se dispara el evento igual que un click real lo haría.
+        page.evaluate("""
+          () => {
+            const chk = document.getElementById('ed-markup-fijo-check');
+            chk.checked = false;
+            chk.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        """)
         page.locator("#ed-btn-save").click()
         page.wait_for_timeout(500)
+        row_unchecked = q(page, "SELECT markup_fijo, precio_venta FROM productos WHERE id=?", [prod_a["id"]])[0]
+        assert row_unchecked["markup_fijo"] is None, f"BUG: destildar el checkbox debería borrar markup_fijo: {row_unchecked}"
+        assert abs(float(row_unchecked["precio_venta"]) - 135.0) < 0.01, f"Destildar no debería tocar el precio: {row_unchecked}"
+        print(f"OK - destildar borra markup_fijo sin tocar el precio: {row_unchecked}")
+
+        # Vuelve a 30%/tildado para que el resto del test use el valor sembrado.
+        page.reload()
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(500)
+        page.locator("[data-section='precios']").first.click()
+        page.wait_for_timeout(300)
+        page.locator("#ed-markup").click()
+        page.locator("#ed-markup").fill("30")
+        page.wait_for_timeout(150)
+        page.evaluate("""
+          () => {
+            const chk = document.getElementById('ed-markup-fijo-check');
+            chk.checked = true;
+            chk.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        """)
+        page.locator("#ed-btn-save").click()
+        page.wait_for_timeout(500)
+        row_restored = q(page, "SELECT markup_fijo, precio_venta FROM productos WHERE id=?", [prod_a["id"]])[0]
+        assert float(row_restored["markup_fijo"]) == 30.0 and abs(float(row_restored["precio_venta"]) - 130.0) < 0.01, (
+            f"No se pudo restaurar el estado sembrado (markup_fijo=30, precio=130) para el resto del test: {row_restored}"
+        )
 
         print("--- Confirmar compra de A con costo nuevo: precio se recalcula SOLO (sin click) ---")
         completar_compra_remito(page, "Producto Markup A", cantidad=10, costo=200)
