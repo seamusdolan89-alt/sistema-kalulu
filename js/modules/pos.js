@@ -654,6 +654,7 @@ export const POS = (() => {
       currentUser: window.SGA_Auth.getCurrentUser(),
       currentSucursal: null,
       editingVentaId: null,
+      sesionVista: null, // solo ADMIN_MODE: sesión de caja pasada elegida para revisar (null = la abierta)
     };
 
     // ── UTILS ──────────────────────────────────────────────────────
@@ -1799,16 +1800,64 @@ export const POS = (() => {
     };
 
     // ── DASHBOARD ──────────────────────────────────────────────────
+    // Admin-POS: lista de turnos (sesiones de caja) para revisar días anteriores, solo lectura.
+    // Cada opción lleva fecha, quién abrió, estado y total vendido; la primera es la más reciente.
+    const poblarSelectorSesiones = () => {
+      const sel = ge('sesion-vista-select');
+      if (!sel || !window.ADMIN_MODE || !state.currentSucursal) return;
+      let rows = [];
+      try {
+        rows = window.SGA_DB.query(`
+          SELECT s.id, s.fecha_apertura, s.fecha_cierre, s.estado, u.nombre AS cajero,
+            COALESCE((SELECT SUM(v.total) FROM ventas v WHERE v.sesion_caja_id = s.id AND v.estado = 'completada'), 0) AS total
+          FROM sesiones_caja s LEFT JOIN usuarios u ON u.id = s.usuario_apertura_id
+          WHERE s.sucursal_id = ?
+          ORDER BY s.fecha_apertura DESC LIMIT 120
+        `, [state.currentSucursal.id]);
+      } catch (e) { console.warn('poblarSelectorSesiones:', e); }
+      if (!rows.length) { sel.style.display = 'none'; return; }
+      const fmtFecha = iso => new Date(iso).toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+      const actual = state.sesionVista ? state.sesionVista.id : (state.sesionActiva ? state.sesionActiva.id : rows[0].id);
+      sel.innerHTML = rows.map(r => {
+        const horas = `${formatTime(r.fecha_apertura)}${r.fecha_cierre ? '–' + formatTime(r.fecha_cierre) : ''}`;
+        const est = r.estado === 'abierta' ? 'ABIERTA' : 'cerrada';
+        return `<option value="${esc(r.id)}" ${r.id === actual ? 'selected' : ''}>${esc(fmtFecha(r.fecha_apertura))} · ${horas} · ${esc(r.cajero || '—')} · ${est} · ${formatCurrency(r.total)}</option>`;
+      }).join('');
+      sel.style.display = '';
+      if (!sel.dataset.wired) {
+        sel.dataset.wired = '1';
+        sel.addEventListener('change', () => {
+          const s = window.SGA_DB.query(`SELECT * FROM sesiones_caja WHERE id = ?`, [sel.value])[0] || null;
+          // Elegir la que está abierta equivale a "volver a la actual"
+          state.sesionVista = (s && state.sesionActiva && s.id === state.sesionActiva.id) ? null : s;
+          closeDetailPanel();
+          loadDashboard();
+        });
+      }
+    };
+
     const loadDashboard = () => {
-      if (!state.sesionActiva) {
-        ge('ventas-tbody').innerHTML = `<tr><td colspan="7"><div class="dash-empty"><div class="dash-empty-icon">💰</div><div>Abrí la caja para comenzar</div></div></td></tr>`;
+      // En Admin-POS, sin caja abierta se muestra el último turno; con uno elegido, ése.
+      if (window.ADMIN_MODE && !state.sesionVista && !state.sesionActiva && state.currentSucursal) {
+        try {
+          state.sesionVista = window.SGA_DB.query(
+            `SELECT * FROM sesiones_caja WHERE sucursal_id = ? ORDER BY fecha_apertura DESC LIMIT 1`,
+            [state.currentSucursal.id]
+          )[0] || null;
+        } catch (e) { /* sin sesiones */ }
+      }
+      const sesion = (window.ADMIN_MODE && state.sesionVista) || state.sesionActiva;
+      if (window.ADMIN_MODE) poblarSelectorSesiones();
+
+      if (!sesion) {
+        ge('ventas-tbody').innerHTML = `<tr><td colspan="7"><div class="dash-empty"><div class="dash-empty-icon">💰</div><div>${window.ADMIN_MODE ? 'Todavía no hay turnos de caja registrados' : 'Abrí la caja para comenzar'}</div></div></td></tr>`;
         updateSummaryBar(null);
         ge('ventas-count-badge').textContent = '0';
         return;
       }
 
       sessionStorage.removeItem('pos_cart');
-      const sid = state.sesionActiva.id;
+      const sid = sesion.id;
 
       // Get ventas for this session
       const ventas = window.SGA_DB.query(`
@@ -1833,34 +1882,67 @@ export const POS = (() => {
       const MEDIO_ICONS = { efectivo: '💵', mercadopago: '📱', tarjeta: '💳', transferencia: '🏦', cuenta_corriente: '📒' };
       const MEDIO_NAMES = { efectivo: 'Efectivo', mercadopago: 'Mercado Pago', tarjeta: 'Tarjeta', transferencia: 'Transferencia', cuenta_corriente: 'Cta. Cte.' };
 
-      const tbody = ge('ventas-tbody');
-      if (!ventas.length) {
-        tbody.innerHTML = `<tr><td colspan="7"><div class="dash-empty"><div class="dash-empty-icon">🛒</div><div>No hay ventas en este turno todavía</div></div></td></tr>`;
-      } else {
-        tbody.innerHTML = ventas.map(v => {
-          const mediosStr = pagosMap[v.id] || '';
-          const mediosArr = [...new Set(mediosStr.split(',').filter(Boolean))];
-          const medioChips = mediosArr.length > 1
-            ? `<span class="medio-chip">🔀 Mixto</span>`
-            : mediosArr.map(m => `<span class="medio-chip">${MEDIO_ICONS[m] || ''} ${MEDIO_NAMES[m] || m}</span>`).join('');
-          return `<tr data-venta-id="${v.id}">
+      // Cobranzas de deuda vieja del turno (ingresos_caja). NO son ventas: no suman al "Total turno"
+      // ni al contador. Las que se cobraron dentro de un ticket se muestran como nota en esa venta;
+      // los cobros sueltos (sin venta) van como fila propia.
+      const deudaPorVenta = {};
+      const cobrosSueltos = [];
+      try {
+        window.SGA_DB.query(`
+          SELECT i.id, i.fecha, i.monto, i.medio, i.venta_id,
+            COALESCE(c.nombre || ' ' || COALESCE(c.apellido,''), 'Sin cliente') AS cliente_nombre
+          FROM ingresos_caja i LEFT JOIN clientes c ON c.id = i.cliente_id
+          WHERE i.sesion_caja_id = ? AND i.tipo = 'cobro_cliente'
+        `, [sid]).forEach(r => {
+          if (r.venta_id) deudaPorVenta[r.venta_id] = (deudaPorVenta[r.venta_id] || 0) + (parseFloat(r.monto) || 0);
+          else cobrosSueltos.push(r);
+        });
+      } catch (e) { console.warn('cobranzas del turno:', e); }
+
+      const filas = ventas.map(v => {
+        const mediosStr = pagosMap[v.id] || '';
+        const mediosArr = [...new Set(mediosStr.split(',').filter(Boolean))];
+        const medioChips = mediosArr.length > 1
+          ? `<span class="medio-chip">🔀 Mixto</span>`
+          : mediosArr.map(m => `<span class="medio-chip">${MEDIO_ICONS[m] || ''} ${MEDIO_NAMES[m] || m}</span>`).join('');
+        const notaDeuda = deudaPorVenta[v.id] > 0.001
+          ? `<div style="font-size:0.78em;font-weight:500;color:#2e7d32">+ saldó deuda anterior ${formatCurrency(deudaPorVenta[v.id])}</div>` : '';
+        return { fecha: v.fecha, html: `<tr data-venta-id="${v.id}">
             <td>${formatTime(v.fecha)}</td>
             <td>${v.cliente_nombre}</td>
             <td style="text-align:center">${v.articulos}</td>
-            <td style="font-weight:700">${formatCurrency(v.total)}</td>
+            <td style="font-weight:700">${formatCurrency(v.total)}${notaDeuda}</td>
             <td>${medioChips}</td>
             <td><span class="estado-badge ${v.estado}">${v.estado === 'completada' ? 'Completada' : 'Anulada'}</span></td>
             <td style="color:#bbb;font-size:1.1em;text-align:center">›</td>
-          </tr>`;
-        }).join('');
+          </tr>` };
+      }).concat(cobrosSueltos.map(r => {
+        const medio = r.medio || 'efectivo';
+        const m = MEDIOS.find(x => x.id === medio);
+        const medioTxt = m ? `${esc(m.icon)} ${esc(m.nombre)}` : `${MEDIO_ICONS[medio] || ''} ${esc(MEDIO_NAMES[medio] || medio)}`;
+        return { fecha: r.fecha, html: `<tr style="background:#f6fbf6">
+            <td>${formatTime(r.fecha)}</td>
+            <td>${esc(r.cliente_nombre)}</td>
+            <td style="text-align:center">—</td>
+            <td style="font-weight:700;color:#2e7d32">${formatCurrency(r.monto)}</td>
+            <td><span class="medio-chip">${medioTxt}</span></td>
+            <td><span class="estado-badge completada" style="background:#e8f5e9;color:#2e7d32">Cobro de deuda</span></td>
+            <td></td>
+          </tr>` };
+      })).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
 
+      const tbody = ge('ventas-tbody');
+      if (!filas.length) {
+        tbody.innerHTML = `<tr><td colspan="7"><div class="dash-empty"><div class="dash-empty-icon">🛒</div><div>No hay ventas en este turno todavía</div></div></td></tr>`;
+      } else {
+        tbody.innerHTML = filas.map(f => f.html).join('');
         tbody.querySelectorAll('tr[data-venta-id]').forEach(tr => {
           tr.addEventListener('click', () => openDetailPanel(tr.dataset.ventaId));
         });
       }
 
       ge('ventas-count-badge').textContent = ventas.filter(v => v.estado === 'completada').length;
-      updateSummaryBar(state.sesionActiva);
+      updateSummaryBar(sesion);
       updatePedidosBadge();
     };
 
@@ -1908,6 +1990,22 @@ export const POS = (() => {
             <span class="sum-value">${formatCurrency(totPagos[medio])}</span>
           </div>`;
       }).join('');
+
+      // Deuda vieja cobrada en el turno: se muestra APARTE, nunca dentro del Total turno
+      // (que son las ventas del turno, cobradas o no).
+      try {
+        const cob = parseFloat(window.SGA_DB.query(
+          `SELECT COALESCE(SUM(monto), 0) AS t FROM ingresos_caja WHERE sesion_caja_id = ? AND tipo = 'cobro_cliente'`,
+          [sesion.id]
+        )[0]?.t) || 0;
+        if (cob > 0.001) {
+          cont.innerHTML += `
+          <div class="sum-item" style="border-left:1px solid #ddd;padding-left:14px" title="Deuda anterior cobrada en este turno. No forma parte del Total turno.">
+            <span class="sum-label">Deuda cobrada (aparte)</span>
+            <span class="sum-value">${formatCurrency(cob)}</span>
+          </div>`;
+        }
+      } catch (e) { console.warn('updateSummaryBar cobranzas:', e); }
     };
 
     // ── DETAIL PANEL ───────────────────────────────────────────────
@@ -1927,6 +2025,25 @@ export const POS = (() => {
         ? (window.SGA_DB.query('SELECT nombre, apellido FROM clientes WHERE id = ?', [venta.cliente_id])[0] || {})
         : null;
       const usuarioInfo = getUsuarioInfo(venta.usuario_id);
+
+      // Lo que el cliente entregó de más en este mismo cobro: deuda anterior saldada y/o vuelto
+      // dejado a favor (ingresos_caja). No forma parte del total de la venta.
+      let extraCobroHtml = '';
+      try {
+        const extras = window.SGA_DB.query(
+          `SELECT tipo, medio, monto FROM ingresos_caja WHERE venta_id = ? AND tipo IN ('cobro_cliente','vuelto_a_favor')`,
+          [venta.id]
+        );
+        if (extras.length) {
+          const medioTxt = id => { const m = MEDIOS.find(x => x.id === (id || 'efectivo')); return m ? `${esc(m.icon)} ${esc(m.nombre)}` : esc(id || 'efectivo'); };
+          extraCobroHtml = `
+        <div class="dp-section">
+          <div class="dp-section-label">Además, en este mismo cobro</div>
+          ${extras.map(x => `<div class="dp-info-row"><span>${x.tipo === 'cobro_cliente' ? 'Deuda anterior saldada' : 'Vuelto dejado a favor'} · ${medioTxt(x.medio)}</span><strong>${formatCurrency(x.monto)}</strong></div>`).join('')}
+          <div style="font-size:0.78em;color:#888;margin-top:4px">No forma parte del total de la venta.</div>
+        </div>`;
+        }
+      } catch (e) { console.warn('detalle: ingresos de la venta', e); }
 
       body.innerHTML = `
         <div class="dp-section">
@@ -1955,6 +2072,7 @@ export const POS = (() => {
             return `<div class="dp-info-row"><span>${m ? `${esc(m.icon)} ${esc(m.nombre)}` : esc(p.medio)}</span><strong>${formatCurrency(p.monto)}</strong></div>`;
           }).join('')}
         </div>
+        ${extraCobroHtml}
 
         <div>
           <div class="dp-total-row"><span>Subtotal</span><span>${formatCurrency(venta.subtotal)}</span></div>
