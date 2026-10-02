@@ -115,8 +115,27 @@ const SGA_GruposSustitutos = (() => {
        VALUES (?, ?, ?, 1, ?)`,
       [prodId, nuevaRef, nuevaRef, ts]
     );
+    asegurarFilaPropia(nuevaRef);
 
     marcarPendientesSync([...afectados]);
+  }
+
+  /**
+   * La referencia de un grupo tiene que tener su PROPIA fila (ref -> ref). Sin ella el stock del
+   * grupo se suma sin contar el de la referencia (las sumas son "filas con referencia_id = X", y
+   * la referencia no figuraba entre ellas) hasta que db.js la autocompleta al proximo arranque.
+   * No toca a un producto que ya tiene fila (aunque apunte a otro grupo).
+   */
+  function asegurarFilaPropia(id) {
+    const tiene = db().query(
+      `SELECT 1 FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1`, [id]
+    )[0];
+    if (tiene) return;
+    db().run(
+      `INSERT INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion)
+       VALUES (?, ?, ?, 1, ?)`,
+      [id, id, id, now()]
+    );
   }
 
   /**
@@ -154,6 +173,7 @@ const SGA_GruposSustitutos = (() => {
        WHERE referencia_id = ? AND producto_id != ?`,
       [raizId, raizId, refId, raizId]
     );
+    asegurarFilaPropia(raizId);
     marcarPendientesSync([raizId, refId, ...seguidores.map(f => f.id)]);
     return { raizId, cambiados: seguidores.length };
   }
@@ -178,8 +198,9 @@ const SGA_GruposSustitutos = (() => {
   /**
    * Arma el grupo exactamente como lo definio el usuario: `miembros` (ids) quedan juntos bajo
    * `referenciaId` (tiene que estar entre ellos); cada id de `involucrados` que NO esta en
-   * `miembros` se saca del grupo. La fila propia de la referencia se saca si apuntaba a otra
-   * referencia (pasa a ser la raiz). Conserva el estado activo de cada miembro.
+   * `miembros` se saca del grupo. La referencia queda con su propia fila (ref -> ref). Cada
+   * producto queda con UNA sola fila (la tabla admite varias por producto, pero toda consulta
+   * asume una) y conserva su estado activo.
    */
   function definirGrupo({ miembros, referenciaId, involucrados }) {
     if (!miembros.includes(referenciaId)) throw new Error('La referencia tiene que ser parte del grupo');
@@ -190,17 +211,13 @@ const SGA_GruposSustitutos = (() => {
       db().run(`DELETE FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL`, [id]);
     });
 
-    db().run(
-      `DELETE FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL AND referencia_id != producto_id`,
-      [referenciaId]
-    );
-
-    miembros.filter(id => id !== referenciaId).forEach(id => {
+    miembros.forEach(id => {
       const activo = db().query(
-        `SELECT activo FROM producto_sustitutos WHERE producto_id = ? LIMIT 1`, [id]
+        `SELECT activo FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1`, [id]
       )[0]?.activo;
+      db().run(`DELETE FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL`, [id]);
       db().run(
-        `INSERT OR REPLACE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion)
+        `INSERT INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion)
          VALUES (?, ?, ?, ?, ?)`,
         [id, referenciaId, referenciaId, activo == null ? 1 : activo, ts]
       );
@@ -209,7 +226,7 @@ const SGA_GruposSustitutos = (() => {
     marcarPendientesSync([...involucrados, ...miembros, referenciaId]);
   }
 
-  return { referenciaRealDe, seguidoresDe, marcarPendientesSync, aplicarCambioReferencia, raizDe, corregirCadena, involucradosDe, definirGrupo };
+  return { referenciaRealDe, seguidoresDe, marcarPendientesSync, aplicarCambioReferencia, asegurarFilaPropia, raizDe, corregirCadena, involucradosDe, definirGrupo };
 })();
 
 window.SGA_GruposSustitutos = SGA_GruposSustitutos;
