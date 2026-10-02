@@ -972,7 +972,9 @@ const EditorProducto = (() => {
     } else {
       html += `
         <div class="ed-ref-panel" style="color:var(--color-text-secondary)">
-          Sin grupo de sustitutos asignado.
+          ${esReferencia
+            ? 'Este producto es la referencia de otros productos (no pertenece a ningún otro grupo).'
+            : 'Sin grupo de sustitutos asignado.'}
         </div>`;
     }
 
@@ -1041,21 +1043,25 @@ const EditorProducto = (() => {
         html += `<p class="ed-text-muted" style="margin-bottom:14px">No hay miembros en este grupo aún.</p>`;
       }
 
-      // Add member search
-      html += `
-        <div class="form-group">
-          <label style="font-size:13px;font-weight:600;margin-bottom:4px;display:block">Agregar miembro al grupo</label>
-          <div style="position:relative">
-            <input type="text" id="ed-sustituto-search" class="input-full"
-                   placeholder="🔍 Buscar por nombre o escanear código..." autocomplete="off">
-            <div id="ed-sustituto-dropdown" class="ed-search-dropdown" style="display:none"></div>
-          </div>
-          <small class="ed-text-muted">Escribí el nombre o escaneá un código (Enter para seleccionar)</small>
-        </div>`;
     }
 
+    // Add member search. Va siempre: si este producto no tiene grupo todavia (o es referencia
+    // "implicita" de otros), agregar un miembro lo arma con ESTE producto como referencia.
+    html += `
+      <div class="form-group">
+        <label style="font-size:13px;font-weight:600;margin-bottom:4px;display:block">${(referenciaId || esReferencia)
+          ? 'Agregar miembro al grupo'
+          : 'Agregar productos que apunten a este (queda como referencia del grupo)'}</label>
+        <div style="position:relative">
+          <input type="text" id="ed-sustituto-search" class="input-full"
+                 placeholder="🔍 Buscar por nombre o escanear código..." autocomplete="off">
+          <div id="ed-sustituto-dropdown" class="ed-search-dropdown" style="display:none"></div>
+        </div>
+        <small class="ed-text-muted">Escribí el nombre o escaneá un código (Enter para seleccionar)</small>
+      </div>`;
+
     // If this product IS the referencia for other products, show those members
-    if (esReferencia) {
+    if (esReferencia && referenciaId !== state.productoId) {
       const miembros = window.SGA_DB.query(`
         SELECT ps.producto_id, ps.activo, p.nombre,
           cb.codigo AS codigo_barras,
@@ -1311,21 +1317,34 @@ const EditorProducto = (() => {
   };
 
   // Add a new product to the current group (or bootstrap the group with this product as reference).
+  // Escribe por GruposSustitutos.aplicarCambioReferencia (resuelve la cadena en las dos
+  // direcciones). Si el producto elegido ya pertenece a OTRO grupo, o es referencia de otros,
+  // se avisa a quienes arrastra antes de moverlos.
   const addMiembroGrupo = (miembroId, referenciaId) => {
     if (!miembroId) return;
-    const now   = window.SGA_Utils.formatISODate(new Date());
     const refId = referenciaId || state.productoId;
-    // Ensure this product is in the group
-    window.SGA_DB.run(
-      'INSERT OR REPLACE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion) VALUES (?, ?, ?, 1, ?)',
-      [state.productoId, refId, refId, now]
-    );
-    // Add the new member
-    window.SGA_DB.run(
-      'INSERT OR REPLACE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion) VALUES (?, ?, ?, 1, ?)',
-      [miembroId, refId, refId, now]
-    );
-    GruposSustitutos.marcarPendientesSync([state.productoId, miembroId, refId]);
+    if (miembroId === refId) return;
+
+    const hoy = GruposSustitutos.referenciaRealDe(miembroId);
+    if (hoy === refId) { showToast('Ese producto ya es parte del grupo'); return; }
+    if (hoy) {
+      const grupoViejo = [hoy, ...GruposSustitutos.seguidoresDe(hoy).map(f => f.id)]
+        .filter(id => id !== miembroId);
+      const lista = grupoViejo.map(id => '• ' + nombreProducto(id)).join('\n');
+      const seguir = confirm(
+        `"${nombreProducto(miembroId)}" ya pertenece a otro grupo (referencia: "${nombreProducto(hoy)}").\n\n` +
+        (lista ? `Al agregarlo se mueven también al grupo de "${nombreProducto(refId)}":\n${lista}\n\n` : '') +
+        '¿Confirmás?'
+      );
+      if (!seguir) return;
+    }
+
+    // Si este producto todavia no tiene fila propia (referencia implicita o sin grupo), se la
+    // damos: queda como referencia del grupo que arranca.
+    if (refId === state.productoId) {
+      GruposSustitutos.aplicarCambioReferencia(state.productoId, refId);
+    }
+    GruposSustitutos.aplicarCambioReferencia(miembroId, refId);
     renderSustitutos();
     showToast('Miembro agregado al grupo');
   };
@@ -1379,12 +1398,10 @@ const EditorProducto = (() => {
     if (!q || q.length < 2) { dropdown.style.display = 'none'; return; }
 
     // Exclude products already in the group AND the current product
-    const existingIds = new Set(
-      window.SGA_DB.query(
-        'SELECT producto_id FROM producto_sustitutos WHERE referencia_id = (SELECT referencia_id FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1)',
-        [state.productoId]
-      ).map(r => r.producto_id)
-    );
+    const refGrupo = GruposSustitutos.referenciaRealDe(state.productoId);
+    const existingIds = new Set(refGrupo
+      ? [refGrupo, ...GruposSustitutos.seguidoresDe(refGrupo).map(f => f.id)]
+      : []);
     existingIds.add(state.productoId);
 
     const results = window.SGA_DB.query(`
@@ -1422,7 +1439,6 @@ const EditorProducto = (() => {
         const si = ge('ed-sustituto-search');
         if (si) si.value = '';
         dropdown.style.display = 'none';
-        sustHlIdx = -1;
       });
     });
   };
