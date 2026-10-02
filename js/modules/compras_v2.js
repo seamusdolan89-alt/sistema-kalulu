@@ -2886,11 +2886,32 @@ const ComprasV2 = (() => {
     });
     ge('cv2-sust-btn-confirm').addEventListener('click', () => {
       const refId = selRef.value;
+      const refNombre = todos.find(p => p.id === refId)?.nombre || '';
       // aplicarCambioReferencia(prodId, nuevaRef) repunta TODO el grupo previo
       // de prodId hacia nuevaRef -- por eso se llama una vez por cada
-      // involucrado que NO quedó de referencia.
+      // involucrado que NO quedó de referencia. Pero si ESE involucrado ya
+      // era seguidor SUELTO de OTRA referencia vieja (no la elegida, no él
+      // mismo), migrarlo a él solo no arrastra a esa referencia vieja (ver
+      // test_compras_revision_sustituto_corrige_cadenas.py) -- el dueño no
+      // tiene por qué saber de memoria a quién apunta cada producto, así que
+      // se le pregunta acá, mostrándole el nombre (pedido del usuario, 2/10/2026).
       todos.filter(p => p.id !== refId).forEach(p => {
-        GruposSustitutos.aplicarCambioReferencia(p.id, refId);
+        const oldRef = GruposSustitutos.referenciaRealDe(p.id);
+        let yaCubierto = false;
+        if (oldRef && oldRef !== p.id && oldRef !== refId) {
+          const oldRefNombre = db().query('SELECT nombre FROM productos WHERE id=?', [oldRef])[0]?.nombre || oldRef;
+          const arrastrar = confirm(
+            `${p.nombre} hoy apunta a ${oldRefNombre}.\n\n` +
+            `¿Querés que ${oldRefNombre} (y todo su grupo) también se una a ${refNombre}?`
+          );
+          if (arrastrar) {
+            GruposSustitutos.aplicarCambioReferencia(oldRef, refId);
+            yaCubierto = true; // ese sweep ya movió a p junto con todo el grupo viejo
+          }
+        }
+        if (!yaCubierto) {
+          GruposSustitutos.aplicarCambioReferencia(p.id, refId);
+        }
       });
       ge('cv2-sust-overlay').style.display = 'none';
       window.SGA_Utils.showNotification(
