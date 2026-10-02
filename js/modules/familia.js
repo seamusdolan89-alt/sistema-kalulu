@@ -340,6 +340,27 @@ const SGA_Familia = (() => {
 
     document.body.appendChild(overlay);
 
+    // Escape cierra ESTE modal, no lo que esté atrás (pedido del usuario,
+    // 2/10/2026: "el teclado debe servir para lo que se ve más al frente").
+    // Capture phase + stopPropagation: este wizard se abre desde tres
+    // módulos distintos (compras_v2.js, operaciones_stock.js,
+    // editor-producto.js), cada uno con su propio listener de teclado en
+    // document -- en vez de coordinar con los tres, un listener en fase de
+    // captura siempre corre ANTES que cualquiera de ellos (que están en fase
+    // de burbujeo), así que alcanza con pararlo acá, una sola vez.
+    const onKeydown = (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      cerrar();
+    };
+    document.addEventListener('keydown', onKeydown, true);
+    function cerrar() {
+      document.removeEventListener('keydown', onKeydown, true);
+      overlay.remove();
+      done();
+    }
+
     // ── Helpers ──
     function getMiembroData(mid) {
       return miembros.find(m => m.id === mid);
@@ -441,14 +462,10 @@ const SGA_Familia = (() => {
           try { sincRow(tr); } catch (e) { /* skip */ }
         }
       });
-      overlay.remove();
-      done();
+      cerrar();
     });
 
-    overlay.querySelector('.cv2-her-btn-cancel')?.addEventListener('click', () => {
-      overlay.remove();
-      done();
-    });
+    overlay.querySelector('.cv2-her-btn-cancel')?.addEventListener('click', cerrar);
   }
 
   return { showHerenciaModal, tieneFamilia, tieneHijos, ensureCss };

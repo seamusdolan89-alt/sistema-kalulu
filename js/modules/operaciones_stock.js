@@ -700,7 +700,12 @@ const OperacionesStock = (() => {
         const markupFijo = parseFloat(inp.dataset.markup);
         const costoLinea = parseFloat(inp.dataset.costo) || 0;
         if (!isNaN(markupFijo) && costoLinea > 0) {
-          const pvEsperado = Math.round(costoLinea * (1 + markupFijo / 100) * 100) / 100;
+          // Redondeo a múltiplo de 10 (pedido del usuario, 2/10/2026): sin
+          // esto, un precio tipeado ya redondeado (ej. 260) podía no coincidir
+          // con el valor exacto que da la fórmula (ej. 259,87) y preguntar de
+          // más -- el piso de comparación tiene que ser el mismo que el que
+          // de verdad se aplica solo (aplicarMarkupFijo en compras_v2.js).
+          const pvEsperado = window.SGA_Utils.roundTo10(costoLinea * (1 + markupFijo / 100));
           if (Math.abs(nuevoPrecio - pvEsperado) > 0.01) {
             const actualizarDefault = confirm(
               `Este precio (${fmt$(nuevoPrecio)}) no coincide con el markup predeterminado de ` +

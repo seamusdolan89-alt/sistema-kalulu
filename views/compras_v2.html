@@ -402,6 +402,11 @@
     font-weight: 600; font-size: 15px; flex-shrink: 0;
   }
   .cv2-overlay-close { background: none; border: none; font-size: 20px; color: #8090a0; cursor: pointer; }
+  /* Asociar sustituto / Asignar madre: la caja de info (quién ya pertenece a
+     qué grupo) puede crecer bastante con varios hermanos/hijos -- sin esto
+     se cortaba contra el max-height:80vh de .cv2-overlay-box sin aviso ni
+     scroll (pedido del usuario, 2/10/2026). */
+  .cv2-overlay-body { padding: 16px 20px; overflow-y: auto; flex: 1; min-height: 0; }
   #cv2-pausadas-list { overflow-y: auto; flex: 1; }
   .cv2-pausada-item {
     display: flex; align-items: center; justify-content: space-between;
@@ -1663,7 +1668,7 @@
       <span>Asociar sustituto — <span id="cv2-sust-prod-nombre"></span></span>
       <button class="cv2-overlay-close" id="cv2-sust-close" aria-label="Cerrar" title="Cerrar">×</button>
     </div>
-    <div style="padding:16px 20px">
+    <div class="cv2-overlay-body">
       <div id="cv2-sust-info"></div>
       <div id="cv2-sust-search-wrap">
         <input class="cv2-pm-input" id="cv2-sust-search" type="text"
@@ -1682,7 +1687,7 @@
       <span>Asignar madre — <span id="cv2-madre-prod-nombre"></span></span>
       <button class="cv2-overlay-close" id="cv2-madre-close" aria-label="Cerrar" title="Cerrar">×</button>
     </div>
-    <div style="padding:16px 20px">
+    <div class="cv2-overlay-body">
       <div id="cv2-madre-info"></div>
       <div id="cv2-madre-search-wrap">
         <input class="cv2-pm-input" id="cv2-madre-search" type="text"

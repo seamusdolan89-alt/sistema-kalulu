@@ -78,12 +78,25 @@
 
   /**
    * Parse currency string to number
-   * 
+   *
    * @param {string} str
    * @returns {number}
    */
   function parseCurrency(str) {
     return parseFloat(str.replace(/[^\d.-]/g, ''));
+  }
+
+  /**
+   * Redondea un precio al múltiplo de 10 más cercano -- el dueño nunca carga
+   * precios de venta que no sean múltiplos de 10 (pedido explícito, 2/10/2026),
+   * así que cualquier precio CALCULADO (markup fijo, sugerencia post-compra,
+   * etc.) tiene que respetar la misma regla antes de mostrarse/guardarse.
+   *
+   * @param {number} value
+   * @returns {number}
+   */
+  function roundTo10(value) {
+    return Math.round((parseFloat(value) || 0) / 10) * 10;
   }
 
   /**
@@ -301,6 +314,7 @@
     formatCurrency,
     formatNumber,
     parseCurrency,
+    roundTo10,
     isValidEmail,
     isValidCUIT,
     debounce,
