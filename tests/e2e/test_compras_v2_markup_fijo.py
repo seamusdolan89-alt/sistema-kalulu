@@ -278,8 +278,8 @@ def main():
         assert fila_b.locator(".cv2-post-badge-markup").count() == 1, "Producto B no muestra el badge de markup fijo"
         prod_b = q(page, "SELECT id FROM productos WHERE nombre='Producto Markup B'")[0]
         row_b0 = q(page, "SELECT precio_venta, markup_fijo FROM productos WHERE id=?", [prod_b["id"]])[0]
-        # 120 costo x 1.30 = 156
-        assert float(row_b0["precio_venta"]) == 156.0, f"Precio auto tras el primer cambio de costo: {row_b0}"
+        # 120 costo x 1.30 = 156, redondeado a multiplo de 10 (2/10/2026) -> 160
+        assert float(row_b0["precio_venta"]) == 160.0, f"Precio auto tras el primer cambio de costo: {row_b0}"
         assert float(row_b0["markup_fijo"]) == 30.0
 
         fila_b.locator(".cv2-post-editar-aldia-btn").click()
@@ -305,9 +305,10 @@ def main():
         page.wait_for_timeout(300)
 
         row_b2 = q(page, "SELECT costo, precio_venta, markup_fijo FROM productos WHERE id=?", [prod_b["id"]])[0]
-        # 150 x 1.30 = 195 -- NO 999, y NO una variación calculada sobre el 999 puntual.
-        assert float(row_b2["precio_venta"]) == 195.0, (
-            f"BUG: la siguiente compra debería volver a aplicar el markup predeterminado (30% de 150 = 195), "
+        # 150 x 1.30 = 195, redondeado a multiplo de 10 -> 200 -- NO 999, y NO una
+        # variación calculada sobre el 999 puntual.
+        assert float(row_b2["precio_venta"]) == 200.0, (
+            f"BUG: la siguiente compra debería volver a aplicar el markup predeterminado (30% de 150 ≈ 200 redondeado), "
             f"ignorando el precio puntual de la vez anterior: {row_b2}"
         )
         print(f"OK - el precio puntual no persiste: la siguiente compra reaplica el markup de siempre: {row_b2}")

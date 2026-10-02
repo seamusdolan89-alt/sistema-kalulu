@@ -130,15 +130,24 @@ def main():
         # idx 2 = Madre Existente Sprite Light (ya es madre de 1 producto)
         # idx 3 = Producto Suelto Sin Familia (sin nada)
 
-        print("--- Sustituto: producto YA en un grupo -> muestra referencia + seguidores ---")
+        print("--- Sustituto: producto YA en un grupo -> muestra referencia + seguidores (como lista) ---")
         abrir_familia_menu(page, 0, "sust")
         assert page.locator("#cv2-sust-overlay").is_visible(), "No se abrio el overlay de sustituto"
         info_sust = page.locator("#cv2-sust-info").inner_text()
         assert "Referencia Existente Sprite" in info_sust, f"No muestra la referencia del grupo: {info_sust!r}"
         assert "Seguidor Existente Sprite" in info_sust, f"No lista al propio producto entre los que apuntan: {info_sust!r}"
+        assert page.locator("#cv2-sust-info li").count() == 1, "Los que apuntan deberían listarse como <li>, no como texto corrido"
         page.screenshot(path=os.path.join(SCREENSHOT_DIR, "revision_info_sust_con_grupo.png"))
-        page.locator("#cv2-sust-close").click()
+
+        print("--- ESC cierra ESTE modal, no la pantalla de Revisión de atrás ---")
+        page.keyboard.press("Escape")
         page.wait_for_timeout(200)
+        assert not page.locator("#cv2-sust-overlay").is_visible(), (
+            "BUG: Escape debería haber cerrado el modal de sustituto"
+        )
+        assert page.locator("#cv2-review-overlay").is_visible(), (
+            "BUG: Escape cerró/afectó la pantalla de Revisión de atrás en vez de solo el modal de encima"
+        )
 
         print("--- Sustituto: producto SIN grupo -> 'no pertenece a ningun grupo' ---")
         abrir_familia_menu(page, 3, "sust")
@@ -147,15 +156,20 @@ def main():
         page.locator("#cv2-sust-close").click()
         page.wait_for_timeout(200)
 
-        print("--- Madre: producto YA es hija -> muestra madre + hermanos ---")
+        print("--- Madre: producto YA es hija -> muestra madre + hermanos (como lista) ---")
         abrir_familia_menu(page, 1, "madre")
         assert page.locator("#cv2-madre-overlay").is_visible(), "No se abrio el overlay de madre"
         info_madre_hija = page.locator("#cv2-madre-info").inner_text()
         assert "Madre Existente Fanta" in info_madre_hija, f"No muestra la madre actual: {info_madre_hija!r}"
         assert "Hija Existente Fanta Dos" in info_madre_hija, f"No lista al hermano: {info_madre_hija!r}"
+        assert page.locator("#cv2-madre-info li").count() == 1, "Los hermanos deberían listarse como <li>, no como texto corrido"
         page.screenshot(path=os.path.join(SCREENSHOT_DIR, "revision_info_madre_hija.png"))
-        page.locator("#cv2-madre-close").click()
+
+        print("--- ESC tambien cierra el modal de madre, no la Revisión de atrás ---")
+        page.keyboard.press("Escape")
         page.wait_for_timeout(200)
+        assert not page.locator("#cv2-madre-overlay").is_visible(), "BUG: Escape debería haber cerrado el modal de madre"
+        assert page.locator("#cv2-review-overlay").is_visible(), "BUG: Escape afectó la Revisión de atrás"
 
         print("--- Madre: producto YA ES madre -> muestra hijos + aviso ---")
         abrir_familia_menu(page, 2, "madre")

@@ -281,7 +281,7 @@ const ComprasV2 = (() => {
   function aplicarMarkupFijo(item, costoNuevo, ts) {
     const row = db().query('SELECT markup_fijo, precio_venta FROM productos WHERE id=?', [item.productoId])[0];
     if (row?.markup_fijo == null) return;
-    const nuevoPrecio = Math.round(costoNuevo * (1 + row.markup_fijo / 100) * 100) / 100;
+    const nuevoPrecio = window.SGA_Utils.roundTo10(costoNuevo * (1 + row.markup_fijo / 100));
     db().run(
       `UPDATE productos SET precio_venta=?, ultima_modificacion_precio=?, sync_status='pending', updated_at=? WHERE id=?`,
       [nuevoPrecio, ts, ts, item.productoId]
@@ -2731,7 +2731,8 @@ const ComprasV2 = (() => {
     info.innerHTML = `
       <div style="margin:0 0 14px;font-size:12px;color:#e65100;background:#fff3e0;border:1px solid #ffcc80;border-radius:6px;padding:8px 12px">
         <strong>Ya pertenece a un grupo de sustitutos.</strong> Producto de referencia: <strong>${esc(refNombre)}</strong>${esReferencia ? ' (este mismo producto)' : ''}.
-        ${seguidores.length ? `<div style="margin-top:6px">Le apuntan: ${seguidores.map(s => esc(s.nombre)).join(', ')}</div>` : ''}
+        ${seguidores.length ? `<div style="margin-top:6px">Le apuntan:</div>
+          <ul style="margin:4px 0 0;padding-left:18px">${seguidores.map(s => `<li>${esc(s.nombre)}</li>`).join('')}</ul>` : ''}
       </div>`;
   }
 
@@ -2858,7 +2859,8 @@ const ComprasV2 = (() => {
       info.innerHTML = `
         <div style="margin:0 0 14px;font-size:12px;color:#e65100;background:#fff3e0;border:1px solid #ffcc80;border-radius:6px;padding:8px 12px">
           <strong>Ya pertenece a una familia.</strong> Madre: <strong>${esc(madre?.nombre || '—')}</strong>.
-          ${hermanos.length ? `<div style="margin-top:6px">Hermanos: ${hermanos.map(h => esc(h.nombre)).join(', ')}</div>` : ''}
+          ${hermanos.length ? `<div style="margin-top:6px">Hermanos:</div>
+            <ul style="margin:4px 0 0;padding-left:18px">${hermanos.map(h => `<li>${esc(h.nombre)}</li>`).join('')}</ul>` : ''}
         </div>`;
       return;
     }
@@ -2867,7 +2869,8 @@ const ComprasV2 = (() => {
       info.innerHTML = `
         <div style="margin:0 0 14px;font-size:12px;color:#e65100;background:#fff3e0;border:1px solid #ffcc80;border-radius:6px;padding:8px 12px">
           <strong>Este producto YA ES madre</strong> de ${hijos.length} producto${hijos.length === 1 ? '' : 's'}.
-          ${hijos.length ? `<div style="margin-top:6px">Hijos: ${hijos.map(h => esc(h.nombre)).join(', ')}</div>` : ''}
+          ${hijos.length ? `<div style="margin-top:6px">Hijos:</div>
+            <ul style="margin:4px 0 0;padding-left:18px">${hijos.map(h => `<li>${esc(h.nombre)}</li>`).join('')}</ul>` : ''}
           <div style="margin-top:6px">Asignarle una madre a este producto no reasigna a sus propios hijos — quedan apuntando a él, que pasaría a tener madre también.</div>
         </div>`;
       return;
@@ -3980,9 +3983,13 @@ const ComprasV2 = (() => {
       const varPct    = costoAnt > 0.001
         ? ((costoNvo / costoAnt) - 1)
         : (costoNvo > 0 ? 1 : 0);
+      // Redondeo a múltiplo de 10 (pedido del usuario, 2/10/2026): el dueño
+      // nunca carga un precio de venta que no sea múltiplo de 10 -- aplica
+      // tanto al recalculo de markup fijo (arriba) como a la sugerencia
+      // normal de acá, para no sugerir algo que igual va a tener que redondear.
       const pvSugerido = tieneMarkup
         ? it.markupPvNuevo
-        : (pvActual > 0 ? pvActual * (1 + varPct) : costoNvo * 1.3);
+        : window.SGA_Utils.roundTo10(pvActual > 0 ? pvActual * (1 + varPct) : costoNvo * 1.3);
       return { ...it, costoAnt, costoNvo, pvActual, cantUds, varPct, pvSugerido };
     });
 
@@ -4892,6 +4899,23 @@ const ComprasV2 = (() => {
       const active = document.activeElement;
       const tag    = active?.tagName;
       const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+
+      // Con el modal rápido de sustituto/madre abierto, el teclado es de ESE
+      // modal -- antes Escape se filtraba hasta acá y ejecutaba una acción de
+      // la pantalla de atrás (ej. "volver" la búsqueda de Revisión) mientras
+      // el modal seguía abierto encima (pedido del usuario, 2/10/2026: "el
+      // teclado debe servir para lo que se ve más al frente").
+      const sustOverlay  = ge('cv2-sust-overlay');
+      const madreOverlay = ge('cv2-madre-overlay');
+      if ((sustOverlay && sustOverlay.style.display !== 'none')
+          || (madreOverlay && madreOverlay.style.display !== 'none')) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          if (sustOverlay)  sustOverlay.style.display  = 'none';
+          if (madreOverlay) madreOverlay.style.display = 'none';
+        }
+        return;
+      }
 
       if (e.key === 'F10') {
         e.preventDefault();
