@@ -2746,9 +2746,49 @@ const ComprasV2 = (() => {
     ge('cv2-sust-results').innerHTML = '';
     ge('cv2-sust-search-wrap').style.display = '';
     ge('cv2-sust-confirm').style.display = 'none';
+    sustMarcados.clear();
+    pintarBarraMarcadosSust();
     overlay.style.display = 'flex';
     sustKbNav?.reset();
     setTimeout(() => ge('cv2-sust-search')?.focus(), 60);
+  }
+
+  function pintarBarraMarcadosSust() {
+    const bar = ge('cv2-sust-batch-bar');
+    if (!bar) return;
+    bar.style.display = sustMarcados.size ? 'flex' : 'none';
+    if (sustMarcados.size) {
+      ge('cv2-sust-batch-count').textContent =
+        `${sustMarcados.size} marcado${sustMarcados.size === 1 ? '' : 's'}`;
+    }
+  }
+
+  // Toggle puro: marca/desmarca sin avanzar -- lo usan el checkbox de cada
+  // fila y la barra espaciadora (Buscador.attachDropdownKeyboard onSpace).
+  function toggleMarcadoSust(id, nombre) {
+    if (sustMarcados.has(id)) sustMarcados.delete(id);
+    else sustMarcados.set(id, nombre);
+    const row = ge('cv2-sust-results')?.querySelector(`[data-sust-elegir="${CSS.escape(id)}"]`);
+    if (row) {
+      row.classList.toggle('cv2-dd-item-marcado', sustMarcados.has(id));
+      const chk = row.querySelector('[data-sust-marcar]');
+      if (chk) chk.textContent = sustMarcados.has(id) ? '☑' : '☐';
+    }
+    pintarBarraMarcadosSust();
+  }
+
+  // Clickear la fila (no el checkbox) siempre AVANZA: asegura que ese
+  // producto esté marcado (nunca lo desmarca) y pasa al paso de elegir
+  // referencia con todo lo marcado hasta ahora + este.
+  function elegirYAvanzarSust(id, nombre, productoId, productoNombre) {
+    if (!sustMarcados.has(id)) sustMarcados.set(id, nombre);
+    avanzarAConfirmSust(productoId, productoNombre);
+  }
+
+  function avanzarAConfirmSust(productoId, productoNombre) {
+    if (!sustMarcados.size) return;
+    mostrarConfirmSustQuick(productoId, productoNombre,
+      Array.from(sustMarcados, ([id, nombre]) => ({ id, nombre })));
   }
 
   function buscarSustQuick(q, productoId, productoNombre) {
@@ -2758,26 +2798,45 @@ const ComprasV2 = (() => {
     if (!texto) { results.innerHTML = ''; return; }
     const res = searchProductos(texto).filter(p => p.id !== productoId);
     results.innerHTML = res.length
-      ? res.map(p => `
-          <div class="cv2-dd-item" data-sust-elegir="${esc(p.id)}" data-sust-nombre="${esc(p.nombre)}">
-            <span class="cv2-dd-nombre">${esc(p.nombre)}</span>
-            <span class="cv2-dd-meta">${esc(p.barcode || '')}</span>
-          </div>`).join('')
+      ? res.map(p => {
+          const marcado = sustMarcados.has(p.id);
+          // Ya pertenece a ALGÚN grupo (como referencia o como seguidor) --
+          // pedido del usuario (2/10/2026) para ver de un vistazo, antes de
+          // elegir, si un candidato ya está agrupado en otro lado.
+          const yaAgrupado = GruposSustitutos.referenciaRealDe(p.id) != null;
+          return `
+            <div class="cv2-dd-item${marcado ? ' cv2-dd-item-marcado' : ''}" data-sust-elegir="${esc(p.id)}" data-sust-nombre="${esc(p.nombre)}">
+              <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1">
+                <button type="button" class="cv2-dd-marcar-btn" data-sust-marcar="${esc(p.id)}" title="Marcar para agregar junto con otros (barra espaciadora)">${marcado ? '☑' : '☐'}</button>
+                <span class="cv2-dd-nombre">${esc(p.nombre)}</span>
+                ${yaAgrupado ? `<span class="cv2-dd-badge-grupo" title="Ya pertenece a un grupo de sustitutos">en grupo</span>` : ''}
+              </div>
+              <span class="cv2-dd-meta">${esc(p.barcode || '')}</span>
+            </div>`;
+        }).join('')
       : '<p style="color:#8090a0;padding:8px 0">Sin resultados.</p>';
 
+    results.querySelectorAll('[data-sust-marcar]').forEach(btn =>
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        toggleMarcadoSust(btn.dataset.sustMarcar, btn.closest('[data-sust-elegir]').dataset.sustNombre);
+      })
+    );
     results.querySelectorAll('[data-sust-elegir]').forEach(el =>
       el.addEventListener('click', () => {
-        mostrarConfirmSustQuick(productoId, productoNombre, el.dataset.sustElegir, el.dataset.sustNombre);
+        elegirYAvanzarSust(el.dataset.sustElegir, el.dataset.sustNombre, productoId, productoNombre);
       })
     );
   }
 
-  // Un paso más antes de aplicar: dejar elegir cuál de los dos productos
-  // queda como "producto de referencia" (el que se le pide al proveedor) --
-  // sin esto no quedaba claro si seguía siendo el que ya estaba en la orden
-  // o pasaba a ser el recién buscado. Mismo concepto que el overlay de
-  // sustituto de ordenes.js (openSustitutoOverlay), adaptado a 2 opciones.
-  function mostrarConfirmSustQuick(productoId, productoNombre, elegidoId, elegidoNombre) {
+  // Un paso más antes de aplicar: dejar elegir cuál de TODOS los productos
+  // involucrados (la fila original + cada marcado) queda como "producto de
+  // referencia" (el que se le pide al proveedor) -- sin esto no quedaba
+  // claro si seguía siendo el que ya estaba en la orden o pasaba a ser el
+  // recién buscado. Mismo concepto que el overlay de sustituto de
+  // ordenes.js (openSustitutoOverlay), extendido a N candidatos (2/10/2026,
+  // antes eran siempre exactamente 2).
+  function mostrarConfirmSustQuick(productoId, productoNombre, elegidos) {
     ge('cv2-sust-search-wrap').style.display = 'none';
     const confirmDiv = ge('cv2-sust-confirm');
     confirmDiv.style.display = '';
@@ -2787,19 +2846,19 @@ const ComprasV2 = (() => {
       ? db().query('SELECT nombre FROM productos WHERE id=?', [refActual])[0]?.nombre
       : null;
 
+    const todos = [{ id: productoId, nombre: productoNombre }, ...elegidos];
     // Si esta fila ya es la referencia de su propio grupo, se mantiene por
-    // defecto; si no, el producto recién encontrado pasa a ser lo que se pide
-    // (es el caso normal: se buscó porque ES el producto real a pedir).
-    const porDefecto = refActual === productoId ? productoId : elegidoId;
+    // defecto; si no, el primer marcado pasa a ser lo que se pide (caso
+    // normal: se buscó porque ES el producto real a pedir).
+    const porDefecto = refActual === productoId ? productoId : elegidos[0].id;
 
     confirmDiv.innerHTML = `
       ${yaAgrupado ? `<p style="margin:0 0 10px;font-size:12px;color:#e65100;background:#fff3e0;border:1px solid #ffcc80;border-radius:6px;padding:8px 12px">
           ⚠ ${esc(productoNombre)} ya pertenece a un grupo cuya referencia es <strong>${esc(yaAgrupado)}</strong>.
         </p>` : ''}
-      <p style="margin:0 0 10px;font-size:14px">Producto de referencia <span style="font-weight:400;color:#8090a0">(el que se le va a pedir al proveedor)</span>:</p>
+      <p style="margin:0 0 10px;font-size:14px">Producto de referencia <span style="font-weight:400;color:#8090a0">(el que se le va a pedir al proveedor${todos.length > 2 ? `, de los ${todos.length} de este grupo` : ''})</span>:</p>
       <select id="cv2-sust-ref" class="cv2-pm-input" style="margin-bottom:10px">
-        <option value="${esc(productoId)}"${porDefecto === productoId ? ' selected' : ''}>${esc(productoNombre)}</option>
-        <option value="${esc(elegidoId)}"${porDefecto === elegidoId ? ' selected' : ''}>${esc(elegidoNombre)}</option>
+        ${todos.map(p => `<option value="${esc(p.id)}"${porDefecto === p.id ? ' selected' : ''}>${esc(p.nombre)}</option>`).join('')}
       </select>
       <p id="cv2-sust-aviso" style="margin:0 0 18px;font-size:12px;color:#607080"></p>
       <div style="display:flex;gap:8px">
@@ -2811,9 +2870,10 @@ const ComprasV2 = (() => {
     const selRef = ge('cv2-sust-ref');
     const aviso  = ge('cv2-sust-aviso');
     const pintarAviso = () => {
-      aviso.textContent = selRef.value === productoId
-        ? `Se le sigue pidiendo a ${productoNombre}. ${elegidoNombre} queda como sustituto y su stock se suma al del grupo.`
-        : `De ahora en más se le pide a ${elegidoNombre}. ${productoNombre} queda como sustituto y su stock se suma al del grupo.`;
+      const refId = selRef.value;
+      const refNombre = todos.find(p => p.id === refId)?.nombre || '';
+      const otros = todos.filter(p => p.id !== refId).map(p => p.nombre).join(', ');
+      aviso.textContent = `Se le pide a ${refNombre}. ${otros} queda${todos.length - 1 === 1 ? '' : 'n'} como sustituto${todos.length - 1 === 1 ? '' : 's'} y su stock se suma al del grupo.`;
     };
     pintarAviso();
     selRef.addEventListener('change', pintarAviso);
@@ -2827,15 +2887,15 @@ const ComprasV2 = (() => {
     ge('cv2-sust-btn-confirm').addEventListener('click', () => {
       const refId = selRef.value;
       // aplicarCambioReferencia(prodId, nuevaRef) repunta TODO el grupo previo
-      // de prodId hacia nuevaRef -- por eso siempre se llama con el que
-      // "pierde" la referencia como prodId, sea la fila o el recién elegido.
-      if (refId === productoId) {
-        GruposSustitutos.aplicarCambioReferencia(elegidoId, productoId);
-      } else {
-        GruposSustitutos.aplicarCambioReferencia(productoId, elegidoId);
-      }
+      // de prodId hacia nuevaRef -- por eso se llama una vez por cada
+      // involucrado que NO quedó de referencia.
+      todos.filter(p => p.id !== refId).forEach(p => {
+        GruposSustitutos.aplicarCambioReferencia(p.id, refId);
+      });
       ge('cv2-sust-overlay').style.display = 'none';
-      window.SGA_Utils.showNotification('Sustituto asignado', 'success');
+      window.SGA_Utils.showNotification(
+        todos.length > 2 ? 'Grupo de sustitutos actualizado' : 'Sustituto asignado', 'success'
+      );
     });
   }
 
@@ -2881,47 +2941,102 @@ const ComprasV2 = (() => {
   function openMadreQuickModal(productoId, nombre) {
     const overlay = ge('cv2-madre-overlay');
     overlay.dataset.prodId = productoId;
+    overlay.dataset.prodNombre = nombre || '';
     ge('cv2-madre-prod-nombre').textContent = nombre || '';
     renderInfoMadreQuick(productoId);
     ge('cv2-madre-search').value = '';
     ge('cv2-madre-results').innerHTML = '';
     ge('cv2-madre-search-wrap').style.display = '';
     ge('cv2-madre-confirm').style.display = 'none';
+    madreMarcados.clear();
+    pintarBarraMarcadosMadre();
     overlay.style.display = 'flex';
     madreKbNav?.reset();
     setTimeout(() => ge('cv2-madre-search')?.focus(), 60);
   }
 
-  function buscarMadreQuick(q, productoId) {
+  function pintarBarraMarcadosMadre() {
+    const bar = ge('cv2-madre-batch-bar');
+    if (!bar) return;
+    bar.style.display = madreMarcados.size ? 'block' : 'none';
+    if (madreMarcados.size) {
+      ge('cv2-madre-batch-count').textContent =
+        `${madreMarcados.size} marcado${madreMarcados.size === 1 ? '' : 's'} — hacé click en cuál de los resultados va a ser la madre de todos`;
+    }
+  }
+
+  // Toggle puro (checkbox de cada fila / barra espaciadora): a diferencia de
+  // sustituto, acá marcar NUNCA designa madre -- solo arma la lista de
+  // "además, estos otros también van a ser hijos de la madre que elijas".
+  function toggleMarcadoMadre(id, nombre) {
+    if (madreMarcados.has(id)) madreMarcados.delete(id);
+    else madreMarcados.set(id, nombre);
+    const row = ge('cv2-madre-results')?.querySelector(`[data-madre-elegir="${CSS.escape(id)}"]`);
+    if (row) {
+      row.classList.toggle('cv2-dd-item-marcado', madreMarcados.has(id));
+      const chk = row.querySelector('[data-madre-marcar]');
+      if (chk) chk.textContent = madreMarcados.has(id) ? '☑' : '☐';
+    }
+    pintarBarraMarcadosMadre();
+  }
+
+  function buscarMadreQuick(q, productoId, productoNombre) {
     const results = ge('cv2-madre-results');
     const texto = q.trim();
     madreKbNav?.reset();
     if (!texto) { results.innerHTML = ''; return; }
     const res = searchProductos(texto).filter(p => p.id !== productoId);
     results.innerHTML = res.length
-      ? res.map(p => `
-          <div class="cv2-dd-item" data-madre-elegir="${esc(p.id)}" data-madre-nombre="${esc(p.nombre)}">
-            <span class="cv2-dd-nombre">${esc(p.nombre)}</span>
-            <span class="cv2-dd-meta">${esc(p.barcode || '')}</span>
-          </div>`).join('')
+      ? res.map(p => {
+          const marcado = madreMarcados.has(p.id);
+          // Ya pertenece a ALGUNA familia (es hija o ya es madre de otros) --
+          // pedido del usuario (2/10/2026), mismo concepto que en sustituto.
+          const fam = db().query('SELECT producto_madre_id, es_madre FROM productos WHERE id=?', [p.id])[0];
+          const yaEnFamilia = !!(fam?.producto_madre_id || fam?.es_madre);
+          return `
+            <div class="cv2-dd-item${marcado ? ' cv2-dd-item-marcado' : ''}" data-madre-elegir="${esc(p.id)}" data-madre-nombre="${esc(p.nombre)}">
+              <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1">
+                <button type="button" class="cv2-dd-marcar-btn" data-madre-marcar="${esc(p.id)}" title="Marcar como otro hijo de la madre que elijas (barra espaciadora)">${marcado ? '☑' : '☐'}</button>
+                <span class="cv2-dd-nombre">${esc(p.nombre)}</span>
+                ${yaEnFamilia ? `<span class="cv2-dd-badge-grupo" title="Ya pertenece a una familia">en familia</span>` : ''}
+              </div>
+              <span class="cv2-dd-meta">${esc(p.barcode || '')}</span>
+            </div>`;
+        }).join('')
       : '<p style="color:#8090a0;padding:8px 0">Sin resultados.</p>';
 
+    results.querySelectorAll('[data-madre-marcar]').forEach(btn =>
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        toggleMarcadoMadre(btn.dataset.madreMarcar, btn.closest('[data-madre-elegir]').dataset.madreNombre);
+      })
+    );
     results.querySelectorAll('[data-madre-elegir]').forEach(el =>
       el.addEventListener('click', () => {
-        mostrarConfirmMadreQuick(productoId, el.dataset.madreElegir, el.dataset.madreNombre);
+        // El que se clickea es SIEMPRE la madre -- si estaba marcado como
+        // candidato a hijo, se saca de ahí (no puede ser madre e hijo a la vez).
+        madreMarcados.delete(el.dataset.madreElegir);
+        mostrarConfirmMadreQuick(
+          productoId, productoNombre, el.dataset.madreElegir, el.dataset.madreNombre,
+          Array.from(madreMarcados, ([id, nombre]) => ({ id, nombre }))
+        );
       })
     );
   }
 
   // Mismo patrón que confirmAsignarMadre() en editor-producto.js: si la
   // elegida no es madre todavía, se convierte, y después se asigna
-  // producto_madre_id con las 2 banderas de herencia (default: ambas).
-  function mostrarConfirmMadreQuick(productoId, madreId, madreNombre) {
+  // producto_madre_id con las 2 banderas de herencia (default: ambas) a la
+  // fila original Y a cada hijo extra marcado (2/10/2026, antes era
+  // siempre un solo hijo).
+  function mostrarConfirmMadreQuick(productoId, productoNombre, madreId, madreNombre, hijosExtra) {
     ge('cv2-madre-search-wrap').style.display = 'none';
     const confirmDiv = ge('cv2-madre-confirm');
     confirmDiv.style.display = '';
+    const todosHijos = [{ id: productoId, nombre: productoNombre }, ...hijosExtra];
     confirmDiv.innerHTML = `
-      <p style="margin:0 0 14px;font-size:14px">Asignar <strong>${esc(madreNombre)}</strong> como madre de este producto.</p>
+      <p style="margin:0 0 10px;font-size:14px">Asignar <strong>${esc(madreNombre)}</strong> como madre de ${todosHijos.length === 1 ? 'este producto' : `estos ${todosHijos.length} productos`}${todosHijos.length > 1 ? ':' : '.'}</p>
+      ${todosHijos.length > 1 ? `<ul style="margin:0 0 14px;padding-left:18px;font-size:13px">${todosHijos.map(h => `<li>${esc(h.nombre)}</li>`).join('')}</ul>` : ''}
       <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px">
         <input type="checkbox" id="cv2-madre-hereda-costo" checked> Heredar costo de la madre
       </label>
@@ -2946,13 +3061,17 @@ const ComprasV2 = (() => {
       if (!yaEsMadre) {
         db().run("UPDATE productos SET es_madre=1, sync_status='pending', updated_at=? WHERE id=?", [ts, madreId]);
       }
-      db().run(
-        `UPDATE productos SET producto_madre_id=?, hereda_costo=?, hereda_precio=?, es_madre=0,
-           fecha_modificacion=?, sync_status='pending', updated_at=? WHERE id=?`,
-        [madreId, hc, hp, ts, ts, productoId]
-      );
+      todosHijos.forEach(h => {
+        db().run(
+          `UPDATE productos SET producto_madre_id=?, hereda_costo=?, hereda_precio=?, es_madre=0,
+             fecha_modificacion=?, sync_status='pending', updated_at=? WHERE id=?`,
+          [madreId, hc, hp, ts, ts, h.id]
+        );
+      });
       ge('cv2-madre-overlay').style.display = 'none';
-      window.SGA_Utils.showNotification('Madre asignada', 'success');
+      window.SGA_Utils.showNotification(
+        todosHijos.length > 1 ? `${todosHijos.length} productos asignados a la madre` : 'Madre asignada', 'success'
+      );
     });
   }
 
@@ -4893,6 +5012,14 @@ const ComprasV2 = (() => {
   // (reset()) en cada búsqueda nueva, ver buscarSustQuick/buscarMadreQuick.
   let sustKbNav  = null;
   let madreKbNav = null;
+  // Selección múltiple (pedido del usuario, 2/10/2026): marcar con espacio
+  // (o el checkbox) varios candidatos antes de aplicar el cambio a todos de
+  // una vez, en vez de repetir "Asociar sustituto"/"Asignar madre" uno por
+  // uno. Se reinicia cada vez que se abre el modal (openSustQuickModal /
+  // openMadreQuickModal) -- sobrevive a re-búsquedas dentro de la MISMA
+  // apertura para poder buscar en varias tandas e ir sumando candidatos.
+  let sustMarcados  = new Map(); // id -> nombre
+  let madreMarcados = new Map();
 
   function setupKeyboard() {
     _docKeydown = e => {
@@ -5500,6 +5627,11 @@ const ComprasV2 = (() => {
     });
     sustKbNav = Buscador.attachDropdownKeyboard(ge('cv2-sust-search'), {
       getItems: () => ge('cv2-sust-results')?.querySelectorAll('[data-sust-elegir]'),
+      onSpace: (el) => toggleMarcadoSust(el.dataset.sustElegir, el.dataset.sustNombre),
+    });
+    ge('cv2-sust-batch-btn')?.addEventListener('click', () => {
+      const overlay = ge('cv2-sust-overlay');
+      avanzarAConfirmSust(overlay.dataset.prodId, overlay.dataset.prodNombre);
     });
 
     ge('cv2-madre-close')?.addEventListener('click', () => { ge('cv2-madre-overlay').style.display = 'none'; });
@@ -5507,10 +5639,12 @@ const ComprasV2 = (() => {
       if (e.target === ge('cv2-madre-overlay')) ge('cv2-madre-overlay').style.display = 'none';
     });
     ge('cv2-madre-search')?.addEventListener('input', e => {
-      buscarMadreQuick(e.target.value, ge('cv2-madre-overlay').dataset.prodId);
+      const overlay = ge('cv2-madre-overlay');
+      buscarMadreQuick(e.target.value, overlay.dataset.prodId, overlay.dataset.prodNombre);
     });
     madreKbNav = Buscador.attachDropdownKeyboard(ge('cv2-madre-search'), {
       getItems: () => ge('cv2-madre-results')?.querySelectorAll('[data-madre-elegir]'),
+      onSpace: (el) => toggleMarcadoMadre(el.dataset.madreElegir, el.dataset.madreNombre),
     });
 
     ge('cv2-ajuste-close')?.addEventListener('click', () => { ge('cv2-ajuste-overlay').style.display = 'none'; });
