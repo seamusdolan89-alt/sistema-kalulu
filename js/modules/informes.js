@@ -2,6 +2,8 @@
  * informes.js — Reports Module
  */
 
+import GruposSustitutos from './grupos_sustitutos.js';
+
 const Informes = (() => {
   'use strict';
 
@@ -1453,7 +1455,7 @@ const Informes = (() => {
         grupos.set(r.ref_id, {
           ref_id: r.ref_id, ref_nombre: r.ref_nombre, ref_codigo: r.ref_codigo,
           miembros: [], stock_total: 0, anomalia: false,
-          ref_real_nombre: null, ref_real_codigo: null,
+          ref_real_nombre: null, ref_real_codigo: null, ref_real_id: null,
         });
       }
       const g = grupos.get(r.ref_id);
@@ -1461,6 +1463,7 @@ const Informes = (() => {
       g.stock_total += (r.miembro_stock || 0);
       if (r.ref_real_id && refRealMap[r.ref_real_id]) {
         g.anomalia = true;
+        g.ref_real_id = r.ref_real_id;
         g.ref_real_nombre = refRealMap[r.ref_real_id].nombre;
         g.ref_real_codigo = refRealMap[r.ref_real_id].codigo;
       }
@@ -1493,7 +1496,7 @@ const Informes = (() => {
           <table class="inf-table">
             <thead><tr>
               <th>Referencia</th><th>Código</th><th>Miembros</th>
-              <th class="num">Stock total</th><th>¿Problema?</th>
+              <th class="num">Stock total</th><th>¿Problema?</th><th></th>
             </tr></thead>
             <tbody>
               ${grupos.map(g => `
@@ -1505,6 +1508,12 @@ const Informes = (() => {
                   <td>${g.anomalia
                     ? `<span class="text-danger bold">Sí</span> — "${esc(g.ref_nombre)}" ya no es la referencia real: a su vez apunta a "${esc(g.ref_real_nombre)}". Correspondería que estos miembros formen parte del grupo de "${esc(g.ref_real_nombre)}".`
                     : '<span class="text-success">No</span>'}</td>
+                  <td>${g.anomalia
+                    ? `<div style="display:flex;flex-direction:column;gap:6px;min-width:150px">
+                         <button class="btn btn-sm btn-primary inf-btn-aceptar-sug" data-ref-id="${esc(g.ref_id)}" title="Pasa estos miembros al grupo de &quot;${esc(g.ref_real_nombre)}&quot;">✔ Aceptar sugerencia</button>
+                         <button class="btn btn-sm inf-btn-editar-grupo" data-ref-id="${esc(g.ref_id)}" title="Elegir qué productos quedan en el grupo y cuál es la referencia">✎ Editar grupo…</button>
+                       </div>`
+                    : ''}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -1519,6 +1528,145 @@ const Informes = (() => {
   function attachExportListeners() {
     ge('inf-btn-excel')?.addEventListener('click', exportExcel);
     ge('inf-btn-csv')?.addEventListener('click',   exportCSV);
+    document.querySelectorAll('.inf-btn-aceptar-sug').forEach(btn =>
+      btn.addEventListener('click', () => aceptarSugerenciaSustitutos(btn.dataset.refId)));
+    document.querySelectorAll('.inf-btn-editar-grupo').forEach(btn =>
+      btn.addEventListener('click', () => abrirEditorGrupoSustitutos(btn.dataset.refId)));
+  }
+
+  function refrescarReporteSustitutos() {
+    const resultsEl = ge('inf-results');
+    const scroll = resultsEl ? resultsEl.scrollTop : 0;
+    state.data = queryGruposSustitutos();
+    if (resultsEl) {
+      resultsEl.innerHTML = renderGruposSustitutos(state.data);
+      resultsEl.scrollTop = scroll;
+    }
+    attachExportListeners();
+  }
+
+  // "Editar grupo…": mismo concepto que el paso de confirmación de Compras (tildar qué productos
+  // quedan en el grupo y elegir cuál es la referencia), pero partiendo de los miembros actuales:
+  // lo destildado SALE del grupo. Todo se aplica junto con GruposSustitutos.definirGrupo.
+  function abrirEditorGrupoSustitutos(refId) {
+    if (!window.SGA_Permisos?.can('can_editar_productos')) {
+      alert('No tenés permiso para modificar grupos de sustitutos.');
+      return;
+    }
+    const ids = GruposSustitutos.involucradosDe(refId);
+    if (!ids.length) return;
+    const sugerida = GruposSustitutos.raizDe(refId);
+    const rows = window.SGA_DB.query(`
+      SELECT p.id, p.nombre, cb.codigo, COALESCE(st.cantidad, 0) AS stock
+      FROM productos p
+      LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
+      LEFT JOIN stock st ON st.producto_id = p.id AND st.sucursal_id = ?
+      WHERE p.id IN (${ids.map(() => '?').join(',')})
+      ORDER BY p.nombre COLLATE NOCASE
+    `, [state.sucursalId, ...ids]);
+    const nombreDe = id => rows.find(r => r.id === id)?.nombre || '—';
+
+    const overlay = document.createElement('div');
+    overlay.id = 'inf-sust-editor';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    overlay.innerHTML = `
+      <div role="dialog" aria-label="Editar grupo de sustitutos" style="background:#fff;border-radius:12px;max-width:640px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+        <div style="padding:16px 20px;border-bottom:1px solid #eee">
+          <div style="font-weight:700;font-size:1.05em">Editar grupo de sustitutos</div>
+          <div style="font-size:.85em;color:#667;margin-top:4px">Tildá los productos que forman el grupo y marcá cuál es la <strong>referencia</strong> (el que se pide al proveedor). Los destildados salen del grupo.</div>
+        </div>
+        <div style="padding:8px 20px;overflow-y:auto;flex:1">
+          ${rows.map(r => {
+            const hoy = GruposSustitutos.referenciaRealDe(r.id);
+            const nota = hoy && hoy !== r.id ? `hoy apunta a "${esc(nombreDe(hoy))}"` : (hoy === r.id ? 'hoy es referencia' : '');
+            return `<label style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f3f3f3;cursor:pointer">
+              <input type="checkbox" class="sg-miembro" value="${esc(r.id)}" checked>
+              <span style="flex:1;min-width:0">
+                <span style="font-weight:600">${esc(r.nombre)}</span>
+                <span style="display:block;font-size:.78em;color:#889">${esc(r.codigo || 'sin código')} · stock ${fmtNum(r.stock)}${nota ? ' · ' + nota : ''}</span>
+              </span>
+              <span style="display:flex;align-items:center;gap:4px;font-size:.82em;color:#445;white-space:nowrap">
+                <input type="radio" name="sg-ref" class="sg-ref" value="${esc(r.id)}" ${r.id === sugerida ? 'checked' : ''}> Referencia
+              </span>
+            </label>`;
+          }).join('')}
+        </div>
+        <div style="padding:12px 20px;border-top:1px solid #eee">
+          <div id="sg-aviso" style="font-size:.82em;color:#556;margin-bottom:10px"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn btn-sm" id="sg-cancelar">Cancelar</button>
+            <button class="btn btn-sm btn-primary" id="sg-confirmar">Confirmar</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    // El modal captura su propio teclado: Escape cierra solo esto, nunca la pantalla de atrás.
+    const onKey = e => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cerrar(); }
+    };
+    const cerrar = () => {
+      document.removeEventListener('keydown', onKey, true);
+      overlay.remove();
+    };
+    document.addEventListener('keydown', onKey, true);
+
+    const chks = () => [...overlay.querySelectorAll('.sg-miembro')];
+    const refSel = () => overlay.querySelector('.sg-ref:checked')?.value;
+    const pintar = () => {
+      const ref = refSel();
+      chks().forEach(c => { if (c.value === ref) { c.checked = true; c.disabled = true; } else c.disabled = false; });
+      const quedan = chks().filter(c => c.checked);
+      const salen = chks().filter(c => !c.checked);
+      overlay.querySelector('#sg-aviso').innerHTML =
+        `Quedan <strong>${quedan.length}</strong> en el grupo, referencia: <strong>${esc(nombreDe(ref))}</strong>.` +
+        (salen.length ? ` Salen del grupo: ${salen.map(c => esc(nombreDe(c.value))).join(', ')}.` : '') +
+        (quedan.length < 2 ? ' <span style="color:#c62828">Con un solo producto el grupo se disuelve.</span>' : '');
+    };
+    overlay.addEventListener('change', pintar);
+    pintar();
+
+    overlay.querySelector('#sg-cancelar').addEventListener('click', cerrar);
+    overlay.addEventListener('mousedown', e => { if (e.target === overlay) cerrar(); });
+    overlay.querySelector('#sg-confirmar').addEventListener('click', () => {
+      const referenciaId = refSel();
+      const miembros = chks().filter(c => c.checked).map(c => c.value);
+      if (miembros.length < 2 && !confirm('Quedaría un solo producto: el grupo se disuelve y todos quedan sueltos. ¿Seguir?')) return;
+      try {
+        GruposSustitutos.definirGrupo({ miembros, referenciaId, involucrados: ids });
+      } catch (e) {
+        alert('No se pudo aplicar el cambio: ' + e.message);
+        return;
+      }
+      cerrar();
+      window.SGA_Sync?.pushPending?.();
+      refrescarReporteSustitutos();
+    });
+    overlay.querySelector('.sg-ref:checked')?.focus();
+  }
+
+  // "Aceptar sugerencia" del reporte Grupos de Sustitutos: repunta los miembros del grupo roto a
+  // la referencia real (GruposSustitutos.corregirCadena) y vuelve a armar el reporte.
+  function aceptarSugerenciaSustitutos(refId) {
+    const g = (state.data || []).find(x => x.ref_id === refId);
+    if (!g) return;
+    if (!window.SGA_Permisos?.can('can_editar_productos')) {
+      alert('No tenés permiso para modificar grupos de sustitutos.');
+      return;
+    }
+    const nombres = g.miembros.map(m => '• ' + m.nombre).join('\n');
+    if (!confirm(
+      `Pasar al grupo de "${g.ref_real_nombre}":\n\n${nombres}\n\n` +
+      `Su referencia pasa de "${g.ref_nombre}" a "${g.ref_real_nombre}".`
+    )) return;
+    try {
+      GruposSustitutos.corregirCadena(refId);
+    } catch (e) {
+      alert('No se pudo aplicar el cambio: ' + e.message);
+      return;
+    }
+    window.SGA_Sync?.pushPending?.();
+    refrescarReporteSustitutos();
   }
 
   function buildExportRows() {

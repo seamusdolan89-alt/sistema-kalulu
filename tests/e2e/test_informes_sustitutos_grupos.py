@@ -138,6 +138,65 @@ def main():
         assert "No" in fila_real, f"El grupo de la referencia real no deberia marcar problema: {fila_real!r}"
         print("OK - fila de la referencia real no marca problema")
 
+        # ── Acciones para resolver el problema desde el reporte ──────────────────────────
+        def estado_db():
+            return page.evaluate("""() => Object.fromEntries(
+              window.SGA_DB.query(`SELECT producto_id, referencia_id FROM producto_sustitutos
+                                   WHERE producto_id LIKE 'sust-%' AND referencia_id IS NOT NULL`)
+                .map(r => [r.producto_id, r.referencia_id]))""")
+
+        def regenerar():
+            page.locator("#inf-btn-generar").click()
+            page.wait_for_timeout(400)
+
+        print("--- Editar grupo...: destildar al seguidor lo saca del grupo ---")
+        page.locator(".inf-btn-editar-grupo").click()
+        page.wait_for_timeout(300)
+        editor = page.locator("#inf-sust-editor")
+        assert editor.is_visible(), "No se abrio el editor del grupo"
+        assert editor.locator(".sg-miembro").count() == 3, "Deberian listarse los 3 involucrados"
+        ref_sel = editor.locator(".sg-ref:checked").get_attribute("value")
+        assert ref_sel == "sust-ref-real", f"La referencia sugerida deberia ser la real, es {ref_sel}"
+        assert editor.locator(".sg-miembro[value='sust-ref-real']").is_disabled(), "La referencia no se puede destildar"
+        editor.locator(".sg-miembro[value='sust-seguidor']").uncheck()
+        editor.locator("#sg-confirmar").click()
+        page.wait_for_timeout(500)
+        e1 = estado_db()
+        assert "sust-seguidor" not in e1, f"El seguidor deberia haber salido del grupo: {e1}"
+        assert e1.get("sust-intermed") == "sust-ref-real", f"El intermedio sigue en el grupo real: {e1}"
+        assert page.locator(".inf-btn-aceptar-sug").count() == 0, "Ya no deberia quedar el problema"
+        assert not page.locator("#inf-sust-editor").count(), "El editor deberia haberse cerrado"
+        print("OK")
+
+        print("--- Escape cierra solo el editor ---")
+        # rearmar una cadena rota nueva para volver a abrirlo
+        page.evaluate("""() => {
+          const now = new Date().toISOString();
+          window.SGA_DB.run(`INSERT INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion)
+                             VALUES ('sust-seguidor', 'sust-intermed', 'sust-intermed', 1, ?)`, [now]);
+        }""")
+        regenerar()
+        page.locator(".inf-btn-editar-grupo").click()
+        page.wait_for_timeout(200)
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(200)
+        assert not page.locator("#inf-sust-editor").count(), "Escape deberia cerrar el editor"
+        assert page.locator(".inf-btn-editar-grupo").count() == 1, "El reporte tiene que seguir ahi"
+        print("OK")
+
+        print("--- Aceptar sugerencia: repunta al seguidor a la referencia real ---")
+        btn = page.locator(".inf-btn-aceptar-sug")
+        assert btn.count() == 1, f"Deberia haber un boton 'Aceptar sugerencia' (uno por grupo con problema): {btn.count()}"
+        btn.click()
+        page.wait_for_timeout(500)
+        e2 = estado_db()
+        assert e2.get("sust-seguidor") == "sust-ref-real", f"El seguidor deberia apuntar a la referencia real: {e2}"
+        assert e2.get("sust-intermed") == "sust-ref-real", "El intermedio no debe cambiar de grupo"
+        assert page.locator(".inf-btn-aceptar-sug").count() == 0, "Despues de aceptar ya no deberia quedar el problema"
+        pend = page.evaluate("window.SGA_DB.query(\"SELECT sync_status FROM productos WHERE id='sust-seguidor'\")[0].sync_status")
+        assert pend in ("pending", "synced"), pend
+        print("OK")
+
         assert not errors, f"Errores JS no capturados en pagina: {errors}"
 
         print("\n=== OK: reporte 'Grupos de Sustitutos' detecta la cadena rota ===")

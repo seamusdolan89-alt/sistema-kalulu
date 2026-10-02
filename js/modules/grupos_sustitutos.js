@@ -119,7 +119,97 @@ const SGA_GruposSustitutos = (() => {
     marcarPendientesSync([...afectados]);
   }
 
-  return { referenciaRealDe, seguidoresDe, marcarPendientesSync, aplicarCambioReferencia };
+  /**
+   * Referencia raiz de refId siguiendo la cadena de filas propias (X -> Y -> Z ...).
+   * Devuelve refId mismo si no tiene fila propia con otra referencia. Corta ante un ciclo.
+   */
+  function raizDe(refId) {
+    const visto = new Set([refId]);
+    let actual = refId;
+    for (;;) {
+      const sig = db().query(
+        `SELECT referencia_id FROM producto_sustitutos
+         WHERE producto_id = ? AND referencia_id IS NOT NULL AND referencia_id != producto_id LIMIT 1`,
+        [actual]
+      )[0]?.referencia_id;
+      if (!sig || visto.has(sig)) return actual;
+      visto.add(sig);
+      actual = sig;
+    }
+  }
+
+  /**
+   * Corrige una cadena rota: refId es la referencia de un grupo, pero a su vez es miembro de
+   * OTRO grupo (tiene fila propia apuntando a Y). Repunta todos sus seguidores a la referencia
+   * raiz real. NO toca la fila propia de refId (conserva su estado activo/inactivo).
+   * Devuelve { raizId, cambiados } (cambiados = cuantos productos se movieron).
+   */
+  function corregirCadena(refId) {
+    const raizId = raizDe(refId);
+    if (!raizId || raizId === refId) return { raizId: refId, cambiados: 0 };
+    const seguidores = seguidoresDe(refId).filter(f => f.id !== raizId);
+    if (!seguidores.length) return { raizId, cambiados: 0 };
+    db().run(
+      `UPDATE producto_sustitutos SET referencia_id = ?, sustituto_id = ?
+       WHERE referencia_id = ? AND producto_id != ?`,
+      [raizId, raizId, refId, raizId]
+    );
+    marcarPendientesSync([raizId, refId, ...seguidores.map(f => f.id)]);
+    return { raizId, cambiados: seguidores.length };
+  }
+
+  /**
+   * Todos los productos involucrados en el grupo roto de refId: la referencia, su referencia real
+   * (raiz de la cadena) y cualquiera que apunte a alguno de ellos. Es el universo que el usuario
+   * puede tildar/destildar en "Editar grupo" (informes).
+   */
+  function involucradosDe(refId) {
+    const ids = new Set([refId, raizDe(refId)]);
+    let crecio = true;
+    while (crecio) {
+      crecio = false;
+      for (const id of [...ids]) {
+        seguidoresDe(id).forEach(f => { if (!ids.has(f.id)) { ids.add(f.id); crecio = true; } });
+      }
+    }
+    return [...ids];
+  }
+
+  /**
+   * Arma el grupo exactamente como lo definio el usuario: `miembros` (ids) quedan juntos bajo
+   * `referenciaId` (tiene que estar entre ellos); cada id de `involucrados` que NO esta en
+   * `miembros` se saca del grupo. La fila propia de la referencia se saca si apuntaba a otra
+   * referencia (pasa a ser la raiz). Conserva el estado activo de cada miembro.
+   */
+  function definirGrupo({ miembros, referenciaId, involucrados }) {
+    if (!miembros.includes(referenciaId)) throw new Error('La referencia tiene que ser parte del grupo');
+    const ts = now();
+    const quedan = new Set(miembros);
+
+    involucrados.filter(id => !quedan.has(id)).forEach(id => {
+      db().run(`DELETE FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL`, [id]);
+    });
+
+    db().run(
+      `DELETE FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL AND referencia_id != producto_id`,
+      [referenciaId]
+    );
+
+    miembros.filter(id => id !== referenciaId).forEach(id => {
+      const activo = db().query(
+        `SELECT activo FROM producto_sustitutos WHERE producto_id = ? LIMIT 1`, [id]
+      )[0]?.activo;
+      db().run(
+        `INSERT OR REPLACE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion)
+         VALUES (?, ?, ?, ?, ?)`,
+        [id, referenciaId, referenciaId, activo == null ? 1 : activo, ts]
+      );
+    });
+
+    marcarPendientesSync([...involucrados, ...miembros, referenciaId]);
+  }
+
+  return { referenciaRealDe, seguidoresDe, marcarPendientesSync, aplicarCambioReferencia, raizDe, corregirCadena, involucradosDe, definirGrupo };
 })();
 
 window.SGA_GruposSustitutos = SGA_GruposSustitutos;
