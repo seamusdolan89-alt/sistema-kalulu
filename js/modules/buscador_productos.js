@@ -181,6 +181,11 @@ const SGA_Buscador = (() => {
    * @param {string}   [opts.highlightClass='cv2-dd-item-hl']  clase para marcar el resaltado
    * @param {Function} [opts.onEscape]              al apretar Escape
    * @param {Function} [opts.onEnterSinResaltado]    Enter sin nada resaltado todavía
+   * @param {Function} [opts.onSpace]                barra espaciadora sobre el item resaltado -- (el, idx) =>
+   *   void. Opt-in: sin este callback, espacio no hace nada especial (se sigue tipeando
+   *   en el input como siempre). Usado para selección múltiple (ej. marcar varios
+   *   candidatos antes de aplicar un cambio en lote) -- no cierra ni resetea el dropdown,
+   *   así las flechas siguen funcionando después de marcar.
    * @returns {{ reset: () => void }} `reset()` hay que llamarlo cada vez que se repinta la lista (nueva búsqueda)
    */
   function attachDropdownKeyboard(input, opts = {}) {
@@ -189,6 +194,7 @@ const SGA_Buscador = (() => {
       highlightClass = 'cv2-dd-item-hl',
       onEscape,
       onEnterSinResaltado,
+      onSpace,
     } = opts;
     let idx = -1;
 
@@ -230,6 +236,12 @@ const SGA_Buscador = (() => {
       if (e.key === 'Escape') {
         idx = -1;
         if (onEscape) onEscape();
+        return;
+      }
+      if (e.key === ' ' && onSpace) {
+        if (idx < 0 || !els[idx]) return; // sin nada resaltado, espacio es texto normal
+        e.preventDefault();
+        onSpace(els[idx], idx);
       }
     });
 

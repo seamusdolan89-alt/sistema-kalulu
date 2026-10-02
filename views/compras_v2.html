@@ -215,6 +215,19 @@
   .cv2-dd-item-hl { background: #e3f2fd; border-left: 3px solid #1565c0; padding-left: 11px; }
   .cv2-dd-nombre { font-weight: 500; color: #1a2744; }
   .cv2-dd-meta { color: #8090a0; font-size: 12px; }
+  /* Selección múltiple en "Asociar sustituto"/"Asignar madre" (2/10/2026):
+     box-shadow en vez de background/border-left para que no choque con
+     .cv2-dd-item-hl (el resaltado de teclado) cuando un item está marcado Y
+     resaltado al mismo tiempo -- las dos señales conviven. */
+  .cv2-dd-item-marcado { box-shadow: inset 3px 0 0 #43a047; }
+  .cv2-dd-marcar-btn {
+    background: none; border: none; cursor: pointer; font-size: 15px;
+    line-height: 1; padding: 0; color: #607080; flex-shrink: 0;
+  }
+  .cv2-dd-badge-grupo {
+    font-size: 10px; font-weight: 700; color: #e65100; background: #fff3e0;
+    border: 1px solid #ffcc80; border-radius: 9px; padding: 1px 7px; flex-shrink: 0;
+  }
   .cv2-dd-nuevo { color: #1565c0; font-style: italic; }
   .cv2-dd-acciones-row { flex-wrap: wrap; gap: 6px; }
   .cv2-dd-accion { cursor: pointer; font-style: italic; color: #1565c0; }
@@ -1673,7 +1686,12 @@
       <div id="cv2-sust-search-wrap">
         <input class="cv2-pm-input" id="cv2-sust-search" type="text"
                placeholder="Buscar producto de referencia por nombre o código…" autocomplete="off">
-        <div id="cv2-sust-results" style="margin-top:10px;max-height:280px;overflow-y:auto"></div>
+        <small style="display:block;margin-top:6px;color:#8090a0">Barra espaciadora (o el ☐) marca varios candidatos para agregarlos todos juntos.</small>
+        <div id="cv2-sust-results" style="margin-top:6px;max-height:280px;overflow-y:auto"></div>
+        <div id="cv2-sust-batch-bar" style="display:none;margin-top:10px;padding:8px 12px;background:#e3f2fd;border-radius:6px;align-items:center;justify-content:space-between;gap:10px">
+          <span id="cv2-sust-batch-count" style="font-size:12px;color:#1565c0;font-weight:600"></span>
+          <button type="button" id="cv2-sust-batch-btn" class="cv2-rev-btn-confirm" style="padding:6px 14px;font-size:12px">Agregar marcados →</button>
+        </div>
       </div>
       <div id="cv2-sust-confirm" style="display:none"></div>
     </div>
@@ -1692,7 +1710,11 @@
       <div id="cv2-madre-search-wrap">
         <input class="cv2-pm-input" id="cv2-madre-search" type="text"
                placeholder="Buscar producto madre por nombre o código…" autocomplete="off">
-        <div id="cv2-madre-results" style="margin-top:10px;max-height:280px;overflow-y:auto"></div>
+        <small style="display:block;margin-top:6px;color:#8090a0">Barra espaciadora (o el ☐) marca varios candidatos para agregarlos todos juntos como hijos.</small>
+        <div id="cv2-madre-results" style="margin-top:6px;max-height:280px;overflow-y:auto"></div>
+        <div id="cv2-madre-batch-bar" style="display:none;margin-top:10px;padding:8px 12px;background:#e3f2fd;border-radius:6px">
+          <span id="cv2-madre-batch-count" style="font-size:12px;color:#1565c0;font-weight:600"></span>
+        </div>
       </div>
       <div id="cv2-madre-confirm" style="display:none"></div>
     </div>
