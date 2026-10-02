@@ -67,8 +67,22 @@ const SGA_Clientes = (() => {
 
   // ── PUBLIC API ────────────────────────────────────────────────────────────
 
+  // Cada palabra del texto debe aparecer en alguno de los campos (en cualquier orden):
+  // "mateo b" encuentra a "Mateo Bourdieu" aunque nombre y apellido sean columnas distintas.
+  function buildSearchCond(texto, alias = 'c') {
+    const tokens = String(texto || '').trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return { cond: '1=1', params: [] };
+    const params = [];
+    const cond = tokens.map(t => {
+      const like = `%${t}%`;
+      params.push(like, like, like, like);
+      return `(${alias}.nombre LIKE ? OR ${alias}.apellido LIKE ? OR ${alias}.telefono LIKE ? OR ${alias}.lote LIKE ?)`;
+    }).join(' AND ');
+    return { cond, params };
+  }
+
   function getAll({ search = '', soloConDeuda = false, soloMasters = false, activo = 1 } = {}) {
-    const like = `%${search}%`;
+    const sc = buildSearchCond(search);
     const activoCond = activo === 'todos' ? '' : `AND c.activo = ${activo ? 1 : 0}`;
     const masterCond = soloMasters ? 'AND c.es_master = 1' : '';
 
@@ -78,11 +92,11 @@ const SGA_Clientes = (() => {
         (SELECT COUNT(*) FROM clientes m WHERE m.cliente_master_id = c.id AND m.activo = 1) AS miembros_count,
         (SELECT u.nombre FROM clientes u WHERE u.id = c.cliente_master_id) AS master_nombre
       FROM clientes c
-      WHERE (c.nombre LIKE ? OR c.apellido LIKE ? OR c.telefono LIKE ? OR c.lote LIKE ?)
+      WHERE (${sc.cond})
         ${activoCond}
         ${masterCond}
       ORDER BY c.nombre, c.apellido
-    `, [like, like, like, like]);
+    `, sc.params);
 
     if (soloConDeuda) return rows.filter(r => r.saldo_actual > 0);
 
@@ -178,16 +192,16 @@ const SGA_Clientes = (() => {
 
   function search(query) {
     if (!query || query.length < 1) return [];
-    const like = `%${query}%`;
+    const sc = buildSearchCond(query);
     const rows = db().query(`
       SELECT c.id, c.nombre, c.apellido, c.lote, c.direccion, c.telefono,
         c.es_master, c.cliente_master_id, c.tope_deuda,
         COALESCE((SELECT SUM(cc.monto) FROM cuenta_corriente cc WHERE cc.cliente_id = c.id), 0) AS saldo_actual
       FROM clientes c
       WHERE c.activo = 1
-        AND (c.nombre LIKE ? OR c.apellido LIKE ? OR c.telefono LIKE ? OR c.lote LIKE ?)
+        AND (${sc.cond})
       ORDER BY c.nombre LIMIT 10
-    `, [like, like, like, like]);
+    `, sc.params);
     if (!rows.length) return rows;
 
     // Batch query 1: saldo_lote for all master IDs referenced (masters + member's masters)
