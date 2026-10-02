@@ -583,6 +583,8 @@ main#app { overflow: hidden; }
       <div class="dash-title">
         Ventas del turno
         <span id="ventas-count-badge" class="count-badge">0</span>
+        <!-- Solo Admin-POS (pos.js lo muestra y lo llena): ver cajas/turnos anteriores, solo lectura -->
+        <select id="sesion-vista-select" aria-label="Ver turno anterior" style="display:none;margin-left:auto;padding:6px 10px;border:1px solid #d0d5dd;border-radius:8px;font-size:0.9em;max-width:60%"></select>
       </div>
       <div class="ventas-table-wrap">
         <table class="ventas-table">
