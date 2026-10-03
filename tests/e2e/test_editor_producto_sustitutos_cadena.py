@@ -127,15 +127,16 @@ def main():
         abrir_sustitutos(page, ids["nuevo"])
         assert "Sin grupo de sustitutos asignado" in page.locator("#ed-sustitutos-list").inner_text()
 
-        dialog_state["accept"] = False
-        dialog_state["messages"] = []
         buscar_y_click(page, "MiembroDeA")
-        assert dialog_state["messages"], "Deberia haber disparado un aviso de confirmacion"
-        msg = dialog_state["messages"][0]
+        dlg = page.locator("#sg-opciones")
+        assert dlg.is_visible(), "Deberia haber disparado un aviso de confirmacion"
+        msg = dlg.inner_text()
         assert "MiembroDeA" in msg and "ReferenciaFinal" in msg, (
             f"El aviso deberia mencionar el producto elegido y la referencia real: {msg!r}"
         )
         print(f"OK - aviso mostrado: {msg!r}")
+        dlg.locator("[data-op='']").click()          # Cancelar
+        page.wait_for_timeout(300)
 
         print("--- Cancelar el aviso no escribe nada ---")
         sin_grupo = page.evaluate(
@@ -145,9 +146,9 @@ def main():
         print("OK")
 
         print("--- Confirmar el aviso usa la referencia REAL (A), no la elegida (B) ---")
-        dialog_state["accept"] = True
-        dialog_state["messages"] = []
         buscar_y_click(page, "MiembroDeA")
+        page.locator("#sg-opciones [data-op='si']").click()
+        page.wait_for_timeout(400)
         panel_text = page.locator("#ed-sustitutos-list").inner_text()
         assert "ReferenciaFinal" in panel_text, (
             f"Deberia haber quedado agrupado bajo la referencia real (A): {panel_text[:300]!r}"
@@ -181,13 +182,16 @@ def main():
             f"Deberia mostrar que D lo usa como referencia: {banner_text[:400]!r}"
         )
 
-        dialog_state["accept"] = False
-        dialog_state["messages"] = []
         buscar_y_click(page, "ReferenciaFinal")
-        assert dialog_state["messages"], "Deberia haber disparado un aviso sobre los seguidores"
-        msg2 = dialog_state["messages"][0]
+        dlg2 = page.locator("#sg-opciones")
+        assert dlg2.is_visible(), "Deberia haber disparado un aviso sobre los seguidores"
+        msg2 = dlg2.inner_text()
         assert "SeguidorDeC" in msg2, f"El aviso deberia mencionar a D, que le apuntaba: {msg2!r}"
+        # Una referencia no puede apuntar a otro producto: se elige que hacer con su grupo
+        assert dlg2.locator("[data-op='unir']").count() == 1 and dlg2.locator("[data-op='agregar']").count() == 1, msg2
         print(f"OK - aviso mostrado: {msg2!r}")
+        dlg2.locator("[data-op='']").click()         # Cancelar
+        page.wait_for_timeout(300)
 
         print("--- Cancelar no deja huerfano a D (sigue apuntando a C, sin cambios) ---")
         fila_d_antes = page.evaluate(
@@ -201,9 +205,9 @@ def main():
         print("OK")
 
         print("--- Confirmar repunta tambien a D (no queda huerfano) ---")
-        dialog_state["accept"] = True
-        dialog_state["messages"] = []
         buscar_y_click(page, "ReferenciaFinal")
+        page.locator("#sg-opciones [data-op='unir']").click()      # unir el grupo de C al de A
+        page.wait_for_timeout(500)
         fila_c = page.evaluate(
             "() => window.SGA_DB.query(\"SELECT referencia_id FROM producto_sustitutos WHERE producto_id='sc-c'\")"
         )

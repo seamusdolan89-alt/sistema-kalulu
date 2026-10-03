@@ -1485,6 +1485,7 @@ const Informes = (() => {
           <span class="inf-periodo">Estado actual — no depende de un período</span>
         </div>
         <div class="inf-export-btns">
+          <button id="inf-btn-auditar" class="btn btn-sm" title="Revisa duplicados, ciclos, cadenas y referencias inexistentes en TODOS los grupos">🔎 Auditar integridad</button>
           <button id="inf-btn-excel" class="btn btn-sm inf-btn-excel">↓ Excel</button>
           <button id="inf-btn-csv"   class="btn btn-sm">↓ CSV</button>
         </div>
@@ -1542,6 +1543,7 @@ const Informes = (() => {
       btn.addEventListener('click', () => aceptarSugerenciaSustitutos(btn.dataset.refId)));
     document.querySelectorAll('.inf-btn-editar-grupo').forEach(btn =>
       btn.addEventListener('click', () => abrirEditorGrupoSustitutos(btn.dataset.refId)));
+    ge('inf-btn-auditar')?.addEventListener('click', abrirAuditoriaSustitutos);
   }
 
   function refrescarReporteSustitutos() {
@@ -1658,6 +1660,112 @@ const Informes = (() => {
       refrescarReporteSustitutos();
     });
     overlay.querySelector('.sg-ref:checked')?.focus();
+  }
+
+  // "Auditar integridad": revisa TODOS los grupos con GruposSustitutos.diagnosticar() y deja
+  // reparar cada problema (duplicados, referencias inexistentes, cadenas, ciclos, referencias sin
+  // fila propia). Cada reparacion pasa por el motor y marca los productos para sincronizar.
+  function abrirAuditoriaSustitutos() {
+    if (!window.SGA_Permisos?.can('can_editar_productos')) {
+      alert('No tenés permiso para modificar grupos de sustitutos.');
+      return;
+    }
+    const G = GruposSustitutos;
+    const nom = (id) => window.SGA_DB.query('SELECT nombre FROM productos WHERE id = ?', [id])[0]?.nombre
+      || '(producto eliminado)';
+
+    const overlay = document.createElement('div');
+    overlay.id = 'inf-sust-auditoria';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    document.body.appendChild(overlay);
+
+    const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cerrar(); } };
+    const cerrar = () => { document.removeEventListener('keydown', onKey, true); overlay.remove(); refrescarReporteSustitutos(); };
+    document.addEventListener('keydown', onKey, true);
+
+    const seccion = (titulo, cuerpo) => `<div style="margin:0 0 14px"><div style="font-weight:700;margin-bottom:6px">${titulo}</div>${cuerpo}</div>`;
+    const fila = (html, boton) => `<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid #f3f3f3"><div style="flex:1;min-width:0">${html}</div>${boton || ''}</div>`;
+
+    const pintar = () => {
+      const d = G.diagnosticar();
+      const bloques = [];
+
+      const sinProducto = d.inexistentes.filter(x => x.falta === 'producto').length;
+      if (sinProducto || d.sinFilaPropia.length) {
+        bloques.push(seccion('Reparación automática (segura)', fila(
+          `${d.sinFilaPropia.length} referencia(s) sin fila propia (su stock no suma al del grupo) y ` +
+          `${sinProducto} fila(s) de productos que ya no existen.`,
+          '<button class="btn btn-sm btn-primary" data-aud="auto">Reparar</button>')));
+      }
+
+      const fantasmas = {};
+      d.inexistentes.filter(x => x.falta === 'referencia').forEach(x => {
+        (fantasmas[x.referencia_id] = fantasmas[x.referencia_id] || []).push(x.producto_id);
+      });
+      const idsFantasma = Object.keys(fantasmas);
+      if (idsFantasma.length) {
+        bloques.push(seccion('Referencia que ya no existe', idsFantasma.map(fid => fila(
+          `Estos productos apuntan a una referencia eliminada: <strong>${esc(fantasmas[fid].map(nom).join(', '))}</strong>.<br>
+           Nueva referencia: <select data-aud-nueva="${esc(fid)}" class="input-full" style="max-width:300px">
+             ${fantasmas[fid].map(id => `<option value="${esc(id)}">${esc(nom(id))}</option>`).join('')}</select>`,
+          `<button class="btn btn-sm btn-primary" data-aud="fantasma" data-id="${esc(fid)}">Reparar</button>`)).join('')));
+      }
+
+      if (d.duplicados.length) {
+        bloques.push(seccion('Productos con más de una referencia', d.duplicados.map(x => fila(
+          `<strong>${esc(nom(x.producto_id))}</strong> tiene ${x.referencias.length} referencias. Dejar solo:<br>
+           <select data-aud-dup="${esc(x.producto_id)}" class="input-full" style="max-width:300px">
+             ${[...new Set(x.referencias)].map(r => `<option value="${esc(r)}">${esc(nom(r))}</option>`).join('')}</select>`,
+          `<button class="btn btn-sm btn-primary" data-aud="dup" data-id="${esc(x.producto_id)}">Dejar solo esta</button>`)).join('')));
+      }
+
+      if (d.cadenas.length) {
+        const refs = [...new Set(d.cadenas.map(c => c.referencia_id))];
+        bloques.push(seccion('Cadenas (una referencia que apunta a otra)', refs.map(r => fila(
+          `<strong>${esc(nom(r))}</strong> es referencia de ${esc(d.cadenas.filter(c => c.referencia_id === r).map(c => nom(c.producto_id)).join(', '))}
+           pero a su vez apunta a otra referencia.`,
+          `<button class="btn btn-sm btn-primary" data-aud="cadena" data-id="${esc(r)}">Corregir</button>
+           <button class="btn btn-sm" data-aud="editar" data-id="${esc(r)}">Editar grupo…</button>`)).join('')));
+      }
+
+      if (d.ciclos.length) {
+        bloques.push(seccion('Ciclos (se apuntan entre sí)', d.ciclos.map(c => fila(
+          `${esc(c.map(nom).join(' → '))} → ${esc(nom(c[0]))}. Nadie es la referencia real: elegí cuál lo es.`,
+          `<button class="btn btn-sm btn-primary" data-aud="editar" data-id="${esc(c[0])}">Resolver…</button>`)).join('')));
+      }
+
+      overlay.innerHTML = `
+        <div role="dialog" aria-label="Auditoría de integridad de grupos de sustitutos" style="background:#fff;border-radius:12px;max-width:760px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+          <div style="padding:16px 20px;border-bottom:1px solid #eee;font-weight:700">🔎 Auditoría de integridad de grupos de sustitutos</div>
+          <div id="inf-aud-cuerpo" style="padding:14px 20px;overflow-y:auto;flex:1;font-size:.92em">
+            ${d.ok
+              ? '<div style="color:#2e7d32;font-weight:600">✔ Todo en orden: ningún producto con dos referencias, sin cadenas, sin ciclos y sin referencias inexistentes.</div>'
+              : bloques.join('')}
+          </div>
+          <div style="padding:12px 20px;border-top:1px solid #eee;display:flex;justify-content:flex-end">
+            <button class="btn btn-sm" data-aud="cerrar">Cerrar</button>
+          </div>
+        </div>`;
+    };
+
+    overlay.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-aud]');
+      if (!b) { if (e.target === overlay) cerrar(); return; }
+      const accion = b.dataset.aud, id = b.dataset.id;
+      try {
+        if (accion === 'cerrar') { cerrar(); return; }
+        if (accion === 'auto') G.repararAutomatico();
+        else if (accion === 'fantasma') G.repararReferenciaInexistente(id, overlay.querySelector(`[data-aud-nueva="${CSS.escape(id)}"]`).value);
+        else if (accion === 'dup') G.repararDuplicado(id, overlay.querySelector(`[data-aud-dup="${CSS.escape(id)}"]`).value);
+        else if (accion === 'cadena') G.corregirCadena(id);
+        else if (accion === 'editar') { cerrar(); abrirEditorGrupoSustitutos(id); return; }
+      } catch (err) {
+        alert('No se pudo reparar: ' + err.message);
+      }
+      window.SGA_Sync?.pushPending?.();
+      pintar();
+    });
+    pintar();
   }
 
   // "Aceptar sugerencia" del reporte Grupos de Sustitutos: repunta los miembros del grupo roto a

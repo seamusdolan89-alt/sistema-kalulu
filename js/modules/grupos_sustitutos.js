@@ -131,10 +131,13 @@ const SGA_GruposSustitutos = (() => {
     }
 
     seguidoresDe(prodId).forEach(f => afectados.add(f.id));
+    // Incluye la fila de nuevaRef si era UN SEGUIDOR de prodId (swap de referencia dentro del grupo):
+    // su fila pasa a ser ref -> ref. Si se la excluyera, prodId -> nuevaRef y nuevaRef -> prodId
+    // formarian un ciclo (pasaba cuando prodId era referencia implicita, sin fila propia).
     db().run(
       `UPDATE producto_sustitutos SET referencia_id = ?, sustituto_id = ?
-       WHERE referencia_id = ? AND producto_id != ?`,
-      [nuevaRef, nuevaRef, prodId, nuevaRef]
+       WHERE referencia_id = ?`,
+      [nuevaRef, nuevaRef, prodId]
     );
 
     db().run(
@@ -197,8 +200,8 @@ const SGA_GruposSustitutos = (() => {
     if (!seguidores.length) return { raizId, cambiados: 0 };
     db().run(
       `UPDATE producto_sustitutos SET referencia_id = ?, sustituto_id = ?
-       WHERE referencia_id = ? AND producto_id != ?`,
-      [raizId, raizId, refId, raizId]
+       WHERE referencia_id = ?`,
+      [raizId, raizId, refId]
     );
     asegurarFilaPropia(raizId);
     marcarPendientesSync([raizId, refId, ...seguidores.map(f => f.id)]);
@@ -572,6 +575,112 @@ const SGA_GruposSustitutos = (() => {
     return true;
   }
 
+  /**
+   * Dialogo generico de decision: muestra un texto y N botones. Devuelve una promesa con el `id`
+   * de la opcion elegida, o null si cancela (boton Cancelar, Escape o clic afuera). `texto` acepta
+   * HTML ya escapado por quien llama. Escape cierra solo el dialogo (captura su propio teclado).
+   */
+  function elegirOpcion({ titulo, texto, opciones }) {
+    const esc = x => String(x == null ? '' : x).replace(/[&<>"']/g,
+      c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.id = 'sg-opciones';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10001;display:flex;align-items:center;justify-content:center;padding:16px';
+      overlay.innerHTML = `
+        <div role="alertdialog" style="background:#fff;border-radius:12px;max-width:560px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.35)">
+          <div style="padding:16px 20px;border-bottom:1px solid #eee;font-weight:700">${esc(titulo)}</div>
+          <div style="padding:14px 20px;font-size:.92em;color:#334;line-height:1.5">${texto}</div>
+          <div style="padding:12px 20px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+            <button class="btn btn-sm" data-op="">Cancelar</button>
+            ${opciones.map(o => `<button class="btn btn-sm ${o.principal ? 'btn-primary' : ''}" data-op="${esc(o.id)}">${esc(o.label)}</button>`).join('')}
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); fin(null); } };
+      const fin = (id) => { document.removeEventListener('keydown', onKey, true); overlay.remove(); resolve(id); };
+      document.addEventListener('keydown', onKey, true);
+      overlay.addEventListener('mousedown', e => { if (e.target === overlay) fin(null); });
+      overlay.querySelectorAll('[data-op]').forEach(b => b.addEventListener('click', () => fin(b.dataset.op || null)));
+      (overlay.querySelector('.btn-primary') || overlay.querySelector('[data-op]')).focus();
+    });
+  }
+
+  // ── Vista previa y reparaciones ──────────────────────────────────────────────────
+
+  /**
+   * Vista previa EXACTA de una operacion de grupos: la ejecuta dentro de una transaccion, lee que
+   * productos cambiarian de referencia y la deshace (no queda nada escrito). Devuelve
+   * [{ id, nombre, desde, hacia }] con los nombres de las referencias antes y despues (null =
+   * sin grupo). Sirve para avisar "estos productos ya tenian otra referencia y van a cambiar"
+   * sin reescribir la logica de cada operacion. No usar dentro de otro lote (beginBatch).
+   */
+  function previsualizar(operacion) {
+    const foto = () => {
+      const m = new Map();
+      db().query(`SELECT producto_id, referencia_id FROM producto_sustitutos WHERE referencia_id IS NOT NULL`)
+        .forEach(r => { if (!m.has(r.producto_id)) m.set(r.producto_id, r.referencia_id); });
+      return m;
+    };
+    const antes = foto();
+    let despues;
+    db().beginBatch();
+    try { operacion(); despues = foto(); }
+    finally { db().rollbackBatch(); }
+    const ids = new Set([...antes.keys(), ...despues.keys()]);
+    const nombre = (id) => id ? (db().query(`SELECT nombre FROM productos WHERE id = ?`, [id])[0]?.nombre || id) : null;
+    const cambios = [];
+    ids.forEach(id => {
+      const d = antes.get(id) || null, h = despues.get(id) || null;
+      if (d !== h) cambios.push({ id, nombre: nombre(id), desde: nombre(d), hacia: nombre(h), desdeId: d, haciaId: h });
+    });
+    return cambios.sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es'));
+  }
+
+  /** Cambios de una vista previa que PISAN una referencia existente (no los productos que recien se agrupan). */
+  const soloCambiosDeReferencia = (cambios) => cambios.filter(c => c.desdeId);
+
+  // Reparaciones de datos viejos (las usa Informes > Auditar integridad). Cada una deja el grupo
+  // cumpliendo las invariantes y marca los productos afectados para sincronizar.
+
+  /** Duplicados: deja al producto con UNA sola fila, apuntando a refId. */
+  function repararDuplicado(prodId, refId) {
+    const filas = db().query(
+      `SELECT referencia_id FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL`, [prodId]);
+    db().run(`DELETE FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL`, [prodId]);
+    if (prodId === refId) asegurarFilaPropia(prodId);
+    else moverMiembro(prodId, refId);
+    marcarPendientesSync([prodId, refId, ...filas.map(f => f.referencia_id)]);
+  }
+
+  /** Referencia inexistente: los productos que le apuntaban pasan a `nuevaId` (que sigue existiendo). */
+  function repararReferenciaInexistente(fantasmaId, nuevaId) {
+    const afectados = db().query(`SELECT producto_id FROM producto_sustitutos WHERE referencia_id = ?`, [fantasmaId])
+      .map(r => r.producto_id);
+    db().run(`UPDATE producto_sustitutos SET referencia_id = ?, sustituto_id = ? WHERE referencia_id = ?`,
+      [nuevaId, nuevaId, fantasmaId]);
+    asegurarFilaPropia(nuevaId);
+    marcarPendientesSync([nuevaId, ...afectados]);
+  }
+
+  /**
+   * Reparaciones seguras que no necesitan decision del usuario: borra las filas de productos que ya
+   * no existen y le da su fila propia a las referencias que no la tienen. Devuelve cuantas hizo.
+   */
+  function repararAutomatico() {
+    let n = 0;
+    const d = diagnosticar();
+    d.inexistentes.filter(x => x.falta === 'producto').forEach(x => {
+      db().run(`DELETE FROM producto_sustitutos WHERE producto_id = ?`, [x.producto_id]);
+      marcarPendientesSync([x.referencia_id]);
+      n++;
+    });
+    d.sinFilaPropia.forEach(r => {
+      if (db().query(`SELECT 1 FROM productos WHERE id = ?`, [r])[0]) { asegurarFilaPropia(r); marcarPendientesSync([r]); n++; }
+    });
+    return n;
+  }
+
   return {
     // Escritura de grupos: SOLO estas funciones (ver la regla al principio del archivo).
     referenciaRealDe, seguidoresDe, marcarPendientesSync, aplicarCambioReferencia, asegurarFilaPropia,
@@ -579,6 +688,7 @@ const SGA_GruposSustitutos = (() => {
     miembrosDe, stockDelGrupo, moverMiembro, agruparConReferencia, diagnosticar,
     candidatosReferencia, migrarReferencia, quitarDelGrupo,
     pedirNuevaReferencia, confirmarDesactivacion, liberarParaEliminar,
+    elegirOpcion, previsualizar, soloCambiosDeReferencia, repararDuplicado, repararReferenciaInexistente, repararAutomatico,
   };
 })();
 

@@ -63,11 +63,12 @@ FUZZ = """
     const rnd = prng(seed);
     const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
     const log = [];
+    const legado = args.legado.includes(seed);
     let falla = null, maxFilas = 0, pasosConGrupo = 0;
 
     for (let n = 0; n < args.pasos && !falla; n++) {
       const a = pick(ids), b = pick(ids);
-      const op = Math.floor(rnd() * 9);
+      const op = Math.floor(rnd() * (legado ? 11 : 9));
       let desc = '';
       try {
         if (op === 0 || op === 1) {            // fila de IMPORTACION (cualquier par, incluso contradictorio)
@@ -104,6 +105,15 @@ FUZZ = """
           desc = `editor.quitarDelGrupo ${a}`;
           const r = G.quitarDelGrupo(a);              // una referencia con miembros se rechaza
           if (!r.ok) desc += ' (bloqueado: es referencia)';
+        } else if (op === 9 || op === 10) {    // LEGADO: llega por sync la fila de un seguidor (la referencia puede no tener fila propia)
+          desc = `sync.llega ${a} -> ${b}`;
+          const libre = !G.seguidoresDe(a).length &&
+            !window.SGA_DB.query(`SELECT 1 FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL`, [a]).length;
+          const raiz = ['', b].includes(G.referenciaRealDe(b) || '') || G.referenciaRealDe(b) === b;
+          if (a !== b && libre && raiz) {
+            window.SGA_DB.run(`INSERT INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion)
+                               VALUES (?, ?, ?, 1, 'x')`, [a, b, b]);
+          } else desc += ' (omitida)';
         } else {                               // cambiar la referencia a OTRO miembro (pausa / desactivar)
           const ms = G.miembrosDe(a).map(m => m.id);
           const ref = G.referenciaRealDe(a);
@@ -119,7 +129,12 @@ FUZZ = """
       log.push(desc);
       if (!falla) {
         const d = G.diagnosticar();
-        if (!d.ok) falla = { desc, diag: d };
+        // En modo legado una referencia puede estar sin fila propia (db.js la completa al arrancar):
+        // todo lo demas (duplicados, cadenas, ciclos, inexistentes) NO puede aparecer nunca.
+        const roto = legado
+          ? ['duplicados', 'inexistentes', 'cadenas', 'ciclos'].some(k => d[k].length)
+          : !d.ok;
+        if (roto) falla = { desc, diag: d };
         const filas = window.SGA_DB.query(`SELECT COUNT(*) AS n FROM producto_sustitutos WHERE producto_id LIKE 'fz-%'`)[0].n;
         maxFilas = Math.max(maxFilas, filas);
         if (filas > 1) pasosConGrupo++;
@@ -185,8 +200,9 @@ def main():
         print("OK")
 
         print("--- Fuzz: operaciones al azar de todos los caminos ---")
-        semillas = [1, 2, 3, 4, 5, 6, 7, 8]
-        res = page.evaluate(FUZZ, {"semillas": semillas, "pasos": 250})
+        semillas = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+        legado = [9, 10, 11, 12, 13, 14]     # con filas que llegan por sincronizacion (referencias implicitas)
+        res = page.evaluate(FUZZ, {"semillas": semillas, "pasos": 250, "legado": legado})
         malas = [r for r in res if r["falla"]]
         for r in malas:
             print(f"\nSEMILLA {r['seed']} rompio una invariante en: {r['falla']['desc']}")
