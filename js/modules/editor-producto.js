@@ -88,6 +88,15 @@ const EditorProducto = (() => {
     renderContent();
     switchSection('datos-basicos');
     attachEvents();
+    // Las dos corren solo en 'change'/'input' (ver attachEvents) -- sin este
+    // llamado inicial, "Costo por unidad de compra" y "Pedido sugerido"
+    // arrancaban siempre visibles por defecto hasta que el usuario tocara el
+    // selector de unidad, sin importar el valor real guardado (bug real,
+    // 3/10/2026: el dueño vio el campo de costo por unidad de compra con un
+    // valor viejo en un producto con unidad_compra='Unidad', donde debería
+    // estar oculto).
+    updatePresEditorUI();
+    updatePedidoUnidadUI();
   };
 
   const loadEditorData = (productoId) => {
@@ -127,6 +136,8 @@ const EditorProducto = (() => {
     renderContent();
     switchSection('datos-basicos');
     attachEvents();
+    updatePresEditorUI();
+    updatePedidoUnidadUI();
   };
 
   // ── APP SHELL ──────────────────────────────────────────────────────────────
