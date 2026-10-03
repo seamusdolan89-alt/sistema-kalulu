@@ -5,6 +5,12 @@
  */
 
 import Buscador from './buscador_productos.js';
+import GruposSustitutos from './grupos_sustitutos.js';
+// REGLA: los grupos de sustitutos (tabla producto_sustitutos) se leen y se escriben SOLO por el
+// motor (grupos_sustitutos.js): stockDelGrupo, miembrosDe, referenciaRealDe, agruparConReferencia,
+// aplicarCambioReferencia, moverMiembro, quitarDelGrupo... Nunca con SQL propio en esta pantalla:
+// cada camino que lo hizo termino dejando filas duplicadas, cadenas o referencias sin fila propia.
+// tests/e2e/test_sustitutos_solo_por_motor.py falla si se escribe la tabla desde otro archivo.
 
 const Ordenes = (() => {
   'use strict';
@@ -21,35 +27,7 @@ const Ordenes = (() => {
    * Si el producto pertenece a un grupo de sustitutos, suma el stock de todos los miembros.
    */
   function stockEfectivo(productoId, sucursalId) {
-    const inGroup = db().query(
-      `SELECT referencia_id FROM producto_sustitutos
-       WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1`,
-      [productoId]
-    );
-    if (inGroup.length) {
-      const r = db().query(`
-        SELECT COALESCE(SUM(st.cantidad), 0) AS total
-        FROM producto_sustitutos ps
-        LEFT JOIN stock st ON st.producto_id = ps.producto_id AND st.sucursal_id = ?
-        WHERE ps.referencia_id = ?
-      `, [sucursalId, inGroup[0].referencia_id]);
-      return r[0]?.total || 0;
-    }
-    // Producto standalone o que es referencia del grupo — suma todos los miembros si los hay
-    const asRef = db().query(
-      `SELECT COALESCE(SUM(st.cantidad), 0) AS total
-       FROM producto_sustitutos ps
-       LEFT JOIN stock st ON st.producto_id = ps.producto_id AND st.sucursal_id = ?
-       WHERE ps.referencia_id = ?`,
-      [sucursalId, productoId]
-    );
-    if (asRef.length && (asRef[0].total || 0) > 0) return asRef[0].total;
-    // Sin grupo — stock propio
-    const own = db().query(
-      `SELECT COALESCE(cantidad, 0) AS qty FROM stock WHERE producto_id = ? AND sucursal_id = ?`,
-      [productoId, sucursalId]
-    );
-    return own[0]?.qty || 0;
+    return GruposSustitutos.stockDelGrupo(productoId, sucursalId);
   }
 
   /**
@@ -921,130 +899,6 @@ const Ordenes = (() => {
   // ── Asociar sustituto ──────────────────────────────────────────────────────
 
   /**
-   * Miembros del grupo de sustitutos de un producto (vacio si no tiene grupo).
-   *
-   * Hay que mirar las dos direcciones. Un producto pertenece a un grupo si
-   * apunta a una referencia, PERO tambien si otros le apuntan a el: la
-   * referencia puede no tener fila propia —los grupos que vienen de la
-   * importacion nacen asi— y mirando una sola direccion parecia estar suelta
-   * aunque el editor la mostrara como referencia de varios productos.
-   */
-  function miembrosDelGrupo(prodId) {
-    const refId = referenciaDe(prodId);
-    if (!refId) return [];
-
-    const filas = db().query(`
-      SELECT DISTINCT ps.producto_id AS id, p.nombre
-      FROM producto_sustitutos ps
-      JOIN productos p ON p.id = ps.producto_id
-      WHERE ps.referencia_id = ?
-    `, [refId]);
-
-    // Si la referencia no tiene fila propia, igual es parte del grupo.
-    if (!filas.some(f => f.id === refId)) {
-      const propia = db().query(`SELECT id, nombre FROM productos WHERE id = ?`, [refId])[0];
-      if (propia) filas.push(propia);
-    }
-
-    return filas.sort((a, b) =>
-      String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' })
-    );
-  }
-
-  /**
-   * Pasa todo un grupo de sustitutos a una referencia nueva.
-   *
-   * La orden de compra le pide siempre a la referencia del grupo, asi que
-   * cambiarla es la unica forma de que el grupo se siga pidiendo cuando la
-   * referencia anterior queda fuera de juego (pausada, o reasignada a otro
-   * proveedor). Marca a los miembros para que el cambio viaje: el grupo va
-   * embebido en el documento de cada producto.
-   */
-  function repuntarReferencia(refViejo, refNuevo) {
-    if (!refViejo || !refNuevo || refViejo === refNuevo) return;
-    db().run(
-      `UPDATE producto_sustitutos SET referencia_id = ?, sustituto_id = ?
-       WHERE referencia_id = ?`,
-      [refNuevo, refNuevo, refViejo]
-    );
-    const ts = now();
-    const miembros = db().query(
-      `SELECT DISTINCT producto_id FROM producto_sustitutos WHERE referencia_id = ?`,
-      [refNuevo]
-    ).map(r => r.producto_id);
-    for (const pid of new Set([...miembros, refViejo, refNuevo])) {
-      db().run(`UPDATE productos SET sync_status = 'pending', updated_at = ? WHERE id = ?`,
-               [ts, pid]);
-    }
-  }
-
-  /**
-   * Deja a dos productos en el mismo grupo, con la referencia elegida.
-   *
-   * Si alguno ya pertenecia a un grupo, ese grupo entero se repunta a la nueva
-   * referencia — misma logica que setReferencia() en el editor de producto.
-   */
-  function asociarAlGrupo(prodA, prodB, refId) {
-    const fecha = window.SGA_Utils.formatISODate(new Date());
-    const ts    = now();
-
-    const viejas = db().query(
-      `SELECT DISTINCT referencia_id FROM producto_sustitutos
-       WHERE producto_id IN (?, ?) AND referencia_id IS NOT NULL`,
-      [prodA, prodB]
-    ).map(r => r.referencia_id).filter(r => r && r !== refId);
-
-    for (const vieja of viejas) repuntarReferencia(vieja, refId);
-
-    for (const pid of [prodA, prodB, refId]) {
-      db().run(
-        `INSERT OR REPLACE INTO producto_sustitutos
-           (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion)
-         VALUES (?, ?, ?, 1, ?)`,
-        [pid, refId, refId, fecha]
-      );
-    }
-
-    // El grupo viaja embebido en el documento de cada producto (ver
-    // applyProductoFull en sync.js), asi que hay que marcarlos pendientes uno
-    // por uno: sin esto el agrupamiento se queda en esta maquina.
-    const miembros = db().query(
-      `SELECT DISTINCT producto_id FROM producto_sustitutos WHERE referencia_id = ?`,
-      [refId]
-    ).map(r => r.producto_id);
-
-    for (const pid of new Set([...miembros, prodA, prodB, refId])) {
-      db().run(
-        `UPDATE productos SET sync_status = 'pending', updated_at = ? WHERE id = ?`,
-        [ts, pid]
-      );
-    }
-  }
-
-  /**
-   * Referencia del grupo de sustitutos de un producto (null si no tiene grupo).
-   *
-   * Segunda direccion incluida a proposito: si nadie figura como su referencia
-   * pero otros productos le apuntan a el, entonces el es la referencia — aunque
-   * no tenga fila propia en producto_sustitutos.
-   */
-  function referenciaDe(prodId) {
-    const propia = db().query(
-      `SELECT referencia_id FROM producto_sustitutos
-       WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1`,
-      [prodId]
-    )[0];
-    if (propia) return propia.referencia_id;
-
-    const leApuntan = db().query(
-      `SELECT 1 FROM producto_sustitutos
-       WHERE referencia_id = ? AND producto_id != ? LIMIT 1`,
-      [prodId, prodId]
-    )[0];
-    return leApuntan ? prodId : null;
-  }
-
-  /**
    * Pausa la reposicion de un producto desde la revision de la orden.
    *
    * Pausar NO es lo mismo que dar de baja: el producto se sigue vendiendo y su
@@ -1073,8 +927,8 @@ const Ordenes = (() => {
 
     let modo = 'indef';
 
-    const grupo    = miembrosDelGrupo(productoId);
-    const refGrupo = referenciaDe(productoId);
+    const grupo    = GruposSustitutos.miembrosDe(productoId);
+    const refGrupo = GruposSustitutos.referenciaRealDe(productoId);
     const enGrupo  = grupo.length > 1;
 
     ge('ord-pausa-producto').textContent = productoNombre || 'Producto';
@@ -1193,7 +1047,8 @@ const Ordenes = (() => {
       // Si se pauso la referencia y quedan miembros activos, el grupo tiene que
       // pasar a pedirle a otro o dejaria de pedirse entero.
       if (refWrap.style.display !== 'none' && selRef.value) {
-        repuntarReferencia(refGrupo, selRef.value);
+        GruposSustitutos.aplicarCambioReferencia(refGrupo, selRef.value);
+        GruposSustitutos.marcarPendientesSync([refGrupo, selRef.value]);
       }
 
       cerrar();
@@ -1247,7 +1102,7 @@ const Ordenes = (() => {
     let elegido = null;   // { id, nombre }
     let hl = -1;          // resultado resaltado con las flechas
 
-    const grupo = miembrosDelGrupo(productoId);
+    const grupo = GruposSustitutos.miembrosDe(productoId);
     ge('ord-sust-producto').textContent = productoNombre || 'Producto';
     ge('ord-sust-grupo').textContent = grupo.length
       ? 'Ya está agrupado con: ' + grupo.filter(m => m.id !== productoId)
@@ -1272,15 +1127,11 @@ const Ordenes = (() => {
       elegido = { id, nombre };
       const opciones = [];
       const vistos = new Set();
-      for (const m of [...grupo, ...miembrosDelGrupo(id),
+      for (const m of [...grupo, ...GruposSustitutos.miembrosDe(id),
                        { id: productoId, nombre: productoNombre }, { id, nombre }]) {
         if (m.id && !vistos.has(m.id)) { vistos.add(m.id); opciones.push(m); }
       }
-      const refActual = grupo.length
-        ? db().query(`SELECT referencia_id FROM producto_sustitutos
-                      WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1`,
-                     [productoId])[0]?.referencia_id
-        : null;
+      const refActual = grupo.length ? GruposSustitutos.referenciaRealDe(productoId) : null;
       // Por defecto, el producto que acabas de buscar: lo normal es marcar que
       // el de la orden ya esta cubierto por ese otro.
       const porDefecto = refActual || id;
@@ -1330,7 +1181,7 @@ const Ordenes = (() => {
     const guardar = () => {
       if (!elegido) return;
       const refId = selRef.value;
-      asociarAlGrupo(productoId, elegido.id, refId);
+      GruposSustitutos.agruparConReferencia([productoId, elegido.id], refId);
 
       const stockGrupo = stockEfectivo(refId, ui.user.sucursal_id);
       const item = db().query(

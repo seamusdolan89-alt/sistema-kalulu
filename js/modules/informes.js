@@ -181,7 +181,7 @@ const Informes = (() => {
         ) AS recibido_compras,
         (
           SELECT COUNT(*) FROM producto_sustitutos ps
-          WHERE ps.producto_id = p.id AND ps.activo = 1
+          WHERE ps.producto_id = p.id
         ) AS tiene_sustituto
       FROM orden_compra_items oci
       JOIN ordenes_compra oc ON oci.orden_id = oc.id
@@ -1417,11 +1417,12 @@ const Informes = (() => {
       SELECT
         ps.referencia_id AS ref_id,
         ref_p.nombre     AS ref_nombre,
+        ref_p.activo     AS ref_activo,
         ref_cb.codigo    AS ref_codigo,
         ps.producto_id   AS miembro_id,
         m.nombre         AS miembro_nombre,
         mcb.codigo       AS miembro_codigo,
-        ps.activo        AS miembro_activo,
+        m.activo         AS miembro_activo,
         COALESCE(st.cantidad, 0) AS miembro_stock,
         (SELECT ps2.referencia_id FROM producto_sustitutos ps2
           WHERE ps2.producto_id = ps.referencia_id
@@ -1454,13 +1455,15 @@ const Informes = (() => {
       if (!grupos.has(r.ref_id)) {
         grupos.set(r.ref_id, {
           ref_id: r.ref_id, ref_nombre: r.ref_nombre, ref_codigo: r.ref_codigo,
-          miembros: [], stock_total: 0, anomalia: false,
+          miembros: [], stock_total: 0, anomalia: false, ref_inactiva: r.ref_activo === 0,
           ref_real_nombre: null, ref_real_codigo: null, ref_real_id: null,
         });
       }
       const g = grupos.get(r.ref_id);
       g.miembros.push({ nombre: r.miembro_nombre, codigo: r.miembro_codigo, stock: r.miembro_stock, activo: r.miembro_activo });
       g.stock_total += (r.miembro_stock || 0);
+      // La orden de compra le pide a la referencia y descarta el grupo si esta inactiva.
+      if (g.ref_inactiva) g.anomalia = true;
       if (r.ref_real_id && refRealMap[r.ref_real_id]) {
         g.anomalia = true;
         g.ref_real_id = r.ref_real_id;
@@ -1506,11 +1509,18 @@ const Informes = (() => {
                   <td>${g.miembros.map(m => `${esc(m.nombre)}${m.activo ? '' : ' (inactivo)'}`).join('<br>')}</td>
                   <td class="num">${fmtNum(g.stock_total)}</td>
                   <td>${g.anomalia
-                    ? `<span class="text-danger bold">Sí</span> — "${esc(g.ref_nombre)}" ya no es la referencia real: a su vez apunta a "${esc(g.ref_real_nombre)}". Correspondería que estos miembros formen parte del grupo de "${esc(g.ref_real_nombre)}".`
+                    ? [
+                        g.ref_real_nombre
+                          ? `<span class="text-danger bold">Sí</span> — "${esc(g.ref_nombre)}" ya no es la referencia real: a su vez apunta a "${esc(g.ref_real_nombre)}". Correspondería que estos miembros formen parte del grupo de "${esc(g.ref_real_nombre)}".`
+                          : '',
+                        g.ref_inactiva
+                          ? `<span class="text-danger bold">Sí</span> — La referencia "${esc(g.ref_nombre)}" está <strong>inactiva</strong>: la orden de compra descarta este grupo. Conviene migrar la referencia a otro miembro.`
+                          : '',
+                      ].filter(Boolean).join('<br>')
                     : '<span class="text-success">No</span>'}</td>
                   <td>${g.anomalia
                     ? `<div style="display:flex;flex-direction:column;gap:6px;min-width:150px">
-                         <button class="btn btn-sm btn-primary inf-btn-aceptar-sug" data-ref-id="${esc(g.ref_id)}" title="Pasa estos miembros al grupo de &quot;${esc(g.ref_real_nombre)}&quot;">✔ Aceptar sugerencia</button>
+                         ${g.ref_real_nombre ? `<button class="btn btn-sm btn-primary inf-btn-aceptar-sug" data-ref-id="${esc(g.ref_id)}" title="Pasa estos miembros al grupo de &quot;${esc(g.ref_real_nombre)}&quot;">✔ Aceptar sugerencia</button>` : ''}
                          <button class="btn btn-sm inf-btn-editar-grupo" data-ref-id="${esc(g.ref_id)}" title="Elegir qué productos quedan en el grupo y cuál es la referencia">✎ Editar grupo…</button>
                        </div>`
                     : ''}</td>
@@ -1555,9 +1565,8 @@ const Informes = (() => {
     }
     const ids = GruposSustitutos.involucradosDe(refId);
     if (!ids.length) return;
-    const sugerida = GruposSustitutos.raizDe(refId);
     const rows = window.SGA_DB.query(`
-      SELECT p.id, p.nombre, cb.codigo, COALESCE(st.cantidad, 0) AS stock
+      SELECT p.id, p.nombre, p.activo, cb.codigo, COALESCE(st.cantidad, 0) AS stock
       FROM productos p
       LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
       LEFT JOIN stock st ON st.producto_id = p.id AND st.sucursal_id = ?
@@ -1565,6 +1574,12 @@ const Informes = (() => {
       ORDER BY p.nombre COLLATE NOCASE
     `, [state.sucursalId, ...ids]);
     const nombreDe = id => rows.find(r => r.id === id)?.nombre || '—';
+    // Referencia sugerida: la raiz de la cadena; si esa esta inactiva, el activo con mas stock.
+    let sugerida = GruposSustitutos.raizDe(refId);
+    if (rows.find(r => r.id === sugerida)?.activo === 0) {
+      const activos = rows.filter(r => r.activo !== 0).sort((a, b) => b.stock - a.stock);
+      if (activos.length) sugerida = activos[0].id;
+    }
 
     const overlay = document.createElement('div');
     overlay.id = 'inf-sust-editor';
@@ -1582,7 +1597,7 @@ const Informes = (() => {
             return `<label style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f3f3f3;cursor:pointer">
               <input type="checkbox" class="sg-miembro" value="${esc(r.id)}" checked>
               <span style="flex:1;min-width:0">
-                <span style="font-weight:600">${esc(r.nombre)}</span>
+                <span style="font-weight:600">${esc(r.nombre)}${r.activo === 0 ? ' <span style="color:#c62828;font-weight:500">(inactivo)</span>' : ''}</span>
                 <span style="display:block;font-size:.78em;color:#889">${esc(r.codigo || 'sin código')} · stock ${fmtNum(r.stock)}${nota ? ' · ' + nota : ''}</span>
               </span>
               <span style="display:flex;align-items:center;gap:4px;font-size:.82em;color:#445;white-space:nowrap">

@@ -23,6 +23,33 @@
  * embebido en el documento de cada producto, ver denormalizeProducto() en
  * js/sync.js -- sin marcar pending, un cambio de grupo nunca sale de esta
  * maquina).
+ *
+ * ╔══════════════════════════════════════════════════════════════════════════╗
+ * ║ REGLA: TODA escritura en la tabla `producto_sustitutos` (INSERT / UPDATE ║
+ * ║ / DELETE) pasa por las funciones de ESTE archivo. Ninguna pantalla,      ║
+ * ║ importacion ni modulo nuevo escribe esa tabla a mano.                    ║
+ * ╚══════════════════════════════════════════════════════════════════════════╝
+ * Por que: cada camino que escribia "a mano" (editor, Ordenes, importacion) termino
+ * dejando filas duplicadas, cadenas rotas, ciclos o referencias sin fila propia, y
+ * cada uno hubo que arreglarlo por separado (auditoria del 2/10/2026). Las
+ * invariantes que el motor garantiza (las verifica diagnosticar()):
+ *   1. UNA sola fila por producto;
+ *   2. una referencia nunca apunta a otro producto (ni cadenas ni ciclos);
+ *   3. toda referencia tiene su propia fila (ref -> ref), asi su stock cuenta en el grupo;
+ *   4. ninguna fila apunta a un producto que no existe.
+ * Si necesitas una operacion nueva sobre grupos: agregala ACA (escribiendo solo con
+ * estas primitivas o con SQL que respete las 4 invariantes, y marcando los productos
+ * afectados con marcarPendientesSync), y sumala a la lista de operaciones de
+ * tests/e2e/test_grupos_sustitutos_fuzz.py: si una operacion nueva rompe una
+ * invariante, ese test la atrapa con la semilla y los pasos exactos.
+ * Los unicos otros lugares que tocan la tabla, a proposito: js/db.js (crear la tabla y
+ * autocompletar filas propias al arrancar) y js/sync.js (aplicar el documento de un
+ * producto que llega de la otra computadora). tests/e2e/test_sustitutos_solo_por_motor.py
+ * falla si aparece cualquier otro archivo escribiendo la tabla.
+ *
+ * Lectura: `stockDelGrupo` es la UNICA formula de stock de un grupo; `miembrosDe` /
+ * `referenciaRealDe` / `seguidoresDe` son las unicas formas de preguntar "de que grupo
+ * es este producto". No reimplementes esas consultas en una pantalla.
  */
 
 const SGA_GruposSustitutos = (() => {
@@ -226,7 +253,333 @@ const SGA_GruposSustitutos = (() => {
     marcarPendientesSync([...involucrados, ...miembros, referenciaId]);
   }
 
-  return { referenciaRealDe, seguidoresDe, marcarPendientesSync, aplicarCambioReferencia, asegurarFilaPropia, raizDe, corregirCadena, involucradosDe, definirGrupo };
+  /**
+   * Miembros del grupo de un producto, referencia incluida: [{ id, nombre }] ordenados por
+   * nombre. Vacio si no tiene grupo. Mira las dos direcciones (ver referenciaRealDe).
+   */
+  function miembrosDe(prodId) {
+    const refId = referenciaRealDe(prodId);
+    if (!refId) return [];
+    const filas = db().query(`
+      SELECT DISTINCT ps.producto_id AS id, p.nombre
+      FROM producto_sustitutos ps
+      JOIN productos p ON p.id = ps.producto_id
+      WHERE ps.referencia_id = ?
+    `, [refId]);
+    if (!filas.some(f => f.id === refId)) {
+      const propia = db().query(`SELECT id, nombre FROM productos WHERE id = ?`, [refId])[0];
+      if (propia) filas.push(propia);
+    }
+    return filas.sort((a, b) =>
+      String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' }));
+  }
+
+  /**
+   * Stock disponible de un producto en una sucursal: el de todo su grupo (referencia incluida,
+   * tenga o no fila propia) o el propio si no tiene grupo. UNICA formula de stock de grupo: no
+   * duplicarla en cada pantalla.
+   */
+  function stockDelGrupo(prodId, sucursalId) {
+    const refId = referenciaRealDe(prodId);
+    if (!refId) {
+      return db().query(
+        `SELECT COALESCE(cantidad, 0) AS q FROM stock WHERE producto_id = ? AND sucursal_id = ?`,
+        [prodId, sucursalId]
+      )[0]?.q || 0;
+    }
+    return db().query(`
+      SELECT COALESCE(SUM(st.cantidad), 0) AS total
+      FROM (SELECT ? AS id UNION SELECT producto_id FROM producto_sustitutos WHERE referencia_id = ?) m
+      LEFT JOIN stock st ON st.producto_id = m.id AND st.sucursal_id = ?
+    `, [refId, refId, sucursalId])[0]?.total || 0;
+  }
+
+  /**
+   * Mueve UN producto a la referencia refId sin tocar al resto de su grupo viejo (lo usa la
+   * importacion: una fila del archivo habla de un solo producto). Si el producto era referencia
+   * de otros, no se pueden dejar atras: se mueve con todo su grupo.
+   *
+   * Nunca deja una cadena: si refId es a su vez miembro de otro grupo, se usa la referencia real
+   * de ese grupo. Devuelve { estado, refEfectiva, antes }:
+   *   'ok'            -> se movio al grupo de refEfectiva (antes = su referencia anterior, o null)
+   *   'redirigida'    -> igual que 'ok', pero refId no era referencia y se uso la real
+   *   'sin_cambio'    -> ya estaba en ese grupo, o es la propia referencia
+   *   'ciclo_ignorado'-> refId es miembro de un grupo que el propio producto encabeza: aplicarla
+   *                      armaria un ciclo, se ignora
+   */
+  function moverMiembro(prodId, refId) {
+    const res = { estado: 'sin_cambio', refEfectiva: refId, antes: null };
+    if (!prodId || !refId || prodId === refId) return res;
+
+    const real = referenciaRealDe(refId);
+    if (real === prodId) return { ...res, estado: 'ciclo_ignorado', refEfectiva: prodId };
+    if (real && real !== refId) { res.refEfectiva = real; refId = real; res.estado = 'redirigida'; }
+
+    const antes = referenciaRealDe(prodId);
+    res.antes = antes;
+    if (antes === refId) return { ...res, estado: 'sin_cambio' };
+
+    if (seguidoresDe(prodId).length) {
+      aplicarCambioReferencia(prodId, refId);
+    } else {
+      db().run(`DELETE FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL`, [prodId]);
+      db().run(
+        `INSERT INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion)
+         VALUES (?, ?, ?, 1, ?)`,
+        [prodId, refId, refId, now()]
+      );
+      asegurarFilaPropia(refId);
+      marcarPendientesSync([prodId, refId, antes]);
+    }
+    if (res.estado === 'sin_cambio') res.estado = 'ok';
+    return res;
+  }
+
+  /**
+   * Chequeo de integridad de TODOS los grupos (solo lectura). Un grupo sano cumple:
+   *  - cada producto tiene UNA sola fila (duplicados);
+   *  - la referencia existe y el producto tambien (inexistentes);
+   *  - una referencia no apunta a otro producto (cadenas) ni se cierra un anillo (ciclos);
+   *  - toda referencia tiene su propia fila ref -> ref (sinFilaPropia).
+   * Devuelve { duplicados, inexistentes, cadenas, ciclos, sinFilaPropia, ok }.
+   */
+  function diagnosticar() {
+    const filas = db().query(`
+      SELECT ps.producto_id, ps.referencia_id,
+             EXISTS(SELECT 1 FROM productos p WHERE p.id = ps.producto_id)    AS prod_ok,
+             EXISTS(SELECT 1 FROM productos p WHERE p.id = ps.referencia_id)  AS ref_ok
+      FROM producto_sustitutos ps WHERE ps.referencia_id IS NOT NULL
+    `);
+    const porProd = new Map();
+    filas.forEach(f => {
+      if (!porProd.has(f.producto_id)) porProd.set(f.producto_id, []);
+      porProd.get(f.producto_id).push(f.referencia_id);
+    });
+
+    const duplicados = [...porProd].filter(([, refs]) => refs.length > 1)
+      .map(([producto_id, refs]) => ({ producto_id, referencias: refs }));
+    const inexistentes = filas.filter(f => !f.prod_ok || !f.ref_ok)
+      .map(f => ({ producto_id: f.producto_id, referencia_id: f.referencia_id, falta: !f.prod_ok ? 'producto' : 'referencia' }));
+
+    const sig = id => (porProd.get(id) || []).find(r => r !== id) || null;   // su referencia, si apunta a OTRO
+    const cadenas = [], ciclos = [], vistoCiclo = new Set();
+    for (const [producto_id, refs] of porProd) {
+      const ref = refs.find(r => r !== producto_id);
+      if (!ref) continue;
+      const sigRef = sig(ref);
+      if (sigRef && sigRef !== producto_id) cadenas.push({ producto_id, referencia_id: ref, apunta_a: sigRef });
+      // anillo: seguir la cadena hasta repetir
+      const camino = [producto_id]; let cur = ref;
+      while (cur && !camino.includes(cur)) { camino.push(cur); cur = sig(cur); }
+      if (cur && camino.includes(cur)) {
+        const anillo = camino.slice(camino.indexOf(cur));
+        const clave = [...anillo].sort().join('|');
+        if (!vistoCiclo.has(clave)) { vistoCiclo.add(clave); ciclos.push(anillo); }
+      }
+    }
+    const sinFilaPropia = [...new Set(filas.map(f => f.referencia_id))]
+      .filter(r => !porProd.has(r) && filas.some(f => f.referencia_id === r && f.producto_id !== r));
+
+    const ok = !duplicados.length && !inexistentes.length && !cadenas.length && !ciclos.length && !sinFilaPropia.length;
+    return { duplicados, inexistentes, cadenas, ciclos, sinFilaPropia, ok };
+  }
+
+  /**
+   * Junta a `prodIds` bajo la referencia `refId`. Cada uno se mueve CON su grupo (y con los que
+   * le apuntaban aunque no tuviera fila propia), y si refId era miembro de otro grupo, ese grupo
+   * entero pasa a refId. Nunca deja cadenas rotas ni una referencia sin fila propia.
+   */
+  function agruparConReferencia(prodIds, refId) {
+    const refReal = referenciaRealDe(refId);
+    if (refReal && refReal !== refId) aplicarCambioReferencia(refId, refId);
+    [...new Set(prodIds)].filter(id => id !== refId).forEach(id => aplicarCambioReferencia(id, refId));
+    asegurarFilaPropia(refId);
+    marcarPendientesSync([...prodIds, refId]);
+  }
+
+  // ── Quitar, cambiar, desactivar y eliminar productos que son referencia ──────────
+  //
+  // Reglas del negocio (acordadas con el dueño, 2/10/2026):
+  //  - Una REFERENCIA no se puede quitar de su grupo: primero se cambia la referencia a otro
+  //    miembro, y recien despues se la puede quitar como a cualquier miembro (quitarDelGrupo).
+  //  - DESACTIVAR un producto no lo saca del grupo: su stock sigue sumando (si no, se pediria de
+  //    mas lo que todavia hay). Si es la referencia, la orden de compra descarta el grupo entero
+  //    (generarOrdenCompra), asi que se avisa y se ofrece migrar la referencia a otro miembro.
+  //  - ELIMINAR un producto que es referencia obliga a elegir antes la nueva referencia; un
+  //    miembro simplemente sale del grupo.
+
+  /**
+   * Si prodId es la referencia de un grupo con otros miembros, devuelve esos miembros
+   * ([{ id, nombre, activo, stock }], activos y con mas stock primero). null si no es
+   * referencia de nadie. `soloActivos` descarta los desactivados (para migrar la referencia al
+   * desactivar: no tiene sentido pasarla a otro inactivo).
+   */
+  function candidatosReferencia(prodId, sucursalId, soloActivos) {
+    if (referenciaRealDe(prodId) !== prodId) return null;
+    const seguidores = seguidoresDe(prodId);
+    if (!seguidores.length) return null;
+    return db().query(`
+      SELECT p.id, p.nombre, p.activo, COALESCE(st.cantidad, 0) AS stock
+      FROM productos p
+      LEFT JOIN stock st ON st.producto_id = p.id AND st.sucursal_id = ?
+      WHERE p.id IN (${seguidores.map(() => '?').join(',')})
+        ${soloActivos ? 'AND p.activo = 1' : ''}
+      ORDER BY p.activo DESC, stock DESC, p.nombre COLLATE NOCASE
+    `, [sucursalId, ...seguidores.map(f => f.id)]);
+  }
+
+  /**
+   * Pasa el grupo de `viejaId` a `nuevaId`. Por defecto `viejaId` SIGUE en el grupo (como un
+   * miembro mas y con su stock contando); con { quitarVieja: true } sale del grupo.
+   */
+  function migrarReferencia(viejaId, nuevaId, { quitarVieja = false } = {}) {
+    const seguidores = seguidoresDe(viejaId).map(f => f.id);
+    aplicarCambioReferencia(viejaId, nuevaId);
+    if (quitarVieja) {
+      db().run(`DELETE FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL`, [viejaId]);
+    }
+    marcarPendientesSync([viejaId, nuevaId, ...seguidores]);
+  }
+
+  /**
+   * Saca a un MIEMBRO de su grupo (su stock deja de sumar al del grupo y vuelve a contar solo).
+   * Una referencia con miembros no se puede quitar: devuelve { ok: false, motivo: 'es_referencia' }
+   * y hay que cambiar antes la referencia (migrarReferencia / pedirNuevaReferencia).
+   */
+  function quitarDelGrupo(prodId) {
+    if (seguidoresDe(prodId).length) return { ok: false, motivo: 'es_referencia' };
+    const ref = db().query(
+      `SELECT referencia_id FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1`,
+      [prodId]
+    )[0]?.referencia_id;
+    db().run(`DELETE FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL`, [prodId]);
+    marcarPendientesSync([prodId, ref]);
+    return { ok: true };
+  }
+
+  /**
+   * Dialogo para elegir la nueva referencia de un grupo. Devuelve una promesa con true si el
+   * caller puede seguir con lo que iba a hacer y false si el usuario cancela. Modos:
+   *  - 'cambiar'    : cambiar la referencia del grupo a otro miembro (el actual sigue en el grupo).
+   *  - 'desactivar' : se va a desactivar la referencia; migrar es opcional y casilla "sacarlo del grupo".
+   *  - 'eliminar'   : se va a eliminar la referencia; elegir la nueva es obligatorio.
+   * Si el producto no es referencia de nadie, resuelve true sin mostrar nada.
+   * Toda la escritura de grupos la hace el motor (migrarReferencia).
+   */
+  function pedirNuevaReferencia(prodId, nombre, modo) {
+    const sucursalId = window.SGA_Auth?.getCurrentUser()?.sucursal_id || '1';
+    const candidatos = candidatosReferencia(prodId, sucursalId, modo === 'desactivar');
+    if (!candidatos) return Promise.resolve(true);
+
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
+      c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const hayOtros = candidatos.length > 0;
+    const T = {
+      cambiar: {
+        titulo: `Cambiar la referencia del grupo de "${esc(nombre)}"`,
+        intro: 'La orden de compra le pide siempre a la referencia. Elegí cuál de los miembros pasa a serlo.',
+        nota: `"${esc(nombre)}" sigue en el grupo como un miembro más.`,
+        ok: 'Cambiar referencia',
+      },
+      desactivar: {
+        titulo: `⚠ "${esc(nombre)}" es la referencia de un grupo de sustitutos`,
+        intro: 'La orden de compra le pide siempre a la referencia. Si la desactivás, <strong>el grupo entero deja de pedirse</strong>.',
+        nota: `"${esc(nombre)}" sigue en el grupo y su stock sigue contando.`,
+        ok: 'Migrar y desactivar',
+      },
+      eliminar: {
+        titulo: `⚠ "${esc(nombre)}" es la referencia de un grupo de sustitutos`,
+        intro: 'Para eliminarlo hay que elegir antes la <strong>nueva referencia</strong> del grupo. "' + esc(nombre) + '" sale del grupo.',
+        nota: '',
+        ok: 'Migrar y eliminar',
+      },
+    }[modo];
+
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.id = 'sg-desactivar-ref';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px';
+      overlay.innerHTML = `
+        <div role="alertdialog" aria-label="Referencia de un grupo de sustitutos" style="background:#fff;border-radius:12px;max-width:560px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.35)">
+          <div style="padding:16px 20px;border-bottom:1px solid #eee;background:#fff3e0;border-radius:12px 12px 0 0">
+            <div style="font-weight:700;color:#e65100">${T.titulo}</div>
+          </div>
+          <div style="padding:14px 20px;font-size:.92em;color:#334">
+            <p style="margin:0 0 10px">${T.intro}</p>
+            ${hayOtros ? `
+              <p style="margin:0 0 6px;font-weight:600">Nueva referencia:</p>
+              <div style="max-height:220px;overflow-y:auto;margin-bottom:10px">
+                ${candidatos.map((c, i) => `
+                  <label style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f3f3f3;cursor:pointer">
+                    <input type="radio" name="sg-nueva-ref" value="${esc(c.id)}" ${i === 0 ? 'checked' : ''}>
+                    <span style="flex:1">${esc(c.nombre)}${c.activo === 0 ? ' <span style="color:#c62828">(inactivo)</span>' : ''}</span>
+                    <span style="color:#889;font-size:.85em">stock ${c.stock}</span>
+                  </label>`).join('')}
+              </div>
+              ${T.nota ? `<p style="margin:0 0 8px;font-size:.82em;color:#667">${T.nota}</p>` : ''}
+              ${modo === 'desactivar' ? `
+                <label style="display:flex;align-items:center;gap:8px;font-size:.88em;cursor:pointer">
+                  <input type="checkbox" id="sg-dr-quitar"> Sacarlo también del grupo (su stock deja de sumarse al del grupo)
+                </label>` : ''}`
+            : `<p style="margin:0;color:#c62828">No quedan otros productos ${modo === 'desactivar' ? 'activos ' : ''}en el grupo para migrar la referencia.</p>`}
+          </div>
+          <div style="padding:12px 20px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+            <button class="btn btn-sm" id="sg-dr-cancelar">Cancelar</button>
+            ${modo === 'desactivar' ? '<button class="btn btn-sm" id="sg-dr-sin">Desactivar sin migrar</button>' : ''}
+            ${hayOtros ? `<button class="btn btn-sm btn-primary" id="sg-dr-migrar">${T.ok}</button>` : ''}
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      // El dialogo captura su propio teclado: Escape cancela solo esto, nunca la pantalla de atras.
+      const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); fin(false); } };
+      const fin = (ok) => {
+        document.removeEventListener('keydown', onKey, true);
+        overlay.remove();
+        resolve(ok);
+      };
+      document.addEventListener('keydown', onKey, true);
+
+      overlay.querySelector('#sg-dr-cancelar').addEventListener('click', () => fin(false));
+      overlay.querySelector('#sg-dr-sin')?.addEventListener('click', () => fin(true));
+      overlay.querySelector('#sg-dr-migrar')?.addEventListener('click', () => {
+        const nuevaId = overlay.querySelector('input[name="sg-nueva-ref"]:checked')?.value;
+        if (nuevaId) {
+          // Eliminar: el producto va a desaparecer, asi que sale del grupo siempre.
+          const quitar = modo === 'eliminar' || !!overlay.querySelector('#sg-dr-quitar')?.checked;
+          migrarReferencia(prodId, nuevaId, { quitarVieja: quitar });
+        }
+        fin(true);
+      });
+      (overlay.querySelector('#sg-dr-migrar') || overlay.querySelector('#sg-dr-cancelar')).focus();
+    });
+  }
+
+  /** Antes de DESACTIVAR un producto (ver pedirNuevaReferencia). */
+  const confirmarDesactivacion = (prodId, nombre) => pedirNuevaReferencia(prodId, nombre, 'desactivar');
+
+  /**
+   * Antes de ELIMINAR un producto: si es referencia obliga a elegir la nueva; si es miembro lo
+   * saca del grupo (no puede quedar una fila apuntando a un producto que ya no existe).
+   * Devuelve una promesa con true si se puede eliminar.
+   */
+  async function liberarParaEliminar(prodId, nombre) {
+    if (seguidoresDe(prodId).length) {
+      const ok = await pedirNuevaReferencia(prodId, nombre, 'eliminar');
+      if (!ok) return false;
+    }
+    quitarDelGrupo(prodId);
+    return true;
+  }
+
+  return {
+    // Escritura de grupos: SOLO estas funciones (ver la regla al principio del archivo).
+    referenciaRealDe, seguidoresDe, marcarPendientesSync, aplicarCambioReferencia, asegurarFilaPropia,
+    raizDe, corregirCadena, involucradosDe, definirGrupo,
+    miembrosDe, stockDelGrupo, moverMiembro, agruparConReferencia, diagnosticar,
+    candidatosReferencia, migrarReferencia, quitarDelGrupo,
+    pedirNuevaReferencia, confirmarDesactivacion, liberarParaEliminar,
+  };
 })();
 
 window.SGA_GruposSustitutos = SGA_GruposSustitutos;
