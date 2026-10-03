@@ -1181,7 +1181,20 @@ const Ordenes = (() => {
     const guardar = () => {
       if (!elegido) return;
       const refId = selRef.value;
-      GruposSustitutos.agruparConReferencia([productoId, elegido.id], refId);
+      // Si algun producto ya tenia OTRA referencia (o su grupo entero se va a mover), avisar antes
+      // de pisarla: un producto nunca debe cambiar de referencia sin que el usuario lo sepa.
+      // "Cancelar" mantiene la referencia actual y no escribe nada.
+      const agrupar = () => GruposSustitutos.agruparConReferencia([productoId, elegido.id], refId);
+      const pisan = GruposSustitutos.soloCambiosDeReferencia(GruposSustitutos.previsualizar(agrupar));
+      if (pisan.length) {
+        const lista = pisan.slice(0, 12).map(c => `• ${c.nombre}: de "${c.desde}" a "${c.hacia}"`).join('\n') +
+          (pisan.length > 12 ? `\n… y ${pisan.length - 12} más` : '');
+        if (!confirm(
+          `Estos productos ya tenían otra referencia y van a cambiar:\n\n${lista}\n\n` +
+          '¿Cambiar la referencia? (Cancelar mantiene la actual y no cambia nada.)'
+        )) return;
+      }
+      agrupar();
 
       const stockGrupo = stockEfectivo(refId, ui.user.sucursal_id);
       const item = db().query(

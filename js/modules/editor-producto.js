@@ -1179,13 +1179,15 @@ const EditorProducto = (() => {
           if (refHl >= 0 && dd) {
             const items = dd.querySelectorAll('.ed-search-result-item[data-id]');
             if (items[refHl]) {
-              if (setReferencia(items[refHl].dataset.id)) {
+              const idElegido = items[refHl].dataset.id;
+              refHl = -1;
+              setReferencia(idElegido).then(ok => {
+                if (!ok) return;
                 refSearch.value = '';
                 const wrap = ge('ed-ref-search-wrap');
                 if (wrap) wrap.style.display = 'none';
                 dd.style.display = 'none';
-              }
-              refHl = -1;
+              });
             }
           }
         }
@@ -1278,39 +1280,78 @@ const EditorProducto = (() => {
     }
   };
 
-  // Set (or change) the referencia for this product's group.
+  // Asigna a este producto (P) el producto R como referencia. Es el unico camino del editor para
+  // "cambiar la referencia"; escribe SOLO por el motor (grupos_sustitutos.js) y siempre muestra
+  // antes que productos van a cambiar de referencia (vista previa exacta). Devuelve (promesa)
+  // true si se aplico algun cambio, false si el usuario cancelo.
   //
-  // Resuelve la cadena en las dos direcciones antes de escribir nada (ver
-  // grupos_sustitutos.js): si el producto elegido ya pertenece el mismo a
-  // otro grupo, ofrece usar la referencia real en su lugar; si otros
-  // productos ya apuntaban a ESTE producto como su referencia, avisa que
-  // tambien se van a actualizar. Si el usuario cancela cualquiera de los
-  // dos avisos, no se escribe nada. Devuelve true si se aplico el cambio.
+  // Casos:
+  //  1. R ya es parte del grupo de P (P es su referencia): no es "unir" sino cambiar la referencia
+  //     del grupo -> "¿R pasa a ser la referencia?".
+  //  2. P es referencia de otros productos: una referencia no puede apuntar a otro, asi que se
+  //     elige: unir el grupo de P al de R, agregar R al grupo de P, o cancelar.
+  //  3. R ya es miembro de OTRO grupo: se ofrece usar la referencia real de ese grupo.
   const nombreProducto = (id) =>
     window.SGA_DB.query('SELECT nombre FROM productos WHERE id = ?', [id])[0]?.nombre || 'ese producto';
 
-  const setReferencia = (newRefId) => {
-    const refReal = GruposSustitutos.referenciaRealDe(newRefId);
-    let refFinal = newRefId;
-    if (refReal && refReal !== newRefId) {
-      const usarReal = confirm(
-        `"${nombreProducto(newRefId)}" ya pertenece a otro grupo: su referencia real es "${nombreProducto(refReal)}".\n\n` +
-        `¿Usar "${nombreProducto(refReal)}" como referencia de este grupo en su lugar?`
-      );
-      if (!usarReal) return false;
-      refFinal = refReal;
+  const setReferencia = async (newRefId) => {
+    const G = GruposSustitutos;
+    const P = state.productoId;
+    const nomP = state.producto?.nombre || nombreProducto(P);
+    const seguidoresP = G.seguidoresDe(P);
+
+    let operacion;
+    // 1) R ya esta en el grupo de P
+    if (G.referenciaRealDe(newRefId) === P && newRefId !== P) {
+      const op = await G.elegirOpcion({
+        titulo: 'Cambiar la referencia del grupo',
+        texto: `"${escapeHtml(nombreProducto(newRefId))}" ya es parte del grupo de "${escapeHtml(nomP)}".<br>¿Querés que pase a ser la <strong>referencia</strong> del grupo? "${escapeHtml(nomP)}" sigue en el grupo.`,
+        opciones: [{ id: 'si', label: 'Sí, cambiar la referencia', principal: true }],
+      });
+      if (op !== 'si') return false;
+      operacion = () => G.migrarReferencia(P, newRefId);
+    } else {
+      // 3) R pertenece a otro grupo: usar su referencia real
+      let refFinal = newRefId;
+      const refReal = G.referenciaRealDe(newRefId);
+      if (refReal && refReal !== newRefId) {
+        const op = await G.elegirOpcion({
+          titulo: 'Ese producto ya pertenece a otro grupo',
+          texto: `"${escapeHtml(nombreProducto(newRefId))}" ya es miembro de un grupo cuya referencia real es "${escapeHtml(nombreProducto(refReal))}".<br>¿Usar "${escapeHtml(nombreProducto(refReal))}" como referencia en su lugar?`,
+          opciones: [{ id: 'si', label: `Usar "${nombreProducto(refReal)}"`, principal: true }],
+        });
+        if (op !== 'si') return false;
+        refFinal = refReal;
+      }
+      // 2) P es referencia de otros: no puede apuntar a otro producto sin decidir que pasa con ellos
+      if (seguidoresP.length && refFinal !== P) {
+        const op = await G.elegirOpcion({
+          titulo: `"${nomP}" ya es referencia de otros productos`,
+          texto: `Los productos que le apuntan (${escapeHtml(seguidoresP.map(f => f.nombre).join(', '))}) no pueden quedar apuntando a un producto que a su vez apunta a otro.<br><br>
+                  ¿Qué querés hacer?`,
+          opciones: [
+            { id: 'unir', label: `Unir su grupo al de "${nombreProducto(refFinal)}"`, principal: true },
+            { id: 'agregar', label: `Agregar "${nombreProducto(refFinal)}" al grupo de "${nomP}"` },
+          ],
+        });
+        if (!op) return false;
+        operacion = op === 'unir'
+          ? () => G.aplicarCambioReferencia(P, refFinal)
+          : () => G.agruparConReferencia([P, refFinal], P);
+      } else {
+        operacion = () => G.aplicarCambioReferencia(P, refFinal);
+      }
     }
 
-    const seguidores = GruposSustitutos.seguidoresDe(state.productoId);
-    if (seguidores.length) {
-      const continuar = confirm(
-        `Los siguientes productos ya apuntan a este producto como su referencia: ${seguidores.map(s => s.nombre).join(', ')}.\n\n` +
-        `Al confirmar, también se van a actualizar para apuntar a "${nombreProducto(refFinal)}". ¿Confirmás?`
-      );
-      if (!continuar) return false;
+    // Vista previa: avisar de TODO producto que cambie de referencia (ademas de este)
+    const otros = G.soloCambiosDeReferencia(G.previsualizar(operacion)).filter(c => c.id !== P);
+    if (otros.length) {
+      const lista = otros.slice(0, 12).map(c => `• ${c.nombre}: de "${c.desde}" a "${c.hacia}"`).join('\n') +
+        (otros.length > 12 ? `\n… y ${otros.length - 12} más` : '');
+      if (!confirm(`Estos productos también cambian de referencia:\n\n${lista}\n\n¿Confirmás? (Cancelar mantiene todo como está.)`)) return false;
     }
 
-    GruposSustitutos.aplicarCambioReferencia(state.productoId, refFinal);
+    operacion();
     renderSustitutos();
     showToast('Referencia del grupo actualizada');
     return true;
@@ -1379,8 +1420,8 @@ const EditorProducto = (() => {
     `).join('');
     dropdown.style.display = '';
     dropdown.querySelectorAll('.ed-search-result-item[data-id]').forEach(item => {
-      item.addEventListener('click', () => {
-        if (setReferencia(item.dataset.id)) {
+      item.addEventListener('click', async () => {
+        if (await setReferencia(item.dataset.id)) {
           const ri = ge('ed-ref-search');
           if (ri) { ri.value = ''; }
           const wrap = ge('ed-ref-search-wrap');
