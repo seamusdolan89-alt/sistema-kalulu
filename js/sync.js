@@ -850,33 +850,25 @@
          item.tipo || 'producto', item.concepto || null]
       );
 
-      // Actualizar costo del producto si el admin lo marcó como modificado —
-      // pero solo si ESTA compra es la más reciente en la que se compró este
-      // producto. Sin este chequeo, sincronizar (o editar) una compra vieja
-      // podría pisar con un costo desactualizado el de una compra posterior
-      // ya aplicada del otro lado. Las líneas de muestra (tipo='muestra')
-      // nunca actualizan el costo — no es el costo real de reposición.
-      // costo_unitario es el de LISTA; el costo real del producto es ese menos
-      // el descuento de la linea (ver costoNetoUsado en compras_v2.js).
-      const descPct   = Math.min(100, Math.max(0, parseFloat(item.descuento_pct) || 0));
-      const costoNeto = (parseFloat(item.costo_unitario) || 0) * (1 - descPct / 100);
-      // Una compra ANULADA nunca actualiza el costo (anularCompra ya lo revirtio
-      // si correspondia) y tampoco cuenta como "compra mas reciente" de nadie.
-      if (item.tipo !== 'muestra' && item.costo_modificado && costoNeto > 0
-          && (data.estado || 'confirmada') !== 'anulada') {
-        const masReciente = window.SGA_DB.query(
-          `SELECT 1 FROM compra_items ci JOIN compras c ON c.id = ci.compra_id
-           WHERE ci.producto_id = ? AND c.id != ? AND c.fecha > ?
-             AND COALESCE(c.estado,'confirmada') != 'anulada' LIMIT 1`,
-          [item.producto_id, data.id, data.fecha]
-        );
-        if (!masReciente.length) {
-          window.SGA_DB.run(
-            `UPDATE productos SET costo = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
-            [costoNeto, now, item.producto_id]
-          );
-        }
-      }
+      // NO se actualiza productos.costo acá (bug real encontrado 3/10/2026,
+      // reportado por el usuario con un caso concreto: Cebolla). Hasta hoy,
+      // esta función re-derivaba el costo desde compra_items.costo_modificado
+      // como un "mejor esfuerzo" -- pero SOLO tocaba `costo`, nunca
+      // `costo_paquete` ni `precio_venta` ni `markup_fijo`, a diferencia de
+      // commitCompra()/commitCompraEdicion() (ver compras_v2.js), que sí
+      // actualizan las cuatro columnas juntas del lado que confirma la compra.
+      // Peor: al marcar sync_status='pending' en esta máquina sin haber
+      // habido ningún cambio real LOCAL, activaba el guard anti-pisada
+      // (tienePendienteLocal) de applyProductoFull() -- la compra se aplica
+      // ANTES que productos en SYNC_APPLY_ORDER (ver más abajo en este
+      // archivo), así que el documento de producto COMPLETO y correcto que
+      // venía en el mismo ciclo de sync quedaba descartado en silencio, y la
+      // fila local quedaba con costo correcto pero costo_paquete/precio_venta
+      // viejos -- y encima marcada 'pending', lista para pushear esa mezcla
+      // corrupta de vuelta a Firestore en el próximo push. El costo (con las
+      // cuatro columnas completas) ya viaja solo, correctamente, a través de
+      // la sincronización propia de 'productos' (applyProductoFull) -- no
+      // hace falta (ni conviene) que compras la duplique.
     }
 
     // La deuda del proveedor no se anota: se calcula desde la compra misma
