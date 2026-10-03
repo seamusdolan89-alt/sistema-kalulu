@@ -1,4 +1,11 @@
-﻿const Productos = (() => {
+﻿import GruposSustitutos from './grupos_sustitutos.js';
+// REGLA: los grupos de sustitutos (tabla producto_sustitutos) se leen y se escriben SOLO por el
+// motor (grupos_sustitutos.js): stockDelGrupo, miembrosDe, referenciaRealDe, agruparConReferencia,
+// aplicarCambioReferencia, moverMiembro, quitarDelGrupo... Nunca con SQL propio en esta pantalla:
+// cada camino que lo hizo termino dejando filas duplicadas, cadenas o referencias sin fila propia.
+// tests/e2e/test_sustitutos_solo_por_motor.py falla si se escribe la tabla desde otro archivo.
+
+const Productos = (() => {
   'use strict';
 
 
@@ -379,7 +386,7 @@
       alert(`"${p.nombre}" vuelve a sugerirse al generar órdenes de compra.`);
     };
 
-    getElement('btn-pausa-discontinuar').onclick = () => {
+    getElement('btn-pausa-discontinuar').onclick = async () => {
       const extra = stock > 0
         ? `
 
@@ -388,6 +395,8 @@ OJO: quedan ${stock} unidades en stock y no vas a poder venderlas.`
       if (!confirm(`¿Discontinuar "${p.nombre}"?
 
 Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
+      // Si es la referencia de un grupo de sustitutos, avisa y ofrece migrarla antes de discontinuar.
+      if (!(await GruposSustitutos.confirmarDesactivacion(productoId, p.nombre))) return;
       window.SGA_DB.run(
         `UPDATE productos SET activo = 0, sync_status = 'pending', updated_at = ? WHERE id = ?`,
         [new Date().toISOString(), productoId]
@@ -497,12 +506,17 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
     });
 
     document.querySelectorAll('.btn-delete-product').forEach(btn => {
-      btn.addEventListener('click', (e) => {
+      btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (!state.puedeEliminar) return; // solo Admin-POS, ver init()
         const id = btn.dataset.id;
         if (!confirm('¿Seguro que desea eliminar este producto?')) return;
         try {
+          // Si es la referencia de un grupo de sustitutos, obliga a elegir la nueva antes de
+          // borrarlo; si es un miembro, lo saca del grupo. Sin esto los miembros quedaban
+          // apuntando a una referencia que ya no existe. (Escritura de grupos: solo por el motor.)
+          const nombre = window.SGA_DB.query('SELECT nombre FROM productos WHERE id = ?', [id])[0]?.nombre || 'Este producto';
+          if (!(await GruposSustitutos.liberarParaEliminar(id, nombre))) return;
           window.SGA_DB.run('DELETE FROM productos WHERE id = ?', [id]);
           window.SGA_DB.registrarEliminacion('productos', id);
           loadProductos();
@@ -1273,6 +1287,17 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
         }
         alert(msg);
       }
+
+      if (results.sustitutosAvisos.length) {
+        console.table(results.sustitutosAvisos);
+        const maxAvisos = 30;
+        let msg = `🔗 Sustitutos: ${results.sustitutosAvisos.length} aviso(s) al vincular las referencias:\n\n` +
+          results.sustitutosAvisos.slice(0, maxAvisos).map(a => '• ' + a).join('\n');
+        if (results.sustitutosAvisos.length > maxAvisos) {
+          msg += `\n… y ${results.sustitutosAvisos.length - maxAvisos} más (ver consola).`;
+        }
+        alert(msg);
+      }
     } catch (error) {
       window.SGA_DB.rollbackBatch();
       console.error('❌ Confirm error:', error);
@@ -1297,6 +1322,7 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
       proveedoresCreados: [],
       sustitutosResueltos: 0,
       sustitutosPendientes: [],
+      sustitutosAvisos: [],
       madresResueltas: 0,
       madresPendientes: [],
       preciosAjustados: [],
@@ -1572,6 +1598,18 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
     // las filas deja de importar. Antes esto se hacia dentro del bucle y los
     // productos listados por encima de su referencia quedaban sin agrupar: se
     // los seguia pidiendo por separado en las ordenes de compra.
+    // Red de seguridad: el motor no deberia dejar nada inconsistente, pero si esta pasada llegara
+    // a sumar duplicados, cadenas, ciclos o referencias inexistentes, se cancela TODA la importacion
+    // (confirmImport hace rollback) en vez de guardar grupos rotos. Lo que ya estaba mal antes de
+    // importar no cuenta: se compara contra el estado previo.
+    const cuentaProblemas = (d) => ({
+      duplicados: d.duplicados.length, inexistentes: d.inexistentes.length,
+      cadenas: d.cadenas.length, ciclos: d.ciclos.length, sinFilaPropia: d.sinFilaPropia.length,
+    });
+    const problemasAntes = cuentaProblemas(GruposSustitutos.diagnosticar());
+    const nombreDe = (id) => window.SGA_DB.query('SELECT nombre FROM productos WHERE id = ?', [id])[0]?.nombre || id;
+    const refPedidaPorProducto = new Map();   // producto -> primera referencia pedida en el archivo
+
     for (const s of sustitutosPorResolver) {
       const refCb = window.SGA_DB.query(
         'SELECT producto_id FROM codigos_barras WHERE codigo = ?', [s.codSustRef]
@@ -1586,18 +1624,34 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
         console.warn('Sustituto auto-referencia ignorado:', s.codSustRef);
         continue;
       }
-      window.SGA_DB.run(
-        'INSERT OR REPLACE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion) VALUES (?, ?, ?, 1, ?)',
-        [s.producto_id, referencia_id, referencia_id, now]
-      );
-      // La referencia también necesita su fila: sin ella queda como referencia
-      // de un grupo al que no pertenece, y su propio stock no cuenta para el
-      // total del grupo.
-      window.SGA_DB.run(
-        'INSERT OR IGNORE INTO producto_sustitutos (producto_id, sustituto_id, referencia_id, activo, fecha_asignacion) VALUES (?, ?, ?, 1, ?)',
-        [referencia_id, referencia_id, referencia_id, now]
-      );
+      // El motor deja una sola fila por producto, le da su fila propia a la referencia (sin ella
+      // su stock no cuenta en el grupo) y marca todo para sincronizar.
+      // Un mismo producto con dos referencias distintas en el archivo: gana la ultima fila, pero
+      // se avisa (puede ser un error del archivo).
+      const yaPedida = refPedidaPorProducto.get(s.producto_id);
+      if (yaPedida && yaPedida !== referencia_id) {
+        results.sustitutosAvisos.push(`"${nombreDe(s.producto_id)}" aparece con dos referencias distintas en el archivo ("${nombreDe(yaPedida)}" y "${nombreDe(referencia_id)}"): quedó la última.`);
+      }
+      refPedidaPorProducto.set(s.producto_id, referencia_id);
+
+      const r = GruposSustitutos.moverMiembro(s.producto_id, referencia_id);
+      if (r.estado === 'ciclo_ignorado') {
+        results.sustitutosAvisos.push(`Se ignoró "${nombreDe(s.producto_id)}" → "${nombreDe(referencia_id)}": esa referencia ya es miembro del grupo de "${nombreDe(s.producto_id)}" y se armaría un ciclo.`);
+        continue;
+      }
+      if (r.estado === 'redirigida') {
+        results.sustitutosAvisos.push(`"${nombreDe(referencia_id)}" ya pertenece a otro grupo: "${nombreDe(s.producto_id)}" se unió a la referencia real, "${nombreDe(r.refEfectiva)}".`);
+      }
+      if ((r.estado === 'ok' || r.estado === 'redirigida') && r.antes && r.antes !== s.producto_id && r.antes !== r.refEfectiva) {
+        results.sustitutosAvisos.push(`"${nombreDe(s.producto_id)}" ya tenía otra referencia ("${nombreDe(r.antes)}"): se cambió a "${nombreDe(r.refEfectiva)}".`);
+      }
       results.sustitutosResueltos++;
+    }
+
+    const problemasDespues = cuentaProblemas(GruposSustitutos.diagnosticar());
+    const nuevos = Object.keys(problemasDespues).filter(k => problemasDespues[k] > problemasAntes[k]);
+    if (nuevos.length) {
+      throw new Error('La importación dejaría grupos de sustitutos inconsistentes (' + nuevos.join(', ') + '). No se guardó nada.');
     }
 
     // Resolve price conflicts within madre/hijo families touched by this import:
@@ -2417,68 +2471,10 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
 
   // ── STOCK DISPONIBLE (group-aware) ────────────────────────────────────────
 
-  const getStockDisponible = (productoId, sucursalId) => {
-    // Check if this product is a member of a referencia group
-    const refRow = window.SGA_DB.query(
-      'SELECT referencia_id FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL LIMIT 1',
-      [productoId]
-    );
-    if (!refRow.length) {
-      // Not in any group — own stock only
-      const st = window.SGA_DB.query(
-        'SELECT COALESCE(cantidad, 0) AS qty FROM stock WHERE producto_id = ? AND sucursal_id = ?',
-        [productoId, sucursalId]
-      );
-      return st.length ? (st[0].qty || 0) : 0;
-    }
-    // In a group — sum all members' stock
-    const referenciaId = refRow[0].referencia_id;
-    const groupSt = window.SGA_DB.query(`
-      SELECT COALESCE(SUM(st.cantidad), 0) AS total
-      FROM producto_sustitutos ps
-      LEFT JOIN stock st ON st.producto_id = ps.producto_id AND st.sucursal_id = ?
-      WHERE ps.referencia_id = ?
-    `, [sucursalId, referenciaId]);
-    return groupSt.length ? (groupSt[0].total || 0) : 0;
-  };
-
-  // Returns products (or groups) whose effective stock is below stock_minimo.
-  // Groups are represented by their referencia product.
-  const getProductosBajoMinimo = (sucursalId) => {
-    // Groups with referencia_id set
-    const grouped = window.SGA_DB.query(`
-      SELECT ps.referencia_id AS id,
-        ref_p.nombre,
-        ref_cb.codigo AS codigo_barras,
-        COALESCE(SUM(st.cantidad), 0) AS stock_disponible,
-        MAX(COALESCE(p.stock_minimo, 0)) AS stock_minimo
-      FROM producto_sustitutos ps
-      JOIN productos p     ON p.id = ps.producto_id AND p.activo = 1
-      JOIN productos ref_p ON ref_p.id = ps.referencia_id
-      LEFT JOIN codigos_barras ref_cb ON ref_cb.producto_id = ps.referencia_id AND ref_cb.es_principal = 1
-      LEFT JOIN stock st ON st.producto_id = ps.producto_id AND st.sucursal_id = ?
-      WHERE ps.referencia_id IS NOT NULL
-      GROUP BY ps.referencia_id
-      HAVING stock_disponible < stock_minimo
-    `, [sucursalId]);
-
-    // Products not in any group
-    const solo = window.SGA_DB.query(`
-      SELECT p.id, p.nombre, cb.codigo AS codigo_barras,
-        COALESCE(st.cantidad, 0) AS stock_disponible,
-        p.stock_minimo
-      FROM productos p
-      LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
-      LEFT JOIN stock st ON st.producto_id = p.id AND st.sucursal_id = ?
-      WHERE p.activo = 1
-        AND COALESCE(st.cantidad, 0) < p.stock_minimo
-        AND p.id NOT IN (
-          SELECT producto_id FROM producto_sustitutos WHERE referencia_id IS NOT NULL
-        )
-    `, [sucursalId]);
-
-    return { grouped, solo };
-  };
+  // La formula del stock de un grupo vive en el motor (grupos_sustitutos.js): una sola para todas
+  // las pantallas.
+  const getStockDisponible = (productoId, sucursalId) =>
+    GruposSustitutos.stockDelGrupo(productoId, sucursalId);
 
   const runMigrations = () => {
     const existingColumns = (table) => {
@@ -2553,7 +2549,7 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
     destroy,
     loadProductos,
     getStockDisponible,
-    getProductosBajoMinimo,
+    importarDesdeExcel,   // expuesta para los tests e2e (el flujo normal pasa por confirmImport)
   };
 })();
 

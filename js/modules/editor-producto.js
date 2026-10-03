@@ -927,6 +927,9 @@ const EditorProducto = (() => {
     showToast('Stock actualizado');
   };
 
+  // REGLA: este archivo NO escribe `producto_sustitutos` a mano. Quitar, cambiar referencia,
+  // agregar miembros, etc. van por GruposSustitutos (grupos_sustitutos.js), que garantiza
+  // una fila por producto, sin cadenas ni ciclos y con la referencia con fila propia.
   const renderSustitutos = () => {
     const list = ge('ed-sustitutos-list');
     if (!list) return;
@@ -965,15 +968,21 @@ const EditorProducto = (() => {
             ${referenciaInfo.ref_codigo ? `<span class="ed-sust-code">${escapeHtml(referenciaInfo.ref_codigo)}</span>` : ''}
           </div>
           <div style="display:flex;gap:6px;flex-shrink:0">
-            <button class="btn btn-sm btn-secondary" id="ed-btn-cambiar-ref">Cambiar</button>
-            <button class="btn btn-sm btn-danger"    id="ed-btn-quitar-grupo">Quitar del grupo</button>
+            ${esReferencia && referenciaId === state.productoId
+              /* Es LA referencia del grupo: se cambia a otro miembro y recien despues se la puede quitar. */
+              ? `<button class="btn btn-sm btn-secondary" id="ed-btn-cambiar-ref-miembro">Cambiar referencia</button>
+                 <button class="btn btn-sm btn-danger" id="ed-btn-quitar-grupo" disabled
+                   title="Es la referencia del grupo: primero cambiá la referencia a otro producto y después quitalo">Quitar del grupo</button>`
+              : `<button class="btn btn-sm btn-secondary" id="ed-btn-cambiar-ref">Cambiar</button>
+                 <button class="btn btn-sm btn-danger"    id="ed-btn-quitar-grupo">Quitar del grupo</button>`}
           </div>
         </div>`;
     } else {
       html += `
         <div class="ed-ref-panel" style="color:var(--color-text-secondary)">
           ${esReferencia
-            ? 'Este producto es la referencia de otros productos (no pertenece a ningún otro grupo).'
+            ? `Este producto es la referencia de otros productos (no pertenece a ningún otro grupo).
+               <button class="btn btn-sm btn-secondary" id="ed-btn-cambiar-ref-miembro" style="margin-left:8px">Cambiar referencia</button>`
             : 'Sin grupo de sustitutos asignado.'}
         </div>`;
     }
@@ -995,7 +1004,7 @@ const EditorProducto = (() => {
     // Group members table (only when in a group)
     if (referenciaId) {
       const members = window.SGA_DB.query(`
-        SELECT ps.producto_id, ps.activo, p.nombre,
+        SELECT ps.producto_id, p.nombre,
           cb.codigo AS codigo_barras,
           COALESCE(st.cantidad, 0) AS stock
         FROM producto_sustitutos ps
@@ -1016,7 +1025,6 @@ const EditorProducto = (() => {
                 <th style="padding:7px 10px;text-align:left;font-weight:600">Nombre</th>
                 <th style="padding:7px 10px;text-align:left;font-weight:600">Código</th>
                 <th style="padding:7px 10px;text-align:right;font-weight:600">Stock</th>
-                <th style="padding:7px 10px;text-align:center;font-weight:600">Activo</th>
               </tr></thead>
               <tbody>
         `;
@@ -1030,12 +1038,6 @@ const EditorProducto = (() => {
               </td>
               <td style="padding:7px 10px;color:var(--color-text-secondary)">${escapeHtml(m.codigo_barras || '—')}</td>
               <td style="padding:7px 10px;text-align:right">${m.stock}</td>
-              <td style="padding:7px 10px;text-align:center">
-                <label class="ed-toggle-switch">
-                  <input type="checkbox" class="ed-sust-toggle" data-id="${escapeHtml(m.producto_id)}" ${m.activo ? 'checked' : ''}>
-                  <span class="ed-toggle-slider"></span>
-                </label>
-              </td>
             </tr>`;
         });
         html += `</tbody></table></div>`;
@@ -1063,7 +1065,7 @@ const EditorProducto = (() => {
     // If this product IS the referencia for other products, show those members
     if (esReferencia && referenciaId !== state.productoId) {
       const miembros = window.SGA_DB.query(`
-        SELECT ps.producto_id, ps.activo, p.nombre,
+        SELECT ps.producto_id, p.nombre,
           cb.codigo AS codigo_barras,
           COALESCE(st.cantidad, 0) AS stock
         FROM producto_sustitutos ps
@@ -1102,18 +1104,6 @@ const EditorProducto = (() => {
 
     // ── Wire events ──────────────────────────────────────────────────────────
 
-    // Active-toggle for each member
-    list.querySelectorAll('.ed-sust-toggle').forEach(chk => {
-      chk.addEventListener('change', () => {
-        window.SGA_DB.run(
-          'UPDATE producto_sustitutos SET activo = ? WHERE producto_id = ? AND referencia_id IS NOT NULL',
-          [chk.checked ? 1 : 0, chk.dataset.id]
-        );
-        GruposSustitutos.marcarPendientesSync([chk.dataset.id]);
-        showToast(chk.checked ? 'Miembro activado' : 'Miembro desactivado');
-      });
-    });
-
     // Cambiar referencia
     ge('ed-btn-cambiar-ref')?.addEventListener('click', () => {
       const wrap = ge('ed-ref-search-wrap');
@@ -1125,14 +1115,24 @@ const EditorProducto = (() => {
       }
     });
 
-    // Quitar del grupo
+    // Cambiar la referencia del grupo a OTRO MIEMBRO (este producto es la referencia). El actual
+    // sigue en el grupo; despues de cambiarla se lo puede quitar como a cualquier miembro.
+    ge('ed-btn-cambiar-ref-miembro')?.addEventListener('click', async () => {
+      const ok = await GruposSustitutos.pedirNuevaReferencia(
+        state.productoId, state.producto?.nombre || 'Este producto', 'cambiar');
+      if (!ok) return;
+      renderSustitutos();
+      showToast('Referencia del grupo actualizada');
+    });
+
+    // Quitar del grupo (todas las escrituras de grupos pasan por el motor: grupos_sustitutos.js)
     ge('ed-btn-quitar-grupo')?.addEventListener('click', () => {
-      if (!confirm('¿Quitar este producto del grupo de sustitutos?')) return;
-      window.SGA_DB.run(
-        'DELETE FROM producto_sustitutos WHERE producto_id = ? AND referencia_id IS NOT NULL',
-        [state.productoId]
-      );
-      GruposSustitutos.marcarPendientesSync([state.productoId]);
+      if (!confirm('¿Quitar este producto del grupo de sustitutos? Su stock deja de sumarse al del grupo.')) return;
+      const r = GruposSustitutos.quitarDelGrupo(state.productoId);
+      if (!r.ok) {
+        alert('Este producto es la referencia del grupo: primero cambiá la referencia a otro producto y después quitalo.');
+        return;
+      }
       renderSustitutos();
       showToast('Producto quitado del grupo');
     });
@@ -2674,7 +2674,18 @@ const EditorProducto = (() => {
 
   // ── SAVE ALL ───────────────────────────────────────────────────────────────
 
-  const saveAll = () => {
+  // Desactivar un producto que es la referencia de un grupo deja al grupo sin pedirse: antes de
+  // guardar se avisa y se ofrece migrar la referencia a otro miembro.
+  const saveAll = async () => {
+    const estabaActivo = state.producto && (state.producto.activo === 1 || state.producto.activo === '1');
+    if (!state.isNew && estabaActivo && ge('ed-activo') && !ge('ed-activo').checked) {
+      const seguir = await GruposSustitutos.confirmarDesactivacion(state.producto.id, state.producto.nombre);
+      if (!seguir) return;
+    }
+    saveAllCore();
+  };
+
+  const saveAllCore = () => {
     const nombre = (ge('ed-nombre') || {}).value && ge('ed-nombre').value.trim();
     if (!nombre) { alert('El nombre es obligatorio'); return; }
 

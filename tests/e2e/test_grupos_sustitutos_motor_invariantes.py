@@ -106,6 +106,27 @@ def main():
         assert total == 10, f"5 + 3 + 2 = 10, dio {total}"
         print("OK")
 
+        print("--- 4) moverMiembro (importacion): mueve UN producto sin arrastrar su grupo viejo ---")
+        page.evaluate("""() => {
+          const now = new Date().toISOString();
+          const mk = (id) => window.SGA_DB.run(
+            `INSERT INTO productos (id, nombre, costo, precio_venta, stock_minimo, unidad_medida,
+               es_madre, precio_independiente, activo, fecha_alta, fecha_modificacion, sync_status, updated_at)
+             VALUES (?, ?, 10, 20, 5, 'unidad', 0, 0, 1, ?, ?, 'synced', ?)`, [id, 'MI ' + id, now, now, now]);
+          ['mi-x', 'mi-y', 'mi-z', 'mi-w'].forEach(mk);
+          const G = window.SGA_GruposSustitutos;
+          G.moverMiembro('mi-y', 'mi-x');          // y -> x (x queda con su fila propia)
+          G.moverMiembro('mi-z', 'mi-x');          // z -> x
+          G.moverMiembro('mi-z', 'mi-w');          // z se muda a w, sin arrastrar a x ni a y
+        }""")
+        r = page.evaluate(
+            "window.SGA_DB.query(`SELECT producto_id, referencia_id FROM producto_sustitutos WHERE producto_id IN ('mi-x','mi-y','mi-z','mi-w') ORDER BY producto_id`)")
+        por = {}
+        for f in r:
+            por.setdefault(f["producto_id"], []).append(f["referencia_id"])
+        assert por == {"mi-x": ["mi-x"], "mi-y": ["mi-x"], "mi-z": ["mi-w"], "mi-w": ["mi-w"]}, por
+        print("OK")
+
         assert not errors, f"Errores JS: {errors}"
         print("\n=== OK: invariantes del motor de grupos de sustitutos ===")
         browser.close()
