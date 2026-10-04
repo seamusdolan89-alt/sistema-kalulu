@@ -100,6 +100,21 @@
   }
 
   /**
+   * Redondea un monto (costo o precio) a 2 decimales -- toda división o
+   * multiplicación que produzca un costo/precio tiene que pasar por acá antes
+   * de guardarse (pedido explícito del dueño, 4/10/2026, tras encontrar
+   * costos como $663,629 o $2954,7769999999996 en producción: ruido de punto
+   * flotante de divisiones como costoPorBulto/unidadesPorPaquete sin redondear,
+   * que después ensucia cualquier exportación/auditoría en CSV).
+   *
+   * @param {number} value
+   * @returns {number}
+   */
+  function roundMoney(value) {
+    return Math.round((parseFloat(value) || 0) * 100) / 100;
+  }
+
+  /**
    * Validate email
    * 
    * @param {string} email
@@ -315,6 +330,7 @@
     formatNumber,
     parseCurrency,
     roundTo10,
+    roundMoney,
     isValidEmail,
     isValidCUIT,
     debounce,

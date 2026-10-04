@@ -214,7 +214,7 @@ const OperacionesStock = (() => {
       if (vistos.has(it.producto_id)) continue;
       vistos.add(it.producto_id);
       const desc = Math.min(100, Math.max(0, parseFloat(it.descuento_pct) || 0));
-      const costoNeto = (parseFloat(it.costo_unitario) || 0) * (1 - desc / 100);
+      const costoNeto = window.SGA_Utils.roundMoney((parseFloat(it.costo_unitario) || 0) * (1 - desc / 100));
       const anterior = parseFloat(it.costo_anterior) || 0;
       if (anterior <= 0 || Math.abs((parseFloat(it.costo_actual) || 0) - costoNeto) >= 0.01) continue;
       const posterior = db().query(
@@ -307,7 +307,7 @@ const OperacionesStock = (() => {
       for (const c of r.costos) {
         db().run(
           `UPDATE productos SET costo = ?, costo_paquete = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
-          [c.a, c.a * c.udsPaq, ts, c.productoId]
+          [c.a, window.SGA_Utils.roundMoney(c.a * c.udsPaq), ts, c.productoId]
         );
       }
 
