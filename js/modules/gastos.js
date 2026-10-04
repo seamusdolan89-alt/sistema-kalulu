@@ -337,7 +337,7 @@ const Gastos = (() => {
 
               <div class="gc-field">
                 <label>Monto${isSueldos ? ' del sueldo' : ''}</label>
-                <input type="number" id="gf-monto" class="gc-input" min="0" step="0.01" placeholder="0,00">
+                <input type="number" id="gf-monto" class="gc-input" min="0" step="0.01" data-money="true" placeholder="0,00">
               </div>
 
               ${isSueldos ? `
@@ -387,7 +387,7 @@ const Gastos = (() => {
                 <div class="gc-facta-section hidden" id="gc-facta-section">
                   <div class="gc-field">
                     <label>Subtotal neto</label>
-                    <input type="number" id="gf-subtotal" class="gc-input" min="0" step="0.01" placeholder="0,00">
+                    <input type="number" id="gf-subtotal" class="gc-input" min="0" step="0.01" data-money="true" placeholder="0,00">
                   </div>
                   <div class="gc-field">
                     <label>Alícuota IVA</label>
@@ -401,7 +401,7 @@ const Gastos = (() => {
                   </div>
                   <div class="gc-field">
                     <label>Perc. IIBB ($)</label>
-                    <input type="number" id="gf-iibb" class="gc-input" min="0" step="0.01" placeholder="0,00">
+                    <input type="number" id="gf-iibb" class="gc-input" min="0" step="0.01" data-money="true" placeholder="0,00">
                   </div>
                   <div class="gc-facta-total">
                     Total: <strong id="gc-facta-total-val">—</strong>
@@ -549,7 +549,7 @@ const Gastos = (() => {
         <select class="gc-select gc-pago-metodo">
           ${METODOS.map(m => `<option value="${m.value}"${m.value === r.metodo ? ' selected' : ''}>${m.label}</option>`).join('')}
         </select>
-        <input type="number" class="gc-input gc-pago-monto" min="0" step="0.01"
+        <input type="number" class="gc-input gc-pago-monto" min="0" step="0.01" data-money="true"
           placeholder="0,00" value="${r.monto}" title="Monto a abonar">
         ${rows.length > 1
           ? `<button class="gc-btn-del-pago" data-idx="${i}" aria-label="Quitar" title="Quitar">✕</button>`
@@ -686,7 +686,7 @@ const Gastos = (() => {
         <select id="ip-metodo" class="gc-select">
           ${METODOS.map(m => `<option value="${m.value}">${m.label}</option>`).join('')}
         </select>
-        <input type="number" id="ip-monto" class="gc-input" min="0" step="0.01" value="${pendiente.toFixed(2)}" placeholder="0,00">
+        <input type="number" id="ip-monto" class="gc-input" min="0" step="0.01" data-money="true" value="${pendiente.toFixed(2)}" placeholder="0,00">
         <button class="btn btn-primary btn-sm" id="btn-ip-save">Registrar</button>
         <button class="btn btn-secondary btn-sm" id="btn-ip-cancel">Cancelar</button>
       </div>

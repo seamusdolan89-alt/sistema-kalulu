@@ -321,7 +321,7 @@ const SGA_PagoProveedorWizard = (() => {
               <input type="checkbox" class="ccprov-metodo-check" id="chk-efectivo">
               <span class="ccprov-metodo-label">💵 Efectivo</span>
               <div class="ccprov-metodo-inputs">
-                <input type="number" class="ccprov-input" id="mp-ef-monto"
+                <input type="number" class="ccprov-input" id="mp-ef-monto" data-money="true"
                   placeholder="$ 0,00" min="0" step="0.01"
                   ${!sesion ? 'disabled title="No hay caja abierta"' : ''}>
                 ${!sesion ? '<span style="font-size:12px;color:#999">Sin caja abierta</span>' : ''}
@@ -332,7 +332,7 @@ const SGA_PagoProveedorWizard = (() => {
               <input type="checkbox" class="ccprov-metodo-check" id="chk-transferencia">
               <span class="ccprov-metodo-label">🏦 Transferencia</span>
               <div class="ccprov-metodo-inputs">
-                <input type="number" class="ccprov-input" id="mp-tr-monto" placeholder="$ 0,00" min="0" step="0.01">
+                <input type="number" class="ccprov-input" id="mp-tr-monto" data-money="true" placeholder="$ 0,00" min="0" step="0.01">
                 <input type="text" class="ccprov-input ccprov-metodo-ref" id="mp-tr-ref" placeholder="Nro. comprobante (opcional)">
               </div>
             </div>
@@ -510,7 +510,7 @@ const SGA_PagoProveedorWizard = (() => {
                 <td class="right">${fmt$(c.total)}</td>
                 <td class="right" style="color:#e65100;font-weight:600">${fmt$(c.saldo)}</td>
                 <td class="right">
-                  <input type="number" class="ccprov-imp-amount imp-monto-input"
+                  <input type="number" class="ccprov-imp-amount imp-monto-input" data-money="true"
                     data-idx="${idx}"
                     data-saldo="${c.saldo}"
                     data-compra-id="${esc(c.id)}"
