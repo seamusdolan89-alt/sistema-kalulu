@@ -212,20 +212,20 @@ const SGA_NotaCreditoWizard = (() => {
             <div class="ccprov-field ncw-solo-a"><label for="ncw-neto">Subtotal neto</label>
               <input type="number" class="ccprov-input" id="ncw-neto" readonly tabindex="-1"></div>
             <div class="ccprov-field ncw-solo-a"><label for="ncw-iva105">IVA 10,5%</label>
-              <input type="number" class="ccprov-input" id="ncw-iva105" min="0" step="any"></div>
+              <input type="number" class="ccprov-input" id="ncw-iva105" min="0" step="any" data-money="true"></div>
             <div class="ccprov-field ncw-solo-a"><label for="ncw-iva21">IVA 21%</label>
-              <input type="number" class="ccprov-input" id="ncw-iva21" min="0" step="any"></div>
+              <input type="number" class="ccprov-input" id="ncw-iva21" min="0" step="any" data-money="true"></div>
             <div class="ccprov-field ncw-solo-a"><label for="ncw-impint">Imp. interno</label>
-              <input type="number" class="ccprov-input" id="ncw-impint" min="0" step="any"></div>
+              <input type="number" class="ccprov-input" id="ncw-impint" min="0" step="any" data-money="true"></div>
             <div class="ccprov-field ncw-solo-a"><label for="ncw-perciva">Percepción IVA</label>
-              <input type="number" class="ccprov-input" id="ncw-perciva" min="0" step="any"></div>
+              <input type="number" class="ccprov-input" id="ncw-perciva" min="0" step="any" data-money="true"></div>
             <div class="ccprov-field ncw-solo-a"><label for="ncw-percibb">Percepción IIBB</label>
-              <input type="number" class="ccprov-input" id="ncw-percibb" min="0" step="any"></div>
+              <input type="number" class="ccprov-input" id="ncw-percibb" min="0" step="any" data-money="true"></div>
           </div>
 
           <div class="ncw-total-box">
             <label for="ncw-total">Total de la NC</label>
-            <input type="number" class="ccprov-input" id="ncw-total" min="0" step="any">
+            <input type="number" class="ccprov-input" id="ncw-total" min="0" step="any" data-money="true">
           </div>
           <div id="ncw-total-hint" style="text-align:right;font-size:12px;color:var(--color-text-secondary);margin-top:-12px"></div>
 
@@ -359,7 +359,7 @@ const SGA_NotaCreditoWizard = (() => {
             <td>${esc(l.nombre)}</td>
             <td class="r">${fmtCant(l.max)}</td>
             <td class="r"><input type="number" data-f="cantidad" min="0.001" max="${l.max}" step="any" value="${l.cantidad}" aria-label="Cantidad a devolver"></td>
-            <td class="r"><input type="number" data-f="costo" min="0" step="any" value="${l.costo}" aria-label="Costo neto unitario"></td>
+            <td class="r"><input type="number" data-f="costo" min="0" step="any" data-money="true" value="${l.costo}" aria-label="Costo neto unitario"></td>
             <td class="ncw-col-iva"><select data-f="iva" aria-label="IVA">${IVA_OPTS}</select></td>
             <td class="r ncw-sub">${fmt$(l.cantidad * l.costo)}</td>
             <td style="text-align:center"><input type="checkbox" data-f="baja" ${l.bajaStock ? 'checked' : ''} aria-label="Baja el stock"></td>
@@ -375,7 +375,7 @@ const SGA_NotaCreditoWizard = (() => {
           ${st.prod.map((l, i) => `<tr data-i="${i}">
             <td>${esc(l.nombre)}</td>
             <td class="r"><input type="number" data-f="cantidad" min="0.001" step="any" value="${l.cantidad}" aria-label="Cantidad"></td>
-            <td class="r"><input type="number" data-f="costo" min="0" step="any" value="${l.costo}" aria-label="Costo neto unitario"></td>
+            <td class="r"><input type="number" data-f="costo" min="0" step="any" data-money="true" value="${l.costo}" aria-label="Costo neto unitario"></td>
             <td class="ncw-col-iva"><select data-f="iva" aria-label="IVA">${IVA_OPTS}</select></td>
             <td class="r ncw-sub">${fmt$(l.cantidad * l.costo)}</td>
             <td style="text-align:center"><input type="checkbox" data-f="baja" ${l.bajaStock ? 'checked' : ''} aria-label="Baja el stock"></td>
@@ -396,7 +396,7 @@ const SGA_NotaCreditoWizard = (() => {
         </tr></thead><tbody>
         ${st.conc.map((l, i) => `<tr data-i="${i}">
           <td><input type="text" class="ncw-concepto" data-f="concepto" value="${esc(l.concepto)}" placeholder="Ej.: bonificación por pronto pago" aria-label="Concepto"></td>
-          <td class="r"><input type="number" data-f="monto" min="0" step="any" value="${l.monto || ''}" aria-label="Monto neto"></td>
+          <td class="r"><input type="number" data-f="monto" min="0" step="any" data-money="true" value="${l.monto || ''}" aria-label="Monto neto"></td>
           <td class="ncw-col-iva"><select data-f="iva" aria-label="IVA">${IVA_OPTS}</select></td>
           <td><button type="button" class="ncw-del" data-del="conc" aria-label="Quitar" title="Quitar">✕</button></td>
         </tr>`).join('')}

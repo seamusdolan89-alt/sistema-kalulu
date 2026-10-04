@@ -1587,7 +1587,7 @@ const CuentaCorrienteProveedores = (() => {
                 <span class="ledger-type-badge ${c.tipo === 'gasto' ? 'ledger-type-gasto' : 'ledger-type-compra'}">${c.tipo === 'gasto' ? 'Gasto' : 'Compra'}</span>
                 <span class="lir-ref">${esc(c.ref)}</span>
                 <span style="color:var(--color-text-secondary)">saldo ${fmt$(c.saldo)}</span>
-                <input type="number" class="imp-row-input" data-id="${esc(c.id)}"
+                <input type="number" class="imp-row-input" data-id="${esc(c.id)}" data-money="true"
                        data-tipo="${esc(c.tipo)}" data-saldo="${c.saldo}"
                        value="${c.sug > 0 ? c.sug.toFixed(2) : ''}" min="0" max="${c.saldo}" step="0.01"
                        placeholder="0,00">
@@ -1775,7 +1775,7 @@ const CuentaCorrienteProveedores = (() => {
             </div>
             <div class="ccprov-field">
               <label for="comp-total">Importe de la NC</label>
-              <input type="number" class="ccprov-input" id="comp-total" min="0" step="any" value="${Math.round(total * 100) / 100}">
+              <input type="number" class="ccprov-input" id="comp-total" min="0" step="any" data-money="true" value="${Math.round(total * 100) / 100}">
             </div>
           </div>
           <div id="comp-error" style="display:none;color:#c62828;font-size:13px"></div>
