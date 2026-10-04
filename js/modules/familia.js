@@ -184,6 +184,7 @@ const SGA_Familia = (() => {
       ? { id: prodId, nombre: prodNombre }
       : db().query(
           `SELECT p.id, p.nombre, p.costo AS costo_actual, p.precio_venta AS precio_actual,
+                  COALESCE(p.unidades_por_paquete_compra, 1) AS uppc,
                   COALESCE(s.cantidad, 0) AS stock_actual
            FROM productos p
            LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?
@@ -201,6 +202,7 @@ const SGA_Familia = (() => {
     if (esMadre) {
       miembros = db().query(`
         SELECT p.id, p.nombre, p.costo AS costo_actual, p.precio_venta AS precio_actual,
+               COALESCE(p.unidades_por_paquete_compra, 1) AS uppc,
                COALESCE(p.hereda_costo, 1) AS hereda_costo,
                COALESCE(p.hereda_precio, 1) AS hereda_precio,
                COALESCE(s.cantidad, 0) AS stock_actual,
@@ -217,6 +219,7 @@ const SGA_Familia = (() => {
         nombre:       madreProd.nombre,
         costo_actual: parseFloat(madreProd.costo_actual) || 0,
         precio_actual: parseFloat(madreProd.precio_actual) || 0,
+        uppc:          parseFloat(madreProd.uppc) || 1,
         hereda_costo:  1,
         hereda_precio: 1,
         stock_actual:  parseFloat(madreProd.stock_actual) || 0,
@@ -224,6 +227,7 @@ const SGA_Familia = (() => {
       };
       const siblings = db().query(`
         SELECT p.id, p.nombre, p.costo AS costo_actual, p.precio_venta AS precio_actual,
+               COALESCE(p.unidades_por_paquete_compra, 1) AS uppc,
                COALESCE(p.hereda_costo, 1) AS hereda_costo,
                COALESCE(p.hereda_precio, 1) AS hereda_precio,
                COALESCE(s.cantidad, 0) AS stock_actual,
@@ -395,7 +399,15 @@ const SGA_Familia = (() => {
       const hp  = tr.querySelector('.cv2-her-chk-precio')?.checked;
       const ts  = nowISO();
       const fields = [], vals = [];
-      if (hc) { fields.push('costo=?', 'costo_paquete=?'); vals.push(nuevoCosto, nuevoCosto); }
+      if (hc) {
+        // costo_paquete del MIEMBRO, no de la madre: si tiene su propia
+        // unidades_por_paquete_compra (ej. la madre se compra por unidad y
+        // este miembro por caja de 6), pisarlo con nuevoCosto a secas dejaba
+        // costo_paquete inconsistente con costo*uppc -- el mismo síntoma que
+        // el bug de sync (4/10/2026, ver CLAUDE.md "BUG GRAVE DE PRECIOS").
+        const costoPaqueteMiembro = window.SGA_Utils.roundMoney(nuevoCosto * (parseFloat(m.uppc) || 1));
+        fields.push('costo=?', 'costo_paquete=?'); vals.push(nuevoCosto, costoPaqueteMiembro);
+      }
       if (hp) { fields.push('precio_venta=?', 'ultima_modificacion_precio=?'); vals.push(nuevoPrecio, ts); }
       if (!fields.length) return;
       fields.push("sync_status='pending'", 'updated_at=?');
