@@ -1123,30 +1123,22 @@
     );
   }
 
-  function applyProductoUpdate(data) {
-    // Solo actualiza los campos que el admin puede modificar remotamente.
-    // No toca stock ni campos calculados por el POS.
-    const now = new Date().toISOString();
-    const fields = data._fields_updated || [];
-
-    if (fields.length === 0) return; // admin debe especificar qué campos cambió
-
-    const allowed = ['nombre', 'costo', 'precio_venta', 'descripcion',
-                     'categoria_id', 'proveedor_principal_id', 'producto_madre_id',
-                     'stock_minimo', 'stock_alerta', 'activo', 'es_oferta',
-                     'oferta_desde', 'oferta_hasta'];
-    const toUpdate = fields.filter(f => allowed.includes(f));
-    if (toUpdate.length === 0) return;
-
-    const setClause = toUpdate.map(f => `${f} = ?`).join(', ');
-    const values    = toUpdate.map(f => data[f] ?? null);
-    values.push('pending', now, data.id);
-
-    window.SGA_DB.run(
-      `UPDATE productos SET ${setClause}, sync_status = ?, updated_at = ? WHERE id = ?`,
-      values
-    );
-  }
+  // applyProductoUpdate existió hasta el 13/5/2026 (d728902): hacía un UPDATE
+  // PARCIAL de productos (incluía costo/precio_venta) y marcaba sync_status
+  // ='pending' sin condición en cada aplicación. Se reemplazó por
+  // applyProductoFull (abajo) en PULL_SOURCES ese mismo día y quedó sin
+  // ningún llamador desde entonces -- pero el código seguía ahí, sin usarse.
+  // Auditoría de sync.js del 4/10/2026 (tras el bug de Cebolla, ver CLAUDE.md
+  // "BUG GRAVE DE PRECIOS"): es exactamente el mismo mecanismo que causó esa
+  // corrupción -- un update parcial a productos marcando 'pending' sin que
+  // hubiera un cambio local real, capaz de activar tienePendienteLocal() y
+  // bloquear el apply completo de applyProductoFull si ambos corrieran en el
+  // mismo ciclo. Dormido no hacía daño (igual que applyCompra antes de
+  // 9313eb3), pero es una trampa para quien lo reconecte sin saberlo. Se
+  // borra en vez de dejarlo "por si acaso": si en el futuro hace falta un
+  // update parcial remoto de productos, hay que diseñarlo de nuevo con la
+  // regla de CLAUDE.md (test de escenario con dos dispositivos, no solo
+  // cobertura tabla por tabla).
 
   function applyPromocion(data) {
     if (window.SGA_DB.fueEliminado('promociones', data.id)) return;
