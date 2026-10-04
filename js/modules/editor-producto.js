@@ -359,14 +359,14 @@ const EditorProducto = (() => {
         <label for="ed-costo">Costo por unidad de venta</label>
         <div class="ed-input-prefix-wrap">
           <span class="ed-input-affix">$</span>
-          <input type="number" id="ed-costo" class="input-full" step="0.01" min="0" value="${p.costo || 0}">
+          <input type="number" id="ed-costo" class="input-full" step="0.01" min="0" data-money="true" value="${p.costo || 0}">
         </div>
       </div>
       <div class="form-group" id="ed-costo-paquete-wrap">
         <label for="ed-costo-paquete">Costo por unidad de compra</label>
         <div class="ed-input-prefix-wrap">
           <span class="ed-input-affix">$</span>
-          <input type="number" id="ed-costo-paquete" class="input-full" step="0.01" min="0" value="${p.costo_paquete || 0}">
+          <input type="number" id="ed-costo-paquete" class="input-full" step="0.01" min="0" data-money="true" value="${p.costo_paquete || 0}">
         </div>
         <small class="ed-text-muted" id="ed-costo-paquete-hint"></small>
       </div>
@@ -383,7 +383,7 @@ const EditorProducto = (() => {
         <label for="ed-precio-venta">Precio de venta</label>
         <div class="ed-input-prefix-wrap">
           <span class="ed-input-affix">$</span>
-          <input type="number" id="ed-precio-venta" class="input-full" step="0.01" min="0" value="${p.precio_venta || 0}">
+          <input type="number" id="ed-precio-venta" class="input-full" step="0.01" min="0" data-money="true" value="${p.precio_venta || 0}">
         </div>
       </div>
       <div class="form-group">

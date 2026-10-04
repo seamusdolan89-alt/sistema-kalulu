@@ -618,6 +618,31 @@
       if (el instanceof HTMLInputElement && el.type === 'number' && el === e.target) el.blur();
     }, { passive: true });
 
+    // Máximo 2 decimales en todo campo de dinero (pedido del usuario,
+    // 4/10/2026, tras encontrar costos con 6+ decimales en producción --
+    // ver roundMoney() en utils.js). step="0.01" en un <input type="number">
+    // NO impide tipear más decimales a mano, solo afecta las flechitas del
+    // spinner -- así que la única forma real de garantizarlo es redondear al
+    // salir del campo. Un solo listener delegado (igual que el de la rueda
+    // del mouse, arriba) cubre data-money="true" en cualquier pantalla, hoy
+    // y las que se agreguen después, sin que cada módulo tenga que acordarse
+    // de engancharlo. Marcar un campo como data-money es una decisión
+    // puntual por pantalla (no todo input numérico es plata), así que se va
+    // agregando donde corresponda, no automáticamente.
+    document.addEventListener('focusout', e => {
+      const el = e.target;
+      if (el instanceof HTMLInputElement && el.type === 'number' && el.dataset.money === 'true') {
+        const v = parseFloat(el.value);
+        if (!isNaN(v)) {
+          el.value = window.SGA_Utils.roundMoney(v).toFixed(2);
+          // Disparar 'input' para que cualquier listener de la pantalla (ej.
+          // el cálculo cruzado costo<->costo_paquete del Editor de Producto)
+          // vuelva a correr con el valor YA redondeado, no con el crudo.
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }
+    });
+
     try {
       // Initialize database
       console.log('🔄 Initializing database...');

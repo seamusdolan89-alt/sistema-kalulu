@@ -651,7 +651,7 @@ const OperacionesStock = (() => {
                        ${it.producto_markup_fijo != null ? `<span style="display:inline-block;background:#ede7f6;color:#5e35b1;border-radius:5px;padding:2px 7px;font-size:10px;font-weight:700;margin-right:5px" title="Este producto tiene un markup predeterminado — cambiarlo va a preguntar si se actualiza o es una excepción">Markup ${esc(String(it.producto_markup_fijo))}%</span>` : ''}
                        <input type="number" class="ops-precio-input" data-idx="${idx}" data-prodid="${esc(it.producto_id)}"
                               data-nombre="${esc(it.producto_nombre || '')}" data-costo="${it.costo_unitario || 0}"
-                              data-markup="${it.producto_markup_fijo ?? ''}"
+                              data-markup="${it.producto_markup_fijo ?? ''}" data-money="true"
                               value="${precioActual.toFixed(2)}" min="0" step="any"
                               title="Precio de venta — editable"
                               style="width:92px;padding:5px 6px;border:1.5px solid #90b8f0;border-radius:4px;text-align:right;font-size:13px;background:#f0f6ff;transition:background .15s,border-color .15s">
@@ -684,12 +684,17 @@ const OperacionesStock = (() => {
         const idx    = parseInt(inp.dataset.idx);
         const prodId = inp.dataset.prodid;
         const item   = compra.items[idx];
-        const nuevoPrecio = parseFloat(inp.value);
-        if (isNaN(nuevoPrecio) || nuevoPrecio < 0) {
+        const precioCrudo = parseFloat(inp.value);
+        if (isNaN(precioCrudo) || precioCrudo < 0) {
           inp.value = (parseFloat(item.producto_precio_venta) || 0).toFixed(2);
           settle();
           return;
         }
+        // Este campo se guarda directo en su propio 'blur' (más abajo), que
+        // corre ANTES que el listener delegado de app.js (data-money):
+        // redondear acá, en el punto de guardado, es lo único que garantiza
+        // que lo que se escribe tenga 2 decimales.
+        const nuevoPrecio = window.SGA_Utils.roundMoney(precioCrudo);
         if (Math.abs(nuevoPrecio - (parseFloat(item.producto_precio_venta) || 0)) < 0.001) { settle(); return; } // sin cambios
 
         // Markup fijo (pedido del usuario, 30/9/2026): si este producto tiene
