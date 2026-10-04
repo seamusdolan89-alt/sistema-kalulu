@@ -262,7 +262,7 @@ const ComprasV2 = (() => {
   // compra_items para que la linea coincida con la factura del proveedor.
   function costoNetoUsado(item) {
     const disc = Math.min(100, Math.max(0, parseFloat(item.descuento) || 0));
-    return costoUsado(item) * (1 - disc / 100);
+    return window.SGA_Utils.roundMoney(costoUsado(item) * (1 - disc / 100));
   }
 
   // Markup fijo (pedido del usuario, 30/9/2026): un producto con
@@ -1430,7 +1430,7 @@ const ComprasV2 = (() => {
       unidadCompra:     producto ? (producto.unidad_compra || 'Unidad') : 'Unidad',
       udsPaquete:       udsPaq,
       costoActual:      producto ? (parseFloat(producto.costo) || 0) : 0,
-      costoNuevo:       udsPaq > 0 ? costoPorBulto / udsPaq : costoPorBulto,
+      costoNuevo:       window.SGA_Utils.roundMoney(udsPaq > 0 ? costoPorBulto / udsPaq : costoPorBulto),
       cantidad:         cantidadFacturada,
       descuento:        0,
       descuentoMonto:   0,
@@ -1541,7 +1541,7 @@ const ComprasV2 = (() => {
     it.unidadCompra = producto ? (producto.unidad_compra || 'Unidad') : it.unidadCompra;
     it.udsPaquete   = udsPaq;
     it.costoActual  = producto ? (parseFloat(producto.costo) || 0) : 0;
-    it.costoNuevo   = udsPaq > 0 ? costoPorBulto / udsPaq : costoPorBulto;
+    it.costoNuevo   = window.SGA_Utils.roundMoney(udsPaq > 0 ? costoPorBulto / udsPaq : costoPorBulto);
     if (producto && producto.iva) it.iva = producto.iva;
     it.confirmado   = true;
     it.matchTentativoProductoId = null;
@@ -3268,7 +3268,7 @@ const ComprasV2 = (() => {
         if (!item.esMuestra && costoNeto > 0 && Math.abs(costoNeto - costoAnt) > 0.001) {
           db().run(
             `UPDATE productos SET costo=?, costo_paquete=?, sync_status='pending', updated_at=? WHERE id=?`,
-            [costoNeto, costoNeto * udsPaq, ts, item.productoId]
+            [costoNeto, window.SGA_Utils.roundMoney(costoNeto * udsPaq), ts, item.productoId]
           );
           aplicarMarkupFijo(item, costoNeto, ts);
         }
@@ -3523,7 +3523,7 @@ const ComprasV2 = (() => {
           if (!masReciente.length) {
             db().run(
               `UPDATE productos SET costo=?, costo_paquete=?, sync_status='pending', updated_at=? WHERE id=?`,
-              [costoNeto, costoNeto * udsPaq, ts, item.productoId]
+              [costoNeto, window.SGA_Utils.roundMoney(costoNeto * udsPaq), ts, item.productoId]
             );
             aplicarMarkupFijo(item, costoNeto, ts);
           }
