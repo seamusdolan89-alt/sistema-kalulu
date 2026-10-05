@@ -735,7 +735,7 @@ const Caja = (() => {
          </small>`
       : `<div class="caja-input-prefix">
            <span>$</span>
-           <input type="number" id="caja-saldo-inicial" value="0" min="0" step="1" placeholder="0">
+           <input type="number" id="caja-saldo-inicial" value="0" min="0" step="1" data-money="true" placeholder="0">
          </div>`;
 
     root.innerHTML = `
@@ -1356,7 +1356,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
         <label>Monto</label>
         <div class="caja-input-prefix">
           <span>$</span>
-          <input type="number" id="egreso-monto" min="1" placeholder="0">
+          <input type="number" id="egreso-monto" min="1" data-money="true" placeholder="0">
         </div>
         <label>Descripción</label>
         <input type="text" id="egreso-descripcion" placeholder="Motivo del egreso">
@@ -1416,7 +1416,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
         <label>Monto</label>
         <div class="caja-input-prefix">
           <span>$</span>
-          <input type="number" id="ingreso-monto" min="1" placeholder="0">
+          <input type="number" id="ingreso-monto" min="1" data-money="true" placeholder="0">
         </div>
         <label>Descripción</label>
         <input type="text" id="ingreso-descripcion" placeholder="Motivo del ingreso">
@@ -1764,7 +1764,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
           <td>${m.label}</td>
           <td style="text-align:right">${fmtPeso(m.esperado)}</td>
           <td style="text-align:right;padding:4px 8px">
-            <input type="number" class="billete-input cierre-medio-input"
+            <input type="number" class="billete-input cierre-medio-input" data-money="true"
               data-medio="${esc(m.id)}" data-esperado="${m.esperado}"
               value="${informado}" min="0" step="0.01"
               style="width:110px;text-align:right">
@@ -1914,7 +1914,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       const rows = state.cierre.explicaciones[medioId] || [];
       container.innerHTML = rows.map((r, i) => `
         <div class="expl-row">
-          <input type="number" class="billete-input expl-monto"
+          <input type="number" class="billete-input expl-monto" data-money="true"
             data-medio="${esc(medioId)}" data-idx="${i}"
             placeholder="Monto" value="${r.monto || ''}" min="0" step="0.01"
             style="width:100px;text-align:right">

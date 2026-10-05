@@ -1283,7 +1283,7 @@ export const POS = (() => {
         const val = state.pagosAmounts[m.id] || 0;
         html += `<div class="mpay-row">
           <span class="mpay-icon">${esc(m.icon)} ${esc(m.nombre)}</span>
-          <input type="number" class="mpay-field" data-medio="${m.id}"
+          <input type="number" class="mpay-field" data-medio="${m.id}" data-money="true"
             value="${val > 0 ? val.toFixed(2) : ''}"
             min="0" step="0.01" placeholder="0.00" autocomplete="off">
         </div>`;
@@ -1348,7 +1348,7 @@ export const POS = (() => {
             <div class="pinput-total-ro">${formatCurrency(effTotal)}</div>
             <div class="recibe-row" style="margin-top:8px">
               <span>Recibe $</span>
-              <input type="number" class="recibe-field" id="recibe-efectivo"
+              <input type="number" class="recibe-field" id="recibe-efectivo" data-money="true"
                 value="${state.recibeEfectivo !== null && !isFavorCovered ? state.recibeEfectivo.toFixed(2) : ''}"
                 min="0" step="0.01" placeholder="${isFavorCovered ? '0,00' : effTotal.toFixed(2)}"
                 ${isFavorCovered ? 'readonly style="background:#f5f5f5;color:#aaa"' : ''}
@@ -1363,7 +1363,7 @@ export const POS = (() => {
             <div class="pinput-sub-lbl">Total a cobrar</div>
             <div class="pinput-total-ro">${formatCurrency(effTotal)}</div>
             <div class="pinput-sub-lbl">Monto recibido</div>
-            <input type="number" class="pinput-field" data-medio="${mid}" value="${amount.toFixed(2)}" min="0" step="0.01">
+            <input type="number" class="pinput-field" data-medio="${mid}" data-money="true" value="${amount.toFixed(2)}" min="0" step="0.01">
             <div id="mpay-simple-sobrante" class="pinput-vuelto" style="display:none"></div>
           </div>`;
         }
@@ -3470,7 +3470,14 @@ export const POS = (() => {
           return;
         }
         for (const m of MEDIOS.map(x => x.id)) {
-          if ((state.pagosAmounts[m] || 0) > 0.001) recibido[m] = state.pagosAmounts[m];
+          // F2/F10 pueden confirmar sin que el campo haya perdido el foco
+          // (el redondeo de app.js corre en 'focusout', que no llega a
+          // dispararse) -- redondear acá, en el punto de lectura, es lo
+          // único que garantiza que lo que se escribe en venta_pagos tenga
+          // 2 decimales. Mismo criterio que operaciones_stock.js (Historial
+          // de Compras, 4/10/2026).
+          const monto = window.SGA_Utils.roundMoney(state.pagosAmounts[m] || 0);
+          if (monto > 0.001) recibido[m] = monto;
         }
         // Lo que pasa del total es vuelto que se le devuelve al cliente EN MANO, asi que sale del
         // efectivo. Antes se guardaba el monto tipeado entero y la caja esperaba plata que ya se
@@ -3486,7 +3493,7 @@ export const POS = (() => {
             );
             return;
           }
-          if (vueltoEnMano > 0.001) recibido['efectivo'] -= vueltoEnMano;
+          if (vueltoEnMano > 0.001) recibido['efectivo'] = window.SGA_Utils.roundMoney(recibido['efectivo'] - vueltoEnMano);
         }
       } else {
         // Final safety: catch efectivo shortfall regardless of how confirm was triggered (click, F10, etc.)
@@ -3518,11 +3525,16 @@ export const POS = (() => {
           if (m === 'efectivo') {
             // Lo que se cuenta es la plata que el cliente entrego; el vuelto que se le devuelve en
             // mano no queda en el cajon, salvo que lo deje a favor.
-            const entregado = state.recibeEfectivo !== null ? state.recibeEfectivo : (state.pagosAmounts[m] || 0);
+            // roundMoney() acá por el mismo motivo que en cobro múltiple, arriba:
+            // F2/F10 pueden confirmar sin blur.
+            const entregado = window.SGA_Utils.roundMoney(
+              state.recibeEfectivo !== null ? state.recibeEfectivo : (state.pagosAmounts[m] || 0)
+            );
             const queda = dejaFavor ? entregado : Math.min(entregado, effTotal);
             if (queda > 0.001) recibido[m] = queda;
-          } else if ((state.pagosAmounts[m] || 0) > 0.001) {
-            recibido[m] = state.pagosAmounts[m];
+          } else {
+            const monto = window.SGA_Utils.roundMoney(state.pagosAmounts[m] || 0);
+            if (monto > 0.001) recibido[m] = monto;
           }
         }
       }
