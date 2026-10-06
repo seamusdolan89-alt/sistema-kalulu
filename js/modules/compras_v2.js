@@ -1572,6 +1572,17 @@ const ComprasV2 = (() => {
     const container = ge('cv2-new-prod-form');
     if (!container) return;
 
+    // El proveedor se asigna solo desde la compra en curso (sin pedirlo acá,
+    // ver investigación de mercado 6/10/2026: Square for Retail hace lo
+    // mismo -- auto-asignar sin mostrar campo es el patrón ganador cuando el
+    // contexto ya lo resuelve). Categoría SÍ se pide: a diferencia del
+    // proveedor, no hay de dónde inferirla, y dejarla afuera era la otra
+    // causa real de productos mal categorizados (pedido del dueño, mismo día).
+    const categorias = db().query('SELECT id, nombre FROM categorias ORDER BY nombre');
+    const catOptions = categorias.map(c =>
+      `<option value="${esc(c.id)}">${esc(c.nombre)}</option>`
+    ).join('');
+
     container.style.display = 'block';
     container.innerHTML = `
       <div class="cv2-new-prod-header">
@@ -1583,6 +1594,15 @@ const ComprasV2 = (() => {
           <div class="cv2-field cv2-field-wide">
             <label>Nombre *</label>
             <input type="text" id="cv2-np-nombre" placeholder="Nombre del producto" autocomplete="off">
+          </div>
+        </div>
+        <div class="cv2-field-row">
+          <div class="cv2-field cv2-field-wide">
+            <label>Categoría *</label>
+            <select id="cv2-np-categoria">
+              <option value="">— Elegir categoría —</option>
+              ${catOptions}
+            </select>
           </div>
         </div>
         <div class="cv2-field-row">
@@ -1629,12 +1649,14 @@ const ComprasV2 = (() => {
   }
 
   function submitNewProduct(barcode) {
-    const nombre = ge('cv2-np-nombre')?.value.trim();
+    const nombre     = ge('cv2-np-nombre')?.value.trim();
+    const categoriaId = ge('cv2-np-categoria')?.value || null;
     const unidad = ge('cv2-np-unidad')?.value || 'Unidad';
     const udsPaq = parseFloat(ge('cv2-np-udspaq')?.value) || 1;
     const costo  = parseFloat(ge('cv2-np-costo')?.value);
 
     if (!nombre)              { alert('El nombre es obligatorio');  ge('cv2-np-nombre')?.focus(); return; }
+    if (!categoriaId)         { alert('La categoría es obligatoria'); ge('cv2-np-categoria')?.focus(); return; }
     if (isNaN(costo) || costo < 0) { alert('Ingresá un costo válido'); ge('cv2-np-costo')?.focus();  return; }
 
     const confirmandoIdx = state._confirmandoIdx;
@@ -1643,12 +1665,16 @@ const ComprasV2 = (() => {
     const user   = state.currentUser;
 
     try {
+      // proveedor_principal_id = el de la compra en curso, sin preguntar
+      // (pedido del dueño, 6/10/2026: productos creados al vuelo desde acá
+      // quedaban sin proveedor asignado -- ver investigación de mercado,
+      // Square/Odoo auto-asignan igual en este mismo flujo).
       const ins = db().run(`
         INSERT INTO productos
           (id, nombre, costo, costo_paquete, unidad_compra, unidades_por_paquete_compra,
-           activo, sync_status, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, 1, 'pending', ?)
-      `, [prodId, nombre, costo, costo * udsPaq, unidad, udsPaq, ts]);
+           categoria_id, proveedor_principal_id, activo, sync_status, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'pending', ?)
+      `, [prodId, nombre, costo, costo * udsPaq, unidad, udsPaq, categoriaId, state.proveedorId || null, ts]);
 
       if (!ins || ins.changes === 0) {
         alert('Error al crear el producto. Revisá la consola.');
