@@ -2087,6 +2087,15 @@ const ComprasV2 = (() => {
       proveedorAgRetIibb:     state.proveedorAgRetIibb,
       items:               state.items,
       pendingAjustes:      state.pendingAjustes,
+      // Sin esto, retomar una compra pausada a mitad de una vinculación de
+      // remito la confirmaba como si fuera independiente: el remito nunca se
+      // marcaba 'facturado' (quedaba "pendiente" para siempre) y el stock de
+      // los ítems deRemito se volvía a sumar al confirmar (doble conteo, ya
+      // lo había sumado el remito al cargarse). Caveat detectado el 24/9/2026
+      // al agregar "sumar productos al vincular", confirmado como bug real en
+      // producción el 8/10/2026 (caso La Serenisima).
+      vinculandoRemitoId:  state.vinculandoRemitoId,
+      remitoNumero:        state.remitoNumero,
     });
 
     const ts   = nowISO();
@@ -2250,6 +2259,8 @@ const ComprasV2 = (() => {
     state.proveedorAgRetIibb     = snap.proveedorAgRetIibb     || 0;
     state.items            = snap.items            || [];
     state.pendingAjustes   = snap.pendingAjustes    || [];
+    state.vinculandoRemitoId = snap.vinculandoRemitoId || null;
+    state.remitoNumero      = snap.remitoNumero       || '';
     state.pausadaId        = pausadaId;
 
     if (state.proveedorId) {
