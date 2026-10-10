@@ -1662,6 +1662,16 @@
     pedidos_abiertos: [],
     compras_pausadas: [],
     ajustes_precio_pendientes: [],
+    // Remito cargado por error (duplicado, proveedor equivocado, etc.): el
+    // receptor (applyRemito, sync.js) ya chequeaba fueEliminado desde que se
+    // creó esta tabla, pero nunca se podía REGISTRAR el borrado porque
+    // 'remitos' no estaba en este mapa -- registrarEliminacion() tiraba un
+    // warn y no hacía nada. Encontrado 10/10/2026 al necesitar borrar un
+    // remito mal cargado. El stock que sumó al cargarse NO se revierte acá
+    // (no hay forma genérica de saber si corresponde): quien borra el
+    // remito tiene que revertirlo aparte, ver stock_movimientos con
+    // ref_tipo='remitos' y ref_id=<este id>.
+    remitos: [['remito_items', 'remito_id']],
   };
 
   /**
