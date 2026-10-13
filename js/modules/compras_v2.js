@@ -970,20 +970,21 @@ const ComprasV2 = (() => {
   }
 
   // ── Product search ───────────────────────────────────────────────────────────
+  // Delega al motor único (buscador_productos.js) -- antes tenía su propia
+  // consulta duplicada, sin ORDER BY y con LIMIT 15 a secas: un producto
+  // llamado justo "Naranja" podía quedar afuera de los resultados si había
+  // 15+ productos que solo CONTENÍAN "naranja" (gaseosas, jugos, dulces) y
+  // SQLite los devolvía antes por su orden interno. Mismo bug que ya se
+  // había arreglado en el motor compartido (88ed8b0) pero nunca llegó acá
+  // porque esta pantalla nunca lo usó para la búsqueda por nombre -- reportado
+  // por el usuario 13/10/2026 ("sigue sin aparecer la naranja").
+  // Se adapta el campo `codigo` del motor a `barcode`, que es como lo esperan
+  // ya los ~15 lugares de este archivo que leen el resultado de esta función.
   function searchProductos(q) {
     if (!q || !q.trim()) return [];
-    const like = `%${q.trim()}%`;
-    return db().query(`
-      SELECT p.id, p.nombre, p.costo, p.iva,
-             p.unidad_compra, p.unidades_por_paquete_compra,
-             (SELECT codigo FROM codigos_barras
-              WHERE producto_id = p.id AND es_principal = 1 LIMIT 1) AS barcode
-      FROM productos p
-      WHERE p.activo = 1 AND (p.nombre LIKE ? OR EXISTS (
-        SELECT 1 FROM codigos_barras WHERE producto_id = p.id AND codigo = ?
-      ))
-      LIMIT 15
-    `, [like, q.trim()]);
+    const user = state.currentUser;
+    return Buscador.porTexto(q, { sucursalId: user?.sucursal_id, limite: 15 })
+      .map(r => ({ ...r, barcode: r.codigo || '' }));
   }
 
   function renderSearchDropdown() {
