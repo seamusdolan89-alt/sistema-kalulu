@@ -4129,7 +4129,7 @@ const ComprasV2 = (() => {
     if (!remito) { alert('Remito no encontrado'); return; }
 
     const items = db().query(
-      `SELECT ri.*, pr.nombre, pr.costo,
+      `SELECT ri.*, pr.nombre, pr.costo, pr.iva,
               (SELECT codigo FROM codigos_barras
                WHERE producto_id = pr.id AND es_principal = 1 LIMIT 1) AS barcode
        FROM remito_items ri
@@ -4165,6 +4165,15 @@ const ComprasV2 = (() => {
       costoNuevo:    parseFloat(ri.costo) || 0,
       descuento:     0,
       descuentoMonto: 0,
+      // Faltaba esto: sin precargar el IVA ya guardado en el producto, CADA
+      // línea que viene del remito (la gran mayoría de una factura real)
+      // arrancaba en blanco y había que elegirlo a mano aunque el producto
+      // ya tuviera IVA registrado de una compra anterior. El resto de los
+      // caminos para agregar un producto (buscador) sí lo precargaban --
+      // reportado por el usuario 13/10/2026 ("a casi todos les tuve que
+      // seleccionar el IVA... los únicos que me trajo son los que agregué
+      // aparte, no los del remito").
+      iva:           ri.iva || '',
       // Vino del remito: su stock ya se sumó al cargarlo (ver commitCompra) y su
       // cantidad queda bloqueada. Lo que se agregue después NO lleva esta marca.
       deRemito:      true,
