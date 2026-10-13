@@ -1672,6 +1672,13 @@
     // remito tiene que revertirlo aparte, ver stock_movimientos con
     // ref_tipo='remitos' y ref_id=<este id>.
     remitos: [['remito_items', 'remito_id']],
+    // Usuario "admin" duplicado (bootstrap local de un dispositivo que nunca
+    // sincronizó con otro antes de crear el suyo propio): mismo gap que
+    // 'remitos', pero más profundo -- acá faltaba TANTO el registro de este
+    // lado (este mapa) COMO el chequeo fueEliminado del lado que recibe
+    // (applyUsuarioFull, sync.js), que ni siquiera lo tenía. Encontrado
+    // 13/10/2026 al limpiar usuarios "admin" repetidos.
+    usuarios: [],
   };
 
   /**

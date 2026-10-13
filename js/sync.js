@@ -1344,6 +1344,12 @@
   // ─── Apply functions para sincronización inicial (todas las colecciones) ────────
 
   function applyUsuarioFull(data) {
+    // Faltaba este chequeo (encontrado 13/10/2026, al limpiar usuarios
+    // "admin" duplicados): sin él, borrar un usuario localmente no alcanzaba
+    // para que el borrado viajara -- 'usuarios' tampoco estaba en HIJOS_DE
+    // (db.js), así que ni siquiera se podía dejar la marca. Mismo patrón que
+    // el bug de 'remitos' (10/10/2026), pero acá faltaban las DOS mitades.
+    if (window.SGA_DB.fueEliminado('usuarios', data.id)) return;
     if (tienePendienteLocal('usuarios', 'id = ?', [data.id])) return;
 
     // No pisar una contraseña vigente con una vieja: POS y admin-pos tienen
