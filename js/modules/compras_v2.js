@@ -3990,6 +3990,7 @@ const ComprasV2 = (() => {
           </div>
           <div class="cv2-remito-actions">
             ${window.ADMIN_MODE ? `<button class="cv2-btn-editar-remito" data-id="${esc(r.id)}" title="Corregir productos o cantidades de este remito">✏️ Editar</button>` : ''}
+            ${window.ADMIN_MODE ? `<button class="cv2-btn-eliminar-remito" data-id="${esc(r.id)}" title="Eliminar este remito (ej.: cargado por error/duplicado)">🗑️ Eliminar</button>` : ''}
             <button class="cv2-btn-vincular" data-id="${esc(r.id)}">Vincular Factura →</button>
           </div>
         </div>
@@ -4007,6 +4008,111 @@ const ComprasV2 = (() => {
         ge('cv2-remitos-overlay').style.display = 'none';
         cargarRemitoParaEditar(btn.dataset.id);
       });
+    });
+    listEl.querySelectorAll('.cv2-btn-eliminar-remito').forEach(btn => {
+      btn.addEventListener('click', () => showEliminarRemitoModal(btn.dataset.id, filtroProveedorId));
+    });
+  }
+
+  // ── Eliminar un remito pendiente (cargado por error/duplicado) ──────────────
+  // Mismo patrón que anularCompra (operaciones_stock.js): solo Admin-POS,
+  // motivo obligatorio, y revierte el stock que el remito sumó al cargarse
+  // antes de borrarlo con marca (para que el borrado viaje -- 'remitos' está
+  // en HIJOS_DE desde el 10/10/2026, antes no se podía).
+  function eliminarRemito(remitoId, motivo) {
+    if (!window.ADMIN_MODE) return { success: false, error: 'Eliminar un remito solo se puede desde Admin-POS' };
+    motivo = String(motivo || '').trim();
+    if (!motivo) return { success: false, error: 'El motivo es obligatorio' };
+
+    const remito = db().query('SELECT * FROM remitos WHERE id=?', [remitoId])[0];
+    if (!remito) return { success: false, error: 'No se encontró el remito' };
+    if (remito.estado !== 'pendiente') {
+      return { success: false, error: 'Este remito ya está facturado -- anulá la compra vinculada primero (Historial de Compras).' };
+    }
+
+    const items = db().query(`
+      SELECT ri.producto_id, pr.nombre, ri.cantidad
+      FROM remito_items ri JOIN productos pr ON pr.id = ri.producto_id
+      WHERE ri.remito_id = ?
+    `, [remitoId]);
+
+    const ts = nowISO();
+    try {
+      db().beginBatch();
+      for (const it of items) {
+        db().moverStock({
+          productoId: it.producto_id, sucursalId: remito.sucursal_id, delta: -it.cantidad,
+          tipo: 'ajuste_correccion', refTipo: 'remitos', refId: remitoId,
+          motivo: `Remito eliminado: ${motivo}`, fecha: ts,
+        });
+      }
+      db().run('DELETE FROM remito_items WHERE remito_id=?', [remitoId]);
+      db().run('DELETE FROM remitos WHERE id=?', [remitoId]);
+      db().registrarEliminacion('remitos', remitoId);
+      db().commitBatch();
+    } catch (e) {
+      db().rollbackBatch();
+      return { success: false, error: 'Error al eliminar: ' + e.message };
+    }
+
+    return { success: true, items };
+  }
+
+  function showEliminarRemitoModal(remitoId, filtroProveedorId) {
+    const remito = db().query(
+      `SELECT r.*, p.razon_social AS proveedor_nombre FROM remitos r JOIN proveedores p ON p.id = r.proveedor_id WHERE r.id=?`,
+      [remitoId]
+    )[0];
+    if (!remito) { alert('Remito no encontrado'); return; }
+    const items = db().query(`
+      SELECT ri.producto_id, pr.nombre, ri.cantidad
+      FROM remito_items ri JOIN productos pr ON pr.id = ri.producto_id
+      WHERE ri.remito_id = ?
+    `, [remitoId]);
+
+    const existing = document.getElementById('cv2-eliminar-remito-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'cv2-eliminar-remito-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:700;display:flex;align-items:center;justify-content:center';
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.25);width:92%;max-width:480px;padding:20px">
+        <div style="font-size:15px;font-weight:800;color:#1a2744;margin-bottom:4px">🗑️ Eliminar remito</div>
+        <div style="font-size:13px;color:#607080;margin-bottom:12px">
+          <strong>${esc(remito.proveedor_nombre)}</strong> · Remito ${esc(remito.numero_remito || '—')} · ${esc((remito.fecha || '').slice(0, 10))}
+        </div>
+        <div style="font-size:13px;color:#2d3748">
+          <div style="font-weight:700;margin-bottom:4px">Al eliminarlo:</div>
+          <ul style="margin:0 0 12px 18px;padding:0">
+            ${items.length
+              ? `<li style="margin:3px 0">Se descuenta el stock que sumó este remito: ${items.map(it => `${esc(it.nombre)} (−${it.cantidad})`).join(', ')}.</li>`
+              : `<li style="margin:3px 0">Este remito no tiene productos cargados.</li>`}
+            <li style="margin:3px 0">El remito deja de aparecer como pendiente de factura.</li>
+          </ul>
+          <label for="cv2-elim-remito-motivo" style="display:block;font-size:11px;font-weight:700;color:#607080;text-transform:uppercase;margin-bottom:3px">Motivo (obligatorio)</label>
+          <textarea id="cv2-elim-remito-motivo" rows="2" placeholder="Ej.: cargado por error, duplicado" style="width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #c8d0dc;border-radius:5px;font-size:13px;font-family:inherit"></textarea>
+          <div id="cv2-elim-remito-error" style="display:none;color:#c62828;font-size:12px;margin-top:6px"></div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+            <button id="cv2-elim-remito-cancelar" style="padding:7px 16px;background:#eef0f3;color:#445566;border:none;border-radius:5px;cursor:pointer;font-size:13px">Cancelar</button>
+            <button id="cv2-elim-remito-confirmar" style="padding:7px 16px;background:#c62828;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-weight:700">Eliminar remito</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    setTimeout(() => ge('cv2-elim-remito-motivo')?.focus(), 50);
+
+    const cerrar = () => overlay.remove();
+    ge('cv2-elim-remito-cancelar').addEventListener('click', cerrar);
+    ge('cv2-elim-remito-confirmar').addEventListener('click', () => {
+      const motivo = ge('cv2-elim-remito-motivo').value.trim();
+      const err = ge('cv2-elim-remito-error');
+      if (!motivo) { err.textContent = 'Escribí el motivo de la eliminación.'; err.style.display = 'block'; return; }
+      const res = eliminarRemito(remitoId, motivo);
+      if (!res.success) { err.textContent = res.error || 'No se pudo eliminar el remito.'; err.style.display = 'block'; return; }
+      cerrar();
+      window.SGA_Utils.showNotification('Remito eliminado', 'success');
+      renderRemitosList(filtroProveedorId);
     });
   }
 
