@@ -335,6 +335,26 @@
   .ord-row-focus td { background: #eef2ff !important; }
   .ord-row-focus td:first-child { border-left: 3px solid #667eea; }
 
+  /* ── Grupo de sustitutos en la orden: nombre en negrita + numeros
+     compuestos (stock/ventas) como boton que abre el detalle por miembro ── */
+  .ord-nombre-grupo { font-weight: 800; }
+  .ord-valor-grupo {
+    background: none; border: none; padding: 0; margin: 0; font: inherit;
+    font-weight: 700; color: #1565c0; cursor: pointer;
+    text-decoration: underline dotted; text-underline-offset: 3px;
+  }
+  .ord-valor-grupo:hover { color: #0d47a1; }
+  .ord-valor-grupo:focus-visible { outline: 2px solid #667eea; outline-offset: 2px; }
+
+  .ord-grupo-tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .ord-grupo-tabla th, .ord-grupo-tabla td { padding: 7px 8px; border-bottom: 1px solid #eef0f3; text-align: left; }
+  .ord-grupo-tabla thead th {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: #607080;
+  }
+  .ord-grupo-tabla tfoot td { border-top: 2px solid #d0d7e3; border-bottom: none; font-weight: 700; }
+  .ord-grupo-fila-ref td:first-child { font-weight: 700; }
+  .ord-grupo-ref-tag { font-size: 11px; color: #667eea; font-weight: 700; margin-left: 6px; }
+
   /* ── Aviso de que la fila tiene menu ──
      Solo en la fila activa. Con hover tambien se encendia en cualquier fila
      por la que pasara el mouse camino a otra cosa, y se leia como parpadeo.
@@ -752,6 +772,20 @@
     <div class="ord-overlay-footer">
       <button class="ord-btn-cancel" id="ord-sust-cancel">Cancelar</button>
       <button class="ord-btn-action ord-btn-confirmar" id="ord-sust-ok" disabled>Asociar</button>
+    </div>
+  </div>
+</div>
+
+<!-- OVERLAY: DETALLE DE GRUPO DE SUSTITUTOS (stock / ventas 30d / prom. 6m) -->
+<div id="ord-grupo-overlay" class="ord-overlay" style="display:none">
+  <div class="ord-overlay-box" style="width:420px;max-width:95vw;max-height:80vh">
+    <div class="ord-overlay-header">
+      <span id="ord-grupo-titulo">Detalle del grupo</span>
+      <button class="ord-overlay-close" id="ord-grupo-close" aria-label="Cerrar" title="Cerrar">×</button>
+    </div>
+    <div class="ord-overlay-body" id="ord-grupo-cuerpo"></div>
+    <div class="ord-overlay-footer">
+      <button class="ord-btn-action ord-btn-confirmar" id="ord-grupo-cerrar-btn">Cerrar</button>
     </div>
   </div>
 </div>

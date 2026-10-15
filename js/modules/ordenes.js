@@ -696,6 +696,19 @@ const Ordenes = (() => {
       const unidad    = it.unidad_pedida || it.prod_pedido_unidad || 'unidad';
       const nombre    = nombreItem(it) + (esLibre ? ' <span class="ord-tag-libre" title="No está en el catálogo — se pidió como novedad">nuevo</span>' : '');
 
+      // Grupo de sustitutos: stock/ventas de la fila son los del grupo entero
+      // (ver stockEfectivo arriba) — se marcan en negrita y sus numeros abren
+      // el detalle por producto (openDetalleGrupoOverlay).
+      const grupo   = esLibre ? [] : GruposSustitutos.miembrosDe(it.producto_id);
+      const enGrupo = grupo.length > 1;
+      const nombreHtml = enGrupo
+        ? `<strong class="ord-nombre-grupo" title="Pertenece a un grupo de sustitutos: el stock y las ventas son las del grupo entero">${nombre}</strong>`
+        : nombre;
+      const valorGrupo = (tipo, valor) => enGrupo
+        ? `<button class="ord-valor-grupo" data-detalle="${tipo}" data-prod="${esc(it.producto_id)}"
+             title="Ver el detalle por producto del grupo">${fmtN(valor)}</button>`
+        : fmtN(valor);
+
       if (editable) {
         // producto_id y nombre viajan en el <tr> porque el panel los necesita
         // y ya no hay botones por accion de donde leerlos.
@@ -704,8 +717,8 @@ const Ordenes = (() => {
           <td><input class="ord-cell-input ord-cell-input-cod" type="text"
             value="${esc(it.codigo_proveedor || '')}" placeholder="—"
             style="width:80px;text-align:left"></td>
-          <td>${nombre}</td>
-          <td>${fmtN(it.stock_actual)}</td>
+          <td>${nombreHtml}</td>
+          <td>${valorGrupo('stock', it.stock_actual)}</td>
           <td>${fmtN(it.stock_minimo)}</td>
           <td>
             <div class="ord-apedir-wrap">
@@ -715,8 +728,8 @@ const Ordenes = (() => {
                 title="Editar cantidad">✏</button>
             </div>
           </td>
-          <td>${fmtN(it.ventas_30d)}</td>
-          <td>${fmtN(it.ventas_prom_6m)}</td>
+          <td>${valorGrupo('ventas30', it.ventas_30d)}</td>
+          <td>${valorGrupo('ventas6m', it.ventas_prom_6m)}</td>
           <td class="${diasCls}">${esLibre ? '—' : dias}</td>
           <td><input class="ord-cell-input ord-cell-input-text" type="text"
             value="${esc(it.notas || '')}" placeholder="—"></td>
@@ -728,13 +741,20 @@ const Ordenes = (() => {
       } else {
         return `<tr>
           <td>${esc(it.codigo_proveedor || '—')}</td>
-          <td>${nombre}</td>
-          <td>${fmtN(it.stock_actual)}</td>
+          <td>${nombreHtml}</td>
+          <td>${valorGrupo('stock', it.stock_actual)}</td>
           <td style="font-weight:700">${esc(labelApedir(cantFinal, unidad))}</td>
           <td>${esc(it.notas || '—')}</td>
         </tr>`;
       }
     }).join('');
+
+    tbody.querySelectorAll('[data-detalle]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openDetalleGrupoOverlay(btn.dataset.prod, btn.dataset.detalle);
+      });
+    });
 
     if (!editable) return;
 
@@ -786,6 +806,63 @@ const Ordenes = (() => {
 
     // Eliminar item
 
+  }
+
+  /**
+   * Detalle de un valor compuesto (stock, ventas 30d o promedio 6m) de un
+   * grupo de sustitutos: la fila de la orden solo muestra el total del grupo
+   * (ver stockEfectivo/generarOrdenCompra) — este overlay abre el desglose
+   * por miembro para que se entienda de dónde sale ese número. Solo lectura:
+   * no escribe nada, así que no hace falta pasar por el motor de sustitutos.
+   */
+  function openDetalleGrupoOverlay(productoId, tipo) {
+    const overlay = ge('ord-grupo-overlay');
+    if (!overlay || !productoId) return;
+
+    const sucId = ui.user.sucursal_id;
+    const grupo = GruposSustitutos.miembrosDe(productoId);
+    const refId = GruposSustitutos.referenciaRealDe(productoId);
+
+    const TITULOS = {
+      stock:    'Stock actual del grupo',
+      ventas30: 'Ventas de los últimos 30 días del grupo',
+      ventas6m: 'Promedio mensual (6 meses) del grupo',
+    };
+
+    const valorDe = (id) => {
+      if (tipo === 'ventas30') return ventasUltimos(id, 30);
+      if (tipo === 'ventas6m') return Math.round((ventasUltimos(id, 180) / 6) * 100) / 100;
+      return db().query(
+        `SELECT COALESCE(cantidad, 0) AS q FROM stock WHERE producto_id = ? AND sucursal_id = ?`,
+        [id, sucId]
+      )[0]?.q || 0;
+    };
+
+    const filas = grupo.map(m => ({ ...m, valor: valorDe(m.id) }));
+    const total = filas.reduce((s, f) => s + (f.valor || 0), 0);
+
+    ge('ord-grupo-titulo').textContent = TITULOS[tipo] || 'Detalle del grupo';
+    ge('ord-grupo-cuerpo').innerHTML = `
+      <table class="ord-grupo-tabla">
+        <thead><tr><th>Producto</th><th style="text-align:right">Valor</th></tr></thead>
+        <tbody>
+          ${filas.map(f => `
+            <tr${f.id === refId ? ' class="ord-grupo-fila-ref"' : ''}>
+              <td>${esc(f.nombre)}${f.id === refId ? ' <span class="ord-grupo-ref-tag">se le pide a este</span>' : ''}</td>
+              <td style="text-align:right">${fmtN(f.valor)}</td>
+            </tr>`).join('')}
+        </tbody>
+        <tfoot><tr><td>Total del grupo</td><td style="text-align:right">${fmtN(total)}</td></tr></tfoot>
+      </table>
+    `;
+
+    overlay.style.display = 'flex';
+    const cerrar = () => { overlay.style.display = 'none'; };
+    ge('ord-grupo-close').onclick      = cerrar;
+    ge('ord-grupo-cerrar-btn').onclick = cerrar;
+    overlay.onclick   = e => { if (e.target === overlay) cerrar(); };
+    overlay.onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); cerrar(); } };
+    setTimeout(() => ge('ord-grupo-cerrar-btn')?.focus(), 50);
   }
 
   // ── OVERLAY: EDITAR CANTIDAD ──────────────────────────────────────────────────
@@ -1641,7 +1718,7 @@ const Ordenes = (() => {
       // Si hay overlays abiertos, no interceptar más teclas (cada overlay maneja las suyas)
       const overlayAbierto = ['ord-edit-cant-overlay', 'ord-agregar-overlay',
                               'ord-cambiar-prov-overlay', 'ord-sustituto-overlay',
-                              'ord-pausa-overlay']
+                              'ord-pausa-overlay', 'ord-grupo-overlay']
         .some(id => ge(id)?.style.display === 'flex');
       if (overlayAbierto) return;
 
