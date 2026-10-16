@@ -193,7 +193,8 @@ const Sugerencias = (() => {
 
     const respuestaHtml = it.estado === 'respondida' ? `
       <div class="sug-respuesta-box">
-        <div>${esc(it.respuesta)}</div>
+        <div class="sug-respuesta-label">💬 Respuesta</div>
+        <div class="sug-respuesta-texto">${esc(it.respuesta)}</div>
         <div class="sug-respuesta-meta">— ${esc(it.respondida_por_nombre || 'El dueño')}, ${fmtFecha(it.respondida_en)}</div>
       </div>` : '';
 
