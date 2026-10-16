@@ -50,6 +50,7 @@
     'configuracion':   () => import('./modules/configuracion.js').then(m => m.default),
     'flujo':           () => import('./modules/flujo.js').then(m => m.default),
     'aprobaciones_pendientes': () => import('./modules/aprobaciones_pendientes.js').then(m => m.default),
+    'sugerencias':      () => import('./modules/sugerencias.js').then(m => m.default),
     // Sin entrada en el menú a propósito — utilidad de una sola vez para la
     // limpieza previa a la migración real. Se accede escribiendo el hash a
     // mano (#limpieza_prueba); igual queda blindada por ROUTE_ADMIN_ONLY.
@@ -186,17 +187,19 @@
   // Módulos del admin-pos (panel remoto): siempre completo. "inicio" queda
   // afuera a propósito — es un dashboard del POS del local (ver inicio.js),
   // no del panel del dueño.
-  const ADMIN_POS_MODULES = ['inicio', 'pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'ajuste_stock', 'ajuste_stock_positivo', 'adelanto_pago', 'configuracion', 'flujo', 'aprobaciones_pendientes'];
+  const ADMIN_POS_MODULES = ['inicio', 'pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'ajuste_stock', 'ajuste_stock_positivo', 'adelanto_pago', 'configuracion', 'flujo', 'aprobaciones_pendientes', 'sugerencias'];
 
   function getAllowedModules() {
     if (window.ADMIN_MODE) return ADMIN_POS_MODULES;
     const u = window.SGA_Auth.getCurrentUser();
     if (!u) return [];
     // Admin: acceso total
-    if (u.rol === 'admin') return ['inicio', 'pos', 'cajas', 'productos', 'clientes', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'adelanto_pago'];
+    if (u.rol === 'admin') return ['inicio', 'pos', 'cajas', 'productos', 'clientes', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'adelanto_pago', 'sugerencias'];
     // Colaboradores: según permisos individuales
     const P = window.SGA_Permisos;
-    const allowed = ['inicio', 'pos', 'cajas']; // siempre visibles
+    // 'sugerencias' siempre visible: cargar una consulta o una idea no es una
+    // operación sensible, no hace falta un permiso propio para eso.
+    const allowed = ['inicio', 'pos', 'cajas', 'sugerencias']; // siempre visibles
     if (P.can('can_ver_productos'))     allowed.push('productos');
     if (P.can('can_clientes'))          allowed.push('clientes');
     if (P.can('can_compras'))           allowed.push('compras_v2');
@@ -317,6 +320,7 @@
       { name: 'promociones', icon: 'tag', text: 'Promociones' },
       { name: 'etiquetas', icon: 'tag', text: 'Etiquetas' },
       { name: 'informes', icon: 'informes', text: 'Informes' },
+      { name: 'sugerencias', icon: 'mensaje', text: 'Consultas y Sugerencias' },
       { name: 'gastos', icon: 'gastos', text: 'Gastos Generales' },
       { name: 'usuarios', icon: 'usuarios', text: 'Usuarios' },
       { name: 'flujo', icon: 'flujo', text: 'Flujo de Fondos', adminPosOnly: true },
@@ -367,6 +371,9 @@
     const nPendientesAprobacion = window.ADMIN_MODE ? ((window.SGA_DB.query(
       `SELECT COUNT(*) AS n FROM stock_ajustes WHERE estado = 'pendiente_aprobacion'`
     )[0] || {}).n || 0) : 0;
+    const nSugerenciasPendientes = window.ADMIN_MODE ? ((window.SGA_DB.query(
+      `SELECT COUNT(*) AS n FROM sugerencias WHERE estado = 'pendiente'`
+    )[0] || {}).n || 0) : 0;
     const allowedModules = getAllowedModules();
     const currentHash = window.location.hash.slice(1) || '';
     const [currentRoute, currentMedio] = currentHash.split('/');
@@ -410,6 +417,8 @@
           badge = ' <span style="display:inline-block;background:#ff8f00;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;vertical-align:middle;margin-left:4px;white-space:nowrap;">● Ajuste pendiente</span>';
         } else if (name === 'aprobaciones_pendientes' && nPendientesAprobacion > 0) {
           badge = ` <span style="display:inline-block;background:#ff8f00;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;vertical-align:middle;margin-left:4px;white-space:nowrap;">● ${nPendientesAprobacion} pendiente${nPendientesAprobacion !== 1 ? 's' : ''}</span>`;
+        } else if (name === 'sugerencias' && nSugerenciasPendientes > 0) {
+          badge = ` <span style="display:inline-block;background:#ff8f00;color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;vertical-align:middle;margin-left:4px;white-space:nowrap;">● ${nSugerenciasPendientes}</span>`;
         }
         return `<li><a href="#${name}" data-module="${name}" class="nav-link">${ic(icon)}${text}${badge}</a></li>`;
       }).join('');

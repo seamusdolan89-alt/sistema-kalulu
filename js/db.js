@@ -1247,6 +1247,34 @@
       `);
     } catch(e) { console.warn('ajustes_precio_pendientes:', e.message); }
 
+    try {
+      // Buzón de consultas y sugerencias de las empleadas (14/10/2026): cualquier
+      // usuario logueado puede cargar una (POS o Admin-POS); el admin las revisa
+      // y responde desde Admin-POS. `adjuntos` guarda un JSON ([{base64,
+      // mediaType}, ...], ya redimensionadas en el cliente) — viaja como
+      // cualquier columna TEXT, no hace falta tabla hija.
+      // `decision` solo aplica a tipo='sugerencia' (aceptada/con_cambios/rechazada);
+      // una consulta queda simplemente 'respondida'.
+      database.run(`
+        CREATE TABLE IF NOT EXISTS sugerencias (
+          id TEXT PRIMARY KEY,
+          sucursal_id TEXT REFERENCES sucursales(id),
+          usuario_id TEXT REFERENCES usuarios(id),
+          tipo TEXT CHECK(tipo IN ('consulta','sugerencia')),
+          texto TEXT NOT NULL,
+          adjuntos TEXT,
+          estado TEXT DEFAULT 'pendiente' CHECK(estado IN ('pendiente','respondida')),
+          decision TEXT CHECK(decision IN ('aceptada','con_cambios','rechazada')),
+          respuesta TEXT,
+          respondida_por TEXT REFERENCES usuarios(id),
+          respondida_en TEXT,
+          fecha TEXT,
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
+        )
+      `);
+    } catch(e) { console.warn('sugerencias:', e.message); }
+
     // Los borradores (ventas pausadas del POS y compras pausadas) ahora se
     // sincronizan: se pueden retomar desde OTRA caja y verse desde Admin-POS. Para
     // eso necesitan sync_status/updated_at. Las filas que ya existian quedan
@@ -1679,6 +1707,10 @@
     // (applyUsuarioFull, sync.js), que ni siquiera lo tenía. Encontrado
     // 13/10/2026 al limpiar usuarios "admin" repetidos.
     usuarios: [],
+    // Buzón de consultas/sugerencias: registrado desde el vamos (sin esperar
+    // a que haga falta de verdad) — ver el comentario de 'usuarios' arriba
+    // sobre por qué este gap se descubre siempre demasiado tarde.
+    sugerencias: [],
   };
 
   /**
