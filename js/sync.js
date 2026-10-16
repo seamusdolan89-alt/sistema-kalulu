@@ -131,6 +131,10 @@
     // "Ajuste de precios" post-compra pausado: antes vivía solo en localStorage de
     // la compu donde se pausó, nunca se veía desde la otra (ver CLAUDE.md, 23/9/2026).
     { table: 'ajustes_precio_pendientes', collection: 'ajustes_precio_pendientes', pk: 'id', denormalize: null },
+    // Buzón de consultas/sugerencias de las empleadas (14/10/2026). 'adjuntos'
+    // viaja como una columna TEXT más (JSON de imágenes ya redimensionadas en
+    // el cliente) — no hace falta tabla hija ni denormalize.
+    { table: 'sugerencias',       collection: 'sugerencias',       pk: 'id', denormalize: null },
     // posPush:false — son admin-authoritative (solo se crean/editan desde ADMIN POS,
     // ver Configuración). El POS no debe re-pushear su copia local: si lo hiciera,
     // una fila local vieja podría pisar en Firestore un cambio recién hecho desde admin.
@@ -162,6 +166,7 @@
     'compras_pausadas',          // compras pausadas — pantalla desktop-only
     'ajustes_precio_pendientes', // ajuste de precios post-compra — mismo módulo Compras, desktop-only
     'clientes',                  // pedido explícito del usuario (17/9) — no lo necesita desde el celular
+    'sugerencias',                // buzón de consultas/sugerencias — no es una de las 5 áreas mobile (BACKLOG.md)
   ];
 
   // window.innerWidth es estable durante la sesión (un celular no cambia de
@@ -218,6 +223,7 @@
     { collection: 'pedidos_abiertos',  applyFn: applyPedidoAbierto },
     { collection: 'compras_pausadas',  applyFn: applyCompraPausada },
     { collection: 'ajustes_precio_pendientes', applyFn: applyAjustePrecioPendiente },
+    { collection: 'sugerencias',       applyFn: applySugerencia },
     { collection: 'medios_cobro',      applyFn: applyMedioCobroFull },
     { collection: 'sucursales',        applyFn: applySucursalFull },
     { collection: 'cuenta_corriente',  applyFn: applyCuentaCorriente },
@@ -261,6 +267,7 @@
     { name: 'pedidos_abiertos',  applyFn: applyPedidoAbierto },
     { name: 'compras_pausadas',  applyFn: applyCompraPausada },
     { name: 'ajustes_precio_pendientes', applyFn: applyAjustePrecioPendiente },
+    { name: 'sugerencias',       applyFn: applySugerencia },
     { name: 'ingresos_caja',     applyFn: applyIngresoCaja },
     { name: 'cuenta_corriente',  applyFn: applyCuentaCorriente },
   ];
@@ -1103,6 +1110,26 @@
       VALUES (?,?,?,?,?,?,'synced')`,
       [data.id, data.sucursal_id || null, data.usuario_id || null, data.snapshot ?? '{}',
        data.created_at || now, data.updated_at || now]
+    );
+  }
+
+  // Buzón de consultas/sugerencias: la misma fila la crea un lado (POS, al
+  // cargar la consulta) y la termina de escribir el otro (Admin-POS, al
+  // responderla) -- tienePendienteLocal es lo que evita que un pull le pise
+  // a Admin-POS la respuesta que acaba de escribir y todavía no subió.
+  function applySugerencia(data) {
+    if (window.SGA_DB.fueEliminado('sugerencias', data.id)) return;
+    if (tienePendienteLocal('sugerencias', 'id = ?', [data.id])) return;
+    const now = new Date().toISOString();
+    window.SGA_DB.run(`
+      INSERT OR REPLACE INTO sugerencias
+        (id, sucursal_id, usuario_id, tipo, texto, adjuntos, estado, decision,
+         respuesta, respondida_por, respondida_en, fecha, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+      [data.id, data.sucursal_id || null, data.usuario_id || null, data.tipo || 'consulta',
+       data.texto || '', data.adjuntos || null, data.estado || 'pendiente', data.decision || null,
+       data.respuesta || null, data.respondida_por || null, data.respondida_en || null,
+       data.fecha || now, data.updated_at || now]
     );
   }
 
@@ -1967,6 +1994,7 @@
       { name: 'pedidos_abiertos',  applyFn: applyPedidoAbierto,    label: 'Ventas pausadas' },
       { name: 'compras_pausadas',  applyFn: applyCompraPausada,    label: 'Compras pausadas' },
       { name: 'ajustes_precio_pendientes', applyFn: applyAjustePrecioPendiente, label: 'Ajustes de precio pendientes' },
+      { name: 'sugerencias',       applyFn: applySugerencia,       label: 'Consultas y sugerencias' },
       { name: 'ingresos_caja',     applyFn: applyIngresoCaja,      label: 'Ingresos de caja' },
       { name: 'cuenta_corriente',  applyFn: applyCuentaCorriente,  label: 'Cuenta corriente' },
       { name: 'medios_cobro',      applyFn: applyMedioCobroFull,   label: 'Medios de pago' },

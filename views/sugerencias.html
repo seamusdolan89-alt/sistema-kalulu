@@ -1,0 +1,122 @@
+<!-- views/sugerencias.html — Buzón de consultas y sugerencias de las empleadas -->
+<style>
+  .sug-form-card { max-width: 720px; }
+  .sug-tipo-radios { display: flex; gap: 10px; margin-bottom: var(--spacing-md); }
+  .sug-tipo-radio {
+    flex: 1; padding: 9px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+    cursor: pointer; text-align: center; font-size: 13px; font-weight: 600; color: var(--color-text-secondary);
+    background: var(--color-background);
+  }
+  .sug-tipo-radio input { display: none; }
+  .sug-tipo-radio.activo { border-color: var(--color-primary); background: var(--color-primary-light); color: var(--color-primary-dark); }
+
+  .sug-adjuntar-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+  .sug-adjuntos-preview { display: flex; gap: 8px; flex-wrap: wrap; }
+  .sug-adjunto-thumb { position: relative; width: 60px; height: 60px; border-radius: 6px; overflow: hidden; border: 1px solid var(--color-border); }
+  .sug-adjunto-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .sug-adjunto-quitar {
+    position: absolute; top: 1px; right: 1px; background: rgba(0,0,0,.65); color: #fff; border: none;
+    border-radius: 50%; width: 17px; height: 17px; font-size: 11px; line-height: 1; cursor: pointer; padding: 0;
+  }
+  .sug-adjuntos-hint { font-size: 11px; color: var(--color-text-secondary); }
+
+  .sug-filtros { display: flex; gap: 6px; margin: var(--spacing-lg) 0 var(--spacing-md); }
+  .sug-filtro-tab {
+    padding: 6px 14px; border-radius: var(--radius-md); border: 1px solid var(--color-border);
+    background: var(--color-background); color: var(--color-text-secondary); font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  .sug-filtro-tab.activo { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+
+  .sug-list { display: flex; flex-direction: column; gap: 10px; }
+  .sug-item { background: var(--color-background); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 14px 16px; }
+  .sug-item-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+  .sug-item-meta { font-size: 12px; color: var(--color-text-secondary); }
+  .sug-item-meta strong { color: var(--color-text); }
+  .sug-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+  .sug-badge {
+    display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 11px; font-weight: 700; white-space: nowrap;
+  }
+  .sug-badge-consulta   { background: #e3f2fd; color: #1565c0; }
+  .sug-badge-sugerencia { background: #ede7f6; color: #5e35b1; }
+  .sug-badge-pendiente  { background: #fff3e0; color: #e65100; }
+  .sug-badge-respondida { background: #e8f5e9; color: #2e7d32; }
+  .sug-badge-aceptada     { background: #e8f5e9; color: #2e7d32; }
+  .sug-badge-con_cambios  { background: #fff3e0; color: #e65100; }
+  .sug-badge-rechazada    { background: #fdecea; color: #c62828; }
+
+  .sug-item-texto { margin: 10px 0; white-space: pre-wrap; color: var(--color-text); line-height: 1.5; }
+  .sug-item-fotos { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+  .sug-item-fotos img {
+    width: 58px; height: 58px; object-fit: cover; border-radius: 6px; cursor: pointer; border: 1px solid var(--color-border);
+  }
+
+  .sug-respuesta-box {
+    background: var(--color-background-secondary); border-radius: var(--radius-md); padding: 9px 12px; margin-top: 8px; font-size: 13px;
+  }
+  .sug-respuesta-box .sug-respuesta-meta { font-size: 11px; color: var(--color-text-secondary); margin-top: 4px; }
+
+  .sug-item-acciones { margin-top: 10px; }
+  .sug-responder-form { margin-top: 10px; display: none; border-top: 1px solid var(--color-border); padding-top: 10px; }
+  .sug-responder-form.abierto { display: block; }
+  .sug-decision-radios { display: flex; gap: 8px; margin: 8px 0; }
+  .sug-decision-radio {
+    flex: 1; padding: 6px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-md);
+    text-align: center; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--color-text-secondary);
+  }
+  .sug-decision-radio input { display: none; }
+  .sug-decision-radio.activo.aceptada    { border-color: #2e7d32; background: #e8f5e9; color: #2e7d32; }
+  .sug-decision-radio.activo.con_cambios { border-color: #e65100; background: #fff3e0; color: #e65100; }
+  .sug-decision-radio.activo.rechazada   { border-color: #c62828; background: #fdecea; color: #c62828; }
+
+  #sug-lightbox.active { display: flex; }
+  #sug-lightbox img { max-width: 92vw; max-height: 92vh; border-radius: 6px; }
+</style>
+
+<div class="page-header">
+  <h2>💬 Consultas y Sugerencias</h2>
+  <p style="color:var(--color-text-secondary);font-size:13px;margin:4px 0 0">
+    Preguntas sobre cómo funciona el sistema, o ideas de mejora. Podés adjuntar una captura de pantalla.
+  </p>
+</div>
+
+<div class="card sug-form-card">
+  <div class="sug-tipo-radios" id="sug-tipo-radios">
+    <label class="sug-tipo-radio activo" data-tipo="consulta">
+      <input type="radio" name="sug-tipo" value="consulta" checked> ❓ Consulta
+    </label>
+    <label class="sug-tipo-radio" data-tipo="sugerencia">
+      <input type="radio" name="sug-tipo" value="sugerencia"> 💡 Sugerencia
+    </label>
+  </div>
+
+  <textarea id="sug-texto" rows="3" placeholder="Escribí acá tu consulta o tu idea..."></textarea>
+
+  <div class="sug-adjuntar-row">
+    <button type="button" class="btn btn-outline btn-sm" id="sug-btn-adjuntar">📎 Adjuntar imagen</button>
+    <span class="sug-adjuntos-hint">O pegá una captura con Ctrl+V. Hasta 3 imágenes.</span>
+    <input type="file" id="sug-file-input" accept="image/*" multiple style="display:none">
+  </div>
+  <div class="sug-adjuntos-preview" id="sug-adjuntos-preview"></div>
+
+  <div class="alert alert-danger" id="sug-error" style="display:none;margin-top:10px"></div>
+
+  <div style="margin-top:12px;text-align:right">
+    <button type="button" class="btn btn-primary" id="sug-btn-enviar">Enviar</button>
+  </div>
+</div>
+
+<div class="sug-filtros" id="sug-filtros" style="display:none">
+  <button class="sug-filtro-tab activo" data-filtro="pendientes">Pendientes</button>
+  <button class="sug-filtro-tab" data-filtro="todas">Todas</button>
+</div>
+
+<div class="sug-list" id="sug-list"></div>
+<div class="card" id="sug-empty" style="display:none;text-align:center;padding:28px;color:var(--color-text-secondary)">
+  Todavía no hay nada acá.
+</div>
+
+<div class="modal" id="sug-lightbox">
+  <div class="modal-content" style="width:auto;max-width:95vw;padding:10px;background:transparent;box-shadow:none;text-align:center">
+    <img id="sug-lightbox-img" src="" alt="Imagen adjunta">
+  </div>
+</div>
