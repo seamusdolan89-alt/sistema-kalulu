@@ -58,9 +58,19 @@ INSTALAR_FIRESTORE_FALSO_JS = """
   });
   const mkQuery = (col, spec) => ({
     where:      (f, o, v) => mkQuery(col, { ...spec, wheres: [...spec.wheres, [f, o, v]] }),
-    orderBy:    (f, dir)  => mkQuery(col, { ...spec, order: [f, dir || 'asc'] }),
+    // Varios orderBy encadenados se acumulan (antes se pisaban): hace falta para el
+    // desempate de syncMonitoringData (_synced_at + FieldPath.documentId()). Un campo
+    // que no es string (el unico caso real: FieldPath.documentId()) se representa como
+    // '__name__', el mismo nombre que usa Firestore de verdad para el id del documento.
+    orderBy:    (f, dir)  => mkQuery(col, { ...spec, order: [...(spec.order || []), [typeof f === 'string' ? f : '__name__', dir || 'asc']] }),
     limit:      (n)       => mkQuery(col, { ...spec, lim: n }),
-    startAfter: (doc)     => mkQuery(col, { ...spec, after: doc.id }),
+    // startAfter(doc) (snapshot, 1 solo arg con .id) sigue igual -- lo usan
+    // syncCollectionFull/las auditorias de huerfanos. startAfter(v1, v2, ...) con
+    // valores sueltos (no un snapshot) es el cursor compuesto nuevo: una posicion
+    // por cada orderBy, en el mismo orden.
+    startAfter: (...args) => mkQuery(col, (args.length === 1 && args[0] && typeof args[0] === 'object' && 'id' in args[0])
+      ? { ...spec, after: args[0].id }
+      : { ...spec, afterValues: args }),
     doc:        (id)      => mkRef(col, id),
     get: async () => {
       const filas = await call('query', { col, spec });
@@ -143,18 +153,48 @@ class FirestoreFalso:
                 if campo not in d["data"]:
                     return False
                 v = d["data"][campo]
-                return v == valor if oper == "==" else v > valor
+                if oper == "==":
+                    return v == valor
+                if oper == ">=":
+                    return v >= valor
+                return v > valor
             docs = [d for d in docs if ok(d)]
-        if spec.get("order"):
-            campo, direccion = spec["order"]
-            docs = [d for d in docs if campo in d["data"]]
-            # Firestore ordena null antes que cualquier otro valor
-            docs.sort(key=lambda d: (d["data"][campo] is not None, d["data"][campo] if d["data"][campo] is not None else ""),
-                      reverse=(direccion == "desc"))
+
+        # 'order' es una lista de pares [campo, direccion] (uno por cada .orderBy()
+        # encadenado -- antes un solo [campo, direccion] suelto, antes de soportar el
+        # desempate compuesto de syncMonitoringData). '__name__' es el id del propio
+        # documento (asi representa el mock a FieldPath.documentId(), ver arriba).
+        orders = spec.get("order") or []
+        if orders and isinstance(orders[0], str):
+            orders = [orders]  # compat: alguna llamada vieja guardo un solo par suelto
+
+        def valor_de(d, campo):
+            return d["id"] if campo == "__name__" else d["data"].get(campo)
+
+        def clave(d, hasta=None):
+            campos = orders[:hasta] if hasta is not None else orders
+            # Firestore ordena null (o el campo ausente) antes que cualquier otro valor.
+            return tuple(
+                (valor_de(d, campo) is not None, valor_de(d, campo) if valor_de(d, campo) is not None else "")
+                for campo, _ in campos
+            )
+
+        if orders:
+            for campo, _ in orders:
+                if campo != "__name__":
+                    docs = [d for d in docs if campo in d["data"]]
+            reverse = all(d == "desc" for _, d in orders)
+            docs.sort(key=clave, reverse=reverse)
+
         if spec.get("after"):
             ids = [d["id"] for d in docs]
             if spec["after"] in ids:
                 docs = docs[ids.index(spec["after"]) + 1:]
+        elif spec.get("afterValues") is not None:
+            valores = spec["afterValues"]
+            cursor = tuple((v is not None, v if v is not None else "") for v in valores)
+            docs = [d for d in docs if clave(d, hasta=len(valores)) > cursor]
+
         if spec.get("lim"):
             docs = docs[: spec["lim"]]
         return docs
