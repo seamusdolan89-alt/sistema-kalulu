@@ -1757,6 +1757,21 @@
 
   // ─── Sync incremental de datos de monitoreo (solo ADMIN_MODE) ────────────────
 
+  // El cursor de syncMonitoringData (ver mas abajo) es compuesto: { synced_at, id }.
+  // Un cursor VIEJO (de antes de este fix, 19/10/2026) es un string _synced_at suelto
+  // en localStorage -- se interpreta como { synced_at: <ese valor>, id: '' }. '' ordena
+  // antes que cualquier id real de Firestore, asi que el primer ciclo post-fix vuelve a
+  // pedir (y reaplica -- inofensivo, INSERT OR IGNORE/REPLACE) cualquier documento
+  // empatado justo en ese limite, en vez de arriesgarse a perderlo en la migracion.
+  function leerCursorMonitor(raw) {
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && parsed.synced_at) return parsed;
+    } catch (_) { /* formato viejo: string suelto, cae al return de abajo */ }
+    return { synced_at: raw, id: '' };
+  }
+
   async function syncMonitoringData() {
     if (!firestoreDb) return 0;
 
@@ -1766,7 +1781,7 @@
     // proteccion de mas abajo: el proximo ciclo ya arrancaba despues de ese
     // documento y no volvia a pedirlo nunca mas. Con fallback al valor viejo
     // compartido para no re-traer 90 dias de golpe en el primer uso post-fix.
-    const cursorViejoCompartido = localStorage.getItem('admin_monitor_sync_at');
+    const cursorViejoCompartido = leerCursorMonitor(localStorage.getItem('admin_monitor_sync_at'));
     let total = 0;
 
     // En un celular (ver MOBILE_SKIP_COLLECTIONS más arriba), saltear acá
@@ -1780,26 +1795,39 @@
     for (const { name, applyFn } of sources) {
       const cursorKey = `admin_monitor_sync_at:${name}`;
       try {
-        let cursor = localStorage.getItem(cursorKey) || cursorViejoCompartido;
+        let cursor = leerCursorMonitor(localStorage.getItem(cursorKey)) || cursorViejoCompartido;
         if (!cursor) {
           // Primera vez: últimos 90 días
           const desde = new Date();
           desde.setDate(desde.getDate() - 90);
-          cursor = desde.toISOString();
+          cursor = { synced_at: desde.toISOString(), id: '' };
         }
 
-        // Paginar con cursor real (orderBy + avanzar al último _synced_at visto) en
-        // vez de un solo limit(): un lote grande (ej. importación masiva en POS)
-        // puede superar los 200/500 de una sola tanda. Si no se agota acá, al mover
-        // el cursor a "ahora" al final, lo que quedó afuera del batch se perdería
-        // para siempre (nunca vuelve a matchear un futuro '> cursor').
+        // Paginar con cursor real (orderBy + avanzar al ultimo _synced_at+id visto) en
+        // vez de un solo limit(): un lote grande (ej. importacion masiva en POS) puede
+        // superar los 200/500 de una sola tanda. Si no se agota aca, al mover el cursor
+        // a "ahora" al final, lo que quedo afuera del batch se perderia para siempre.
+        //
+        // El desempate por id (FieldPath.documentId(), unico por definicion) es el fix
+        // del 19/10/2026: varios documentos pueden compartir el MISMO _synced_at exacto
+        // (ej. los movimientos de stock de una sola compra con varios items, todos
+        // escritos en el mismo batch.commit()) -- un simple `where('_synced_at', '>',
+        // cursor)` sobre un valor NO UNICO deja afuera PARA SIEMPRE a los que empatan con
+        // el cursor ya guardado, sin ningun aviso (encontrado via auditarHuerfanosAdmin:
+        // 20 stock_movimientos de 3 compras distintas nunca habian llegado a Admin-POS).
+        // Sin id previo (primera corrida, o migrando un cursor viejo -- ver
+        // leerCursorMonitor), startAfter(valor, '') tira un error de Firestore
+        // ("document path invalido"): un id vacio no arma un path valido. Para
+        // ese caso se filtra por '>=' en vez de dar un cursor -- no hace falta
+        // desempatar un id que todavia no existe, y el campo del filtro
+        // coincide con el primer orderBy (requisito de Firestore).
         let batchSize;
         do {
-          const snap = await firestoreDb.collection(name)
-            .where('_synced_at', '>', cursor)
-            .orderBy('_synced_at')
-            .limit(200)
-            .get();
+          let q = firestoreDb.collection(name);
+          if (!cursor.id) q = q.where('_synced_at', '>=', cursor.synced_at);
+          q = q.orderBy('_synced_at').orderBy(firebase.firestore.FieldPath.documentId());
+          if (cursor.id) q = q.startAfter(cursor.synced_at, cursor.id);
+          const snap = await q.limit(200).get();
 
           batchSize = snap.size;
           if (batchSize === 0) break;
@@ -1815,11 +1843,11 @@
               // proximo ciclo hasta que el cambio local se suba. Los
               // documentos mas nuevos de esta misma tanda igual se aplican
               // ahora (reaplicarlos despues es inofensivo, INSERT OR REPLACE).
-              if (!ultimoSkipPorPendiente) cursor = doc.data()._synced_at;
+              if (!ultimoSkipPorPendiente) cursor = { synced_at: doc.data()._synced_at, id: doc.id };
             }
             catch (err) { console.warn(`Monitor apply error (${name}):`, err.message); }
           }
-          localStorage.setItem(cursorKey, cursor);
+          localStorage.setItem(cursorKey, JSON.stringify(cursor));
           // Si nada avanzo, repetir la misma consulta trae la misma tanda de
           // nuevo sin progreso -- cortar para no loopear dentro de esta corrida.
           if (cursor === cursorAntes) break;
