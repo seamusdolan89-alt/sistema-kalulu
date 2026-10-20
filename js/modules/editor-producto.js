@@ -2815,9 +2815,9 @@ const EditorProducto = (() => {
           precio_lista_por, precio_lista_divisor,
           es_oferta, oferta_desde, oferta_hasta,
           imagen, iva, markup_fijo,
-          fecha_modificacion, sync_status, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-      `, [newId, ...fieldValues, now, now]);
+          fecha_alta, fecha_modificacion, sync_status, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+      `, [newId, ...fieldValues, now, now, now]);
 
       state.barcodes.forEach(bc => {
         window.SGA_DB.run(
