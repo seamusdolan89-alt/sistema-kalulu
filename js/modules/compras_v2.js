@@ -3300,6 +3300,20 @@ const ComprasV2 = (() => {
           });
         }
 
+        // Proveedor: si el producto todavía no tenía proveedor principal (ficha
+        // creada suelta, sin pasar por el buscador de esta pantalla -- ver
+        // submitNewProduct, que ya lo asigna al crearlo desde acá), pasa a ser
+        // el de ESTA compra. Pedido del dueño, 20/10/2026: encontró un producto
+        // comprado a "Fumo Bravo" sin ningún proveedor asignado porque se había
+        // dado de alta antes, suelto, desde Productos. Para cuando se llega
+        // acá el item ya no puede ser un renglón de ajuste (envío/descuento,
+        // sin producto real) -- isAjuste() ya hizo `continue` más arriba.
+        db().run(
+          `UPDATE productos SET proveedor_principal_id = ?, sync_status = 'pending', updated_at = ?
+           WHERE id = ? AND (proveedor_principal_id IS NULL OR proveedor_principal_id = '')`,
+          [state.proveedorId, ts, item.productoId]
+        );
+
         // Cost update (if changed) — las líneas de muestra NUNCA actualizan el
         // costo del producto: su costo (normalmente $0) no es el costo real
         // de reposición, y pisarlo arruinaría precios/márgenes.
@@ -3548,6 +3562,15 @@ const ComprasV2 = (() => {
             tipo: 'compra_edicion', refTipo: 'compras', refId: compraId, fecha: ts,
           });
         }
+
+        // Proveedor: mismo criterio que en commitCompra (ver ese comentario) --
+        // un producto agregado a la compra al editarla también puede ser uno
+        // sin proveedor asignado.
+        db().run(
+          `UPDATE productos SET proveedor_principal_id = ?, sync_status = 'pending', updated_at = ?
+           WHERE id = ? AND (proveedor_principal_id IS NULL OR proveedor_principal_id = '')`,
+          [state.proveedorId, ts, item.productoId]
+        );
 
         // Costo del producto: solo si cambió Y esta sigue siendo la compra
         // más reciente en la que se compró este producto.
