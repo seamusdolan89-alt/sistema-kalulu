@@ -1388,6 +1388,24 @@
           permisos.can_roturas_vencimientos = !!permisos.can_operaciones_stock;
           cambio = true;
         }
+        // can_informes se desglosó en un permiso por informe (21/10/2026, ver
+        // auth.js) — un usuario que ya tenía can_informes=true (o false) NO
+        // pierde ni gana acceso: se le replica ese mismo valor en los 10
+        // permisos nuevos, igual criterio que las expansiones de arriba.
+        if (permisos.can_informes !== undefined && permisos.can_informes_ventas_producto === undefined) {
+          const valInf = !!permisos.can_informes;
+          permisos.can_informes_ventas_producto    = valInf;
+          permisos.can_informes_analitica_producto = valInf;
+          permisos.can_informes_ventas_transaccion = valInf;
+          permisos.can_informes_quiebres_stock     = valInf;
+          permisos.can_informes_ventas_vendedor    = valInf;
+          permisos.can_informes_aging_cc           = valInf;
+          permisos.can_informes_resumen_diario     = valInf;
+          permisos.can_informes_stock_muerto       = valInf;
+          permisos.can_informes_salidas_stock      = valInf;
+          permisos.can_informes_sustitutos_grupos  = valInf;
+          cambio = true;
+        }
 
         if (cambio) {
           database.run(`UPDATE usuarios SET permisos_json = ? WHERE id = ?`, [JSON.stringify(permisos), u.id]);

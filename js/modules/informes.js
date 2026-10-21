@@ -20,6 +20,13 @@ const Informes = (() => {
     { id: 'sustitutos_grupos',  label: 'Grupos de Sustitutos' },
   ];
 
+  // can_informes (ruta) es el acceso a la SECCIÓN; cada id de REPORTES tiene
+  // además su propio permiso 'can_informes_<id>' (ver auth.js) — el admin
+  // (rol='admin') siempre puede todo via SGA_Permisos.can(). Pedido explícito
+  // del usuario (21/10/2026): poder elegir qué informes ve cada usuario.
+  const reportesPermitidos = () =>
+    REPORTES.filter(r => window.SGA_Permisos?.can('can_informes_' + r.id));
+
   const TIPO_SALIDA_LABEL = {
     consumo:     'Consumo Interno',
     rotura:      'Rotura',
@@ -436,6 +443,14 @@ const Informes = (() => {
     state.desde      = defaultDesde();
     state.hasta      = defaultHasta();
 
+    // state.reporte puede venir de una sesión anterior (otro usuario, u otro
+    // permiso) — si no está entre los habilitados para ESTE usuario, se cae
+    // al primero que sí lo esté (o queda sin reporte si no tiene ninguno).
+    const permitidos = reportesPermitidos();
+    if (!permitidos.some(r => r.id === state.reporte)) {
+      state.reporte = permitidos[0]?.id || null;
+    }
+
     const root = ge('inf-root');
     if (!root) return;
 
@@ -558,6 +573,21 @@ const Informes = (() => {
   }
 
   function renderShell() {
+    const permitidos = reportesPermitidos();
+    if (!permitidos.length) {
+      return `
+        <div class="inf-toolbar">
+          <h2 class="inf-title">📊 Informes</h2>
+        </div>
+        <div id="inf-results" class="inf-results-area">
+          <div class="inf-empty-state">
+            <div class="inf-empty-icon">📊</div>
+            <p>No tenés ningún informe habilitado. Pedile al administrador que te habilite alguno desde Usuarios.</p>
+          </div>
+        </div>
+      `;
+    }
+
     return `
       <div class="inf-toolbar">
         <h2 class="inf-title">📊 Informes</h2>
@@ -565,7 +595,7 @@ const Informes = (() => {
           <div class="inf-control-group">
             <label>Reporte</label>
             <select id="inf-sel-reporte" class="inf-select">
-              ${REPORTES.map(r => `<option value="${r.id}"${r.id === state.reporte ? ' selected' : ''}>${r.label}</option>`).join('')}
+              ${permitidos.map(r => `<option value="${r.id}"${r.id === state.reporte ? ' selected' : ''}>${r.label}</option>`).join('')}
             </select>
           </div>
           <div class="inf-control-group">
