@@ -1,6 +1,6 @@
 """
 tests/e2e/test_compras_editar_remito.py — "✏️ Editar" en Remitos Pendientes
-de Factura (Compras, solo Admin-POS).
+de Factura (Compras).
 
 Antes no habia forma de corregir un remito ya cargado (producto equivocado,
 cantidad mal): el panel de remitos pendientes solo ofrecia "Vincular Factura",
@@ -16,8 +16,10 @@ antes de abrir el editor -- no "revertir todo y recargar". Casos:
     linea conserva su remito_items.id (el sync no la duplica)
   - sacar una linea cuyo stock ya se vendio -> avisa (confirm) antes de dejar
     stock negativo
-  - el remito queda sync_status='pending' y Editar no aparece fuera de
-    Admin-POS
+  - el remito queda sync_status='pending' y Editar no aparece para un cajero
+    del POS SIN el permiso can_editar_remitos (pedido explicito del usuario,
+    21/10/2026: habilitarlo por permiso granular, no solo por ADMIN_MODE --
+    ver test_compras_v2_editar_remito_permiso.py para el caso CON el permiso)
 
 Correr (server ya levantado en :8765, ver README.md):
 
@@ -32,7 +34,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 sys.path.insert(0, os.path.dirname(__file__))
 
 from playwright.sync_api import sync_playwright
-from helpers import assert_stock_integro, block_firebase, enable_dev_mode, login_via_seed
+from helpers import assert_stock_integro, block_firebase, enable_dev_mode, login_direct, login_via_seed
 
 SCREENSHOT_DIR = os.path.join(os.path.dirname(__file__), "screenshots")
 
@@ -230,12 +232,31 @@ def main():
         tipos = [m['tipo'] for m in movs]
         assert tipos[-2:] == ['remito_edicion', 'remito_edicion'] or tipos[-1] == 'remito_edicion', f"movimientos de la edicion: {tipos}"
 
-        print("--- POS del local (no admin): el remito aparece pero SIN boton Editar ---")
+        print("--- POS del local, cajero SIN can_editar_remitos: aparece el remito pero SIN boton Editar ---")
         pos = context.new_page()
         pos.on("pageerror", lambda exc: errors.append(str(exc)))
         pos.on("dialog", lambda d: d.accept())
         login_via_seed(pos, admin_pos=False)
         pos.evaluate(SEED_JS)
+
+        # Cajero con acceso a Compras pero SIN el permiso de editar remitos --
+        # el admin de la demo (rol='admin') tiene TODOS los permisos siempre
+        # (SGA_Permisos.can()), así que no sirve para probar este caso.
+        pos.evaluate("""
+          async () => {
+            const now = new Date().toISOString();
+            const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('pass123'));
+            const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+            window.SGA_DB.run(
+              `INSERT INTO usuarios (id, firebase_uid, nombre, username, password_hash, rol, sucursal_id, activo, permisos_json, sync_status, updated_at)
+               VALUES ('cajero-er-sinperm', 'dev-cajero-er-sinperm', 'Cajera Sin Permiso', 'cajeraerin', ?, 'cajero', '1', 1, '{"can_compras": true}', 'synced', ?)`,
+              [hash, now]
+            );
+          }
+        """)
+        pos.evaluate("() => sessionStorage.removeItem('sga_user')")
+        login_direct(pos, username="cajeraerin", password="pass123")
+
         pos.evaluate("window.location.hash = 'compras_v2'")
         pos.wait_for_load_state("networkidle")
         pos.wait_for_timeout(500)
@@ -243,7 +264,7 @@ def main():
         assert pos.locator("#cv2-remitos-list .cv2-btn-vincular[data-id='remito-er']").count() == 1, \
             "En el POS deberia seguir apareciendo el remito con Vincular Factura"
         assert pos.locator("#cv2-remitos-list .cv2-btn-editar-remito").count() == 0, \
-            "El boton Editar no deberia aparecer fuera de Admin-POS"
+            "El boton Editar no deberia aparecer para un cajero sin can_editar_remitos"
 
         assert not errors, f"Errores JS no capturados en pagina: {errors}"
 

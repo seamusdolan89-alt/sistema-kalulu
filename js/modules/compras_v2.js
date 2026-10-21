@@ -3637,7 +3637,7 @@ const ComprasV2 = (() => {
     }
   }
 
-  // ── Editar un remito pendiente de factura (solo admin) ───────────────────────
+  // ── Editar un remito pendiente de factura (admin, o POS con permiso) ─────────
   // El remito suma stock al guardarse (commitRemito) y vincular la factura
   // después NO lo vuelve a tocar — así que corregir un remito mal cargado
   // tiene que corregir también el stock. Mismo enfoque que la edición de
@@ -3647,8 +3647,14 @@ const ComprasV2 = (() => {
   // productos que realmente cambiaron, no hay un instante con stock de más o
   // de menos, y los remito_items que siguen existiendo conservan su id (el
   // sync los actualiza en vez de duplicarlos).
+  // Pedido explícito del usuario (21/10/2026): habilitar esto desde el POS
+  // mediante un permiso granular (can_editar_remitos) — eliminar un remito
+  // sigue siendo solo-admin (ver eliminarRemito), acá solo se habilita CORREGIR.
   function cargarRemitoParaEditar(remitoId) {
-    if (!window.ADMIN_MODE) { alert('Solo el administrador puede editar remitos.'); return; }
+    if (!window.ADMIN_MODE && !window.SGA_Permisos?.can('can_editar_remitos')) {
+      alert('No tenés permiso para editar remitos.');
+      return;
+    }
 
     const remito = db().query(
       `SELECT r.*, p.razon_social, p.condicion_iva, p.agente_retencion_iva, p.agente_retencion_iibb
@@ -3851,9 +3857,14 @@ const ComprasV2 = (() => {
       }
 
       db().commitBatch();
-      // pushToPos() y no pushPending(): en Admin-POS los cambios tienen que
-      // subir con _pulled:false para que el POS del local los descargue.
-      window.SGA_Sync?.pushToPos?.()?.catch(() => {});
+      // pushPending() (no pushToPos() a secas): desde que editar un remito se
+      // habilita tambien en el POS por permiso (can_editar_remitos, 21/10/2026),
+      // esta funcion corre en las dos superficies — pushPending() ya sabe elegir
+      // el canal correcto segun ADMIN_MODE (ver su comentario en sync.js). Llamar
+      // pushToPos() a secas aca forzaba el canal de admin (_pulled:false) incluso
+      // desde el POS, y de paso ignoraba el filtro posPush:false de las tablas
+      // admin-authoritative (medios_cobro/sucursales).
+      window.SGA_Sync?.pushPending?.();
       window.SGA_Utils.showNotification('Remito actualizado', 'success');
       salirCompras(); // antes de limpiar editandoRemitoId, que es lo que decide el destino
       state.editandoRemitoId   = null;
@@ -4013,7 +4024,8 @@ const ComprasV2 = (() => {
             <span class="cv2-remito-meta">Fecha: ${fechaFmt}</span>
           </div>
           <div class="cv2-remito-actions">
-            ${window.ADMIN_MODE ? `<button class="cv2-btn-editar-remito" data-id="${esc(r.id)}" title="Corregir productos o cantidades de este remito">✏️ Editar</button>` : ''}
+            ${(window.ADMIN_MODE || window.SGA_Permisos?.can('can_editar_remitos'))
+              ? `<button class="cv2-btn-editar-remito" data-id="${esc(r.id)}" title="Corregir productos o cantidades de este remito">✏️ Editar</button>` : ''}
             ${window.ADMIN_MODE ? `<button class="cv2-btn-eliminar-remito" data-id="${esc(r.id)}" title="Eliminar este remito (ej.: cargado por error/duplicado)">🗑️ Eliminar</button>` : ''}
             <button class="cv2-btn-vincular" data-id="${esc(r.id)}">Vincular Factura →</button>
           </div>
