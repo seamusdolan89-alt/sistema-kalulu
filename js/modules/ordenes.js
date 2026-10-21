@@ -47,6 +47,21 @@ const Ordenes = (() => {
   }
 
   /**
+   * Unidades vendidas en los últimos N días de un producto Y, si pertenece a un
+   * grupo de sustitutos, de TODOS sus miembros — misma idea que stockEfectivo:
+   * la demanda es del grupo entero, no de un sustituto en particular. Antes esto
+   * se calculaba solo sobre la referencia (ventasUltimos(refId)), así que un
+   * grupo donde la venta real pasaba por un miembro no-referencia mostraba 0 en
+   * la fila de la orden aunque el popup de detalle (que sí suma por miembro)
+   * mostrara el total real — bug real reportado por el usuario 21/10/2026.
+   */
+  function ventasGrupoUltimos(productoId, dias) {
+    const miembros = GruposSustitutos.miembrosDe(productoId);
+    const ids = miembros.length ? miembros.map(m => m.id) : [productoId];
+    return ids.reduce((total, id) => total + ventasUltimos(id, dias), 0);
+  }
+
+  /**
    * Genera una orden de compra en estado 'borrador' para un proveedor.
    *
    * Incluye todos los productos del proveedor cuyo stock efectivo
@@ -117,10 +132,11 @@ const Ordenes = (() => {
       // Ese miembro en particular puede estar pausado aunque el grupo no lo este.
       if (pedidoId !== refId && db().pausaVigente(aPedir)) continue;
 
-      // Las ventas y los dias sin stock se miran sobre la referencia: son la
-      // demanda del grupo, que es lo que justifica el pedido.
-      const v30d   = ventasUltimos(refId, 30);
-      const v6m    = ventasUltimos(refId, 180);
+      // Las ventas y los dias sin stock se miran sobre la referencia, sumando
+      // TODO el grupo (ventasGrupoUltimos): son la demanda del grupo, que es
+      // lo que justifica el pedido.
+      const v30d   = ventasGrupoUltimos(refId, 30);
+      const v6m    = ventasGrupoUltimos(refId, 180);
       const diasSS = db().calcularDiasSinStock6m(refId, sucursalId);
 
       const cantPedido = aPedir.cant_pedido || 0;
@@ -321,8 +337,8 @@ const Ordenes = (() => {
     `, [
       uuid(), ordenId, productoId, prod.cant_pedido || 0,
       stockAct, prod.stock_minimo || 0, prod.cant_pedido || 0,
-      ventasUltimos(productoId, 30),
-      Math.round((ventasUltimos(productoId, 180) / 6) * 100) / 100,
+      ventasGrupoUltimos(productoId, 30),
+      Math.round((ventasGrupoUltimos(productoId, 180) / 6) * 100) / 100,
       db().calcularDiasSinStock6m(productoId, sucursalId),
       prod.cant_pedido || 0,
       prod.pedido_unidad || 'unidad',
