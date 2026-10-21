@@ -1312,8 +1312,16 @@ const EditorProducto = (() => {
     const seguidoresP = G.seguidoresDe(P);
 
     let operacion;
-    // 1) R ya esta en el grupo de P
-    if (G.referenciaRealDe(newRefId) === P && newRefId !== P) {
+    // 1) R ya esta en el MISMO grupo que P (sea P la referencia formal o un miembro
+    // cualquiera — con un tercer producto como referencia actual). Antes esto solo
+    // miraba "la referencia de R es P", que falla cuando P es un miembro comun del
+    // grupo (no la referencia): en ese caso caia al caso 3 ("R pertenece a OTRO
+    // grupo"), un dialogo pensado para grupos distintos que termina ofreciendo
+    // "usar la referencia ACTUAL en su lugar" — exactamente lo contrario de lo que
+    // se pidio. Bug real reportado por el usuario (21/10/2026): cambiar la
+    // referencia a un miembro ya agrupado, desde la pantalla de OTRO miembro.
+    const refP = G.referenciaRealDe(P);
+    if (refP && G.referenciaRealDe(newRefId) === refP && newRefId !== P) {
       const op = await G.elegirOpcion({
         titulo: 'Cambiar la referencia del grupo',
         texto: `"${escapeHtml(nombreProducto(newRefId))}" ya es parte del grupo de "${escapeHtml(nomP)}".<br>¿Querés que pase a ser la <strong>referencia</strong> del grupo? "${escapeHtml(nomP)}" sigue en el grupo.`,
