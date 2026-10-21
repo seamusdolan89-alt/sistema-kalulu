@@ -66,8 +66,26 @@
     // ── OTROS ─────────────────────────────────────────────────────────────
     { key: 'can_clientes',     label: 'Gestionar clientes',    grupo: 'Otros', riesgo: 'bajo',  tipo: 'bool', default: false },
     { key: 'can_promociones',  label: 'Gestionar promociones', grupo: 'Otros', riesgo: 'bajo',  tipo: 'bool', default: false },
-    { key: 'can_informes',     label: 'Ver informes',          grupo: 'Otros', riesgo: 'medio', tipo: 'bool', default: false },
     { key: 'can_etiquetas',    label: 'Imprimir etiquetas',    grupo: 'Otros', riesgo: 'bajo',  tipo: 'bool', default: false },
+
+    // ── INFORMES ──────────────────────────────────────────────────────────
+    // can_informes es el acceso a la SECCIÓN (gate de ruta en app.js, igual que
+    // antes); cada informe puntual es un permiso aparte que requiere ese acceso
+    // general — informes.js filtra el selector de reportes por estos, no solo
+    // por can_informes. Pedido explícito del usuario (21/10/2026): "desglosarlo
+    // para poder elegir qué informes puede ver y cuáles no". Migración de
+    // usuarios que ya tenían can_informes=true: ver js/db.js.
+    { key: 'can_informes',                     label: 'Ver informes (acceso a la sección)', grupo: 'Informes', riesgo: 'medio', tipo: 'bool', default: false },
+    { key: 'can_informes_ventas_producto',      label: 'Ventas por Producto',                grupo: 'Informes', riesgo: 'bajo',  tipo: 'bool', default: false, requiere: 'can_informes' },
+    { key: 'can_informes_analitica_producto',   label: 'Análisis de Productos',               grupo: 'Informes', riesgo: 'bajo',  tipo: 'bool', default: false, requiere: 'can_informes' },
+    { key: 'can_informes_ventas_transaccion',   label: 'Ventas por Transacción',               grupo: 'Informes', riesgo: 'bajo',  tipo: 'bool', default: false, requiere: 'can_informes' },
+    { key: 'can_informes_quiebres_stock',       label: 'Quiebres de Stock',                   grupo: 'Informes', riesgo: 'bajo',  tipo: 'bool', default: false, requiere: 'can_informes' },
+    { key: 'can_informes_ventas_vendedor',      label: 'Ventas por Vendedor',                 grupo: 'Informes', riesgo: 'bajo',  tipo: 'bool', default: false, requiere: 'can_informes' },
+    { key: 'can_informes_aging_cc',             label: 'Aging Cuenta Corriente',               grupo: 'Informes', riesgo: 'medio', tipo: 'bool', default: false, requiere: 'can_informes' },
+    { key: 'can_informes_resumen_diario',       label: 'Resumen Diario de Caja',               grupo: 'Informes', riesgo: 'medio', tipo: 'bool', default: false, requiere: 'can_informes' },
+    { key: 'can_informes_stock_muerto',         label: 'Stock sin Movimiento',                grupo: 'Informes', riesgo: 'bajo',  tipo: 'bool', default: false, requiere: 'can_informes' },
+    { key: 'can_informes_salidas_stock',        label: 'Salidas de Stock (no venta)',          grupo: 'Informes', riesgo: 'bajo',  tipo: 'bool', default: false, requiere: 'can_informes' },
+    { key: 'can_informes_sustitutos_grupos',    label: 'Grupos de Sustitutos',                 grupo: 'Informes', riesgo: 'bajo',  tipo: 'bool', default: false, requiere: 'can_informes' },
   ];
 
   // ─── Plantillas de rol ──────────────────────────────────────────────────────
@@ -103,7 +121,12 @@
         can_ver_productos: true, can_editar_productos: true, can_ver_costos: true,
         can_compras: true, can_ordenes: true, can_proveedores: true,
         can_operaciones_stock: true, can_roturas_vencimientos: true, can_consumo_interno: true,
-        can_clientes: true, can_promociones: true, can_informes: true, can_etiquetas: true,
+        can_clientes: true, can_promociones: true, can_etiquetas: true,
+        can_informes: true, can_informes_ventas_producto: true, can_informes_analitica_producto: true,
+        can_informes_ventas_transaccion: true, can_informes_quiebres_stock: true,
+        can_informes_ventas_vendedor: true, can_informes_aging_cc: true,
+        can_informes_resumen_diario: true, can_informes_stock_muerto: true,
+        can_informes_salidas_stock: true, can_informes_sustitutos_grupos: true,
       },
     },
   ];
