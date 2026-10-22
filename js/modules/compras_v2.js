@@ -5061,32 +5061,34 @@ const ComprasV2 = (() => {
           </div>
         </div>
 
-        ${hayCambios ? `
-        <div class="cv2-rf-section">
-          <div class="cv2-rf-section-title">Cambios de Costo y/o Precio</div>
-          <table class="cv2-rf-table">
-            <thead><tr>
-              <th class="c"><input type="checkbox" class="cv2-rf-chk-all" data-sec="cambios" checked title="Seleccionar todos"></th>
-              <th>Producto</th><th>Código</th><th>Costo</th><th>Precio Venta</th>
-            </tr></thead>
-            <tbody>${cambiosRows}</tbody>
-          </table>
-        </div>` : `
-        <div class="cv2-rf-section cv2-rf-empty">
-          No hubo modificaciones de costo o precio en esta compra.
-        </div>`}
+        <div class="cv2-rf-body">
+          ${hayCambios ? `
+          <div class="cv2-rf-section">
+            <div class="cv2-rf-section-title">Cambios de Costo y/o Precio</div>
+            <table class="cv2-rf-table">
+              <thead><tr>
+                <th class="c"><input type="checkbox" class="cv2-rf-chk-all" data-sec="cambios" checked title="Seleccionar todos"></th>
+                <th>Producto</th><th>Código</th><th>Costo</th><th>Precio Venta</th>
+              </tr></thead>
+              <tbody>${cambiosRows}</tbody>
+            </table>
+          </div>` : `
+          <div class="cv2-rf-section cv2-rf-empty">
+            No hubo modificaciones de costo o precio en esta compra.
+          </div>`}
 
-        ${hayNuevos ? `
-        <div class="cv2-rf-section">
-          <div class="cv2-rf-section-title">Productos Nuevos</div>
-          <table class="cv2-rf-table">
-            <thead><tr>
-              <th class="c"><input type="checkbox" class="cv2-rf-chk-all" data-sec="nuevos" checked title="Seleccionar todos"></th>
-              <th>Producto</th><th>Código de Barras</th><th>Costo</th><th>Precio Venta</th><th></th>
-            </tr></thead>
-            <tbody>${nuevosRows}</tbody>
-          </table>
-        </div>` : ''}
+          ${hayNuevos ? `
+          <div class="cv2-rf-section">
+            <div class="cv2-rf-section-title">Productos Nuevos</div>
+            <table class="cv2-rf-table">
+              <thead><tr>
+                <th class="c"><input type="checkbox" class="cv2-rf-chk-all" data-sec="nuevos" checked title="Seleccionar todos"></th>
+                <th>Producto</th><th>Código de Barras</th><th>Costo</th><th>Precio Venta</th><th></th>
+              </tr></thead>
+              <tbody>${nuevosRows}</tbody>
+            </table>
+          </div>` : ''}
+        </div>
 
         <div class="cv2-rf-footer">
           <button class="cv2-rf-btn-pausar" id="cv2-rf-btn-pausar">⏸ Pausar · Retomar después</button>

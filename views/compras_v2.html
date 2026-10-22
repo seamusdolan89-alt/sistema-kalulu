@@ -799,10 +799,19 @@
   }
   .cv2-rf-btn-share:hover { opacity: 0.88; }
   .cv2-rf-btn-share-mail { background: #546e7a; }
+  /* Antes el contenido (cambios + nuevos) iba directo en .cv2-rf-root, sin
+     esta franja scrolleable: si la suma de filas pasaba el alto de la
+     ventana, las de abajo quedaban clipeadas sin scrollbar, invisibles —
+     bug real reportado por una cajera (22/10/2026): "hay más productos en
+     nuevos pero la pantalla no los muestra". Mismo patrón que
+     .cv2-cart-section/.cv2-rev-body (flex:1 + overflow-y:auto + min-height:0
+     para que el flex-basis no ignore el overflow). */
+  .cv2-rf-body { flex: 1; overflow-y: auto; min-height: 0; }
   .cv2-rf-section {
     margin: 20px 28px 0; background: #fff; border-radius: 10px;
     border: 1px solid #e0e6ef; overflow: hidden;
   }
+  .cv2-rf-body .cv2-rf-section:last-child { margin-bottom: 20px; }
   .cv2-rf-section-title {
     padding: 10px 16px; background: #f0f4fb;
     font-size: 13px; font-weight: 700; color: #1a2744;
