@@ -324,7 +324,6 @@
       { name: 'gastos', icon: 'gastos', text: 'Gastos Generales' },
       { name: 'usuarios', icon: 'usuarios', text: 'Usuarios' },
       { name: 'flujo', icon: 'flujo', text: 'Flujo de Fondos', adminPosOnly: true },
-      { name: 'aprobaciones_pendientes', icon: 'aprobaciones', text: 'Aprobaciones Pendientes', adminOnly: true, adminPosOnly: true },
       { name: 'configuracion', icon: 'configuracion', text: 'Configuración', adminOnly: true, adminPosOnly: true },
     ];
 
