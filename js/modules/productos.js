@@ -4,6 +4,9 @@
 // aplicarCambioReferencia, moverMiembro, quitarDelGrupo... Nunca con SQL propio en esta pantalla:
 // cada camino que lo hizo termino dejando filas duplicadas, cadenas o referencias sin fila propia.
 // tests/e2e/test_sustitutos_solo_por_motor.py falla si se escribe la tabla desde otro archivo.
+// Import estatico (no window.SGA_Familia) por el mismo motivo que compras_v2.js/
+// operaciones_stock.js/editor-producto.js: el modulo que necesita el wizard se lo trae solo.
+import Familia from './familia.js';
 
 const Productos = (() => {
   'use strict';
@@ -2213,6 +2216,121 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
     }
   };
 
+  // ── FAMILIAS CON PRECIO DISTINTO (auditoría) ────────────────────────────────
+  // Lista madres cuyos hijos tienen precio_venta distinto al de la madre.
+  // "Corregir" abre el wizard de herencia YA EXISTENTE (familia.js) con la
+  // familia completa — no escribe precios acá: el wizard decide, por fila,
+  // qué hijo hereda costo/precio y aplica con el mismo motor que usa el resto
+  // de la app (compras, editor de producto). Pedido del usuario (23/10/2026).
+  const escHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                                          .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  const getFamiliasDesajustadas = () => {
+    const rows = window.SGA_DB.query(`
+      SELECT
+        m.id AS madre_id, m.nombre AS madre_nombre, m.costo AS madre_costo, m.precio_venta AS madre_precio,
+        h.id AS hijo_id, h.nombre AS hijo_nombre, h.costo AS hijo_costo, h.precio_venta AS hijo_precio
+      FROM productos h
+      JOIN productos m ON m.id = h.producto_madre_id
+      WHERE h.activo = 1 AND m.activo = 1
+        AND ROUND(h.precio_venta, 2) != ROUND(m.precio_venta, 2)
+      ORDER BY m.nombre COLLATE NOCASE, h.nombre COLLATE NOCASE
+    `);
+    const porMadre = new Map();
+    for (const r of rows) {
+      if (!porMadre.has(r.madre_id)) {
+        porMadre.set(r.madre_id, {
+          id: r.madre_id, nombre: r.madre_nombre, costo: r.madre_costo, precio: r.madre_precio,
+          hijos: [],
+        });
+      }
+      porMadre.get(r.madre_id).hijos.push({
+        id: r.hijo_id, nombre: r.hijo_nombre, costo: r.hijo_costo, precio: r.hijo_precio,
+      });
+    }
+    return [...porMadre.values()];
+  };
+
+  const renderFamiliasDesajustadas = () => {
+    const body = getElement('familias-desajustadas-body');
+    if (!body) return;
+    const familias = getFamiliasDesajustadas();
+
+    if (!familias.length) {
+      body.innerHTML = `<p style="color:#2e7d32;font-weight:600">✓ No hay familias con precio de venta distinto.</p>`;
+      return;
+    }
+
+    const costoCell = (v) => state.puedeVerCostos
+      ? formatCurrency(v || 0)
+      : '<span title="Sin permiso para ver costos" style="color:#bbb">🔒</span>';
+
+    body.innerHTML = `
+      <p style="margin-bottom:14px;color:#555;font-size:13px">
+        ${familias.length} familia${familias.length !== 1 ? 's' : ''} con al menos un hijo cuyo precio de venta no coincide con el de la madre.
+      </p>
+      ${familias.map(f => `
+        <div style="border:1px solid #e0e0e0;border-radius:8px;margin-bottom:14px;overflow:hidden">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:#f5f9ff">
+            <strong>👑 ${escHtml(f.nombre)}</strong>
+            <button class="btn btn-small btn-primary" data-corregir-madre="${escHtml(f.id)}">Corregir familia</button>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr style="background:#fafafa">
+              <th style="text-align:left;padding:6px 14px;font-size:11px;color:#777;text-transform:uppercase">Hijo</th>
+              <th style="text-align:right;padding:6px 14px;font-size:11px;color:#777;text-transform:uppercase">Costo</th>
+              <th style="text-align:right;padding:6px 14px;font-size:11px;color:#777;text-transform:uppercase">Precio Venta</th>
+            </tr></thead>
+            <tbody>
+              <tr style="background:#fffde7">
+                <td style="padding:6px 14px">${escHtml(f.nombre)} <span style="font-size:10px;color:#f57f17">(madre)</span></td>
+                <td style="padding:6px 14px;text-align:right">${costoCell(f.costo)}</td>
+                <td style="padding:6px 14px;text-align:right;font-weight:600">${formatCurrency(f.precio || 0)}</td>
+              </tr>
+              ${f.hijos.map(h => `
+                <tr>
+                  <td style="padding:6px 14px">${escHtml(h.nombre)}</td>
+                  <td style="padding:6px 14px;text-align:right">${costoCell(h.costo)}</td>
+                  <td style="padding:6px 14px;text-align:right;font-weight:600;color:#c62828">${formatCurrency(h.precio || 0)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `).join('')}
+    `;
+
+    body.querySelectorAll('[data-corregir-madre]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const f = familias.find(x => x.id === btn.dataset.corregirMadre);
+        if (!f) return;
+        // El wizard (.cv2-her-overlay, z-index 600) queda DEBAJO de este modal
+        // (.modal, z-index 1000) si los dos están abiertos a la vez -- se
+        // cierra este antes de abrirlo y se vuelve a abrir (ya actualizado)
+        // cuando el wizard termina.
+        closeFamiliasDesajustadasModal();
+        Familia.showHerenciaModal({
+          prodId: f.id,
+          prodNombre: f.nombre,
+          nuevoCosto: parseFloat(f.costo) || 0,
+          nuevoPrecio: parseFloat(f.precio) || 0,
+          onDone: () => { loadProductos(); openFamiliasDesajustadasModal(); },
+        });
+      });
+    });
+  };
+
+  const openFamiliasDesajustadasModal = () => {
+    renderFamiliasDesajustadas();
+    getElement('familias-desajustadas-modal').classList.remove('hidden');
+    getElement('modal-backdrop').classList.remove('hidden');
+  };
+
+  const closeFamiliasDesajustadasModal = () => {
+    getElement('familias-desajustadas-modal').classList.add('hidden');
+    getElement('modal-backdrop').classList.add('hidden');
+  };
+
   // ── EVENTS ────────────────────────────────────────────────────────────────
 
   const setUpEvents = () => {
@@ -2258,7 +2376,12 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
       getElement('btn-nuevo-producto')?.classList.add('hidden');
       getElement('btn-importar-excel')?.classList.add('hidden');
       getElement('btn-descargar-plantilla')?.classList.add('hidden');
+      getElement('btn-familias-desajustadas')?.classList.add('hidden');
     }
+
+    getElement('btn-familias-desajustadas')?.addEventListener('click', openFamiliasDesajustadasModal);
+    getElement('btn-close-familias-desajustadas')?.addEventListener('click', closeFamiliasDesajustadasModal);
+    getElement('btn-familias-desajustadas-cerrar')?.addEventListener('click', closeFamiliasDesajustadasModal);
 
     getElement('btn-descargar-plantilla')?.addEventListener('click', downloadTemplate);
     getElement('btn-nuevo-producto')?.addEventListener('click', () => {
