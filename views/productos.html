@@ -5,6 +5,7 @@
     <div class="toolbar-buttons">
       <button id="btn-descargar-plantilla" class="btn btn-secondary">⬇️ Descargar Plantilla</button>
       <button id="btn-importar-excel" class="btn btn-secondary">📊 Importar Excel</button>
+      <button id="btn-familias-desajustadas" class="btn btn-secondary">👪 Familias con Precio Distinto</button>
       <button id="btn-nuevo-producto" class="btn btn-primary">+ Nuevo Producto</button>
     </div>
   </div>
@@ -117,6 +118,20 @@
     <div class="form-actions" style="padding:0 20px 20px;border-top:1px solid #eee;margin-top:0;">
       <button id="btn-assign-madre-cancel" class="btn btn-secondary">Cancelar</button>
       <button id="btn-assign-madre-confirm" class="btn btn-primary" disabled>Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- FAMILIAS CON PRECIO DISTINTO (auditoría) -->
+<div id="familias-desajustadas-modal" class="modal hidden">
+  <div class="modal-content modal-large">
+    <div class="modal-header">
+      <h3>👪 Familias con precio distinto</h3>
+      <button id="btn-close-familias-desajustadas" class="btn-close" aria-label="Cerrar">✕</button>
+    </div>
+    <div id="familias-desajustadas-body" style="padding:16px 20px;max-height:70vh;overflow-y:auto"></div>
+    <div class="form-actions" style="padding:0 20px 20px;border-top:1px solid #eee;margin-top:0;">
+      <button id="btn-familias-desajustadas-cerrar" class="btn btn-secondary">Cerrar</button>
     </div>
   </div>
 </div>
