@@ -42,6 +42,12 @@
     { key: 'can_ver_productos',      label: 'Ver productos (buscar, stock, precio)',   grupo: 'Productos', riesgo: 'bajo',  tipo: 'bool', default: false },
     { key: 'can_editar_productos',   label: 'Crear, modificar y borrar productos',     grupo: 'Productos', riesgo: 'medio', tipo: 'bool', default: false, requiere: 'can_ver_productos' },
     { key: 'can_ver_costos',         label: 'Ver costos y márgenes',                   grupo: 'Productos', riesgo: 'medio', tipo: 'bool', default: false, requiere: 'can_ver_productos' },
+    // Corrección MASIVA de precios de familia entera (no un producto puntual) —
+    // aparte de can_editar_productos a propósito, para poder tenerla apagada
+    // en el POS aunque alguien ya tenga permiso de editar productos sueltos.
+    // Pedido explícito del usuario (23/10/2026). En Admin-POS no aplica: ahí
+    // el botón siempre está disponible (ADMIN_MODE da acceso total).
+    { key: 'can_familias_desajustadas', label: 'Corregir precios de familia (masivo)', grupo: 'Productos', riesgo: 'medio', tipo: 'bool', default: false, requiere: 'can_editar_productos' },
 
     // ── COMPRAS Y PROVEEDORES ────────────────────────────────────────────
     { key: 'can_compras',             label: 'Gestionar compras',                        grupo: 'Compras y Proveedores', riesgo: 'medio', tipo: 'bool', default: false },

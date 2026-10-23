@@ -2376,6 +2376,13 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
       getElement('btn-nuevo-producto')?.classList.add('hidden');
       getElement('btn-importar-excel')?.classList.add('hidden');
       getElement('btn-descargar-plantilla')?.classList.add('hidden');
+    }
+
+    // Permiso aparte de can_editar_productos a propósito (ver auth.js): en
+    // Admin-POS siempre disponible (ADMIN_MODE), en el POS requiere que el
+    // dueño lo habilite puntualmente, aunque la cajera ya pueda editar
+    // productos sueltos.
+    if (!(window.ADMIN_MODE || window.SGA_Permisos?.can('can_familias_desajustadas'))) {
       getElement('btn-familias-desajustadas')?.classList.add('hidden');
     }
 

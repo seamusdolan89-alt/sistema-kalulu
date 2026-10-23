@@ -17,11 +17,22 @@ fila qué hereda. El audit modal (z-index 1000) se cierra ANTES de abrir el
 wizard (z-index 600) para que no quede tapado, y se reabre (ya actualizado)
 cuando el wizard termina.
 
+Permiso (agregado a pedido del usuario, mismo día, tras preguntar "¿lo
+armaste para POS también?"): can_familias_desajustadas, APARTE de
+can_editar_productos -- en el POS una cajera con permiso de editar
+productos sueltos NO ve este botón salvo que el dueño se lo habilite
+puntual. En Admin-POS siempre está disponible (ADMIN_MODE).
+
 Cubre:
-1. El botón no aparece para un usuario sin permiso de editar productos.
-2. La lista muestra SOLO la familia con precio distinto (no una con
+1. POS, sin ningún permiso: el botón no aparece.
+2. POS, CON can_editar_productos pero SIN can_familias_desajustadas: el
+   botón sigue sin aparecer (el permiso nuevo es indispensable, no
+   alcanza con poder editar productos sueltos).
+3. POS, con los dos permisos: el botón aparece.
+4. Admin-POS: el botón siempre aparece (ADMIN_MODE), sin importar permisos.
+5. La lista muestra SOLO la familia con precio distinto (no una con
    precios ya iguales).
-3. "Corregir familia" abre el wizard con la familia completa; aplicar deja
+6. "Corregir familia" abre el wizard con la familia completa; aplicar deja
    al hijo con el precio de la madre, sync_status='pending', y el audit
    modal se reabre mostrando "sin familias con precio distinto".
 
@@ -65,23 +76,28 @@ def q(page, sql, params=None):
     return page.evaluate("([s, p]) => window.SGA_DB.query(s, p)", [sql, params or []])
 
 
-def crear_usuario_sin_editar(page, user_id, username):
+def crear_usuario(page, user_id, username, permisos_json):
     page.evaluate(
-        """([userId, username]) => {
+        """([userId, username, permisosJson]) => {
           return (async () => {
             const now = new Date().toISOString();
             const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('pass123'));
             const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
             window.SGA_DB.run(
               `INSERT INTO usuarios (id, firebase_uid, nombre, username, password_hash, rol, sucursal_id, activo, permisos_json, sync_status, updated_at)
-               VALUES (?, ?, ?, ?, ?, 'cajero', '1', 1, '{"can_ver_productos": true}', 'synced', ?)`,
-              [userId, 'dev-' + userId, username, username, hash, now]
+               VALUES (?, ?, ?, ?, ?, 'cajero', '1', 1, ?, 'synced', ?)`,
+              [userId, 'dev-' + userId, username, username, hash, permisosJson, now]
             );
           })();
         }""",
-        [user_id, username],
+        [user_id, username, permisos_json],
     )
     page.wait_for_timeout(150)
+
+
+def boton_visible(page):
+    btn = page.locator("#btn-familias-desajustadas")
+    return btn.count() > 0 and btn.is_visible()
 
 
 def main():
@@ -95,20 +111,42 @@ def main():
         page.on("pageerror", lambda exc: errors.append(str(exc)))
         page.on("dialog", lambda d: d.accept())
 
-        print("--- 1) POS (no Admin-POS, donde los permisos SI se aplican): sin permiso de editar, el botón no aparece ---")
         # En Admin-POS window.ADMIN_MODE da acceso total sin importar el
-        # usuario (es la superficie del dueño) -- este chequeo de permiso
-        # solo tiene sentido en el POS llano.
+        # usuario (es la superficie del dueño) -- la matriz de permisos solo
+        # es observable en el POS llano.
         login_via_seed(page, admin_pos=False)
-        crear_usuario_sin_editar(page, "user-prod-soloview", "prodsoloview")
+        crear_usuario(page, "user-prod-sinperm", "prodsinperm", '{"can_ver_productos": true}')
+        crear_usuario(page, "user-prod-soloeditar", "prodsoloeditar",
+                      '{"can_ver_productos": true, "can_editar_productos": true}')
+        crear_usuario(page, "user-prod-familias", "prodfamilias",
+                      '{"can_ver_productos": true, "can_editar_productos": true, "can_familias_desajustadas": true}')
+
+        print("--- 1) POS, sin ningún permiso: el botón no aparece ---")
         page.evaluate("() => sessionStorage.removeItem('sga_user')")
-        login_direct(page, username="prodsoloview", password="pass123", admin_pos=False)
+        login_direct(page, username="prodsinperm", password="pass123", admin_pos=False)
         page.evaluate("window.location.hash = 'productos'")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(400)
-        assert page.locator("#btn-familias-desajustadas").count() == 0 or \
-            not page.locator("#btn-familias-desajustadas").is_visible(), \
-            "El botón no debería ser visible sin permiso de editar productos"
+        assert not boton_visible(page), "El botón no debería ser visible sin ningún permiso"
+        print("OK")
+
+        print("--- 2) POS, CON can_editar_productos pero SIN can_familias_desajustadas: sigue sin aparecer ---")
+        page.evaluate("() => sessionStorage.removeItem('sga_user')")
+        login_direct(page, username="prodsoloeditar", password="pass123", admin_pos=False)
+        page.evaluate("window.location.hash = 'productos'")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(400)
+        assert not boton_visible(page), \
+            "BUG: poder editar productos sueltos no debería alcanzar para ver este botón"
+        print("OK")
+
+        print("--- 3) POS, con los DOS permisos: el botón aparece ---")
+        page.evaluate("() => sessionStorage.removeItem('sga_user')")
+        login_direct(page, username="prodfamilias", password="pass123", admin_pos=False)
+        page.evaluate("window.location.hash = 'productos'")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(400)
+        assert boton_visible(page), "Con los dos permisos el botón debería aparecer"
         print("OK")
 
         print("--- Login admin-pos + seed: familia con precios distintos + familia OK (control) ---")
@@ -116,13 +154,13 @@ def main():
         login_via_seed(page, admin_pos=True)
         page.evaluate(SEMBRAR)
 
-        print("--- 2) Con permiso: el botón aparece y la lista muestra SOLO la familia desajustada ---")
+        print("--- 4) Admin-POS: el botón siempre aparece (ADMIN_MODE), lista SOLO la familia desajustada ---")
         page.evaluate("window.location.hash = 'productos'")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(400)
 
         btn = page.locator("#btn-familias-desajustadas")
-        assert btn.is_visible(), "El botón debería ser visible con permiso de editar"
+        assert btn.is_visible(), "El botón debería ser visible en Admin-POS"
         btn.click()
         page.wait_for_timeout(300)
 
@@ -137,7 +175,7 @@ def main():
             "La familia de control (precios ya iguales) no debería aparecer"
         print("OK - lista solo la familia con precio distinto")
 
-        print("--- 3) 'Corregir familia' abre el wizard con la familia completa ---")
+        print("--- 5) 'Corregir familia' abre el wizard con la familia completa ---")
         page.locator('[data-corregir-madre="fd-madre"]').click()
         page.wait_for_timeout(300)
         assert not modal.is_visible(), "El audit modal debería cerrarse antes de abrir el wizard"
