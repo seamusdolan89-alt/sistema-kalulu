@@ -2265,9 +2265,15 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
       ? formatCurrency(v || 0)
       : '<span title="Sin permiso para ver costos" style="color:#bbb">🔒</span>';
 
+    // Cualquier fila (madre o un hijo cualquiera) puede ser la de precio
+    // correcto -- no siempre es la madre (pedido del usuario, 23/10/2026: vio
+    // un caso real donde los hijos tenían el precio bueno y la madre el
+    // viejo). El radio por familia elige de cuál sale nuevoCosto/nuevoPrecio;
+    // por default arranca en la madre (comportamiento de antes).
     body.innerHTML = `
       <p style="margin-bottom:14px;color:#555;font-size:13px">
         ${familias.length} familia${familias.length !== 1 ? 's' : ''} con al menos un hijo cuyo precio de venta no coincide con el de la madre.
+        Elegí de qué fila sale el precio correcto antes de corregir.
       </p>
       ${familias.map(f => `
         <div style="border:1px solid #e0e0e0;border-radius:8px;margin-bottom:14px;overflow:hidden">
@@ -2277,18 +2283,25 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
           </div>
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead><tr style="background:#fafafa">
+              <th style="text-align:center;padding:6px 10px;font-size:11px;color:#777;text-transform:uppercase">Correcto</th>
               <th style="text-align:left;padding:6px 14px;font-size:11px;color:#777;text-transform:uppercase">Hijo</th>
               <th style="text-align:right;padding:6px 14px;font-size:11px;color:#777;text-transform:uppercase">Costo</th>
               <th style="text-align:right;padding:6px 14px;font-size:11px;color:#777;text-transform:uppercase">Precio Venta</th>
             </tr></thead>
             <tbody>
               <tr style="background:#fffde7">
+                <td style="padding:6px 10px;text-align:center">
+                  <input type="radio" name="fd-ref-${escHtml(f.id)}" value="${escHtml(f.id)}" checked>
+                </td>
                 <td style="padding:6px 14px">${escHtml(f.nombre)} <span style="font-size:10px;color:#f57f17">(madre)</span></td>
                 <td style="padding:6px 14px;text-align:right">${costoCell(f.costo)}</td>
                 <td style="padding:6px 14px;text-align:right;font-weight:600">${formatCurrency(f.precio || 0)}</td>
               </tr>
               ${f.hijos.map(h => `
                 <tr>
+                  <td style="padding:6px 10px;text-align:center">
+                    <input type="radio" name="fd-ref-${escHtml(f.id)}" value="${escHtml(h.id)}">
+                  </td>
                   <td style="padding:6px 14px">${escHtml(h.nombre)}</td>
                   <td style="padding:6px 14px;text-align:right">${costoCell(h.costo)}</td>
                   <td style="padding:6px 14px;text-align:right;font-weight:600;color:#c62828">${formatCurrency(h.precio || 0)}</td>
@@ -2304,6 +2317,33 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
       btn.addEventListener('click', () => {
         const f = familias.find(x => x.id === btn.dataset.corregirMadre);
         if (!f) return;
+
+        const refId = body.querySelector(`input[name="fd-ref-${f.id}"]:checked`)?.value || f.id;
+        const ref = refId === f.id ? f : f.hijos.find(h => h.id === refId);
+        if (!ref) return;
+        const nuevoCosto  = parseFloat(ref.costo) || 0;
+        const nuevoPrecio = parseFloat(ref.precio) || 0;
+
+        // El wizard (showHerenciaModal, abierto con prodId=madre) SOLO
+        // actualiza hijos -- nunca toca a la madre misma (por diseño: en su
+        // uso normal, desde una compra o el editor, la madre YA quedó con el
+        // precio correcto antes de abrirlo). Acá el usuario puede elegir
+        // como referencia a un HIJO (su precio era el correcto, el de la
+        // madre no, caso real reportado 23/10/2026) -- en ese caso hay que
+        // corregir la madre a mano antes de abrir el wizard, o quedaría
+        // desactualizada aunque todos los hijos ya coincidan entre sí.
+        if (refId !== f.id) {
+          const uppc = parseFloat((window.SGA_DB.query(
+            `SELECT COALESCE(unidades_por_paquete_compra, 1) AS uppc FROM productos WHERE id=?`, [f.id]
+          )[0] || {}).uppc) || 1;
+          const ts = window.SGA_Utils.formatISODate(new Date());
+          window.SGA_DB.run(
+            `UPDATE productos SET costo=?, costo_paquete=?, precio_venta=?, ultima_modificacion_precio=?,
+               sync_status='pending', updated_at=? WHERE id=?`,
+            [nuevoCosto, window.SGA_Utils.roundMoney(nuevoCosto * uppc), nuevoPrecio, ts, ts, f.id]
+          );
+        }
+
         // El wizard (.cv2-her-overlay, z-index 600) queda DEBAJO de este modal
         // (.modal, z-index 1000) si los dos están abiertos a la vez -- se
         // cierra este antes de abrirlo y se vuelve a abrir (ya actualizado)
@@ -2312,8 +2352,8 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
         Familia.showHerenciaModal({
           prodId: f.id,
           prodNombre: f.nombre,
-          nuevoCosto: parseFloat(f.costo) || 0,
-          nuevoPrecio: parseFloat(f.precio) || 0,
+          nuevoCosto,
+          nuevoPrecio,
           onDone: () => { loadProductos(); openFamiliasDesajustadasModal(); },
         });
       });
