@@ -23,6 +23,15 @@ can_editar_productos -- en el POS una cajera con permiso de editar
 productos sueltos NO ve este botón salvo que el dueño se lo habilite
 puntual. En Admin-POS siempre está disponible (ADMIN_MODE).
 
+Selector de referencia (agregado el mismo día, tras ver un caso real donde
+era al revés: la madre tenía el precio VIEJO y los hijos ya el correcto —
+"Corregir familia" siempre ofrecía sincronizar al precio de la madre, que
+ahí era justo el incorrecto). Ahora cada fila (madre o cualquier hijo)
+tiene un radio para elegir de cuál sale el precio a propagar. Si se elige
+un hijo, el wizard (que por diseño solo actualiza hijos, nunca a la madre
+misma) no alcanza para corregir a la madre -- se la actualiza directo
+ANTES de abrirlo.
+
 Cubre:
 1. POS, sin ningún permiso: el botón no aparece.
 2. POS, CON can_editar_productos pero SIN can_familias_desajustadas: el
@@ -32,9 +41,14 @@ Cubre:
 4. Admin-POS: el botón siempre aparece (ADMIN_MODE), sin importar permisos.
 5. La lista muestra SOLO la familia con precio distinto (no una con
    precios ya iguales).
-6. "Corregir familia" abre el wizard con la familia completa; aplicar deja
-   al hijo con el precio de la madre, sync_status='pending', y el audit
-   modal se reabre mostrando "sin familias con precio distinto".
+6. "Corregir familia" con la madre como referencia (default, sin tocar
+   radios): abre el wizard con la familia completa; aplicar deja al hijo
+   con el precio de la madre, sync_status='pending', y el audit modal se
+   reabre mostrando "sin familias con precio distinto".
+7. "Corregir familia" eligiendo un HIJO como referencia (la madre tiene el
+   precio viejo): la madre se corrige directo (sin pasar por el wizard,
+   que no la toca) y el wizard que se abre después propaga el precio del
+   hijo elegido, no el de la madre.
 
 Correr (server ya levantado en :8765, ver README.md):
 
@@ -68,6 +82,13 @@ SEMBRAR = """
   // Familia de control: precios YA iguales, no debería listarse ninguna.
   mk('fd-madre2', 'Familia OK Madre', 50, 200, null);
   mk('fd-hijo2',  'Familia OK Hijo',  50, 200, 'fd-madre2');
+
+  // Familia "al revés": la MADRE tiene el precio viejo, los dos hijos ya
+  // tienen el correcto (y coinciden entre sí) -- caso real reportado
+  // 23/10/2026.
+  mk('fd-madre3', 'Alfajor Bon o Bon 3x60g Test',  60, 999, null);
+  mk('fd-hijo3a', 'Alfajor Tofi Blanco Test',      55, 450, 'fd-madre3');
+  mk('fd-hijo3b', 'Alfajor Tofi Negro Test',       55, 450, 'fd-madre3');
 }
 """
 
@@ -175,7 +196,7 @@ def main():
             "La familia de control (precios ya iguales) no debería aparecer"
         print("OK - lista solo la familia con precio distinto")
 
-        print("--- 5) 'Corregir familia' abre el wizard con la familia completa ---")
+        print("--- 6) 'Corregir familia' abre el wizard con la familia completa ---")
         page.locator('[data-corregir-madre="fd-madre"]').click()
         page.wait_for_timeout(300)
         assert not modal.is_visible(), "El audit modal debería cerrarse antes de abrir el wizard"
@@ -197,12 +218,48 @@ def main():
         assert hijo["sync_status"] == "pending", f"Tiene que quedar pending para viajar: {hijo}"
         print(f"OK - fd-hijo-distinto: {hijo}")
 
-        print("--- El audit modal se reabre y ya no muestra ninguna familia desajustada ---")
+        print("--- El audit modal se reabre y ya no muestra la familia 'fd-madre' ---")
         assert modal.is_visible(), "El audit modal debería haberse reabierto solo"
         page.wait_for_timeout(200)
-        assert "no hay familias con precio" in modal.inner_text().lower(), \
-            f"Debería mostrar el mensaje de 'sin familias': {modal.inner_text()[:300]!r}"
+        texto_tras_madre = modal.inner_text()
+        assert "Matarazzo Penne Rigate Sin Gluten 500gr" not in texto_tras_madre, \
+            f"fd-madre ya no debería listarse: {texto_tras_madre[:300]!r}"
         print("OK")
+
+        print("--- 7) Eligiendo un HIJO como referencia: corrige la madre directo (el wizard no la toca) ---")
+        assert "Alfajor Bon o Bon 3x60g Test" in texto_tras_madre, \
+            f"La familia 'al revés' debería seguir listada: {texto_tras_madre[:400]!r}"
+
+        # Tildar el radio del hijo 'fd-hijo3a' en vez de dejar el de la madre.
+        modal.locator('input[type="radio"][value="fd-hijo3a"]').check()
+        modal.locator('[data-corregir-madre="fd-madre3"]').click()
+        page.wait_for_timeout(300)
+
+        madre3 = q(page, "SELECT precio_venta, sync_status FROM productos WHERE id='fd-madre3'")[0]
+        assert float(madre3["precio_venta"]) == 450.0, \
+            f"La madre debería haberse corregido DIRECTO al precio del hijo elegido (450): {madre3}"
+        assert madre3["sync_status"] == "pending", f"Tiene que quedar pending: {madre3}"
+        print(f"OK - fd-madre3 corregida directo: {madre3}")
+
+        wizard2 = page.locator(".cv2-her-overlay")
+        assert wizard2.is_visible(), "El wizard debería abrirse igual, para sincronizar a los hermanos"
+        wizard2_text = wizard2.inner_text()
+        assert "Alfajor Tofi Blanco Test" in wizard2_text and "Alfajor Tofi Negro Test" in wizard2_text
+        print("OK - wizard abierto con los dos hijos")
+
+        page.locator(".cv2-her-btn-apply").click()
+        page.wait_for_timeout(500)
+
+        hijos3 = q(page, "SELECT id, precio_venta FROM productos WHERE id IN ('fd-hijo3a','fd-hijo3b')")
+        for h in hijos3:
+            assert float(h["precio_venta"]) == 450.0, f"Debería haber quedado en 450: {h}"
+        print(f"OK - los dos hijos siguen/quedan en 450: {hijos3}")
+
+        assert modal.is_visible(), "El audit modal debería haberse reabierto solo (otra vez)"
+        page.wait_for_timeout(200)
+        assert "no hay familias con precio" in modal.inner_text().lower(), \
+            f"Ya no debería quedar ninguna familia desajustada: {modal.inner_text()[:300]!r}"
+        print("OK - no quedan familias desajustadas")
 
         assert not errors, f"Errores JS: {errors}"
         print("\n=== OK: Familias con Precio Distinto — lista, filtra, corrige con el wizard existente ===")
