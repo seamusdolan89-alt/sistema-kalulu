@@ -632,25 +632,40 @@ const OperacionesStock = (() => {
               </tr>`;
             }
             const descPct = parseFloat(it.descuento_pct) || 0;
+            const tieneDescuento = descPct > 0.001;
             const esMuestra = it.tipo === 'muestra';
             const precioActual = parseFloat(it.producto_precio_venta) || 0;
+            const costoBruto = parseFloat(it.costo_unitario) || 0;
+            // Costo REAL de reposición: el de lista menos el descuento de la línea
+            // — mismo criterio que costoNetoUsado() en compras_v2.js, que es lo
+            // que de verdad se guarda en productos.costo al confirmar la compra.
+            // costo_unitario (de lista, sin descuento) solo sirve para que la
+            // línea coincida con la factura del proveedor — mostrarlo solo no
+            // reflejaba lo que en verdad costó, y subestimaba el margen real.
+            const costoNeto = tieneDescuento
+              ? window.SGA_Utils.roundMoney(costoBruto * (1 - descPct / 100))
+              : costoBruto;
             // Margen contra el costo de ESTA muestra no dice nada (costo casi
             // $0 a propósito) — no calificar con color en ese caso.
-            const margen = esMuestra ? null : calcMargenPct(it.costo_unitario, precioActual);
+            const margen = esMuestra ? null : calcMargenPct(costoNeto, precioActual);
             const margenColor = margen == null ? '#8090a0' : margen < 0 ? '#c62828' : margen < 15 ? '#e65100' : '#445566';
-            return `<tr class="ops-detalle-row" data-idx="${idx}" style="border-bottom:1px solid #eef0f3${esMuestra ? ';background:#f6f2ff' : ''}">
-              <td style="padding:7px 10px">${esc(it.producto_nombre || '—')}${esMuestra ? ' <span style="font-size:10px;font-weight:700;color:#6a1fc9">🎁 Muestra</span>' : ''}</td>
+            const rowBg = esMuestra ? '#f6f2ff' : (tieneDescuento ? '#fff8e1' : '');
+            return `<tr class="ops-detalle-row" data-idx="${idx}" style="border-bottom:1px solid #eef0f3${rowBg ? `;background:${rowBg}` : ''}">
+              <td style="padding:7px 10px">${esc(it.producto_nombre || '—')}${esMuestra ? ' <span style="font-size:10px;font-weight:700;color:#6a1fc9">🎁 Muestra</span>' : ''}${tieneDescuento ? ` <span style="font-size:10px;font-weight:700;color:#e65100;background:#fff3e0;border:1px solid #ffcc80;border-radius:4px;padding:1px 6px" title="Esta línea tuvo un descuento del proveedor">🏷️ -${descPct.toFixed(1)}% dto.</span>` : ''}</td>
               <td style="padding:7px 10px;text-align:right">${it.cantidad}</td>
               <td style="padding:7px 10px;color:#607080">${esc(it.unidad_compra || 'Unidad')}</td>
-              <td style="padding:7px 10px;text-align:right">${fmt$(it.costo_unitario)}</td>
-              <td style="padding:7px 10px;text-align:right;color:#607080">${descPct > 0.001 ? descPct.toFixed(1) + '%' : '—'}</td>
+              <td style="padding:7px 10px;text-align:right">${tieneDescuento ? `
+                <div style="color:#9e9e9e;text-decoration:line-through;font-size:11px;line-height:1.3">${fmt$(costoBruto)}</div>
+                <div style="font-weight:700;color:#e65100;line-height:1.3">${fmt$(costoNeto)}</div>
+              ` : fmt$(costoBruto)}</td>
+              <td style="padding:7px 10px;text-align:right;color:#607080">${tieneDescuento ? descPct.toFixed(1) + '%' : '—'}</td>
               <td style="padding:7px 10px;text-align:right;font-weight:600">${fmt$(it.subtotal)}</td>
               ${isAdmin ? (
                 it.producto_id
                   ? `<td style="padding:5px 10px;text-align:right;white-space:nowrap">
                        ${it.producto_markup_fijo != null ? `<span style="display:inline-block;background:#ede7f6;color:#5e35b1;border-radius:5px;padding:2px 7px;font-size:10px;font-weight:700;margin-right:5px" title="Este producto tiene un markup predeterminado — cambiarlo va a preguntar si se actualiza o es una excepción">Markup ${esc(String(it.producto_markup_fijo))}%</span>` : ''}
                        <input type="number" class="ops-precio-input" data-idx="${idx}" data-prodid="${esc(it.producto_id)}"
-                              data-nombre="${esc(it.producto_nombre || '')}" data-costo="${it.costo_unitario || 0}"
+                              data-nombre="${esc(it.producto_nombre || '')}" data-costo="${costoNeto || 0}"
                               data-markup="${it.producto_markup_fijo ?? ''}" data-money="true"
                               value="${precioActual.toFixed(2)}" min="0" step="any"
                               title="Precio de venta — editable"
@@ -742,7 +757,9 @@ const OperacionesStock = (() => {
         const margenCell = body.querySelector(`.ops-margen-cell[data-idx="${idx}"]`);
         if (margenCell) {
           const esMuestra = item.tipo === 'muestra';
-          const margen = esMuestra ? null : calcMargenPct(item.costo_unitario, nuevoPrecio);
+          // costoLinea ya es el costo NETO (descuento aplicado) -- ver data-costo
+          // más arriba, mismo criterio que costoNetoUsado() en compras_v2.js.
+          const margen = esMuestra ? null : calcMargenPct(costoLinea, nuevoPrecio);
           const color = margen == null ? '#8090a0' : margen < 0 ? '#c62828' : margen < 15 ? '#e65100' : '#445566';
           margenCell.style.color = color;
           margenCell.textContent = margen == null ? '—' : margen.toFixed(1) + '%';

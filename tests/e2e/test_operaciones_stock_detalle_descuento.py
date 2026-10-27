@@ -1,0 +1,156 @@
+"""
+tests/e2e/test_operaciones_stock_detalle_descuento.py — "Detalle de compra"
+(Historial de Compras, Operaciones de Stock): una línea con descuento tiene
+que mostrar el costo REAL (neto del descuento), resaltarse, mostrar el % y
+calcular el Margen contra ese costo neto -- no contra el costo de lista.
+
+Pedido explícito del usuario (27/10/2026), con captura: "los costos
+mostrados no contemplan si el producto tenía algún descuento aplicado...
+muéstrame el costo con descuento aplicado y además resalte el producto...
+y también indique de qué % es ese descuento."
+
+Causa real (no solo de UI): compra_items.costo_unitario es el costo DE
+LISTA (sin descuento) -- se guarda así a propósito, para que la línea
+coincida con la factura del proveedor (ver costoUsado()/costoNetoUsado() en
+compras_v2.js). El costo REAL de reposición (lo que ya se guarda en
+productos.costo al confirmar la compra, vía costoNetoUsado) es
+costo_unitario * (1 - descuento_pct/100). "Detalle de compra" mostraba el
+de lista tal cual, y el Margen se calculaba contra ESE costo de lista, no
+el neto -- subestimando el margen real en cualquier línea con descuento.
+
+Fix: costoNeto = costo_unitario * (1 - descuento_pct/100) cuando hay
+descuento. La celda "Costo unit." muestra el de lista tachado + el neto en
+negrita; la fila se resalta (fondo ámbar); el nombre del producto lleva un
+badge "🏷️ -X% dto."; el Margen (inicial Y al editar el Precio Venta) se
+calcula contra el costo neto. El campo oculto que alimenta el chequeo de
+"¿coincide con el markup predeterminado?" también pasa a usar el costo
+neto (antes comparaba contra el de lista, mismo tipo de desvío).
+
+Correr (server ya levantado en :8765, ver README.md):
+
+    python tests/e2e/test_operaciones_stock_detalle_descuento.py
+"""
+import os
+import sys
+
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8")
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+from playwright.sync_api import sync_playwright
+from helpers import block_firebase, enable_dev_mode, login_via_seed
+
+
+def main():
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1500, "height": 1000})
+        context.route("**/*", block_firebase)
+        enable_dev_mode(context)
+        page = context.new_page()
+        errors = []
+        page.on("pageerror", lambda exc: errors.append(str(exc)))
+        page.on("dialog", lambda d: d.accept())
+
+        print("--- Login Admin-POS + seed ---")
+        login_via_seed(page, admin_pos=True, wait_target="productos")
+
+        print("--- Compra confirmada: una línea con 20% de descuento, otra sin descuento ---")
+        setup = page.evaluate("""
+          () => {
+            const db = window.SGA_DB;
+            const uuid = window.SGA_Utils.generateUUID;
+            const now = new Date().toISOString();
+            const suc = window.SGA_Auth.getCurrentUser().sucursal_id;
+            const usr = window.SGA_Auth.getCurrentUser().id;
+            const prov = db.query(`SELECT id FROM proveedores LIMIT 1`)[0].id;
+
+            const prodDto = uuid(); const prodSin = uuid();
+            db.run(`INSERT INTO productos (id, nombre, costo, precio_venta, activo, sync_status, updated_at)
+                    VALUES (?, 'Producto Con Descuento Test', 800, 1000, 1, 'synced', ?)`, [prodDto, now]);
+            db.run(`INSERT INTO productos (id, nombre, costo, precio_venta, activo, sync_status, updated_at)
+                    VALUES (?, 'Producto Sin Descuento Test', 500, 750, 1, 'synced', ?)`, [prodSin, now]);
+
+            const compraId = uuid();
+            db.run(`INSERT INTO compras (id, proveedor_id, sucursal_id, usuario_id, fecha, estado, total, total_factura, sync_status, updated_at)
+                    VALUES (?, ?, ?, ?, ?, 'confirmada', 1700, 1700, 'synced', ?)`,
+                   [compraId, prov, suc, usr, now, now]);
+            // costo_unitario = costo DE LISTA (1000), descuento_pct=20 -> neto real 800
+            // (coincide con productos.costo, que ya se guarda neto al confirmar).
+            db.run(`INSERT INTO compra_items (id, compra_id, producto_id, cantidad, costo_unitario, descuento_pct, subtotal)
+                    VALUES (?, ?, ?, 1, 1000, 20, 800)`, [uuid(), compraId, prodDto]);
+            db.run(`INSERT INTO compra_items (id, compra_id, producto_id, cantidad, costo_unitario, descuento_pct, subtotal)
+                    VALUES (?, ?, ?, 1, 500, 0, 500)`, [uuid(), compraId, prodSin]);
+
+            return { compraId, prodDto, prodSin };
+          }
+        """)
+
+        page.evaluate("window.location.hash = 'operaciones_stock'")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(300)
+        page.evaluate("() => document.querySelector('[data-action=\"historial_compras\"]')?.click()")
+        page.wait_for_timeout(300)
+        page.evaluate(
+            "(id) => document.querySelector(`[data-ver-compra=\"${id}\"]`)?.click()",
+            setup["compraId"],
+        )
+        page.wait_for_timeout(300)
+
+        fila_dto = page.locator('tr.ops-detalle-row', has_text="Producto Con Descuento Test")
+        fila_sin = page.locator('tr.ops-detalle-row', has_text="Producto Sin Descuento Test")
+
+        print("--- La línea con descuento muestra el badge '-20% dto.' junto al nombre ---")
+        assert "-20.0% dto." in fila_dto.inner_text() or "-20,0% dto." in fila_dto.inner_text(), \
+            f"Debería verse el badge del descuento: {fila_dto.inner_text()!r}"
+        print("OK")
+
+        print("--- La fila con descuento está resaltada (fondo distinto), la otra no ---")
+        bg_dto = fila_dto.evaluate("el => getComputedStyle(el).backgroundColor")
+        bg_sin = fila_sin.evaluate("el => getComputedStyle(el).backgroundColor")
+        assert bg_dto != bg_sin, f"La fila con descuento debería tener un fondo distinto: dto={bg_dto!r} sin={bg_sin!r}"
+        assert bg_sin in ("rgba(0, 0, 0, 0)", "transparent"), \
+            f"La fila SIN descuento no debería tener ningún resaltado: {bg_sin!r}"
+        print(f"OK - fondo con descuento: {bg_dto}, sin descuento: {bg_sin}")
+
+        print("--- 'Costo unit.' muestra el de lista tachado y el NETO (800) en negrita ---")
+        texto_fila_dto = fila_dto.inner_text()
+        assert "1.000,00" in texto_fila_dto or "1000,00" in texto_fila_dto, \
+            f"Debería verse el costo de lista (1.000): {texto_fila_dto!r}"
+        assert "800,00" in texto_fila_dto, f"Debería verse el costo neto (800): {texto_fila_dto!r}"
+        print("OK")
+
+        print("--- Margen de la línea CON descuento se calcula contra el costo NETO (800), no el de lista (1000) ---")
+        # precio_venta=1000, costo neto=800 -> margen=(1000-800)/1000=20%.
+        # Con el bug viejo (costo de lista=1000) hubiera dado 0%.
+        margen_dto = page.locator('.ops-margen-cell').nth(0).inner_text()
+        assert "20.0%" in margen_dto or "20,0%" in margen_dto, \
+            f"BUG: el margen debería ser 20% (contra el costo neto), dio: {margen_dto!r}"
+        print(f"OK - margen de la línea con descuento: {margen_dto}")
+
+        print("--- Margen de la línea SIN descuento sigue siendo el mismo de siempre (costo de lista = costo neto) ---")
+        # precio_venta=750, costo=500 -> margen=(750-500)/750=33.3%.
+        margen_sin = page.locator('.ops-margen-cell').nth(1).inner_text()
+        assert "33.3%" in margen_sin or "33,3%" in margen_sin, \
+            f"El margen sin descuento no debería haber cambiado: {margen_sin!r}"
+        print(f"OK - margen de la línea sin descuento: {margen_sin}")
+
+        print("--- Editar el Precio Venta de la línea con descuento recalcula el margen contra el costo NETO ---")
+        input_dto = page.locator('.ops-precio-input').nth(0)
+        input_dto.fill("1600")
+        input_dto.blur()
+        page.wait_for_timeout(300)
+        # precio_venta=1600, costo neto=800 -> margen=(1600-800)/1600=50%.
+        margen_dto_editado = page.locator('.ops-margen-cell').nth(0).inner_text()
+        assert "50.0%" in margen_dto_editado or "50,0%" in margen_dto_editado, \
+            f"BUG: tras editar el precio, el margen debería recalcularse contra el costo neto (50%), dio: {margen_dto_editado!r}"
+        print(f"OK - margen recalculado al editar el precio: {margen_dto_editado}")
+
+        assert not errors, f"Errores JS: {errors}"
+        print("\n=== OK: Detalle de compra muestra el costo real (neto del descuento), resalta la línea, y el margen es correcto ===")
+        browser.close()
+
+
+if __name__ == "__main__":
+    main()
