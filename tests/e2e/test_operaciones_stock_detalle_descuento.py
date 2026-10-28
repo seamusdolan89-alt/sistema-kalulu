@@ -26,6 +26,12 @@ calcula contra el costo neto. El campo oculto que alimenta el chequeo de
 "¿coincide con el markup predeterminado?" también pasa a usar el costo
 neto (antes comparaba contra el de lista, mismo tipo de desvío).
 
+Ampliación (mismo día, pedido del usuario viendo la pantalla real): el
+Margen también muestra, tachado arriba del real, el margen que hubiera
+dado SI no hubiera habido descuento (contra el costo de lista) -- mismo
+criterio visual que la celda de Costo unit., para ver de un vistazo cuánto
+mejora el margen gracias al descuento negociado.
+
 Correr (server ya levantado en :8765, ver README.md):
 
     python tests/e2e/test_operaciones_stock_detalle_descuento.py
@@ -40,6 +46,19 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from playwright.sync_api import sync_playwright
 from helpers import block_firebase, enable_dev_mode, login_via_seed
+
+
+def margen_bruto_y_neto(page, idx):
+    """Separa el margen 'de lista' (tachado, en un <div> propio) del margen
+    real -- comparar por substring en el texto completo de la celda es
+    ambiguo (ej. "0.0%" es substring de "20.0%"), así que se aíslan
+    estructuralmente los dos números."""
+    cell = page.locator('.ops-margen-cell').nth(idx)
+    div = cell.locator('div')
+    bruto = div.inner_text().strip() if div.count() == 1 else None
+    completo = cell.inner_text()
+    neto = completo.replace(bruto, '', 1).strip() if bruto else completo.strip()
+    return bruto, neto
 
 
 def main():
@@ -121,31 +140,37 @@ def main():
         assert "800,00" in texto_fila_dto, f"Debería verse el costo neto (800): {texto_fila_dto!r}"
         print("OK")
 
-        print("--- Margen de la línea CON descuento se calcula contra el costo NETO (800), no el de lista (1000) ---")
-        # precio_venta=1000, costo neto=800 -> margen=(1000-800)/1000=20%.
-        # Con el bug viejo (costo de lista=1000) hubiera dado 0%.
-        margen_dto = page.locator('.ops-margen-cell').nth(0).inner_text()
-        assert "20.0%" in margen_dto or "20,0%" in margen_dto, \
-            f"BUG: el margen debería ser 20% (contra el costo neto), dio: {margen_dto!r}"
-        print(f"OK - margen de la línea con descuento: {margen_dto}")
+        print("--- Margen de la línea CON descuento: real (20%, contra costo neto) Y el 'de lista' tachado (0%) ---")
+        # precio_venta=1000, costo neto=800 -> margen real=(1000-800)/1000=20%.
+        # Con el bug viejo (costo de lista=1000) hubiera dado 0% -- ahora ESE
+        # 0% se muestra igual, pero tachado, al lado del 20% real.
+        bruto_dto, neto_dto = margen_bruto_y_neto(page, 0)
+        assert bruto_dto in ("0.0%", "0,0%"), f"El margen 'de lista' (tachado) debería ser 0%: {bruto_dto!r}"
+        assert neto_dto in ("20.0%", "20,0%"), f"BUG: el margen real debería ser 20% (contra el costo neto): {neto_dto!r}"
+        print(f"OK - margen de lista (tachado): {bruto_dto!r}, margen real: {neto_dto!r}")
 
-        print("--- Margen de la línea SIN descuento sigue siendo el mismo de siempre (costo de lista = costo neto) ---")
-        # precio_venta=750, costo=500 -> margen=(750-500)/750=33.3%.
-        margen_sin = page.locator('.ops-margen-cell').nth(1).inner_text()
-        assert "33.3%" in margen_sin or "33,3%" in margen_sin, \
-            f"El margen sin descuento no debería haber cambiado: {margen_sin!r}"
-        print(f"OK - margen de la línea sin descuento: {margen_sin}")
+        print("--- Margen de la línea SIN descuento: sin cambios, SIN el tachado de 'margen de lista' ---")
+        # precio_venta=750, costo=500 -> margen=(750-500)/750=33.3%. Al no haber
+        # descuento, costo de lista == costo neto -> no corresponde mostrar un
+        # segundo margen tachado (sería el mismo número, redundante).
+        bruto_sin, neto_sin = margen_bruto_y_neto(page, 1)
+        assert bruto_sin is None, f"Sin descuento no debería haber un margen 'de lista' aparte: {bruto_sin!r}"
+        assert neto_sin in ("33.3%", "33,3%"), f"El margen sin descuento no debería haber cambiado: {neto_sin!r}"
+        print(f"OK - margen de la línea sin descuento: {neto_sin!r}")
 
-        print("--- Editar el Precio Venta de la línea con descuento recalcula el margen contra el costo NETO ---")
+        print("--- Editar el Precio Venta de la línea con descuento recalcula LOS DOS márgenes ---")
         input_dto = page.locator('.ops-precio-input').nth(0)
         input_dto.fill("1600")
         input_dto.blur()
         page.wait_for_timeout(300)
-        # precio_venta=1600, costo neto=800 -> margen=(1600-800)/1600=50%.
-        margen_dto_editado = page.locator('.ops-margen-cell').nth(0).inner_text()
-        assert "50.0%" in margen_dto_editado or "50,0%" in margen_dto_editado, \
-            f"BUG: tras editar el precio, el margen debería recalcularse contra el costo neto (50%), dio: {margen_dto_editado!r}"
-        print(f"OK - margen recalculado al editar el precio: {margen_dto_editado}")
+        # precio_venta=1600: real contra costo neto (800) = 50%; "de lista"
+        # contra costo bruto (1000) = (1600-1000)/1600 = 37.5%.
+        bruto_edit, neto_edit = margen_bruto_y_neto(page, 0)
+        assert bruto_edit in ("37.5%", "37,5%"), \
+            f"BUG: el margen 'de lista' también debería recalcularse (37.5%): {bruto_edit!r}"
+        assert neto_edit in ("50.0%", "50,0%"), \
+            f"BUG: tras editar el precio, el margen real debería recalcularse contra el costo neto (50%): {neto_edit!r}"
+        print(f"OK - margen de lista: {bruto_edit!r}, margen real: {neto_edit!r}")
 
         assert not errors, f"Errores JS: {errors}"
         print("\n=== OK: Detalle de compra muestra el costo real (neto del descuento), resalta la línea, y el margen es correcto ===")

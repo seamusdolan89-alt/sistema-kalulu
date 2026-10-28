@@ -648,6 +648,11 @@ const OperacionesStock = (() => {
             // Margen contra el costo de ESTA muestra no dice nada (costo casi
             // $0 a propósito) — no calificar con color en ese caso.
             const margen = esMuestra ? null : calcMargenPct(costoNeto, precioActual);
+            // Margen "de lista" (como si no hubiera habido descuento) — se
+            // muestra tachado junto al real, mismo criterio que la celda de
+            // Costo unit., para que se vea de un vistazo cuánto mejoró el
+            // margen gracias al descuento (pedido del usuario, 27/10/2026).
+            const margenBruto = (esMuestra || !tieneDescuento) ? null : calcMargenPct(costoBruto, precioActual);
             const margenColor = margen == null ? '#8090a0' : margen < 0 ? '#c62828' : margen < 15 ? '#e65100' : '#445566';
             const rowBg = esMuestra ? '#f6f2ff' : (tieneDescuento ? '#fff8e1' : '');
             return `<tr class="ops-detalle-row" data-idx="${idx}" style="border-bottom:1px solid #eef0f3${rowBg ? `;background:${rowBg}` : ''}">
@@ -673,6 +678,7 @@ const OperacionesStock = (() => {
                        <span class="ops-precio-saved" data-idx="${idx}" style="display:none;color:#2e7d32;font-weight:700;margin-left:5px;font-size:13px" title="Guardado">✓</span>
                      </td>
                      <td class="ops-margen-cell" data-idx="${idx}" style="padding:7px 10px;text-align:right;font-weight:700;color:${margenColor}">
+                       ${margenBruto != null ? `<div style="color:#9e9e9e;text-decoration:line-through;font-size:11px;font-weight:400;line-height:1.3">${margenBruto.toFixed(1)}%</div>` : ''}
                        ${margen == null ? '—' : margen.toFixed(1) + '%'}
                      </td>`
                   : `<td style="padding:7px 10px;text-align:right">—</td><td style="padding:7px 10px;text-align:right">—</td>`
@@ -761,8 +767,13 @@ const OperacionesStock = (() => {
           // más arriba, mismo criterio que costoNetoUsado() en compras_v2.js.
           const margen = esMuestra ? null : calcMargenPct(costoLinea, nuevoPrecio);
           const color = margen == null ? '#8090a0' : margen < 0 ? '#c62828' : margen < 15 ? '#e65100' : '#445566';
+          const descPctItem = parseFloat(item.descuento_pct) || 0;
+          const costoBrutoItem = parseFloat(item.costo_unitario) || 0;
+          const margenBruto = (esMuestra || descPctItem <= 0.001) ? null : calcMargenPct(costoBrutoItem, nuevoPrecio);
           margenCell.style.color = color;
-          margenCell.textContent = margen == null ? '—' : margen.toFixed(1) + '%';
+          margenCell.innerHTML =
+            (margenBruto != null ? `<div style="color:#9e9e9e;text-decoration:line-through;font-size:11px;font-weight:400;line-height:1.3">${margenBruto.toFixed(1)}%</div>` : '') +
+            (margen == null ? '—' : margen.toFixed(1) + '%');
         }
 
         // Guardado consciente: a diferencia de un toast que desaparece solo, este
