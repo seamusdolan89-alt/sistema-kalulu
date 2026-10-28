@@ -607,11 +607,15 @@ const OperacionesStock = (() => {
             <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Cant.</th>
             <th style="padding:7px 10px;text-align:left;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Unidad</th>
             <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Costo unit.</th>
+            <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">IVA</th>
+            <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Costo Final</th>
             <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Descuento</th>
             <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Subtotal</th>
             ${isAdmin ? `
               <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Precio Venta</th>
+              <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Precio Neto</th>
               <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Margen</th>
+              <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Markup</th>
             ` : ''}
           </tr>
         </thead>
@@ -626,9 +630,11 @@ const OperacionesStock = (() => {
                 <td style="padding:7px 10px;text-align:right">—</td>
                 <td style="padding:7px 10px;color:#607080">—</td>
                 <td style="padding:7px 10px;text-align:right">—</td>
+                <td style="padding:7px 10px;text-align:right">—</td>
+                <td style="padding:7px 10px;text-align:right">—</td>
                 <td style="padding:7px 10px;text-align:right;color:#607080">—</td>
                 <td style="padding:7px 10px;text-align:right;font-weight:600">${sub < 0 ? '− ' : ''}${fmt$(Math.abs(sub))}</td>
-                ${isAdmin ? `<td style="padding:7px 10px;text-align:right">—</td><td style="padding:7px 10px;text-align:right">—</td>` : ''}
+                ${isAdmin ? `<td style="padding:7px 10px;text-align:right">—</td><td style="padding:7px 10px;text-align:right">—</td><td style="padding:7px 10px;text-align:right">—</td><td style="padding:7px 10px;text-align:right">—</td>` : ''}
               </tr>`;
             }
             const descPct = parseFloat(it.descuento_pct) || 0;
@@ -655,6 +661,23 @@ const OperacionesStock = (() => {
             const margenBruto = (esMuestra || !tieneDescuento) ? null : calcMargenPct(costoBruto, precioActual);
             const margenColor = margen == null ? '#8090a0' : margen < 0 ? '#c62828' : margen < 15 ? '#e65100' : '#445566';
             const rowBg = esMuestra ? '#f6f2ff' : (tieneDescuento ? '#fff8e1' : '');
+
+            // IVA / Costo Final / Precio Neto / Markup (pedido del usuario, 27/10/2026).
+            // costo_unitario y costoNeto son EX-IVA (ver calcIvaCalc en compras_v2.js:
+            // el IVA de Factura A se calcula COMO ADICIONAL sobre itemSubtotal) --
+            // productos.precio_venta, en cambio, es el precio final al consumidor,
+            // CON IVA incluido (de ahí "Precio Neto = Precio Venta ÷ (1+IVA)", tal
+            // cual lo pidió el usuario). costoFinal pone el costo en la MISMA base
+            // (con IVA) que Precio Venta, para que sean comparables a simple vista.
+            const ivaPct    = parseFloat(it.iva) || 0;
+            const tieneIva  = ivaPct > 0.001;
+            const costoFinal  = tieneIva ? window.SGA_Utils.roundMoney(costoNeto * (1 + ivaPct / 100)) : costoNeto;
+            const precioNeto  = tieneIva ? precioActual / (1 + ivaPct / 100) : precioActual;
+            // Markup = Precio Neto ÷ Costo Neto -- por construcción, da LO MISMO
+            // que Precio Venta ÷ Costo Final (el usuario lo pidió así, como chequeo
+            // de consistencia: los dos pares difieren por el mismo factor de IVA).
+            const markup = (esMuestra || costoNeto <= 0) ? null : (precioNeto / costoNeto);
+
             return `<tr class="ops-detalle-row" data-idx="${idx}" style="border-bottom:1px solid #eef0f3${rowBg ? `;background:${rowBg}` : ''}">
               <td style="padding:7px 10px">${esc(it.producto_nombre || '—')}${esMuestra ? ' <span style="font-size:10px;font-weight:700;color:#6a1fc9">🎁 Muestra</span>' : ''}${tieneDescuento ? ` <span style="font-size:10px;font-weight:700;color:#e65100;background:#fff3e0;border:1px solid #ffcc80;border-radius:4px;padding:1px 6px" title="Esta línea tuvo un descuento del proveedor">🏷️ -${descPct.toFixed(1)}% dto.</span>` : ''}</td>
               <td style="padding:7px 10px;text-align:right">${it.cantidad}</td>
@@ -663,6 +686,8 @@ const OperacionesStock = (() => {
                 <div style="color:#9e9e9e;text-decoration:line-through;font-size:11px;line-height:1.3">${fmt$(costoBruto)}</div>
                 <div style="font-weight:700;color:#e65100;line-height:1.3">${fmt$(costoNeto)}</div>
               ` : fmt$(costoBruto)}</td>
+              <td style="padding:7px 10px;text-align:right;color:#607080">${tieneIva ? esc(String(it.iva)).replace('.', ',') + '%' : '—'}</td>
+              <td class="ops-costofinal-cell" data-idx="${idx}" style="padding:7px 10px;text-align:right">${fmt$(costoFinal)}</td>
               <td style="padding:7px 10px;text-align:right;color:#607080">${tieneDescuento ? descPct.toFixed(1) + '%' : '—'}</td>
               <td style="padding:7px 10px;text-align:right;font-weight:600">${fmt$(it.subtotal)}</td>
               ${isAdmin ? (
@@ -677,11 +702,15 @@ const OperacionesStock = (() => {
                               style="width:92px;padding:5px 6px;border:1.5px solid #90b8f0;border-radius:4px;text-align:right;font-size:13px;background:#f0f6ff;transition:background .15s,border-color .15s">
                        <span class="ops-precio-saved" data-idx="${idx}" style="display:none;color:#2e7d32;font-weight:700;margin-left:5px;font-size:13px" title="Guardado">✓</span>
                      </td>
+                     <td class="ops-precioneto-cell" data-idx="${idx}" style="padding:7px 10px;text-align:right">${fmt$(precioNeto)}</td>
                      <td class="ops-margen-cell" data-idx="${idx}" style="padding:7px 10px;text-align:right;font-weight:700;color:${margenColor}">
                        ${margenBruto != null ? `<div style="color:#9e9e9e;text-decoration:line-through;font-size:11px;font-weight:400;line-height:1.3">${margenBruto.toFixed(1)}%</div>` : ''}
                        ${margen == null ? '—' : margen.toFixed(1) + '%'}
+                     </td>
+                     <td class="ops-markup-cell" data-idx="${idx}" style="padding:7px 10px;text-align:right;font-weight:700;color:#445566" title="Precio Neto ÷ Costo Neto (= Precio Venta ÷ Costo Final)">
+                       ${markup == null ? '—' : markup.toFixed(2) + 'x'}
                      </td>`
-                  : `<td style="padding:7px 10px;text-align:right">—</td><td style="padding:7px 10px;text-align:right">—</td>`
+                  : `<td style="padding:7px 10px;text-align:right">—</td><td style="padding:7px 10px;text-align:right">—</td><td style="padding:7px 10px;text-align:right">—</td><td style="padding:7px 10px;text-align:right">—</td>`
               ) : ''}
             </tr>`;
           }).join('')}
@@ -774,6 +803,19 @@ const OperacionesStock = (() => {
           margenCell.innerHTML =
             (margenBruto != null ? `<div style="color:#9e9e9e;text-decoration:line-through;font-size:11px;font-weight:400;line-height:1.3">${margenBruto.toFixed(1)}%</div>` : '') +
             (margen == null ? '—' : margen.toFixed(1) + '%');
+
+          // Precio Neto y Markup dependen del Precio Venta recién guardado --
+          // costoLinea ya es el costo neto de descuento (ver arriba).
+          const ivaPctItem = parseFloat(item.iva) || 0;
+          const precioNeto = ivaPctItem > 0.001 ? nuevoPrecio / (1 + ivaPctItem / 100) : nuevoPrecio;
+          const precioNetoCell = body.querySelector(`.ops-precioneto-cell[data-idx="${idx}"]`);
+          if (precioNetoCell) precioNetoCell.textContent = fmt$(precioNeto);
+
+          const markupCell = body.querySelector(`.ops-markup-cell[data-idx="${idx}"]`);
+          if (markupCell) {
+            const markup = (esMuestra || costoLinea <= 0) ? null : (precioNeto / costoLinea);
+            markupCell.textContent = markup == null ? '—' : markup.toFixed(2) + 'x';
+          }
         }
 
         // Guardado consciente: a diferencia de un toast que desaparece solo, este
