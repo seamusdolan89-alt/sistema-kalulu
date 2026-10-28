@@ -600,22 +600,21 @@ const OperacionesStock = (() => {
         </div>
       ` : ''}
       <div style="overflow-x:auto">
-      <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px">
+      <table style="width:100%;border-collapse:collapse;font-size:14.5px;margin-bottom:16px">
         <thead>
           <tr style="background:#f0f2f5">
-            <th style="padding:7px 10px;text-align:left;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Producto</th>
-            <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Cant.</th>
-            <th style="padding:7px 10px;text-align:left;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Unidad</th>
-            <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Costo unit.</th>
-            <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">IVA</th>
-            <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Costo Final</th>
-            <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Descuento</th>
-            <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Subtotal</th>
+            <th style="padding:8px 10px;text-align:left;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Producto</th>
+            <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Cant.</th>
+            <th style="padding:8px 10px;text-align:left;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Unidad</th>
+            <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Costo unit.</th>
+            <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">IVA</th>
+            <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Costo Final</th>
+            <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Subtotal</th>
             ${isAdmin ? `
-              <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Precio Venta</th>
-              <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Precio Neto</th>
-              <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Margen</th>
-              <th style="padding:7px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Markup</th>
+              <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Precio Venta</th>
+              <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Precio Neto</th>
+              <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Margen</th>
+              <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Markup</th>
             ` : ''}
           </tr>
         </thead>
@@ -626,15 +625,14 @@ const OperacionesStock = (() => {
               const sub = parseFloat(it.subtotal) || 0;
               const icon = it.tipo === 'envio' ? '🚚' : '🏷️';
               return `<tr style="border-bottom:1px solid #eef0f3">
-                <td style="padding:7px 10px">${icon} ${esc(it.concepto || (it.tipo === 'envio' ? 'Envío' : 'Descuento'))}</td>
-                <td style="padding:7px 10px;text-align:right">—</td>
-                <td style="padding:7px 10px;color:#607080">—</td>
-                <td style="padding:7px 10px;text-align:right">—</td>
-                <td style="padding:7px 10px;text-align:right">—</td>
-                <td style="padding:7px 10px;text-align:right">—</td>
-                <td style="padding:7px 10px;text-align:right;color:#607080">—</td>
-                <td style="padding:7px 10px;text-align:right;font-weight:600">${sub < 0 ? '− ' : ''}${fmt$(Math.abs(sub))}</td>
-                ${isAdmin ? `<td style="padding:7px 10px;text-align:right">—</td><td style="padding:7px 10px;text-align:right">—</td><td style="padding:7px 10px;text-align:right">—</td><td style="padding:7px 10px;text-align:right">—</td>` : ''}
+                <td style="padding:8px 10px">${icon} ${esc(it.concepto || (it.tipo === 'envio' ? 'Envío' : 'Descuento'))}</td>
+                <td style="padding:8px 10px;text-align:right">—</td>
+                <td style="padding:8px 10px;color:#607080">—</td>
+                <td style="padding:8px 10px;text-align:right">—</td>
+                <td style="padding:8px 10px;text-align:right">—</td>
+                <td style="padding:8px 10px;text-align:right">—</td>
+                <td style="padding:8px 10px;text-align:right;font-weight:600">${sub < 0 ? '− ' : ''}${fmt$(Math.abs(sub))}</td>
+                ${isAdmin ? `<td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td>` : ''}
               </tr>`;
             }
             const descPct = parseFloat(it.descuento_pct) || 0;
@@ -679,38 +677,37 @@ const OperacionesStock = (() => {
             const markup = (esMuestra || costoNeto <= 0) ? null : (precioNeto / costoNeto);
 
             return `<tr class="ops-detalle-row" data-idx="${idx}" style="border-bottom:1px solid #eef0f3${rowBg ? `;background:${rowBg}` : ''}">
-              <td style="padding:7px 10px">${esc(it.producto_nombre || '—')}${esMuestra ? ' <span style="font-size:10px;font-weight:700;color:#6a1fc9">🎁 Muestra</span>' : ''}${tieneDescuento ? ` <span style="font-size:10px;font-weight:700;color:#e65100;background:#fff3e0;border:1px solid #ffcc80;border-radius:4px;padding:1px 6px" title="Esta línea tuvo un descuento del proveedor">🏷️ -${descPct.toFixed(1)}% dto.</span>` : ''}</td>
-              <td style="padding:7px 10px;text-align:right">${it.cantidad}</td>
-              <td style="padding:7px 10px;color:#607080">${esc(it.unidad_compra || 'Unidad')}</td>
-              <td style="padding:7px 10px;text-align:right">${tieneDescuento ? `
-                <div style="color:#9e9e9e;text-decoration:line-through;font-size:11px;line-height:1.3">${fmt$(costoBruto)}</div>
+              <td style="padding:8px 10px">${esc(it.producto_nombre || '—')}${esMuestra ? ' <span style="font-size:11px;font-weight:700;color:#6a1fc9">🎁 Muestra</span>' : ''}${tieneDescuento ? ` <span style="font-size:11px;font-weight:700;color:#e65100;background:#fff3e0;border:1px solid #ffcc80;border-radius:4px;padding:1px 6px" title="Esta línea tuvo un descuento del proveedor">🏷️ -${descPct.toFixed(1)}% dto.</span>` : ''}</td>
+              <td style="padding:8px 10px;text-align:right">${it.cantidad}</td>
+              <td style="padding:8px 10px;color:#607080">${esc(it.unidad_compra || 'Unidad')}</td>
+              <td style="padding:8px 10px;text-align:right">${tieneDescuento ? `
+                <div style="color:#9e9e9e;text-decoration:line-through;font-size:12px;line-height:1.3">${fmt$(costoBruto)}</div>
                 <div style="font-weight:700;color:#e65100;line-height:1.3">${fmt$(costoNeto)}</div>
               ` : fmt$(costoBruto)}</td>
-              <td style="padding:7px 10px;text-align:right;color:#607080">${tieneIva ? esc(String(it.iva)).replace('.', ',') + '%' : '—'}</td>
-              <td class="ops-costofinal-cell" data-idx="${idx}" style="padding:7px 10px;text-align:right">${fmt$(costoFinal)}</td>
-              <td style="padding:7px 10px;text-align:right;color:#607080">${tieneDescuento ? descPct.toFixed(1) + '%' : '—'}</td>
-              <td style="padding:7px 10px;text-align:right;font-weight:600">${fmt$(it.subtotal)}</td>
+              <td style="padding:8px 10px;text-align:right;color:#607080">${tieneIva ? esc(String(it.iva)).replace('.', ',') + '%' : '—'}</td>
+              <td class="ops-costofinal-cell" data-idx="${idx}" style="padding:8px 10px;text-align:right">${fmt$(costoFinal)}</td>
+              <td style="padding:8px 10px;text-align:right;font-weight:600">${fmt$(it.subtotal)}</td>
               ${isAdmin ? (
                 it.producto_id
-                  ? `<td style="padding:5px 10px;text-align:right;white-space:nowrap">
-                       ${it.producto_markup_fijo != null ? `<span style="display:inline-block;background:#ede7f6;color:#5e35b1;border-radius:5px;padding:2px 7px;font-size:10px;font-weight:700;margin-right:5px" title="Este producto tiene un markup predeterminado — cambiarlo va a preguntar si se actualiza o es una excepción">Markup ${esc(String(it.producto_markup_fijo))}%</span>` : ''}
+                  ? `<td style="padding:6px 10px;text-align:right;white-space:nowrap">
+                       ${it.producto_markup_fijo != null ? `<span style="display:inline-block;background:#ede7f6;color:#5e35b1;border-radius:5px;padding:2px 7px;font-size:11px;font-weight:700;margin-right:5px" title="Este producto tiene un markup predeterminado — cambiarlo va a preguntar si se actualiza o es una excepción">Markup ${esc(String(it.producto_markup_fijo))}%</span>` : ''}
                        <input type="number" class="ops-precio-input" data-idx="${idx}" data-prodid="${esc(it.producto_id)}"
                               data-nombre="${esc(it.producto_nombre || '')}" data-costo="${costoNeto || 0}"
                               data-markup="${it.producto_markup_fijo ?? ''}" data-money="true"
                               value="${precioActual.toFixed(2)}" min="0" step="any"
                               title="Precio de venta — editable"
-                              style="width:92px;padding:5px 6px;border:1.5px solid #90b8f0;border-radius:4px;text-align:right;font-size:13px;background:#f0f6ff;transition:background .15s,border-color .15s">
-                       <span class="ops-precio-saved" data-idx="${idx}" style="display:none;color:#2e7d32;font-weight:700;margin-left:5px;font-size:13px" title="Guardado">✓</span>
+                              style="width:98px;padding:6px 7px;border:1.5px solid #90b8f0;border-radius:4px;text-align:right;font-size:14.5px;background:#f0f6ff;transition:background .15s,border-color .15s">
+                       <span class="ops-precio-saved" data-idx="${idx}" style="display:none;color:#2e7d32;font-weight:700;margin-left:5px;font-size:14.5px" title="Guardado">✓</span>
                      </td>
-                     <td class="ops-precioneto-cell" data-idx="${idx}" style="padding:7px 10px;text-align:right">${fmt$(precioNeto)}</td>
-                     <td class="ops-margen-cell" data-idx="${idx}" style="padding:7px 10px;text-align:right;font-weight:700;color:${margenColor}">
-                       ${margenBruto != null ? `<div style="color:#9e9e9e;text-decoration:line-through;font-size:11px;font-weight:400;line-height:1.3">${margenBruto.toFixed(1)}%</div>` : ''}
+                     <td class="ops-precioneto-cell" data-idx="${idx}" style="padding:8px 10px;text-align:right">${fmt$(precioNeto)}</td>
+                     <td class="ops-margen-cell" data-idx="${idx}" style="padding:8px 10px;text-align:right;font-weight:700;color:${margenColor}">
+                       ${margenBruto != null ? `<div style="color:#9e9e9e;text-decoration:line-through;font-size:12px;font-weight:400;line-height:1.3">${margenBruto.toFixed(1)}%</div>` : ''}
                        ${margen == null ? '—' : margen.toFixed(1) + '%'}
                      </td>
-                     <td class="ops-markup-cell" data-idx="${idx}" style="padding:7px 10px;text-align:right;font-weight:700;color:#445566" title="Precio Neto ÷ Costo Neto (= Precio Venta ÷ Costo Final)">
+                     <td class="ops-markup-cell" data-idx="${idx}" style="padding:8px 10px;text-align:right;font-weight:700;color:#445566" title="Precio Neto ÷ Costo Neto (= Precio Venta ÷ Costo Final)">
                        ${markup == null ? '—' : markup.toFixed(2) + 'x'}
                      </td>`
-                  : `<td style="padding:7px 10px;text-align:right">—</td><td style="padding:7px 10px;text-align:right">—</td><td style="padding:7px 10px;text-align:right">—</td><td style="padding:7px 10px;text-align:right">—</td>`
+                  : `<td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td>`
               ) : ''}
             </tr>`;
           }).join('')}
@@ -801,7 +798,7 @@ const OperacionesStock = (() => {
           const margenBruto = (esMuestra || descPctItem <= 0.001) ? null : calcMargenPct(costoBrutoItem, nuevoPrecio);
           margenCell.style.color = color;
           margenCell.innerHTML =
-            (margenBruto != null ? `<div style="color:#9e9e9e;text-decoration:line-through;font-size:11px;font-weight:400;line-height:1.3">${margenBruto.toFixed(1)}%</div>` : '') +
+            (margenBruto != null ? `<div style="color:#9e9e9e;text-decoration:line-through;font-size:12px;font-weight:400;line-height:1.3">${margenBruto.toFixed(1)}%</div>` : '') +
             (margen == null ? '—' : margen.toFixed(1) + '%');
 
           // Precio Neto y Markup dependen del Precio Venta recién guardado --

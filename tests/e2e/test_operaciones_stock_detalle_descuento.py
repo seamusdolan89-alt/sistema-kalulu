@@ -41,6 +41,12 @@ Venta ÷ Costo Final, que es como lo verificó el usuario). El modal se
 agrandó (720px -> 1480px) para que entren las columnas nuevas sin apretar
 las que ya había.
 
+Ampliación 3 (mismo día, viendo la pantalla real con las columnas nuevas):
+el % de descuento quedaba duplicado -- ya se ve en el badge junto al
+nombre del producto, y además en su propia columna "Descuento". Se
+eliminó la columna (el badge alcanza) y se agrandó la fuente de toda la
+tabla (13px -> 14.5px) aprovechando el espacio que quedó libre.
+
 Correr (server ya levantado en :8765, ver README.md):
 
     python tests/e2e/test_operaciones_stock_detalle_descuento.py
@@ -132,6 +138,11 @@ def main():
             setup["compraId"],
         )
         page.wait_for_timeout(300)
+
+        print("--- La columna 'Descuento' ya no existe (el % está en el badge junto al nombre, no duplicado) ---")
+        headers = page.locator("thead th").all_inner_texts()
+        assert "Descuento" not in headers, f"La columna 'Descuento' debería haberse eliminado: {headers}"
+        print(f"OK - columnas: {headers}")
 
         # Orden de filas = ORDER BY pr.nombre: "Con Descuento" < "Con IVA" < "Sin Descuento"
         # (índices 0, 1, 2 respectivamente) -- los selectores .nth() de abajo asumen este orden.
