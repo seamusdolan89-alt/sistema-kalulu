@@ -47,6 +47,15 @@ nombre del producto, y además en su propia columna "Descuento". Se
 eliminó la columna (el badge alcanza) y se agrandó la fuente de toda la
 tabla (13px -> 14.5px) aprovechando el espacio que quedó libre.
 
+Ampliación 4 (mismo día, pedido del usuario): las 4 columnas de IVA solo
+tienen sentido en Factura A -- es la única condición de compra donde se
+carga un IVA discriminado por línea (compra_items.iva). Para el resto
+(Factura B/C, Ticket, Remito, etc.) se oculta "IVA"/"Costo Final", el
+header de "Costo unit." pasa a decir "Costo Neto", y aparece una columna
+nueva editable "IVA Venta" (independiente del IVA de la compra) que deja
+elegir la alícuota de venta ahí mismo -- arranca con lo que el producto ya
+tenga cargado en productos.iva -- para poder calcular el Precio Neto igual.
+
 Correr (server ya levantado en :8765, ver README.md):
 
     python tests/e2e/test_operaciones_stock_detalle_descuento.py
@@ -109,8 +118,8 @@ def main():
                     VALUES (?, 'Producto Con IVA Test', 1000, 1210, 1, 'synced', ?)`, [prodIva, now]);
 
             const compraId = uuid();
-            db.run(`INSERT INTO compras (id, proveedor_id, sucursal_id, usuario_id, fecha, estado, total, total_factura, sync_status, updated_at)
-                    VALUES (?, ?, ?, ?, ?, 'confirmada', 2910, 2910, 'synced', ?)`,
+            db.run(`INSERT INTO compras (id, proveedor_id, sucursal_id, usuario_id, fecha, estado, total, total_factura, condicion_compra, sync_status, updated_at)
+                    VALUES (?, ?, ?, ?, ?, 'confirmada', 2910, 2910, 'Factura A', 'synced', ?)`,
                    [compraId, prov, suc, usr, now, now]);
             // costo_unitario = costo DE LISTA (1000), descuento_pct=20 -> neto real 800
             // (coincide con productos.costo, que ya se guarda neto al confirmar).
@@ -124,7 +133,27 @@ def main():
             db.run(`INSERT INTO compra_items (id, compra_id, producto_id, cantidad, costo_unitario, descuento_pct, iva, subtotal)
                     VALUES (?, ?, ?, 1, 1000, 0, '21', 1000)`, [uuid(), compraId, prodIva]);
 
-            return { compraId, prodDto, prodSin, prodIva };
+            // --- Compra NO Factura A (Factura B): sin IVA discriminado por línea --
+            // las columnas IVA/Costo Final no corresponden, en cambio aparece la
+            // columna editable "IVA Venta". prodSinIvaB nunca tuvo IVA cargado
+            // (arranca en '—'); prodConIvaB YA tenía productos.iva='10.5' (ej. de
+            // una Factura A anterior) -- el select tiene que arrancar mostrando ESE.
+            const prodSinIvaB = uuid(); const prodConIvaB = uuid();
+            db.run(`INSERT INTO productos (id, nombre, costo, precio_venta, activo, sync_status, updated_at)
+                    VALUES (?, 'Producto Factura B Sin IVA Test', 500, 1000, 1, 'synced', ?)`, [prodSinIvaB, now]);
+            db.run(`INSERT INTO productos (id, nombre, costo, precio_venta, iva, activo, sync_status, updated_at)
+                    VALUES (?, 'Producto Factura B Con IVA Previo Test', 500, 1105, '10.5', 1, 'synced', ?)`, [prodConIvaB, now]);
+
+            const compraIdB = uuid();
+            db.run(`INSERT INTO compras (id, proveedor_id, sucursal_id, usuario_id, fecha, estado, total, total_factura, condicion_compra, sync_status, updated_at)
+                    VALUES (?, ?, ?, ?, ?, 'confirmada', 1500, 1500, 'Factura B', 'synced', ?)`,
+                   [compraIdB, prov, suc, usr, now, now]);
+            db.run(`INSERT INTO compra_items (id, compra_id, producto_id, cantidad, costo_unitario, descuento_pct, subtotal)
+                    VALUES (?, ?, ?, 1, 500, 0, 500)`, [uuid(), compraIdB, prodSinIvaB]);
+            db.run(`INSERT INTO compra_items (id, compra_id, producto_id, cantidad, costo_unitario, descuento_pct, subtotal)
+                    VALUES (?, ?, ?, 1, 500, 0, 500)`, [uuid(), compraIdB, prodConIvaB]);
+
+            return { compraId, prodDto, prodSin, prodIva, compraIdB, prodSinIvaB, prodConIvaB };
           }
         """)
 
@@ -244,8 +273,67 @@ def main():
         assert "2.00x" in markup_edit, f"BUG: Markup no se recalculó al editar el precio (debería ser 2.00x): {markup_edit!r}"
         print(f"OK - Precio Neto={precioneto_edit!r}, Markup={markup_edit!r}")
 
+        print("--- Compra NO Factura A (Factura B): cerrar y abrir el detalle de esa otra compra ---")
+        page.evaluate("() => document.getElementById('ops-detalle-close')?.click()")
+        page.wait_for_timeout(200)
+        page.evaluate(
+            "(id) => document.querySelector(`[data-ver-compra=\"${id}\"]`)?.click()",
+            setup["compraIdB"],
+        )
+        page.wait_for_timeout(300)
+
+        print("--- Header: 'Costo Neto' en vez de 'Costo unit.', sin columnas IVA/Costo Final, con 'IVA Venta' ---")
+        headers_b = page.locator("thead th").all_inner_texts()
+        assert "Costo Neto" in headers_b, f"Debería decir 'Costo Neto' (no es Factura A): {headers_b}"
+        assert "Costo unit." not in headers_b, f"No debería decir 'Costo unit.' en una compra que no es Factura A: {headers_b}"
+        assert "IVA" not in headers_b, f"No debería existir la columna IVA de compra (no es Factura A): {headers_b}"
+        assert "Costo Final" not in headers_b, f"No debería existir Costo Final (no es Factura A): {headers_b}"
+        assert "IVA Venta" in headers_b, f"Debería existir la columna editable 'IVA Venta': {headers_b}"
+        assert "Precio Neto" in headers_b and "Markup" in headers_b, f"Precio Neto/Markup deberían seguir estando: {headers_b}"
+        print(f"OK - columnas: {headers_b}")
+
+        # Orden ORDER BY pr.nombre: "Con IVA Previo" < "Sin IVA" (índices 0, 1).
+        print("--- Producto SIN IVA previo: el select 'IVA Venta' arranca en '—', Precio Neto = Precio Venta ---")
+        select_sin = page.locator('.ops-ivaventa-select').nth(1)
+        assert select_sin.input_value() == "", f"Debería arrancar sin IVA elegido: {select_sin.input_value()!r}"
+        precioneto_sin_b = page.locator('.ops-precioneto-cell').nth(1).inner_text()
+        assert "1.000,00" in precioneto_sin_b or "1000,00" in precioneto_sin_b, \
+            f"Sin IVA de venta elegido, Precio Neto debería ser igual a Precio Venta (1000): {precioneto_sin_b!r}"
+        print(f"OK - select en blanco, Precio Neto={precioneto_sin_b!r}")
+
+        print("--- Producto CON IVA previo (productos.iva='10.5'): el select arranca en 10,5%, Precio Neto ya descontado ---")
+        # precio_venta=1105 (c/IVA 10,5%) -> Precio Neto = 1105 / 1.105 = 1000.
+        # costo=500 (sin descuento) -> Markup = 1000/500 = 2.00x.
+        select_con = page.locator('.ops-ivaventa-select').nth(0)
+        assert select_con.input_value() == "10.5", f"Debería arrancar con el IVA que ya tenía el producto (10,5%): {select_con.input_value()!r}"
+        precioneto_con_b = page.locator('.ops-precioneto-cell').nth(0).inner_text()
+        assert "1.000,00" in precioneto_con_b or "1000,00" in precioneto_con_b, \
+            f"Precio Neto debería ser 1105 / 1.105 = 1000: {precioneto_con_b!r}"
+        markup_con_b = page.locator('.ops-markup-cell').nth(0).inner_text()
+        assert "2.00x" in markup_con_b, f"Markup debería ser 1000/500 = 2.00x: {markup_con_b!r}"
+        print(f"OK - select en 10,5%, Precio Neto={precioneto_con_b!r}, Markup={markup_con_b!r}")
+
+        print("--- Cambiar el IVA Venta del producto sin IVA previo a 21%: recalcula y persiste en productos.iva ---")
+        select_sin.select_option("21")
+        page.wait_for_timeout(200)
+        # precio_venta=1000 (c/IVA 21% según la nueva elección) -> Precio Neto = 1000/1.21 = 826.45.
+        # costo=500 -> Markup = 826.45/500 = 1.65x.
+        precioneto_tras_cambio = page.locator('.ops-precioneto-cell').nth(1).inner_text()
+        assert "826,45" in precioneto_tras_cambio, \
+            f"BUG: Precio Neto no se recalculó al cambiar el IVA Venta a 21% (debería ser 826,45): {precioneto_tras_cambio!r}"
+        markup_tras_cambio = page.locator('.ops-markup-cell').nth(1).inner_text()
+        assert "1.65x" in markup_tras_cambio, \
+            f"BUG: Markup no se recalculó al cambiar el IVA Venta: {markup_tras_cambio!r}"
+        iva_persistido = page.evaluate(
+            "(id) => window.SGA_DB.query('SELECT iva, sync_status FROM productos WHERE id=?', [id])[0]",
+            setup["prodSinIvaB"],
+        )
+        assert iva_persistido["iva"] == "21", f"BUG: el nuevo IVA de venta debería quedar guardado en productos.iva: {iva_persistido}"
+        assert iva_persistido["sync_status"] == "pending", f"El cambio debería marcar sync_status='pending': {iva_persistido}"
+        print(f"OK - Precio Neto={precioneto_tras_cambio!r}, Markup={markup_tras_cambio!r}, productos.iva={iva_persistido['iva']!r}")
+
         assert not errors, f"Errores JS: {errors}"
-        print("\n=== OK: Detalle de compra muestra el costo real (neto del descuento), resalta la línea, y el margen es correcto ===")
+        print("\n=== OK: Detalle de compra muestra el costo real (neto del descuento), resalta la línea, el margen es correcto, y Factura A vs. el resto muestran las columnas de IVA correctas ===")
         browser.close()
 
 

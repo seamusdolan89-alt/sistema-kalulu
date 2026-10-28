@@ -119,7 +119,7 @@ const OperacionesStock = (() => {
     if (!compra) return null;
     compra.items = db().query(`
       SELECT ci.*, pr.nombre AS producto_nombre, pr.precio_venta AS producto_precio_venta,
-             pr.markup_fijo AS producto_markup_fijo
+             pr.markup_fijo AS producto_markup_fijo, pr.iva AS producto_iva
       FROM compra_items ci
       LEFT JOIN productos pr ON pr.id = ci.producto_id
       WHERE ci.compra_id = ?
@@ -546,6 +546,15 @@ const OperacionesStock = (() => {
     // de ESTA compra) — para poder revisar y corregir de una los precios que
     // el sistema sugirió y se aceptaron sin chequear al confirmar la compra.
     const isAdmin = !!window.ADMIN_MODE;
+    // IVA de COMPRA (columnas "IVA"/"Costo Final") solo existe de verdad en
+    // Factura A -- es la única condición de compra donde se carga un IVA
+    // discriminado por línea (ver calcIvaCalc en compras_v2.js). El resto
+    // (Factura B/C, Ticket, Remito) no tiene ese dato: el costo ya viene
+    // "final" tal cual, esas dos columnas no aportan nada. Pedido del
+    // usuario (27/10/2026): para esos casos, mostrar solo Costo Neto y
+    // dejar elegir el IVA de VENTA (independiente del de la compra) para
+    // poder calcular el Precio Neto de venta igual.
+    const facturaA = (compra.condicion_compra || '') === 'Factura A';
 
     const estadoCompra = compra.estado || 'confirmada';
     const estadoColor  = ESTADO_COLOR[estadoCompra] || '#445566';
@@ -606,12 +615,15 @@ const OperacionesStock = (() => {
             <th style="padding:8px 10px;text-align:left;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Producto</th>
             <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Cant.</th>
             <th style="padding:8px 10px;text-align:left;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Unidad</th>
-            <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Costo unit.</th>
-            <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">IVA</th>
-            <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Costo Final</th>
+            <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">${facturaA ? 'Costo unit.' : 'Costo Neto'}</th>
+            ${facturaA ? `
+              <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">IVA</th>
+              <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Costo Final</th>
+            ` : ''}
             <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Subtotal</th>
             ${isAdmin ? `
               <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Precio Venta</th>
+              ${!facturaA ? `<th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">IVA Venta</th>` : ''}
               <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Precio Neto</th>
               <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Margen</th>
               <th style="padding:8px 10px;text-align:right;font-weight:700;color:#445566;border-bottom:2px solid #d0d7e3">Markup</th>
@@ -624,15 +636,18 @@ const OperacionesStock = (() => {
             if (esAjuste) {
               const sub = parseFloat(it.subtotal) || 0;
               const icon = it.tipo === 'envio' ? '🚚' : '🏷️';
+              const celdasAjusteExtra = facturaA ? '<td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td>' : '';
+              const celdasAjusteAdmin = isAdmin
+                ? `<td style="padding:8px 10px;text-align:right">—</td>${!facturaA ? '<td style="padding:8px 10px;text-align:right">—</td>' : ''}<td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td>`
+                : '';
               return `<tr style="border-bottom:1px solid #eef0f3">
                 <td style="padding:8px 10px">${icon} ${esc(it.concepto || (it.tipo === 'envio' ? 'Envío' : 'Descuento'))}</td>
                 <td style="padding:8px 10px;text-align:right">—</td>
                 <td style="padding:8px 10px;color:#607080">—</td>
                 <td style="padding:8px 10px;text-align:right">—</td>
-                <td style="padding:8px 10px;text-align:right">—</td>
-                <td style="padding:8px 10px;text-align:right">—</td>
+                ${celdasAjusteExtra}
                 <td style="padding:8px 10px;text-align:right;font-weight:600">${sub < 0 ? '− ' : ''}${fmt$(Math.abs(sub))}</td>
-                ${isAdmin ? `<td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td>` : ''}
+                ${celdasAjusteAdmin}
               </tr>`;
             }
             const descPct = parseFloat(it.descuento_pct) || 0;
@@ -667,10 +682,18 @@ const OperacionesStock = (() => {
             // CON IVA incluido (de ahí "Precio Neto = Precio Venta ÷ (1+IVA)", tal
             // cual lo pidió el usuario). costoFinal pone el costo en la MISMA base
             // (con IVA) que Precio Venta, para que sean comparables a simple vista.
-            const ivaPct    = parseFloat(it.iva) || 0;
-            const tieneIva  = ivaPct > 0.001;
-            const costoFinal  = tieneIva ? window.SGA_Utils.roundMoney(costoNeto * (1 + ivaPct / 100)) : costoNeto;
-            const precioNeto  = tieneIva ? precioActual / (1 + ivaPct / 100) : precioActual;
+            // IVA de COMPRA: solo existe de verdad en Factura A.
+            const ivaCompraPct   = parseFloat(it.iva) || 0;
+            const tieneIvaCompra = ivaCompraPct > 0.001;
+            const costoFinal     = tieneIvaCompra ? window.SGA_Utils.roundMoney(costoNeto * (1 + ivaCompraPct / 100)) : costoNeto;
+            // IVA de VENTA: en Factura A es el mismo que el de compra (ya
+            // discriminado en la factura); en el resto de los casos no hay
+            // IVA de compra que usar, así que se elige acá -- arranca en lo
+            // que el producto ya tenga cargado (productos.iva), el usuario
+            // lo puede cambiar con el select de abajo.
+            const ivaVentaInicial = facturaA ? '' : String(it.iva || it.producto_iva || '');
+            const ivaVentaPct     = facturaA ? ivaCompraPct : (parseFloat(ivaVentaInicial) || 0);
+            const precioNeto      = ivaVentaPct > 0.001 ? precioActual / (1 + ivaVentaPct / 100) : precioActual;
             // Markup = Precio Neto ÷ Costo Neto -- por construcción, da LO MISMO
             // que Precio Venta ÷ Costo Final (el usuario lo pidió así, como chequeo
             // de consistencia: los dos pares difieren por el mismo factor de IVA).
@@ -684,8 +707,10 @@ const OperacionesStock = (() => {
                 <div style="color:#9e9e9e;text-decoration:line-through;font-size:12px;line-height:1.3">${fmt$(costoBruto)}</div>
                 <div style="font-weight:700;color:#e65100;line-height:1.3">${fmt$(costoNeto)}</div>
               ` : fmt$(costoBruto)}</td>
-              <td style="padding:8px 10px;text-align:right;color:#607080">${tieneIva ? esc(String(it.iva)).replace('.', ',') + '%' : '—'}</td>
-              <td class="ops-costofinal-cell" data-idx="${idx}" style="padding:8px 10px;text-align:right">${fmt$(costoFinal)}</td>
+              ${facturaA ? `
+                <td style="padding:8px 10px;text-align:right;color:#607080">${tieneIvaCompra ? esc(String(it.iva)).replace('.', ',') + '%' : '—'}</td>
+                <td class="ops-costofinal-cell" data-idx="${idx}" style="padding:8px 10px;text-align:right">${fmt$(costoFinal)}</td>
+              ` : ''}
               <td style="padding:8px 10px;text-align:right;font-weight:600">${fmt$(it.subtotal)}</td>
               ${isAdmin ? (
                 it.producto_id
@@ -699,6 +724,16 @@ const OperacionesStock = (() => {
                               style="width:98px;padding:6px 7px;border:1.5px solid #90b8f0;border-radius:4px;text-align:right;font-size:14.5px;background:#f0f6ff;transition:background .15s,border-color .15s">
                        <span class="ops-precio-saved" data-idx="${idx}" style="display:none;color:#2e7d32;font-weight:700;margin-left:5px;font-size:14.5px" title="Guardado">✓</span>
                      </td>
+                     ${!facturaA ? `
+                     <td style="padding:6px 10px;text-align:right">
+                       <select class="ops-ivaventa-select" data-idx="${idx}" data-prodid="${esc(it.producto_id)}"
+                               title="IVA de venta — independiente del de esta compra, define el Precio Neto"
+                               style="width:80px;padding:4px 4px;border:1px solid #c8d0dc;border-radius:4px;font-size:13px">
+                         <option value=""     ${!ivaVentaInicial ? 'selected' : ''}>—</option>
+                         <option value="10.5" ${ivaVentaInicial === '10.5' ? 'selected' : ''}>10,5%</option>
+                         <option value="21"   ${ivaVentaInicial === '21'   ? 'selected' : ''}>21%</option>
+                       </select>
+                     </td>` : ''}
                      <td class="ops-precioneto-cell" data-idx="${idx}" style="padding:8px 10px;text-align:right">${fmt$(precioNeto)}</td>
                      <td class="ops-margen-cell" data-idx="${idx}" style="padding:8px 10px;text-align:right;font-weight:700;color:${margenColor}">
                        ${margenBruto != null ? `<div style="color:#9e9e9e;text-decoration:line-through;font-size:12px;font-weight:400;line-height:1.3">${margenBruto.toFixed(1)}%</div>` : ''}
@@ -707,7 +742,7 @@ const OperacionesStock = (() => {
                      <td class="ops-markup-cell" data-idx="${idx}" style="padding:8px 10px;text-align:right;font-weight:700;color:#445566" title="Precio Neto ÷ Costo Neto (= Precio Venta ÷ Costo Final)">
                        ${markup == null ? '—' : markup.toFixed(2) + 'x'}
                      </td>`
-                  : `<td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td>`
+                  : `<td style="padding:8px 10px;text-align:right">—</td>${!facturaA ? '<td style="padding:8px 10px;text-align:right">—</td>' : ''}<td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td>`
               ) : ''}
             </tr>`;
           }).join('')}
@@ -802,8 +837,11 @@ const OperacionesStock = (() => {
             (margen == null ? '—' : margen.toFixed(1) + '%');
 
           // Precio Neto y Markup dependen del Precio Venta recién guardado --
-          // costoLinea ya es el costo neto de descuento (ver arriba).
-          const ivaPctItem = parseFloat(item.iva) || 0;
+          // costoLinea ya es el costo neto de descuento (ver arriba). En
+          // Factura A el IVA es el de la compra (item.iva); en el resto, el
+          // que el usuario haya elegido en el select "IVA Venta" de esta fila.
+          const ivaSelectEl = facturaA ? null : body.querySelector(`.ops-ivaventa-select[data-idx="${idx}"]`);
+          const ivaPctItem = facturaA ? (parseFloat(item.iva) || 0) : (parseFloat(ivaSelectEl?.value) || 0);
           const precioNeto = ivaPctItem > 0.001 ? nuevoPrecio / (1 + ivaPctItem / 100) : nuevoPrecio;
           const precioNetoCell = body.querySelector(`.ops-precioneto-cell[data-idx="${idx}"]`);
           if (precioNetoCell) precioNetoCell.textContent = fmt$(precioNeto);
@@ -858,6 +896,40 @@ const OperacionesStock = (() => {
           // mover el foco (más abajo, en settle) dispara el blur natural solo
           // -- así el wizard de familia (si se abre) no compite por el foco.
           guardarPrecio(inp, { onSettled: () => { if (next) next.focus(); } });
+        });
+      });
+
+      // IVA Venta (solo cuando NO es Factura A, ver arriba): recalcula Precio
+      // Neto/Markup de esa fila y lo deja guardado en productos.iva -- a
+      // diferencia de item.iva (lo que dice ESTA factura), este campo es el
+      // IVA de venta general del producto, por eso no se toca compra_items.
+      body.querySelectorAll('.ops-ivaventa-select').forEach(sel => {
+        sel.addEventListener('change', () => {
+          const idx = parseInt(sel.dataset.idx);
+          const prodId = sel.dataset.prodid;
+          const item = compra.items[idx];
+          const esMuestra = item.tipo === 'muestra';
+          const descPctItem = parseFloat(item.descuento_pct) || 0;
+          const costoBrutoItem = parseFloat(item.costo_unitario) || 0;
+          const costoNetoItem = descPctItem > 0.001
+            ? window.SGA_Utils.roundMoney(costoBrutoItem * (1 - descPctItem / 100))
+            : costoBrutoItem;
+          const precioActual = parseFloat(item.producto_precio_venta) || 0;
+          const ivaPct = parseFloat(sel.value) || 0;
+          const precioNeto = ivaPct > 0.001 ? precioActual / (1 + ivaPct / 100) : precioActual;
+          const markup = (esMuestra || costoNetoItem <= 0) ? null : (precioNeto / costoNetoItem);
+
+          const precioNetoCell = body.querySelector(`.ops-precioneto-cell[data-idx="${idx}"]`);
+          if (precioNetoCell) precioNetoCell.textContent = fmt$(precioNeto);
+          const markupCell = body.querySelector(`.ops-markup-cell[data-idx="${idx}"]`);
+          if (markupCell) markupCell.textContent = markup == null ? '—' : markup.toFixed(2) + 'x';
+
+          item.iva = sel.value || null;
+          item.producto_iva = sel.value || null;
+          const ts = window.SGA_Utils.formatISODate(new Date());
+          db().run(`UPDATE productos SET iva=?, sync_status='pending', updated_at=? WHERE id=?`,
+                   [sel.value || null, ts, prodId]);
+          window.SGA_Utils.showNotification('IVA de venta actualizado', 'success', 1500);
         });
       });
     }
