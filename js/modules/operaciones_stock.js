@@ -698,13 +698,17 @@ const OperacionesStock = (() => {
             // que Precio Venta ÷ Costo Final (el usuario lo pidió así, como chequeo
             // de consistencia: los dos pares difieren por el mismo factor de IVA).
             const markup = (esMuestra || costoNeto <= 0) ? null : (precioNeto / costoNeto);
+            // Markup "de lista" (mismo criterio que costoBruto/margenBruto): el
+            // mismo Precio Neto contra el costo SIN descuento, para ver cuánto
+            // mejoró el markup gracias al descuento (pedido del usuario, 28/10/2026).
+            const markupBruto = (esMuestra || !tieneDescuento || costoBruto <= 0) ? null : (precioNeto / costoBruto);
 
             return `<tr class="ops-detalle-row" data-idx="${idx}" style="border-bottom:1px solid #eef0f3${rowBg ? `;background:${rowBg}` : ''}">
               <td style="padding:8px 10px">${esc(it.producto_nombre || '—')}${esMuestra ? ' <span style="font-size:11px;font-weight:700;color:#6a1fc9">🎁 Muestra</span>' : ''}${tieneDescuento ? ` <span style="font-size:11px;font-weight:700;color:#e65100;background:#fff3e0;border:1px solid #ffcc80;border-radius:4px;padding:1px 6px" title="Esta línea tuvo un descuento del proveedor">🏷️ -${descPct.toFixed(1)}% dto.</span>` : ''}</td>
               <td style="padding:8px 10px;text-align:right">${it.cantidad}</td>
               <td style="padding:8px 10px;color:#607080">${esc(it.unidad_compra || 'Unidad')}</td>
               <td style="padding:8px 10px;text-align:right">${tieneDescuento ? `
-                <div style="color:#9e9e9e;text-decoration:line-through;font-size:12px;line-height:1.3">${fmt$(costoBruto)}</div>
+                <div style="color:#8090a0;font-size:11px;line-height:1.3">${fmt$(costoBruto)}</div>
                 <div style="font-weight:700;color:#e65100;line-height:1.3">${fmt$(costoNeto)}</div>
               ` : fmt$(costoBruto)}</td>
               ${facturaA ? `
@@ -736,10 +740,11 @@ const OperacionesStock = (() => {
                      </td>` : ''}
                      <td class="ops-precioneto-cell" data-idx="${idx}" style="padding:8px 10px;text-align:right">${fmt$(precioNeto)}</td>
                      <td class="ops-margen-cell" data-idx="${idx}" style="padding:8px 10px;text-align:right;font-weight:700;color:${margenColor}">
-                       ${margenBruto != null ? `<div style="color:#9e9e9e;text-decoration:line-through;font-size:12px;font-weight:400;line-height:1.3">${margenBruto.toFixed(1)}%</div>` : ''}
+                       ${margenBruto != null ? `<div style="color:#8090a0;font-size:11px;font-weight:400;line-height:1.3">${margenBruto.toFixed(1)}%</div>` : ''}
                        ${margen == null ? '—' : margen.toFixed(1) + '%'}
                      </td>
                      <td class="ops-markup-cell" data-idx="${idx}" style="padding:8px 10px;text-align:right;font-weight:700;color:#445566" title="Precio Neto ÷ Costo Neto (= Precio Venta ÷ Costo Final)">
+                       ${markupBruto != null ? `<div style="color:#8090a0;font-size:11px;font-weight:400;line-height:1.3">${markupBruto.toFixed(2)}x</div>` : ''}
                        ${markup == null ? '—' : markup.toFixed(2) + 'x'}
                      </td>`
                   : `<td style="padding:8px 10px;text-align:right">—</td>${!facturaA ? '<td style="padding:8px 10px;text-align:right">—</td>' : ''}<td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td><td style="padding:8px 10px;text-align:right">—</td>`
@@ -833,7 +838,7 @@ const OperacionesStock = (() => {
           const margenBruto = (esMuestra || descPctItem <= 0.001) ? null : calcMargenPct(costoBrutoItem, nuevoPrecio);
           margenCell.style.color = color;
           margenCell.innerHTML =
-            (margenBruto != null ? `<div style="color:#9e9e9e;text-decoration:line-through;font-size:12px;font-weight:400;line-height:1.3">${margenBruto.toFixed(1)}%</div>` : '') +
+            (margenBruto != null ? `<div style="color:#8090a0;font-size:11px;font-weight:400;line-height:1.3">${margenBruto.toFixed(1)}%</div>` : '') +
             (margen == null ? '—' : margen.toFixed(1) + '%');
 
           // Precio Neto y Markup dependen del Precio Venta recién guardado --
@@ -849,7 +854,10 @@ const OperacionesStock = (() => {
           const markupCell = body.querySelector(`.ops-markup-cell[data-idx="${idx}"]`);
           if (markupCell) {
             const markup = (esMuestra || costoLinea <= 0) ? null : (precioNeto / costoLinea);
-            markupCell.textContent = markup == null ? '—' : markup.toFixed(2) + 'x';
+            const markupBruto = (esMuestra || descPctItem <= 0.001 || costoBrutoItem <= 0) ? null : (precioNeto / costoBrutoItem);
+            markupCell.innerHTML =
+              (markupBruto != null ? `<div style="color:#8090a0;font-size:11px;font-weight:400;line-height:1.3">${markupBruto.toFixed(2)}x</div>` : '') +
+              (markup == null ? '—' : markup.toFixed(2) + 'x');
           }
         }
 
@@ -922,7 +930,12 @@ const OperacionesStock = (() => {
           const precioNetoCell = body.querySelector(`.ops-precioneto-cell[data-idx="${idx}"]`);
           if (precioNetoCell) precioNetoCell.textContent = fmt$(precioNeto);
           const markupCell = body.querySelector(`.ops-markup-cell[data-idx="${idx}"]`);
-          if (markupCell) markupCell.textContent = markup == null ? '—' : markup.toFixed(2) + 'x';
+          if (markupCell) {
+            const markupBruto = (esMuestra || descPctItem <= 0.001 || costoBrutoItem <= 0) ? null : (precioNeto / costoBrutoItem);
+            markupCell.innerHTML =
+              (markupBruto != null ? `<div style="color:#8090a0;font-size:11px;font-weight:400;line-height:1.3">${markupBruto.toFixed(2)}x</div>` : '') +
+              (markup == null ? '—' : markup.toFixed(2) + 'x');
+          }
 
           item.iva = sel.value || null;
           item.producto_iva = sel.value || null;

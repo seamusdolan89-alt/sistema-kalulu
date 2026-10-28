@@ -56,6 +56,13 @@ nueva editable "IVA Venta" (independiente del IVA de la compra) que deja
 elegir la alícuota de venta ahí mismo -- arranca con lo que el producto ya
 tenga cargado en productos.iva -- para poder calcular el Precio Neto igual.
 
+Ampliación 5 (28/10/2026, pedido del usuario viendo la pantalla real): Markup
+también muestra, chico y en gris arriba del real, el markup que hubiera dado
+SI no hubiera habido descuento (contra el costo de lista) -- mismo criterio
+que Costo unit./Margen. Y en los tres (Costo unit., Margen, Markup) se sacó
+el tachado del valor "de lista": "esos datos deben ser más legibles, sacale
+el tachado, simplemente que sea más chico y un tono menor de color está ok".
+
 Correr (server ya levantado en :8765, ver README.md):
 
     python tests/e2e/test_operaciones_stock_detalle_descuento.py
@@ -72,17 +79,24 @@ from playwright.sync_api import sync_playwright
 from helpers import block_firebase, enable_dev_mode, login_via_seed
 
 
-def margen_bruto_y_neto(page, idx):
-    """Separa el margen 'de lista' (tachado, en un <div> propio) del margen
+def _bruto_y_real(cell):
+    """Separa el valor 'de lista' (chico/gris, en un <div> propio) del valor
     real -- comparar por substring en el texto completo de la celda es
     ambiguo (ej. "0.0%" es substring de "20.0%"), así que se aíslan
     estructuralmente los dos números."""
-    cell = page.locator('.ops-margen-cell').nth(idx)
     div = cell.locator('div')
     bruto = div.inner_text().strip() if div.count() == 1 else None
     completo = cell.inner_text()
-    neto = completo.replace(bruto, '', 1).strip() if bruto else completo.strip()
-    return bruto, neto
+    real = completo.replace(bruto, '', 1).strip() if bruto else completo.strip()
+    return bruto, real
+
+
+def margen_bruto_y_neto(page, idx):
+    return _bruto_y_real(page.locator('.ops-margen-cell').nth(idx))
+
+
+def markup_bruto_y_real(page, idx):
+    return _bruto_y_real(page.locator('.ops-markup-cell').nth(idx))
 
 
 def main():
@@ -192,26 +206,35 @@ def main():
             f"La fila SIN descuento no debería tener ningún resaltado: {bg_sin!r}"
         print(f"OK - fondo con descuento: {bg_dto}, sin descuento: {bg_sin}")
 
-        print("--- 'Costo unit.' muestra el de lista tachado y el NETO (800) en negrita ---")
+        print("--- 'Costo unit.' muestra el de lista (chico/gris, SIN tachado) y el NETO (800) en negrita ---")
         texto_fila_dto = fila_dto.inner_text()
         assert "1.000,00" in texto_fila_dto or "1000,00" in texto_fila_dto, \
             f"Debería verse el costo de lista (1.000): {texto_fila_dto!r}"
         assert "800,00" in texto_fila_dto, f"Debería verse el costo neto (800): {texto_fila_dto!r}"
-        print("OK")
+        costo_div = page.locator('tr.ops-detalle-row').nth(0).locator('td').nth(3).locator('div').first
+        costo_decoracion = costo_div.evaluate("el => getComputedStyle(el).textDecorationLine")
+        assert costo_decoracion in ("none", "normal"), f"El costo 'de lista' no debería estar tachado: {costo_decoracion!r}"
+        print(f"OK - text-decoration: {costo_decoracion!r}")
 
-        print("--- Margen de la línea CON descuento: real (20%, contra costo neto) Y el 'de lista' tachado (0%) ---")
+        print("--- Margen de la línea CON descuento: real (20%, contra costo neto) Y el 'de lista' (0%) ---")
         # precio_venta=1000, costo neto=800 -> margen real=(1000-800)/1000=20%.
         # Con el bug viejo (costo de lista=1000) hubiera dado 0% -- ahora ESE
-        # 0% se muestra igual, pero tachado, al lado del 20% real.
+        # 0% se muestra igual, chico y en gris, al lado del 20% real.
         bruto_dto, neto_dto = margen_bruto_y_neto(page, 0)
-        assert bruto_dto in ("0.0%", "0,0%"), f"El margen 'de lista' (tachado) debería ser 0%: {bruto_dto!r}"
+        assert bruto_dto in ("0.0%", "0,0%"), f"El margen 'de lista' debería ser 0%: {bruto_dto!r}"
         assert neto_dto in ("20.0%", "20,0%"), f"BUG: el margen real debería ser 20% (contra el costo neto): {neto_dto!r}"
-        print(f"OK - margen de lista (tachado): {bruto_dto!r}, margen real: {neto_dto!r}")
+        print(f"OK - margen de lista: {bruto_dto!r}, margen real: {neto_dto!r}")
 
-        print("--- Margen de la línea SIN descuento: sin cambios, SIN el tachado de 'margen de lista' ---")
+        print("--- El margen 'de lista' NO lleva tachado (pedido del usuario, 28/10/2026: más legible) ---")
+        margen_div = page.locator('.ops-margen-cell').nth(0).locator('div')
+        decoracion = margen_div.evaluate("el => getComputedStyle(el).textDecorationLine")
+        assert decoracion in ("none", "normal"), f"El valor 'de lista' no debería estar tachado: {decoracion!r}"
+        print(f"OK - text-decoration: {decoracion!r}")
+
+        print("--- Margen de la línea SIN descuento: sin cambios, SIN el 'margen de lista' aparte ---")
         # precio_venta=750, costo=500 -> margen=(750-500)/750=33.3%. Al no haber
         # descuento, costo de lista == costo neto -> no corresponde mostrar un
-        # segundo margen tachado (sería el mismo número, redundante).
+        # segundo margen aparte (sería el mismo número, redundante).
         # Índice 2: "Sin Descuento" quedó tercera alfabéticamente (después de "Con IVA").
         bruto_sin, neto_sin = margen_bruto_y_neto(page, 2)
         assert bruto_sin is None, f"Sin descuento no debería haber un margen 'de lista' aparte: {bruto_sin!r}"
@@ -221,7 +244,8 @@ def main():
         print("--- IVA / Costo Final / Precio Neto / Markup: línea SIN iva cargado ---")
         # prodDto no tiene iva en compra_items -> columna IVA = '—', y sin
         # IVA no hay uplift: Costo Final = Costo Neto (800), Precio Neto =
-        # Precio Venta (1000), Markup = 1000/800 = 1.25x.
+        # Precio Venta (1000), Markup real = 1000/800 = 1.25x, Markup "de
+        # lista" (mismo Precio Neto contra el costo SIN descuento) = 1000/1000 = 1.00x.
         assert "—" in page.locator('tr.ops-detalle-row').nth(0).locator('td').nth(4).inner_text(), \
             "Sin IVA cargado en la línea, la columna IVA debería mostrar '—'"
         assert "800,00" in page.locator('.ops-costofinal-cell').nth(0).inner_text(), \
@@ -229,14 +253,16 @@ def main():
         assert "1.000,00" in page.locator('.ops-precioneto-cell').nth(0).inner_text() or \
                "1000,00" in page.locator('.ops-precioneto-cell').nth(0).inner_text(), \
             f"Sin IVA, Precio Neto debería ser igual al Precio Venta (1000): {page.locator('.ops-precioneto-cell').nth(0).inner_text()!r}"
-        markup_dto = page.locator('.ops-markup-cell').nth(0).inner_text()
-        assert "1.25x" in markup_dto, f"Markup debería ser Precio Neto(1000) / Costo Neto(800) = 1.25x: {markup_dto!r}"
-        print(f"OK - Costo Final=800, Precio Neto=1000, Markup={markup_dto!r}")
+        markup_bruto_dto, markup_real_dto = markup_bruto_y_real(page, 0)
+        assert markup_bruto_dto == "1.00x", f"Markup 'de lista' debería ser Precio Neto(1000)/Costo Bruto(1000) = 1.00x: {markup_bruto_dto!r}"
+        assert markup_real_dto == "1.25x", f"Markup real debería ser Precio Neto(1000) / Costo Neto(800) = 1.25x: {markup_real_dto!r}"
+        print(f"OK - Costo Final=800, Precio Neto=1000, Markup de lista={markup_bruto_dto!r}, Markup real={markup_real_dto!r}")
 
         print("--- IVA / Costo Final / Precio Neto / Markup: línea CON iva 21%, sin descuento ---")
         # costo neto=1000 (sin descuento), iva=21% -> Costo Final=1210.
         # precio_venta=1210 (c/IVA) -> Precio Neto = 1210/1.21 = 1000.
-        # Markup = Precio Neto(1000) / Costo Neto(1000) = 1.00x.
+        # Markup = Precio Neto(1000) / Costo Neto(1000) = 1.00x. Sin descuento
+        # no corresponde mostrar un Markup "de lista" aparte (sería el mismo número).
         assert "21%" in fila_iva.inner_text(), f"Debería verse la alícuota de IVA (21%): {fila_iva.inner_text()!r}"
         assert "1.210,00" in page.locator('.ops-costofinal-cell').nth(1).inner_text() or \
                "1210,00" in page.locator('.ops-costofinal-cell').nth(1).inner_text(), \
@@ -244,10 +270,11 @@ def main():
         assert "1.000,00" in page.locator('.ops-precioneto-cell').nth(1).inner_text() or \
                "1000,00" in page.locator('.ops-precioneto-cell').nth(1).inner_text(), \
             f"Precio Neto debería ser 1210 / 1.21 = 1000: {page.locator('.ops-precioneto-cell').nth(1).inner_text()!r}"
-        markup_iva = page.locator('.ops-markup-cell').nth(1).inner_text()
-        assert "1.00x" in markup_iva, \
-            f"Markup debería ser Precio Neto(1000) / Costo Neto(1000) = 1.00x -- Precio Venta(1210) / Costo Final(1210) da lo mismo: {markup_iva!r}"
-        print(f"OK - Costo Final=1210, Precio Neto=1000, Markup={markup_iva!r}")
+        markup_bruto_iva, markup_real_iva = markup_bruto_y_real(page, 1)
+        assert markup_bruto_iva is None, f"Sin descuento no debería haber un Markup 'de lista' aparte: {markup_bruto_iva!r}"
+        assert markup_real_iva == "1.00x", \
+            f"Markup debería ser Precio Neto(1000) / Costo Neto(1000) = 1.00x -- Precio Venta(1210) / Costo Final(1210) da lo mismo: {markup_real_iva!r}"
+        print(f"OK - Costo Final=1210, Precio Neto=1000, Markup={markup_real_iva!r}")
 
         print("--- Editar el Precio Venta de la línea con descuento recalcula LOS DOS márgenes ---")
         input_dto = page.locator('.ops-precio-input').nth(0)
@@ -263,15 +290,16 @@ def main():
             f"BUG: tras editar el precio, el margen real debería recalcularse contra el costo neto (50%): {neto_edit!r}"
         print(f"OK - margen de lista: {bruto_edit!r}, margen real: {neto_edit!r}")
 
-        print("--- Precio Neto y Markup también se recalculan en vivo al editar el Precio Venta ---")
+        print("--- Precio Neto y Markup (real Y 'de lista') también se recalculan en vivo al editar el Precio Venta ---")
         # nuevoPrecio=1600 (sin IVA en esta línea) -> Precio Neto=1600,
-        # Markup=1600/800=2.00x.
+        # Markup real=1600/800=2.00x, Markup "de lista"=1600/1000=1.60x.
         precioneto_edit = page.locator('.ops-precioneto-cell').nth(0).inner_text()
         assert "1.600,00" in precioneto_edit or "1600,00" in precioneto_edit, \
             f"BUG: Precio Neto no se recalculó al editar el precio: {precioneto_edit!r}"
-        markup_edit = page.locator('.ops-markup-cell').nth(0).inner_text()
-        assert "2.00x" in markup_edit, f"BUG: Markup no se recalculó al editar el precio (debería ser 2.00x): {markup_edit!r}"
-        print(f"OK - Precio Neto={precioneto_edit!r}, Markup={markup_edit!r}")
+        markup_bruto_edit, markup_real_edit = markup_bruto_y_real(page, 0)
+        assert markup_bruto_edit == "1.60x", f"BUG: el Markup 'de lista' también debería recalcularse (1.60x): {markup_bruto_edit!r}"
+        assert markup_real_edit == "2.00x", f"BUG: Markup no se recalculó al editar el precio (debería ser 2.00x): {markup_real_edit!r}"
+        print(f"OK - Precio Neto={precioneto_edit!r}, Markup de lista={markup_bruto_edit!r}, Markup real={markup_real_edit!r}")
 
         print("--- Compra NO Factura A (Factura B): cerrar y abrir el detalle de esa otra compra ---")
         page.evaluate("() => document.getElementById('ops-detalle-close')?.click()")
