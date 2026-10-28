@@ -9,7 +9,8 @@ desde el 28/9/2026) y otra vez pegada a "Configuración" (su posición
 VIEJA, de antes de ese cambio). Causa: una promoción histórica a `main`
 cherry-pickeó el commit que agregaba la entrada nueva pero nunca el que
 sacaba la vieja -- `dev` nunca tuvo el bug (ahí el array moduleList de
-app.js siempre tuvo una sola entrada), era un residuo exclusivo de `main`.
+app.js siempre tuvo una sola entrada), era un residuo exclusivo de `main`
+(fix directo ahí, ver commit 658f25d).
 
 Este test es un guardia general, no específico de "Aprobaciones
 Pendientes": verifica que NINGÚN módulo del sidebar (ni en POS admin

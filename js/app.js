@@ -230,7 +230,7 @@
   // POS local), más allá del rol de quien esté logueado ahí.
   const ROUTE_ADMIN_POS_ONLY = ['configuracion', 'flujo', 'aprobaciones_pendientes'];
   // Rutas que ya se autoprotegen con su propio chequeo de rol==='admin'
-  // adentro del módulo (usuarios.js, configuracion.js, caja_admin.js,
+  // adentro del módulo (usuarios.js, configuracion.js,
   // adelanto_pago.js, aprobaciones_pendientes.js) — se listan igual acá
   // para blindaje centralizado.
   const ROUTE_ADMIN_ONLY = ['usuarios', 'configuracion', 'adelanto_pago', 'limpieza_prueba', 'aprobaciones_pendientes'];
