@@ -743,6 +743,14 @@
       // Mobile nav drawer (hamburguesa)
       initMobileNav();
 
+      // Peek de Productos: búsqueda rápida de stock/precio sin abandonar la
+      // pantalla actual (Ctrl+K / botón flotante) — pedido del usuario
+      // (29/10/2026). Oculto para quien no puede ver productos.
+      if (window.SGA_Permisos?.can('can_ver_productos')) {
+        const PeekProductos = await import('./modules/peek_productos.js').then(m => m.default);
+        PeekProductos.initFloatingButton();
+      }
+
       // El POS del local (cualquier rol, cajera incluida) arranca en el
       // dashboard de Inicio; admin-pos arranca en Productos.
       if (window.ADMIN_MODE) {
