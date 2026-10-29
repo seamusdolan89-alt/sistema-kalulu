@@ -92,6 +92,7 @@
     { key: 'can_informes_stock_muerto',         label: 'Stock sin Movimiento',                grupo: 'Informes', riesgo: 'bajo',  tipo: 'bool', default: false, requiere: 'can_informes' },
     { key: 'can_informes_salidas_stock',        label: 'Salidas de Stock (no venta)',          grupo: 'Informes', riesgo: 'bajo',  tipo: 'bool', default: false, requiere: 'can_informes' },
     { key: 'can_informes_sustitutos_grupos',    label: 'Grupos de Sustitutos',                 grupo: 'Informes', riesgo: 'bajo',  tipo: 'bool', default: false, requiere: 'can_informes' },
+    { key: 'can_informes_precios_etiquetas',    label: 'Precios y Etiquetas',                  grupo: 'Informes', riesgo: 'bajo',  tipo: 'bool', default: false, requiere: 'can_informes' },
   ];
 
   // ─── Plantillas de rol ──────────────────────────────────────────────────────
@@ -133,6 +134,7 @@
         can_informes_ventas_vendedor: true, can_informes_aging_cc: true,
         can_informes_resumen_diario: true, can_informes_stock_muerto: true,
         can_informes_salidas_stock: true, can_informes_sustitutos_grupos: true,
+        can_informes_precios_etiquetas: true,
       },
     },
   ];

@@ -18,6 +18,7 @@ const Informes = (() => {
     { id: 'stock_muerto',       label: 'Stock sin Movimiento' },
     { id: 'salidas_stock',      label: 'Salidas de Stock (no venta)' },
     { id: 'sustitutos_grupos',  label: 'Grupos de Sustitutos' },
+    { id: 'precios_etiquetas',  label: 'Precios y Etiquetas' },
   ];
 
   // can_informes (ruta) es el acceso a la SECCIÓN; cada id de REPORTES tiene
@@ -46,6 +47,7 @@ const Informes = (() => {
     user: null,
     data: null,
     diasSinMovimiento: 90,
+    diasSinModificarPrecio: 90, // 0 = todos los productos (sin filtrar)
     tipoSalida: 'todos', // 'todos' | 'consumo' | 'rotura' | 'vencimiento'
     mobilePeriod: 'mes', // 'hoy' | 'semana' | 'mes' | 'elegir-mes' — solo Admin-POS mobile
   };
@@ -404,6 +406,45 @@ const Informes = (() => {
     `, [sid, sid, cutoffISO]);
   }
 
+  // Días sin modificar precio/costo: mismo dato (ultima_modificacion_precio)
+  // que ya se actualiza en Compras, Editor de Producto, Familia y Operaciones
+  // de Stock cada vez que cambia costo o precio_venta — no hace falta
+  // trackear nada nuevo, solo mostrarlo. diasSinModificarPrecio = 0 muestra
+  // TODOS los productos (sin filtrar), para ver el listado completo con sus
+  // dos fechas sin importar cuándo fue el último cambio.
+  function queryPreciosEtiquetas() {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - state.diasSinModificarPrecio);
+    const cutoffISO = cutoff.toISOString();
+    const sinFiltro = state.diasSinModificarPrecio === 0;
+
+    return window.SGA_DB.query(`
+      SELECT
+        p.id,
+        COALESCE((SELECT codigo FROM codigos_barras
+                  WHERE producto_id = p.id AND es_principal = 1 LIMIT 1), '') AS codigo,
+        p.nombre,
+        COALESCE(cat.nombre, '') AS categoria,
+        COALESCE(pr.razon_social, '') AS proveedor,
+        p.precio_venta,
+        p.ultima_modificacion_precio,
+        p.ultima_impresion_etiqueta,
+        -- Misma condición que "Etiquetas sugeridas" (etiquetas.js): el precio
+        -- cambió después de la última impresión, o nunca se imprimió. El
+        -- REPLACE normaliza las marcas viejas guardadas con espacio en vez
+        -- de T (ver CLAUDE.md, "etiquetas: auditoría de impresión...").
+        CASE WHEN p.ultima_impresion_etiqueta IS NULL
+                  OR p.ultima_modificacion_precio > REPLACE(p.ultima_impresion_etiqueta, ' ', 'T')
+             THEN 1 ELSE 0 END AS pendiente_imprimir
+      FROM productos p
+      LEFT JOIN categorias cat ON p.categoria_id = cat.id
+      LEFT JOIN proveedores pr ON p.proveedor_principal_id = pr.id
+      WHERE p.activo = 1
+        AND (? OR p.ultima_modificacion_precio IS NULL OR p.ultima_modificacion_precio < ?)
+      ORDER BY (p.ultima_modificacion_precio IS NOT NULL), p.ultima_modificacion_precio ASC
+    `, [sinFiltro ? 1 : 0, cutoffISO]);
+  }
+
   function querySalidasStock() {
     const desde = toUTC(state.desde);
     const hasta = toUTC(addOneDay(state.hasta));
@@ -657,6 +698,21 @@ const Informes = (() => {
       ge('inf-dias-sin-mov')?.addEventListener('change', e => {
         state.diasSinMovimiento = Number(e.target.value);
       });
+    } else if (state.reporte === 'precios_etiquetas') {
+      bar.innerHTML = `
+        <div class="inf-extra-bar-inner">
+          <label>Sin cambios de precio</label>
+          <select id="inf-dias-sin-precio" class="inf-select" style="min-width:180px">
+            <option value="0"${state.diasSinModificarPrecio === 0 ? ' selected' : ''}>Todos los productos</option>
+            ${[30,60,90,180,365].map(d =>
+              `<option value="${d}"${d === state.diasSinModificarPrecio ? ' selected' : ''}>Hace ${d}+ días</option>`
+            ).join('')}
+          </select>
+        </div>
+      `;
+      ge('inf-dias-sin-precio')?.addEventListener('change', e => {
+        state.diasSinModificarPrecio = Number(e.target.value);
+      });
     } else if (state.reporte === 'salidas_stock') {
       bar.innerHTML = `
         <div class="inf-extra-bar-inner">
@@ -728,7 +784,7 @@ const Informes = (() => {
     state.desde   = ge('inf-desde')?.value       || state.desde;
     state.hasta   = ge('inf-hasta')?.value        || state.hasta;
 
-    const needsPeriod = !['aging_cc', 'stock_muerto', 'sustitutos_grupos'].includes(state.reporte);
+    const needsPeriod = !['aging_cc', 'stock_muerto', 'sustitutos_grupos', 'precios_etiquetas'].includes(state.reporte);
     if (needsPeriod && (!state.desde || !state.hasta)) {
       resultsEl.innerHTML = `<div class="inf-error">Seleccioná el período completo.</div>`;
       return;
@@ -782,6 +838,10 @@ const Informes = (() => {
           case 'sustitutos_grupos':
             state.data = queryGruposSustitutos();
             resultsEl.innerHTML = renderGruposSustitutos(state.data);
+            break;
+          case 'precios_etiquetas':
+            state.data = queryPreciosEtiquetas();
+            resultsEl.innerHTML = renderPreciosEtiquetas(state.data);
             break;
           default:
             resultsEl.innerHTML = `<div class="inf-error">Reporte no reconocido.</div>`;
@@ -1365,6 +1425,68 @@ const Informes = (() => {
     `;
   }
 
+  // ── REPORT: Precios y Etiquetas ─────────────────────────────────────────────
+
+  function renderPreciosEtiquetas(rows) {
+    const nuncaPrecio   = rows.filter(r => !r.ultima_modificacion_precio).length;
+    const nuncaEtiqueta = rows.filter(r => !r.ultima_impresion_etiqueta).length;
+    const pendientes    = rows.filter(r => r.pendiente_imprimir).length;
+    const filtroLabel   = state.diasSinModificarPrecio === 0
+      ? 'Todos los productos'
+      : `Sin cambios de precio hace ${state.diasSinModificarPrecio}+ días`;
+    return `
+      <div class="inf-report-header">
+        <div class="inf-report-title">
+          <h3>Precios y Etiquetas</h3>
+          <span class="inf-periodo">${esc(filtroLabel)}</span>
+        </div>
+        <div class="inf-export-btns">
+          <button id="inf-btn-excel" class="btn btn-sm inf-btn-excel">↓ Excel</button>
+          <button id="inf-btn-csv"   class="btn btn-sm">↓ CSV</button>
+        </div>
+      </div>
+      <div class="inf-kpi-row">
+        <div class="inf-kpi"><div class="inf-kpi-label">Productos</div><div class="inf-kpi-value">${rows.length}</div></div>
+        <div class="inf-kpi danger"><div class="inf-kpi-label">Nunca modificaron precio</div><div class="inf-kpi-value text-danger">${nuncaPrecio}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Nunca imprimieron etiqueta</div><div class="inf-kpi-value">${nuncaEtiqueta}</div></div>
+        <div class="inf-kpi highlight"><div class="inf-kpi-label">Etiqueta desactualizada</div><div class="inf-kpi-value">${pendientes}</div></div>
+      </div>
+      ${rows.length === 0 ? `<div class="inf-empty">No hay productos en el filtro seleccionado.</div>` : `
+        <div class="inf-table-wrap">
+          <table class="inf-table">
+            <thead><tr>
+              <th>Código</th><th>Nombre</th><th>Categoría</th><th>Proveedor</th>
+              <th class="num">Precio actual</th>
+              <th>Última modif. precio</th><th class="num">Días sin modificar</th>
+              <th>Última impresión etiqueta</th><th>¿Etiqueta al día?</th>
+            </tr></thead>
+            <tbody>
+              ${rows.map(r => {
+                const diasPrecio   = daysSince(r.ultima_modificacion_precio);
+                const diasPrecioStr = diasPrecio === null
+                  ? '<span class="text-danger bold">Nunca</span>'
+                  : `<span class="${diasPrecio > 180 ? 'text-danger' : diasPrecio > 90 ? 'text-warning' : ''}">${diasPrecio}d</span>`;
+                return `
+                  <tr>
+                    <td class="mono">${esc(r.codigo)}</td>
+                    <td>${esc(r.nombre)}</td>
+                    <td>${esc(r.categoria)}</td>
+                    <td>${esc(r.proveedor)}</td>
+                    <td class="num">${fmtPeso(r.precio_venta)}</td>
+                    <td>${r.ultima_modificacion_precio ? fmtFechaCorta(r.ultima_modificacion_precio.slice(0,10)) : '<span class="text-danger">Nunca</span>'}</td>
+                    <td class="num">${diasPrecioStr}</td>
+                    <td>${r.ultima_impresion_etiqueta ? fmtFechaCorta(r.ultima_impresion_etiqueta.slice(0,10)) : '<span class="text-warning">Nunca</span>'}</td>
+                    <td>${r.pendiente_imprimir ? '<span class="text-danger bold">Desactualizada</span>' : '<span class="text-success">Al día</span>'}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `}
+    `;
+  }
+
   // ── REPORT 9: Salidas de Stock (no venta) ─────────────────────────────────────
 
   function renderSalidasStock(rows) {
@@ -1830,6 +1952,9 @@ const Informes = (() => {
                     rep === 'stock_muerto' ? `Sin ventas en los últimos ${state.diasSinMovimiento} días` :
                     rep === 'salidas_stock' ? `Período: ${fmtPeriodo()} · ${TIPO_SALIDA_LABEL[state.tipoSalida] || 'Todos los tipos'}` :
                     rep === 'sustitutos_grupos' ? `Estado al ${new Date().toLocaleDateString('es-AR')}` :
+                    rep === 'precios_etiquetas' ? (state.diasSinModificarPrecio === 0
+                      ? 'Todos los productos'
+                      : `Sin cambios de precio hace ${state.diasSinModificarPrecio}+ días`) :
                     `Período: ${fmtPeriodo()}`;
 
     if (rep === 'ventas_producto' || rep === 'analitica_producto') {
@@ -1899,6 +2024,20 @@ const Informes = (() => {
         return [r.codigo, r.nombre, r.categoria, r.proveedor,
           r.stock_actual, r.costo, r.costo_inmovilizado,
           r.ultima_venta ? r.ultima_venta.slice(0,10) : 'Nunca', dias ?? 'Nunca'];
+      });
+      return { title, periodo, headers, data };
+    }
+    if (rep === 'precios_etiquetas') {
+      const headers = ['Código','Nombre','Categoría','Proveedor','Precio actual',
+                       'Última modificación de precio','Días sin modificar',
+                       'Última impresión de etiqueta','¿Etiqueta al día?'];
+      const data = rows.map(r => {
+        const dias = daysSince(r.ultima_modificacion_precio);
+        return [r.codigo, r.nombre, r.categoria, r.proveedor, r.precio_venta,
+          r.ultima_modificacion_precio ? r.ultima_modificacion_precio.slice(0,10) : 'Nunca',
+          dias ?? 'Nunca',
+          r.ultima_impresion_etiqueta ? r.ultima_impresion_etiqueta.slice(0,10) : 'Nunca',
+          r.pendiente_imprimir ? 'Desactualizada' : 'Al día'];
       });
       return { title, periodo, headers, data };
     }
