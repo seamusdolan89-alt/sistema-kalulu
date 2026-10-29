@@ -10,6 +10,7 @@
  * Compras integration: if localStorage has 'etiquetas_pending' (JSON array of
  * { id, nombre, precio_venta, codigo, cantidad }), those items are pre-loaded.
  */
+import Buscador from './buscador_productos.js';
 
 const JSBARCODE_CDN = 'https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js';
 
@@ -24,6 +25,7 @@ const mod = {
       results: [],
       showDrop: false,
       focusIdx: -1,    // keyboard-focused dropdown row (-1 = none)
+      searchTimer: null,
       sugeridas: [],
       sugeridasFocusIdx: -1,
       sugeridasFiltros: { categorias: new Set(), proveedores: new Set() },
@@ -249,10 +251,24 @@ const mod = {
         }
         if (e.key === 'Enter') {
           e.preventDefault();
-          this._selectFocused();
+          if (this._state.focusIdx >= 0) {
+            this._selectFocused();
+            return;
+          }
+          // Sin nada resaltado con flechas — el caso normal al escanear un
+          // código (el lector manda Enter apenas termina de tipear, antes de
+          // que el usuario llegue a usar las flechas). Probar código exacto
+          // por el motor único antes de no hacer nada.
+          const q = this._state.query.trim();
+          if (!q) return;
+          const sucursalId = window.SGA_Auth?.getCurrentUser()?.sucursal_id || '1';
+          const byBarcode = Buscador.porCodigo(q, { sucursalId });
+          if (byBarcode) { this._addItem(byBarcode); return; }
+          if (this._state.results.length === 1) this._addItem(this._state.results[0]);
           return;
         }
         if (e.key === 'Escape') {
+          clearTimeout(this._state.searchTimer);
           this._state.showDrop = false;
           this._state.focusIdx = -1;
           this._render();
@@ -437,33 +453,40 @@ const mod = {
   },
 
   // ── Search ─────────────────────────────────────────────────────────────
+  // Debounce de 180ms (mismo valor que POS/Vencimientos): sin esto, un lector
+  // de código de barras — que tipea muy rápido — dispara una consulta SQL +
+  // re-render completo del dropdown en CADA tecla, lo que se siente como
+  // lentitud al escanear seguido.
   _onSearch(q) {
     this._state.query = q;
+    clearTimeout(this._state.searchTimer);
     if (q.length < 2) {
       this._state.results = [];
       this._state.showDrop = false;
       this._renderDropdown();
       return;
     }
-    const like = `%${q.toLowerCase()}%`;
-    const rows = this._db().query(`
-      SELECT p.id, p.nombre, p.precio_venta,
-        (SELECT codigo FROM codigos_barras
-         WHERE producto_id = p.id AND es_principal = 1 LIMIT 1) AS codigo
-      FROM productos p
-      WHERE p.activo = 1
-        AND (LOWER(p.nombre) LIKE ?
-             OR EXISTS (SELECT 1 FROM codigos_barras WHERE producto_id = p.id AND codigo LIKE ?))
-      ORDER BY p.nombre
-      LIMIT 20
-    `, [like, like]) || [];
+    this._state.searchTimer = setTimeout(() => {
+      const like = `%${q.toLowerCase()}%`;
+      const rows = this._db().query(`
+        SELECT p.id, p.nombre, p.precio_venta,
+          (SELECT codigo FROM codigos_barras
+           WHERE producto_id = p.id AND es_principal = 1 LIMIT 1) AS codigo
+        FROM productos p
+        WHERE p.activo = 1
+          AND (LOWER(p.nombre) LIKE ?
+               OR EXISTS (SELECT 1 FROM codigos_barras WHERE producto_id = p.id AND codigo LIKE ?))
+        ORDER BY p.nombre
+        LIMIT 20
+      `, [like, like]) || [];
 
-    this._state.results = rows;
-    this._state.showDrop = true;
-    this._state.focusIdx = -1;
-    this._renderDropdown();
-    // Re-attach outside listener
-    document.addEventListener('click', this._outsideClick.bind(this), { once: true });
+      this._state.results = rows;
+      this._state.showDrop = true;
+      this._state.focusIdx = -1;
+      this._renderDropdown();
+      // Re-attach outside listener
+      document.addEventListener('click', this._outsideClick.bind(this), { once: true });
+    }, 180);
   },
 
   // Partial re-render: only swap the dropdown DOM without touching the rest of the UI
@@ -509,6 +532,12 @@ const mod = {
 
   // ── Item management ────────────────────────────────────────────────────
   _addItem(prod) {
+    // Cancelar la búsqueda debounced pendiente: sin esto, un Enter/click que
+    // agrega el item ANTES de que venzan los 180ms deja el timer vivo, que
+    // dispara después con el texto viejo y reabre el dropdown ya con el
+    // item agregado y el input vacío (búsqueda "fantasma", mismo bug que en
+    // Vencimientos/Consumo Interno/POS).
+    clearTimeout(this._state.searchTimer);
     const existing = this._state.items.find(i => i.id === prod.id);
     if (existing) {
       existing.cantidad = Math.min(999, existing.cantidad + 1);

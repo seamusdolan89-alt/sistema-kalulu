@@ -68,6 +68,12 @@ const Vencimientos = (() => {
       });
     }
 
+    // Cancelar la búsqueda debounced pendiente: sin esto, un Enter/click que
+    // agrega el item ANTES de que venzan los 180ms deja el timer vivo, que
+    // dispara después con el texto viejo y reabre el dropdown ya con el
+    // carrito actualizado y el input vacío (búsqueda "fantasma").
+    clearTimeout(searchTimer);
+
     // Limpiar búsqueda y foco al input
     const input = ge('ci-search-input');
     const dd    = ge('ci-search-dropdown');
@@ -306,6 +312,7 @@ const Vencimientos = (() => {
       if (e.key === 'Escape') {
         const dd = ge('ci-search-dropdown');
         if (dd && dd.style.display !== 'none') {
+          clearTimeout(searchTimer);
           searchInput.value = '';
           dd.style.display = 'none';
           lastResults = [];
