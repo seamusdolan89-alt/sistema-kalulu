@@ -34,9 +34,20 @@ const mod = {
       ultimaImpresion: null,
     };
     this._loadPending();
+    this._loadDraft();
     this._loadSugeridas();
     this._render();
     this._bind();
+  },
+
+  /**
+   * Se llama al navegar a OTRA pantalla (router, ver app.js). Sin esto, salir
+   * a atender una venta y volver después perdía toda la selección en curso —
+   * pedido explícito del usuario (29/10/2026) tras un caso real.
+   */
+  destroy() {
+    clearTimeout(this._state?.searchTimer);
+    this._saveDraft();
   },
 
   _db() { return window.SGA_DB; },
@@ -51,6 +62,49 @@ const mod = {
         list.forEach(p => this._addItem(p));
         localStorage.removeItem('etiquetas_pending');
       }
+    } catch (_) {}
+  },
+
+  // ── Borrador (pausar/retomar) ────────────────────────────────────────────
+  // Vive en localStorage de ESTA compu/navegador — alcanza para el caso real
+  // (salir a hacer una venta y volver en un rato) y no requiere sync: es un
+  // dato 100% descartable una vez impreso. Si dos personas distintas loguean
+  // en el mismo navegador, una podría ver el borrador de la otra — aceptado,
+  // mismo riesgo bajo que ya tiene 'etiquetas_pending'.
+  _saveDraft() {
+    try {
+      if (this._state.items.length > 0) {
+        localStorage.setItem('etiquetas_draft', JSON.stringify(this._state.items));
+      } else {
+        localStorage.removeItem('etiquetas_draft');
+      }
+    } catch (_) {}
+  },
+
+  _loadDraft() {
+    try {
+      const raw = localStorage.getItem('etiquetas_draft');
+      if (!raw) return;
+      const list = JSON.parse(raw);
+      if (Array.isArray(list) && list.length > 0) {
+        list.forEach(it => {
+          if (!it || !it.id) return;
+          const existing = this._state.items.find(i => i.id === it.id);
+          if (existing) {
+            existing.cantidad = Math.min(999, existing.cantidad + (it.cantidad || 1));
+          } else {
+            this._state.items.push({
+              id: it.id, nombre: it.nombre, precio_venta: it.precio_venta,
+              codigo: it.codigo || null, cantidad: it.cantidad || 1,
+            });
+          }
+        });
+        window.SGA_Utils?.showNotification?.(
+          `Se recuperó tu selección anterior (${list.length} producto${list.length !== 1 ? 's' : ''})`,
+          'info'
+        );
+      }
+      localStorage.removeItem('etiquetas_draft');
     } catch (_) {}
   },
 
