@@ -1696,11 +1696,11 @@
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO ventas
         (id, sucursal_id, sesion_caja_id, cliente_id, usuario_id,
-         fecha, subtotal, descuento, total, estado, sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+         fecha, subtotal, descuento, descuento_redondeo, total, estado, sync_status, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.sucursal_id || null, data.sesion_caja_id || null,
        data.cliente_id || null, data.usuario_id || null,
-       data.fecha, data.subtotal || 0, data.descuento || 0,
+       data.fecha, data.subtotal || 0, data.descuento || 0, data.descuento_redondeo || 0,
        data.total || 0, data.estado || 'completada', data.updated_at || null]
     );
 

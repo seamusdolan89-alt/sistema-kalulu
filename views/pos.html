@@ -510,6 +510,28 @@ main#app { overflow: hidden; }
 .pinput-vuelto.ok    { background: #e8f5e9; color: #2e7d32; }
 .pinput-vuelto.falta { background: #fff3e0; color: #e65100; }
 
+/* ── Redondeo de vuelto (descuento por falta de billetes chicos) ── */
+.redondeo-box { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #c8e6c9; font-weight: normal; }
+.redondeo-titulo { font-size: 0.82em; color: #555; margin-bottom: 6px; font-weight: 600; }
+.redondeo-opciones { display: flex; flex-wrap: wrap; gap: 6px; }
+.redondeo-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 6px 12px; border: 1.5px solid #a5d6a7; border-radius: 7px;
+  background: #fff; color: #2e7d32; font-weight: 700; font-size: 0.95em;
+  cursor: pointer;
+}
+.redondeo-btn:hover { background: #f1f8f2; }
+.redondeo-btn--sel { background: #2e7d32; color: #fff; border-color: #2e7d32; }
+.redondeo-btn--sel .redondeo-btn-sub { color: #e8f5e9; }
+.redondeo-btn--alto { border-color: #ffb74d; color: #e65100; }
+.redondeo-btn--alto.redondeo-btn--sel { background: #e65100; border-color: #e65100; color: #fff; }
+.redondeo-btn-sub { font-size: 0.72em; font-weight: 400; color: #888; white-space: nowrap; }
+.redondeo-ver-mas {
+  margin-top: 6px; background: none; border: none; color: #e65100;
+  font-size: 0.8em; cursor: pointer; padding: 2px 0; text-decoration: underline;
+}
+#redondeo-aplicado { margin-top: 6px; }
+
 /* ── RECOVER BANNER (uncontrolled exit) ── */
 #pos-recover-banner {
   display: none;

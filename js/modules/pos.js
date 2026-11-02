@@ -165,6 +165,11 @@ export const POS = (() => {
         items,
         pagos,
         descuentoGlobal = 0,
+        // Parte de descuentoGlobal (el caller ya lo suma ahí para que el total
+        // cobrado sea correcto) — se repite acá aparte solo para que quede en
+        // su propia columna, y así Informes pueda desglosar cuánto fue
+        // específicamente redondeo de vuelto vs. otros descuentos.
+        descuentoRedondeo = 0,
       } = ventaData;
 
       const now = window.SGA_Utils.formatISODate(new Date());
@@ -186,13 +191,13 @@ export const POS = (() => {
       const ventaSql = existingVentaId ? `
         UPDATE ventas SET
           sucursal_id = ?, sesion_caja_id = ?, cliente_id = ?, usuario_id = ?,
-          fecha = ?, subtotal = ?, descuento = ?, total = ?, estado = ?, sync_status = ?, updated_at = ?
+          fecha = ?, subtotal = ?, descuento = ?, descuento_redondeo = ?, total = ?, estado = ?, sync_status = ?, updated_at = ?
         WHERE id = ?
       ` : `
         INSERT INTO ventas (
           id, sucursal_id, sesion_caja_id, cliente_id, usuario_id,
-          fecha, subtotal, descuento, total, estado, sync_status, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          fecha, subtotal, descuento, descuento_redondeo, total, estado, sync_status, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
       window.SGA_DB.run(ventaSql, existingVentaId ? [
@@ -203,6 +208,7 @@ export const POS = (() => {
         now,
         subtotal,
         descuentoTotal,
+        descuentoRedondeo,
         total,
         'completada', // set to completada on confirm
         'pending',
@@ -217,6 +223,7 @@ export const POS = (() => {
         now,
         subtotal,
         descuentoTotal,
+        descuentoRedondeo,
         total,
         'completada',
         'pending',
@@ -644,6 +651,13 @@ export const POS = (() => {
       descTipo: 'monto',
       descuentoTotal: 0,
       descTipoTotal: 'monto',
+      // Descuento por redondeo de vuelto (2/11/2026): alternativa de vuelto
+      // "redondo" aceptada por la cajera, sin billetes chicos. Se resetea en
+      // cualquier cambio que invalide la sugerencia (recibeEfectivo, carrito,
+      // medio de pago) — ver renderVuelto()/renderPaymentInputs().
+      descuentoRedondeo: 0,
+      redondeoSeleccionado: null, // { monto, descuento, pct, billetes } o null
+      redondeoBaseRecibe: undefined, // recibeEfectivo con el que se calculó/aceptó la sugerencia actual
       promoDescuentos: 0,
       promoAplicadas: [],
       promoHints: [],
@@ -706,7 +720,7 @@ export const POS = (() => {
     const saveCart = () => sessionStorage.setItem('pos_cart', JSON.stringify(state.cart));
 
     const getCartSubtotal = () => state.cart.reduce((s, i) => s + i.cantidad * i.precioUnitario, 0);
-    const getCartDescuento = () => state.cart.reduce((s, i) => s + (i.descuentoItem || 0), 0) + state.descuentoGlobal + state.descuentoTotal + (state.promoDescuentos || 0);
+    const getCartDescuento = () => state.cart.reduce((s, i) => s + (i.descuentoItem || 0), 0) + state.descuentoGlobal + state.descuentoTotal + (state.promoDescuentos || 0) + (state.descuentoRedondeo || 0);
     const getCartTotal = () => Math.max(0, getCartSubtotal() - getCartDescuento());
     const getTotalAsignado = () => {
       if (state.cobroMultiple) {
@@ -1193,6 +1207,14 @@ export const POS = (() => {
       chk.addEventListener('change', () => {
         const bd = ge('saldo-favor-breakdown');
         if (bd) bd.style.display = chk.checked ? 'block' : 'none';
+        // Si el vuelto se deja como saldo a favor no sale plata física de la
+        // caja, así que redondear no tiene sentido — se oculta y se descarta
+        // cualquier opción ya elegida.
+        const rbox = ge('redondeo-box');
+        if (rbox) {
+          rbox.style.display = chk.checked ? 'none' : '';
+          if (chk.checked) { state.descuentoRedondeo = 0; state.redondeoSeleccionado = null; }
+        }
         updateConfirmBtn();
       });
     };
@@ -1213,7 +1235,98 @@ export const POS = (() => {
       wireSaldoFavorChk();
     };
 
+    // Sugerencias de vuelto redondo (sin billetes chicos) — pedido del dueño,
+    // 2/11/2026. Viven en js/utils.js (sugerirRedondeoVuelto, reusable) y leen
+    // las denominaciones ya cargadas en el recuento de Caja (window.SGA_Caja.
+    // getDenominaciones), no una lista aparte — si el dueño agrega/saca un
+    // billete ahí, esto se actualiza solo.
+    const buildRedondeoHtml = (vueltoExacto, ventaTotal) => {
+      if (!window.SGA_Caja?.getDenominaciones) return '';
+      const denoms = window.SGA_Caja.getDenominaciones();
+      const sug = window.SGA_Utils.sugerirRedondeoVuelto({ vueltoExacto, totalVenta: ventaTotal, denominaciones: denoms });
+      if (!sug.normales.length && !sug.extendidas.length) return '';
+
+      const pctTxt = pct => String(Math.round(pct * 10) / 10).replace('.', ',');
+      const btn = (c, extra = '') => `
+        <button type="button" class="redondeo-btn${extra}" data-monto="${c.monto}" data-descuento="${c.descuento}" data-pct="${c.pct}">
+          ${formatCurrency(c.monto)}
+          <span class="redondeo-btn-sub">${c.billetes.map(formatCurrency).join(' + ')} · -${pctTxt(c.pct)}%</span>
+        </button>`;
+
+      let html = `<div class="redondeo-box" id="redondeo-box">
+        <div class="redondeo-titulo">💡 ¿Sin billetes chicos? Redondeá el vuelto:</div>
+        <div class="redondeo-opciones">${sug.normales.map(c => btn(c)).join('')}</div>`;
+      if (sug.extendidas.length) {
+        html += `
+          <button type="button" id="redondeo-ver-mas" class="redondeo-ver-mas">Ver opciones hasta 10% ▾</button>
+          <div class="redondeo-opciones redondeo-extendidas" id="redondeo-extendidas" style="display:none">
+            ${sug.extendidas.map(c => btn(c, ' redondeo-btn--alto')).join('')}
+          </div>`;
+      }
+      html += `<div id="redondeo-aplicado" style="display:none"></div></div>`;
+      return html;
+    };
+
+    const wireRedondeoBtns = () => {
+      const box = ge('redondeo-box');
+      if (!box) return;
+      // Clickear acá sacaría el foco de "Recibe $" — eso dispara el 'focusout'
+      // global de app.js (redondeo a 2 decimales en campos data-money), que
+      // redispara 'input' sobre ese campo y hace renderVuelto() de nuevo,
+      // reseteando la selección justo antes de que termine de procesarse el
+      // click. preventDefault en mousedown evita que el foco se mueva.
+      box.addEventListener('mousedown', e => e.preventDefault());
+      ge('redondeo-ver-mas')?.addEventListener('click', () => {
+        const ext = ge('redondeo-extendidas');
+        if (ext) ext.style.display = ext.style.display === 'none' ? 'flex' : 'none';
+      });
+      box.querySelectorAll('.redondeo-btn').forEach(b => {
+        b.addEventListener('click', () => {
+          const monto = parseFloat(b.dataset.monto);
+          const descuento = parseFloat(b.dataset.descuento);
+          const pct = parseFloat(b.dataset.pct);
+          // Clickear la misma opcion ya elegida la deshace (vuelve al vuelto exacto).
+          const yaElegido = state.redondeoSeleccionado && Math.abs(state.redondeoSeleccionado.monto - monto) < 0.001;
+          state.descuentoRedondeo = yaElegido ? 0 : descuento;
+          state.redondeoSeleccionado = yaElegido ? null : { monto, descuento, pct };
+          // autoFillPayment() hizo pagosAmounts.efectivo = getEffectiveTotal()
+          // ANTES de este descuento — sin re-sincronizarlo acá queda viejo, y
+          // "El monto recibido supera el total" se dispara solo al confirmar
+          // (el excedente de $descuento no tiene dónde explicarse). No se
+          // puede llamar autoFillPayment() entero: re-renderiza todo el
+          // formulario y pierde esta misma selección.
+          const mid = [...state.activeMedios][0];
+          if (mid === 'efectivo') state.pagosAmounts.efectivo = getEffectiveTotal();
+          box.querySelectorAll('.redondeo-btn').forEach(x => x.classList.toggle('redondeo-btn--sel', x === b && !yaElegido));
+          const aplicado = ge('redondeo-aplicado');
+          if (aplicado) {
+            if (state.redondeoSeleccionado) {
+              aplicado.style.display = 'block';
+              aplicado.innerHTML = `<span style="color:#2E7D32;font-weight:600">✓ Vuelto redondeado a ${formatCurrency(monto)}</span>`;
+            } else {
+              aplicado.style.display = 'none';
+              aplicado.innerHTML = '';
+            }
+          }
+          updateConfirmBtn();
+        });
+      });
+    };
+
     const renderVuelto = () => {
+      // Solo invalidar una sugerencia ya aceptada si "recibe" CAMBIÓ de
+      // verdad. Clickear cualquier botón de afuera (incluido "Confirmar
+      // Venta") saca el foco de #recibe-efectivo, que dispara el redondeo a
+      // 2 decimales de app.js (data-money, en 'focusout') — ese handler
+      // redispara 'input' sobre el mismo campo con el MISMO valor, lo que
+      // llama a este renderVuelto() de nuevo. Sin esta comparación, esa
+      // llamada espuria reseteaba la selección justo antes de confirmar.
+      if (state.recibeEfectivo !== state.redondeoBaseRecibe) {
+        state.descuentoRedondeo = 0;
+        state.redondeoSeleccionado = null;
+        state.redondeoBaseRecibe = state.recibeEfectivo;
+      }
+
       const effTotal = getEffectiveTotal();
       const recibe = state.recibeEfectivo;
       const el = ge('efectivo-vuelto');
@@ -1256,8 +1369,9 @@ export const POS = (() => {
         if (debtRow) debtRow.style.display = 'none';
         el.className = 'pinput-vuelto ok';
 
-        el.innerHTML = buildSobranteHtml(vuelto, true);
+        el.innerHTML = buildSobranteHtml(vuelto, true) + buildRedondeoHtml(vuelto, getCartTotal());
         wireSaldoFavorChk();
+        wireRedondeoBtns();
         el.style.display = 'block';
 
       } else {
@@ -1697,6 +1811,9 @@ export const POS = (() => {
       sessionStorage.removeItem('sga_sale_mode');
       state.cart = [];
       state.descuentoTotal = 0;
+      state.descuentoRedondeo = 0;
+      state.redondeoSeleccionado = null;
+      state.redondeoBaseRecibe = undefined;
       state.pagosAmounts = { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0, cuenta_corriente: 0 };
       state.activeMedios = new Set(['efectivo']);
       state.recibeEfectivo = null;
@@ -1724,6 +1841,9 @@ export const POS = (() => {
       sessionStorage.removeItem('sga_sale_mode');
       state.cart = [];
       state.descuentoTotal = 0;
+      state.descuentoRedondeo = 0;
+      state.redondeoSeleccionado = null;
+      state.redondeoBaseRecibe = undefined;
       state.pagosAmounts = { efectivo: 0, mercadopago: 0, tarjeta: 0, transferencia: 0, cuenta_corriente: 0 };
       state.activeMedios = new Set(['efectivo']);
       state.recibeEfectivo = null;
@@ -1788,6 +1908,11 @@ export const POS = (() => {
           state.cobroMultiple = fresh.checked;
           Object.keys(state.pagosAmounts).forEach(k => { state.pagosAmounts[k] = 0; });
           state.recibeEfectivo = null;
+          // El redondeo de vuelto es solo para pago 100% efectivo — pasar a
+          // cobro múltiple invalida cualquier selección previa.
+          state.descuentoRedondeo = 0;
+          state.redondeoSeleccionado = null;
+          state.redondeoBaseRecibe = undefined;
           updateCobroToggleLabels();
           renderPaymentChips();
           autoFillPayment();
@@ -3562,7 +3687,8 @@ export const POS = (() => {
         usuarioId: state.currentUser.id,
         items: state.cart,
         pagos,
-        descuentoGlobal: state.descuentoGlobal + (state.descuentoTotal || 0) + (state.promoDescuentos || 0),
+        descuentoGlobal: state.descuentoGlobal + (state.descuentoTotal || 0) + (state.promoDescuentos || 0) + (state.descuentoRedondeo || 0),
+        descuentoRedondeo: state.descuentoRedondeo || 0,
         saldoFavorMonto: saldoFavorApplied,
       };
 
