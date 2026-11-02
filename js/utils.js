@@ -115,6 +115,92 @@
   }
 
   /**
+   * Sugerencias de "vuelto redondo" para no depender de billetes chicos
+   * (pedido del dueño, 2/11/2026 — falta de billetes de baja denominación +
+   * el cliente casi nunca los quiere igual).
+   *
+   * Busca, combinando hasta `maxBilletes` billetes de las denominaciones
+   * dadas (repetidos permitido), el monto MÁS BARATO por encima del vuelto
+   * exacto — nunca por debajo, el redondeo es siempre a favor del cliente.
+   * Para cada monto alcanzable, guarda la PRIMERA combinación que lo logra
+   * (la búsqueda es por niveles, de 1 billete hacia arriba, así que esa
+   * primera combinación es siempre la de menos billetes posible).
+   *
+   * El vuelto exacto en sí NUNCA es una sugerencia: si fuera alcanzable con
+   * las denominaciones de la lista, sería gratis (0% de descuento) y
+   * ganaría siempre la búsqueda — pero esa lista son las denominaciones que
+   * EXISTEN, no las que la cajera tiene a mano ahora mismo (que es
+   * justamente el problema que esto resuelve). El vuelto exacto se sigue
+   * pudiendo entregar igual que siempre, por fuera de esta función.
+   *
+   * @param {Object} o
+   * @param {number} o.vueltoExacto
+   * @param {number} o.totalVenta       el % de descuento se calcula sobre esto
+   * @param {number[]} o.denominaciones
+   * @param {number} [o.topeNormalPct=5]
+   * @param {number} [o.topeMaximoPct=10]
+   * @param {number} [o.maxBilletes=10] cota de la búsqueda, no una restricción real de uso
+   * @returns {{ normales: Array, extendidas: Array }} cada candidato:
+   *   { monto, descuento, pct, billetes: number[] }, ordenados de más barato a más caro
+   */
+  function sugerirRedondeoVuelto({
+    vueltoExacto, totalVenta, denominaciones,
+    topeNormalPct = 5, topeMaximoPct = 10, maxBilletes = 10, maxRepPorDenominacion = 2,
+  } = {}) {
+    const exacto = roundMoney(vueltoExacto);
+    const venta  = parseFloat(totalVenta) || 0;
+    if (exacto <= 0 || venta <= 0) return { normales: [], extendidas: [] };
+
+    const denoms = [...new Set((denominaciones || []).map(d => parseFloat(d)).filter(d => d > 0))]
+      .sort((a, b) => a - b);
+    if (!denoms.length) return { normales: [], extendidas: [] };
+
+    const limite = exacto + venta * (topeMaximoPct / 100);
+    const combos = new Map([[0, []]]); // suma -> billetes que la componen (la combinación con menos billetes)
+    let frontera = [0];
+    for (let i = 0; i < maxBilletes && frontera.length; i++) {
+      const siguiente = [];
+      for (const base of frontera) {
+        const billetesBase = combos.get(base);
+        for (const d of denoms) {
+          // Repetir el MISMO billete muchas veces es justo lo que esto tiene
+          // que evitar (si falta un billete, probablemente falten varios) —
+          // maxBilletes solo acota la búsqueda, esto es la restricción real.
+          const usados = billetesBase.reduce((n, x) => n + (x === d ? 1 : 0), 0);
+          if (usados >= maxRepPorDenominacion) continue;
+          const suma = roundMoney(base + d);
+          if (suma > limite || combos.has(suma)) continue;
+          combos.set(suma, [...billetesBase, d]);
+          siguiente.push(suma);
+        }
+      }
+      frontera = siguiente;
+    }
+
+    // El tope por denominación repetida (arriba) evita apilar el MISMO billete,
+    // pero no alcanza sola: con denominaciones chicas disponibles (ej. $20,
+    // $200) la combinación matemáticamente más barata puede igual terminar
+    // siendo 4-5 billetes distintos para ahorrar centavos — menos práctica de
+    // contar que una de 2 billetes un poco más cara. Se descartan del todo las
+    // combinaciones de más de 3 billetes: a esa escala de descuento (siempre
+    // chico, acotado por el tope %) no vale la pena la complejidad extra.
+    const candidatos = [...combos.entries()]
+      .filter(([monto, billetes]) => monto > exacto + 0.009 && billetes.length <= 3)
+      .sort((a, b) => a[0] - b[0])
+      .map(([monto, billetes]) => {
+        const descuento = roundMoney(monto - exacto);
+        const pct = Math.round((descuento / venta) * 10000) / 100;
+        return { monto, descuento, pct, billetes };
+      })
+      .filter(c => c.pct <= topeMaximoPct + 0.001);
+
+    return {
+      normales:   candidatos.filter(c => c.pct <= topeNormalPct + 0.001).slice(0, 3),
+      extendidas: candidatos.filter(c => c.pct > topeNormalPct + 0.001).slice(0, 2),
+    };
+  }
+
+  /**
    * Validate email
    * 
    * @param {string} email
@@ -331,6 +417,7 @@
     parseCurrency,
     roundTo10,
     roundMoney,
+    sugerirRedondeoVuelto,
     isValidEmail,
     isValidCUIT,
     debounce,

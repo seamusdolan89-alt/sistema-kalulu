@@ -2562,6 +2562,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
     registrarEgreso,
     registrarIngreso,
     getTotalesSesion,
+    getDenominaciones,
   };
 
   return { init, destroy };

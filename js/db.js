@@ -898,6 +898,13 @@
       // De que venta salio (vuelto en efectivo que el cliente dejo a favor o con el que cancelo
       // deuda): anular o editar esa venta tiene que poder deshacer este ingreso.
       "ALTER TABLE ingresos_caja ADD COLUMN venta_id TEXT",
+      // Descuento por redondeo de vuelto en efectivo (2/11/2026): aparte de
+      // ventas.descuento (que sigue significando "descuento comercial" como
+      // siempre) para poder ver en Informes cuánto costó específicamente el
+      // redondeo, sin mezclarlo con otros descuentos. Ya está incluido DENTRO
+      // de ventas.descuento/total (pos.js lo suma ahí también) — esta columna
+      // es solo para el desglose, no cambia el total cobrado.
+      "ALTER TABLE ventas ADD COLUMN descuento_redondeo REAL DEFAULT 0",
     ];
     // Las marcas de impresion de etiquetas se guardaban con un espacio donde va
     // la T ("2026-09-08 14:30:00"), mientras que ultima_modificacion_precio usa

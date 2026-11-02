@@ -326,6 +326,18 @@ const Informes = (() => {
       GROUP BY ${dia('e.fecha')}
     `, [sid, desde, hasta]);
 
+    // Ya está incluido dentro de cobranza_ventas/total_recibido (reduce el total
+    // cobrado como cualquier otro descuento) — esto es solo para poder verlo
+    // aparte y auditar que el tope (5-10%) no se esté usando de más.
+    const redondeos = window.SGA_DB.query(`
+      SELECT ${dia('v.fecha')} AS dia, SUM(v.descuento_redondeo) AS monto
+      FROM ventas v
+      WHERE v.estado = 'completada'
+        AND v.sucursal_id = ?
+        AND v.fecha >= ? AND v.fecha < ?
+      GROUP BY ${dia('v.fecha')}
+    `, [sid, desde, hasta]);
+
     const dias = {};
     const fila = d => dias[d] || (dias[d] = {
       dia: d, num_ventas: 0,
@@ -335,7 +347,7 @@ const Informes = (() => {
       // que no sea uno de los 4 fijos. Sin este bucket esa plata sumaría al total pero no
       // aparecería en ninguna columna del desglose.
       otros: 0,
-      cuenta_corriente: 0, egresos: 0,
+      cuenta_corriente: 0, egresos: 0, descuento_redondeo: 0,
     });
     const FIJOS = ['efectivo', 'mercadopago', 'tarjeta', 'transferencia'];
     const porMedio = (r, medio, monto) => { if (FIJOS.includes(medio)) r[medio] += monto; else r.otros += monto; };
@@ -358,6 +370,7 @@ const Informes = (() => {
       porMedio(r, x.medio, monto);
     });
     egresos.forEach(x => { fila(x.dia).egresos += parseFloat(x.egresos) || 0; });
+    redondeos.forEach(x => { fila(x.dia).descuento_redondeo += parseFloat(x.monto) || 0; });
 
     return Object.values(dias)
       .sort((a, b) => a.dia.localeCompare(b.dia))
@@ -1282,7 +1295,7 @@ const Informes = (() => {
   function renderResumenDiario(rows) {
     const CAMPOS = ['num_ventas', 'cobranza_ventas', 'cobranza_deuda', 'vuelto_favor', 'otros_ingresos',
       'total_recibido', 'efectivo', 'mercadopago', 'tarjeta', 'transferencia', 'otros',
-      'cuenta_corriente', 'egresos', 'neto', 'efectivo_neto'];
+      'cuenta_corriente', 'egresos', 'neto', 'efectivo_neto', 'descuento_redondeo'];
     const tot = {};
     CAMPOS.forEach(k => { tot[k] = rows.reduce((a, r) => a + (r[k] || 0), 0); });
     const celda = v => `<td class="num">${v > 0.005 ? fmtPeso(v) : '—'}</td>`;
@@ -1298,6 +1311,7 @@ const Informes = (() => {
         <div class="inf-kpi"><div class="inf-kpi-label">Egresos</div><div class="inf-kpi-value text-danger">${fmtPeso(tot.egresos)}</div></div>
         <div class="inf-kpi"><div class="inf-kpi-label">Neto de caja</div><div class="inf-kpi-value ${tot.neto >= 0 ? 'text-success' : 'text-danger'}">${fmtPeso(tot.neto)}</div></div>
         <div class="inf-kpi"><div class="inf-kpi-label">Efectivo neto (recibido − egresos)</div><div class="inf-kpi-value ${tot.efectivo_neto >= 0 ? 'text-success' : 'text-danger'}">${fmtPeso(tot.efectivo_neto)}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Descuento por redondeo de vuelto</div><div class="inf-kpi-value">${fmtPeso(tot.descuento_redondeo)}</div></div>
       </div>
       ${rows.length === 0 ? `<div class="inf-empty">No hay movimientos en el período seleccionado.</div>` : `
         <div class="inf-table-wrap">
@@ -2003,11 +2017,11 @@ const Informes = (() => {
     if (rep === 'resumen_diario') {
       const headers = ['Fecha','Ventas','Cobranza de ventas','Cobranza de deuda','Vuelto a favor','Otros ingresos',
                        'Total recibido','Efectivo','Mercado Pago','Tarjeta','Transferencia','Otros medios',
-                       'Cta. Cte. (fiada)','Egresos','Neto'];
+                       'Cta. Cte. (fiada)','Egresos','Neto','Descuento por redondeo de vuelto'];
       const data = rows.map(r => [fmtFechaCorta(r.dia), r.num_ventas,
         r.cobranza_ventas, r.cobranza_deuda, r.vuelto_favor, r.otros_ingresos,
         r.total_recibido, r.efectivo, r.mercadopago, r.tarjeta, r.transferencia, r.otros,
-        r.cuenta_corriente, r.egresos, r.neto]);
+        r.cuenta_corriente, r.egresos, r.neto, r.descuento_redondeo]);
       return { title, periodo, headers, data };
     }
     if (rep === 'salidas_stock') {
