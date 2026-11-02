@@ -610,10 +610,13 @@ const SGA_PagosProveedores = (() => {
 
   /**
    * Completar una NC provisoria con los datos de la NC REAL del proveedor: su N° de
-   * comprobante y su importe (puede no coincidir centavo a centavo con lo calculado).
+   * comprobante, tipo (A/B/C), importe y — si es "A" — el desglose fiscal (neto, IVA,
+   * imp. interno, percepciones). El importe puede no coincidir centavo a centavo con
+   * lo calculado de las líneas (motivo original de este flujo). `fiscal` es opcional:
+   * sin tipo "A" no tiene sentido pedirlo.
    * Si estaba aplicada a la factura de origen, se vuelve a aplicar por el importe real.
    */
-  function completarNotaCredito(pagoId, { numero_comprobante, total } = {}) {
+  function completarNotaCredito(pagoId, { numero_comprobante, total, condicion_nc = '', fiscal = {} } = {}) {
     if (!window.ADMIN_MODE) return { success: false, error: 'Completar una NC solo se puede desde Admin-POS' };
     const numero = String(numero_comprobante || '').trim();
     const nuevoTotal = parseFloat(total) || 0;
@@ -626,12 +629,23 @@ const SGA_PagosProveedores = (() => {
     )[0];
     if (!pago) return { success: false, error: 'No es una nota de crédito provisoria' };
 
+    const letraA = condicion_nc === 'A';
+    const num = v => parseFloat(v) || 0;
+    const subtotalNeto = letraA ? num(fiscal.subtotal_neto) : 0;
+    const iva105 = letraA ? num(fiscal.iva_105) : 0;
+    const iva21 = letraA ? num(fiscal.iva_21) : 0;
+    const impInt = letraA ? num(fiscal.imp_interno) : 0;
+    const percIva = letraA ? num(fiscal.percepcion_iva) : 0;
+    const percIibb = letraA ? num(fiscal.percepcion_iibb) : 0;
+
     const ts = now();
     try {
       db().beginBatch();
       db().run(
-        `UPDATE pagos_proveedores SET numero_comprobante = ?, nc_provisoria = 0, sync_status = 'pending', updated_at = ? WHERE id = ?`,
-        [numero, ts, pagoId]
+        `UPDATE pagos_proveedores SET numero_comprobante = ?, condicion_nc = ?, nc_provisoria = 0,
+           subtotal_neto = ?, iva_105 = ?, iva_21 = ?, imp_interno = ?, percepcion_iva = ?, percepcion_iibb = ?,
+           sync_status = 'pending', updated_at = ? WHERE id = ?`,
+        [numero, condicion_nc || null, subtotalNeto, iva105, iva21, impInt, percIva, percIibb, ts, pagoId]
       );
       db().run(
         `UPDATE pagos_proveedores_metodos SET monto = ?, referencia = ? WHERE pago_id = ? AND metodo = 'nota_credito'`,
@@ -1740,11 +1754,13 @@ const CuentaCorrienteProveedores = (() => {
   // calculado. Si estaba aplicada a la factura de origen, se re-aplica por el importe real.
   function openModalCompletarNC(pagoId, proveedorId, proveedorNombre) {
     PagoWizard.ensureCss();
+    NotaCreditoWizard.ensureCss(); // .ncw-fiscal / .ncw-es-a / .ncw-solo-a — mismos campos que "Registrar NC"
     const overlay = ge('ccprov-overlay');
     if (!overlay) return;
 
     const pago = window.SGA_DB.query(
       `SELECT p.id, p.fecha, p.compra_origen_id, p.condicion_nc,
+              p.subtotal_neto, p.iva_105, p.iva_21, p.imp_interno, p.percepcion_iva, p.percepcion_iibb,
               COALESCE((SELECT SUM(m.monto) FROM pagos_proveedores_metodos m WHERE m.pago_id = p.id), 0) AS total
        FROM pagos_proveedores p WHERE p.id = ? AND p.tipo = 'nota_credito' AND p.nc_provisoria = 1`, [pagoId]
     )[0];
@@ -1755,9 +1771,11 @@ const CuentaCorrienteProveedores = (() => {
        WHERE i.pago_id = ? ORDER BY i.rowid`, [pagoId]
     );
     const total = parseFloat(pago.total) || 0;
+    const num = v => parseFloat(v) || 0;
+    const redondear = v => v ? (Math.round(v * 100) / 100) : '';
 
     overlay.innerHTML = `
-      <div class="ccprov-modal" style="max-width:560px">
+      <div class="ccprov-modal" style="max-width:640px">
         <div class="ccprov-modal-hdr">
           <span>\u{1F9FE} Completar nota de crédito \u2014 ${esc(proveedorNombre)}</span>
           <button class="ccprov-modal-close" id="btn-comp-close" aria-label="Cerrar" title="Cerrar">\u2715</button>
@@ -1767,17 +1785,41 @@ const CuentaCorrienteProveedores = (() => {
           <ul style="margin:0 0 4px 18px;padding:0">
             ${lineas.map(l => `<li>${esc(l.nombre || 'Producto')} — ${l.cantidad} × ${fmt$(l.costo_unitario)}${l.iva ? ` + IVA ${String(l.iva).replace('.', ',')}%` : ''}</li>`).join('')}
           </ul>
-          <p style="margin:0;color:var(--color-text-secondary)">Cuando llegue la NC real del proveedor, cargá su número y su importe (puede no coincidir centavo a centavo).</p>
+          <p style="margin:0;color:var(--color-text-secondary)">Cuando llegue la NC real del proveedor, cargá sus datos tal cual el comprobante (puede no coincidir centavo a centavo con lo calculado).</p>
           <div class="ccprov-field-row">
             <div class="ccprov-field">
+              <label for="comp-letra">Tipo de comprobante</label>
+              <select class="ccprov-input" id="comp-letra">
+                <option value="">— (sin discriminar IVA)</option>
+                <option value="A">NC A (discrimina IVA)</option>
+                <option value="B">NC B</option>
+                <option value="C">NC C</option>
+              </select>
+            </div>
+            <div class="ccprov-field" style="flex:1.5">
               <label for="comp-numero">N° de la NC del proveedor</label>
               <input type="text" class="ccprov-input" id="comp-numero" placeholder="0001-00000123" autocomplete="off">
             </div>
-            <div class="ccprov-field">
-              <label for="comp-total">Importe de la NC</label>
-              <input type="number" class="ccprov-input" id="comp-total" min="0" step="any" data-money="true" value="${Math.round(total * 100) / 100}">
-            </div>
           </div>
+          <div class="ncw-fiscal" id="comp-fiscal">
+            <div class="ccprov-field ncw-solo-a"><label for="comp-neto">Subtotal neto</label>
+              <input type="number" class="ccprov-input" id="comp-neto" min="0" step="any" data-money="true" value="${redondear(num(pago.subtotal_neto))}"></div>
+            <div class="ccprov-field ncw-solo-a"><label for="comp-iva105">IVA 10,5%</label>
+              <input type="number" class="ccprov-input" id="comp-iva105" min="0" step="any" data-money="true" value="${redondear(num(pago.iva_105))}"></div>
+            <div class="ccprov-field ncw-solo-a"><label for="comp-iva21">IVA 21%</label>
+              <input type="number" class="ccprov-input" id="comp-iva21" min="0" step="any" data-money="true" value="${redondear(num(pago.iva_21))}"></div>
+            <div class="ccprov-field ncw-solo-a"><label for="comp-impint">Imp. interno</label>
+              <input type="number" class="ccprov-input" id="comp-impint" min="0" step="any" data-money="true" value="${redondear(num(pago.imp_interno))}"></div>
+            <div class="ccprov-field ncw-solo-a"><label for="comp-perciva">Percepción IVA</label>
+              <input type="number" class="ccprov-input" id="comp-perciva" min="0" step="any" data-money="true" value="${redondear(num(pago.percepcion_iva))}"></div>
+            <div class="ccprov-field ncw-solo-a"><label for="comp-percibb">Percepción IIBB</label>
+              <input type="number" class="ccprov-input" id="comp-percibb" min="0" step="any" data-money="true" value="${redondear(num(pago.percepcion_iibb))}"></div>
+          </div>
+          <div class="ncw-total-box">
+            <label for="comp-total">Importe de la NC</label>
+            <input type="number" class="ccprov-input" id="comp-total" min="0" step="any" data-money="true" value="${Math.round(total * 100) / 100}">
+          </div>
+          <div id="comp-total-hint" style="text-align:right;font-size:12px;color:var(--color-text-secondary);margin-top:-6px"></div>
           <div id="comp-error" style="display:none;color:#c62828;font-size:13px"></div>
         </div>
         <div class="ccprov-modal-ftr">
@@ -1786,15 +1828,49 @@ const CuentaCorrienteProveedores = (() => {
         </div>
       </div>`;
     overlay.classList.remove('hidden');
+
+    const modal = overlay.querySelector('.ccprov-modal');
+    ge('comp-letra').value = pago.condicion_nc || '';
+
+    // Mismo patron que nota_credito_wizard.js: con tipo "A" se ven los campos
+    // fiscales y el Importe se recalcula solo de ellos, salvo que el usuario
+    // ya lo haya tocado a mano (ahi se respeta lo que escribio — puede no
+    // coincidir centavo a centavo con el comprobante real).
+    const tocado = new Set();
+    const esA = () => ge('comp-letra').value === 'A';
+    const recalcular = () => {
+      modal.classList.toggle('ncw-es-a', esA());
+      const calculado = esA()
+        ? num(ge('comp-neto').value) + num(ge('comp-iva105').value) + num(ge('comp-iva21').value)
+              + num(ge('comp-impint').value) + num(ge('comp-perciva').value) + num(ge('comp-percibb').value)
+        : null;
+      if (calculado != null && !tocado.has('comp-total')) ge('comp-total').value = redondear(calculado);
+      const dif = calculado != null ? num(ge('comp-total').value) - calculado : 0;
+      ge('comp-total-hint').textContent = calculado != null && tocado.has('comp-total') && Math.abs(dif) > 0.01
+        ? `Calculado de los campos fiscales: ${fmt$(calculado)} (diferencia ${fmt$(Math.abs(dif))})`
+        : '';
+    };
+    ge('comp-letra').addEventListener('change', recalcular);
+    ['comp-neto', 'comp-iva105', 'comp-iva21', 'comp-impint', 'comp-perciva', 'comp-percibb', 'comp-total'].forEach(id => {
+      ge(id).addEventListener('input', () => { tocado.add(id); recalcular(); });
+    });
+    recalcular();
+
     setTimeout(() => ge('comp-numero')?.focus(), 50);
 
     const close = () => { overlay.classList.add('hidden'); overlay.innerHTML = ''; };
     ge('btn-comp-close').addEventListener('click', close);
     ge('btn-comp-cancel').addEventListener('click', close);
     ge('btn-comp-ok').addEventListener('click', () => {
+      const letra = ge('comp-letra').value;
       const res = data().completarNotaCredito(pagoId, {
         numero_comprobante: ge('comp-numero').value,
         total: ge('comp-total').value,
+        condicion_nc: letra,
+        fiscal: letra === 'A' ? {
+          subtotal_neto: ge('comp-neto').value, iva_105: ge('comp-iva105').value, iva_21: ge('comp-iva21').value,
+          imp_interno: ge('comp-impint').value, percepcion_iva: ge('comp-perciva').value, percepcion_iibb: ge('comp-percibb').value,
+        } : {},
       });
       if (!res.success) {
         const err = ge('comp-error');

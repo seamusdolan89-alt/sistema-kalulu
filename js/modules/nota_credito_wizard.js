@@ -588,7 +588,7 @@ const SGA_NotaCreditoWizard = (() => {
     setTimeout(() => (ge('ncw-proveedor').value ? ge('ncw-buscar') : ge('ncw-proveedor')).focus(), 60);
   }
 
-  return { abrir, puede };
+  return { abrir, puede, ensureCss };
 })();
 
 window.SGA_NotaCreditoWizard = SGA_NotaCreditoWizard;
