@@ -138,6 +138,15 @@ def main():
         assert "No" in fila_real, f"El grupo de la referencia real no deberia marcar problema: {fila_real!r}"
         print("OK - fila de la referencia real no marca problema")
 
+        print("--- 'Editar grupo...' aparece en TODAS las filas, no solo las que tienen problema (4/11/2026) ---")
+        assert page.locator('.inf-btn-editar-grupo[data-ref-id="sust-ref-real"]').count() == 1, (
+            "El grupo SIN problema tambien deberia tener 'Editar grupo...'"
+        )
+        assert page.locator('.inf-btn-editar-grupo[data-ref-id="sust-intermed"]').count() == 1, (
+            "El grupo CON problema deberia seguir teniendo 'Editar grupo...'"
+        )
+        print("OK")
+
         # ── Acciones para resolver el problema desde el reporte ──────────────────────────
         def estado_db():
             return page.evaluate("""() => Object.fromEntries(
@@ -150,7 +159,9 @@ def main():
             page.wait_for_timeout(400)
 
         print("--- Editar grupo...: destildar al seguidor lo saca del grupo ---")
-        page.locator(".inf-btn-editar-grupo").click()
+        # Desde este cambio "Editar grupo..." aparece en TODAS las filas, no solo en las
+        # que tienen un problema -- hay que apuntar a la del grupo con problema puntual.
+        page.locator('.inf-btn-editar-grupo[data-ref-id="sust-intermed"]').click()
         page.wait_for_timeout(300)
         editor = page.locator("#inf-sust-editor")
         assert editor.is_visible(), "No se abrio el editor del grupo"
@@ -176,12 +187,12 @@ def main():
                              VALUES ('sust-seguidor', 'sust-intermed', 'sust-intermed', 1, ?)`, [now]);
         }""")
         regenerar()
-        page.locator(".inf-btn-editar-grupo").click()
+        page.locator('.inf-btn-editar-grupo[data-ref-id="sust-intermed"]').click()
         page.wait_for_timeout(200)
         page.keyboard.press("Escape")
         page.wait_for_timeout(200)
         assert not page.locator("#inf-sust-editor").count(), "Escape deberia cerrar el editor"
-        assert page.locator(".inf-btn-editar-grupo").count() == 1, "El reporte tiene que seguir ahi"
+        assert page.locator('.inf-btn-editar-grupo[data-ref-id="sust-intermed"]').count() == 1, "El reporte tiene que seguir ahi"
         print("OK")
 
         print("--- Aceptar sugerencia: repunta al seguidor a la referencia real ---")
