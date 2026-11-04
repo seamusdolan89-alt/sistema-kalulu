@@ -1377,9 +1377,14 @@ const EditorProducto = (() => {
   };
 
   // Add a new product to the current group (or bootstrap the group with this product as reference).
-  // Escribe por GruposSustitutos.aplicarCambioReferencia (resuelve la cadena en las dos
-  // direcciones). Si el producto elegido ya pertenece a OTRO grupo, o es referencia de otros,
-  // se avisa a quienes arrastra antes de moverlos.
+  // Escribe por GruposSustitutos.moverMiembro, que mueve SOLO a este producto — a
+  // diferencia de aplicarCambioReferencia (pensada para cambiar la referencia de un
+  // grupo ENTERO), no arrastra al resto de los miembros del grupo viejo. Bug real
+  // reportado por el usuario (3/11/2026): mover un miembro común de otro grupo movía
+  // también a todos sus ex compañeros, cuando solo quería mover ese uno. Si el
+  // producto elegido es A SU VEZ referencia de otros, no hay forma de moverlo solo
+  // (sus seguidores quedarían apuntando a alguien que apunta a otro) — ahí sí se
+  // avisa a quiénes arrastra antes de moverlos, igual que antes.
   const addMiembroGrupo = (miembroId, referenciaId) => {
     if (!miembroId) return;
     const refId = referenciaId || state.productoId;
@@ -1387,14 +1392,12 @@ const EditorProducto = (() => {
 
     const hoy = GruposSustitutos.referenciaRealDe(miembroId);
     if (hoy === refId) { showToast('Ese producto ya es parte del grupo'); return; }
-    if (hoy) {
-      const grupoViejo = [hoy, ...GruposSustitutos.seguidoresDe(hoy).map(f => f.id)]
-        .filter(id => id !== miembroId);
-      const lista = grupoViejo.map(id => '• ' + nombreProducto(id)).join('\n');
+
+    const seguidoresMiembro = GruposSustitutos.seguidoresDe(miembroId);
+    if (seguidoresMiembro.length) {
+      const lista = seguidoresMiembro.map(f => '• ' + f.nombre).join('\n');
       const seguir = confirm(
-        `"${nombreProducto(miembroId)}" ya pertenece a otro grupo (referencia: "${nombreProducto(hoy)}").\n\n` +
-        (lista ? `Al agregarlo se mueven también al grupo de "${nombreProducto(refId)}":\n${lista}\n\n` : '') +
-        '¿Confirmás?'
+        `"${nombreProducto(miembroId)}" es a su vez referencia de otro grupo — moverlo mueve también a quienes le apuntan:\n${lista}\n\n¿Confirmás?`
       );
       if (!seguir) return;
     }
@@ -1404,7 +1407,7 @@ const EditorProducto = (() => {
     if (refId === state.productoId) {
       GruposSustitutos.aplicarCambioReferencia(state.productoId, refId);
     }
-    GruposSustitutos.aplicarCambioReferencia(miembroId, refId);
+    GruposSustitutos.moverMiembro(miembroId, refId);
     renderSustitutos();
     showToast('Miembro agregado al grupo');
   };
