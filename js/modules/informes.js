@@ -51,6 +51,7 @@ const Informes = (() => {
     diasSinModificarPrecio: 90, // 0 = todos los productos (sin filtrar)
     tipoSalida: 'todos', // 'todos' | 'consumo' | 'rotura' | 'vencimiento'
     sustMostrarSinGrupo: false, // informe "Grupos de Sustitutos": filtro de productos sin grupo
+    sustFiltroTexto: '', // informe "Grupos de Sustitutos": filtro por nombre/código
     mobilePeriod: 'mes', // 'hoy' | 'semana' | 'mes' | 'elegir-mes' — solo Admin-POS mobile
   };
 
@@ -1681,10 +1682,24 @@ const Informes = (() => {
     `;
   }
 
+  // Coincide si el texto aparece en el nombre/código de la referencia o de CUALQUIER
+  // miembro — buscar "arroz" tiene que encontrar el grupo aunque "arroz" solo esté en
+  // el nombre de un miembro, no en el de la referencia.
+  const grupoCoincide = (g, needle) => {
+    if (!needle) return true;
+    const en = (s) => (s || '').toLowerCase().includes(needle);
+    return en(g.ref_nombre) || en(g.ref_codigo) || g.miembros.some(m => en(m.nombre) || en(m.codigo));
+  };
+
   function renderGruposSustitutos(grupos) {
-    const totMiembros = grupos.reduce((s, g) => s + g.miembros.length, 0);
-    const conProblema = grupos.filter(g => g.anomalia).length;
-    const sinGrupo = state.sustMostrarSinGrupo ? queryProductosSinGrupo() : null;
+    const needle = (state.sustFiltroTexto || '').trim().toLowerCase();
+    const gruposFiltrados = needle ? grupos.filter(g => grupoCoincide(g, needle)) : grupos;
+    const totMiembros = gruposFiltrados.reduce((s, g) => s + g.miembros.length, 0);
+    const conProblema = gruposFiltrados.filter(g => g.anomalia).length;
+    let sinGrupo = state.sustMostrarSinGrupo ? queryProductosSinGrupo() : null;
+    if (sinGrupo && needle) {
+      sinGrupo = sinGrupo.filter(r => (r.nombre || '').toLowerCase().includes(needle) || (r.codigo || '').toLowerCase().includes(needle));
+    }
     return `
       <div class="inf-report-header">
         <div class="inf-report-title">
@@ -1697,12 +1712,14 @@ const Informes = (() => {
           <button id="inf-btn-csv"   class="btn btn-sm">↓ CSV</button>
         </div>
       </div>
+      <input type="text" id="inf-sust-filtro" class="input-full" placeholder="Filtrar por nombre o código (referencia o cualquier miembro)…"
+             value="${esc(state.sustFiltroTexto || '')}" autocomplete="off" style="margin:4px 2px 14px">
       <div class="inf-kpi-row">
-        <div class="inf-kpi"><div class="inf-kpi-label">Grupos</div><div class="inf-kpi-value">${grupos.length}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Grupos</div><div class="inf-kpi-value">${gruposFiltrados.length}</div></div>
         <div class="inf-kpi"><div class="inf-kpi-label">Productos agrupados</div><div class="inf-kpi-value">${totMiembros}</div></div>
         <div class="inf-kpi ${conProblema > 0 ? 'danger' : ''}"><div class="inf-kpi-label">Con problema</div><div class="inf-kpi-value ${conProblema > 0 ? 'text-danger' : ''}">${conProblema}</div></div>
       </div>
-      ${grupos.length === 0 ? `<div class="inf-empty">No hay grupos de sustitutos armados.</div>` : `
+      ${gruposFiltrados.length === 0 ? `<div class="inf-empty">${needle ? `No hay grupos que coincidan con "${esc(state.sustFiltroTexto.trim())}".` : 'No hay grupos de sustitutos armados.'}</div>` : `
         <div class="inf-table-wrap">
           <table class="inf-table">
             <thead><tr>
@@ -1710,7 +1727,7 @@ const Informes = (() => {
               <th class="num">Stock total</th><th>¿Problema?</th><th></th>
             </tr></thead>
             <tbody>
-              ${grupos.map(g => `
+              ${gruposFiltrados.map(g => `
                 <tr class="${g.anomalia ? 'row-danger' : ''}">
                   <td><strong>${esc(g.ref_nombre)}</strong></td>
                   <td class="mono">${esc(g.ref_codigo || '—')}</td>
@@ -1753,7 +1770,17 @@ const Informes = (() => {
     ge('inf-btn-csv')?.addEventListener('click',   exportCSV);
     ge('inf-chk-sin-grupo')?.addEventListener('change', e => {
       state.sustMostrarSinGrupo = e.target.checked;
-      refrescarReporteSustitutos();
+      rerenderVistaSustitutos();
+    });
+    const filtroEl = ge('inf-sust-filtro');
+    filtroEl?.addEventListener('input', () => {
+      state.sustFiltroTexto = filtroEl.value;
+      const cursor = filtroEl.selectionStart;
+      rerenderVistaSustitutos();
+      // El re-render reemplaza el input entero (innerHTML) — sin esto, cada tecla
+      // le hace perder el foco y escribir se vuelve imposible.
+      const nuevoFiltro = ge('inf-sust-filtro');
+      if (nuevoFiltro) { nuevoFiltro.focus(); nuevoFiltro.setSelectionRange(cursor, cursor); }
     });
     document.querySelectorAll('.inf-btn-asignar-grupo').forEach(btn =>
       btn.addEventListener('click', () => abrirAsignarGrupoSustituto(btn.dataset.id, btn.dataset.nombre)));
@@ -1772,6 +1799,19 @@ const Informes = (() => {
       resultsEl.innerHTML = renderGruposSustitutos(state.data);
       resultsEl.scrollTop = scroll;
     }
+    attachExportListeners();
+  }
+
+  // Igual que refrescarReporteSustitutos() pero SIN volver a consultar la base — para el
+  // filtro de texto y el checkbox "sin grupo", que no cambian ningún dato, solo qué parte
+  // de lo que ya está en memoria (state.data) se muestra. Evita pegarle a SQLite en cada
+  // tecla tipeada.
+  function rerenderVistaSustitutos() {
+    const resultsEl = ge('inf-results');
+    if (!resultsEl || !state.data) return;
+    const scroll = resultsEl.scrollTop;
+    resultsEl.innerHTML = renderGruposSustitutos(state.data);
+    resultsEl.scrollTop = scroll;
     attachExportListeners();
   }
 
@@ -1811,7 +1851,12 @@ const Informes = (() => {
 
     const buscar = ge('sa-buscar');
     const dd = ge('sa-dd');
+    const nav = Buscador.attachDropdownKeyboard(buscar, {
+      getItems: () => dd.querySelectorAll('.sri'),
+      highlightClass: 'sust-hl',
+    });
     buscar.addEventListener('input', () => {
+      nav.reset();
       const q = buscar.value.trim();
       if (q.length < 2) { dd.style.display = 'none'; return; }
       const resultados = Buscador.porTexto(q, { sucursalId: state.sucursalId, limite: 12 }).filter(p => p.id !== prodId);
@@ -1925,7 +1970,12 @@ const Informes = (() => {
     // seguidores — dejarlo afuera crearía una cadena rota (ver diagnosticar/invariante #2).
     const buscar = ge('sg-buscar');
     const dd = ge('sg-dd');
+    const nav = Buscador.attachDropdownKeyboard(buscar, {
+      getItems: () => dd.querySelectorAll('.sri'),
+      highlightClass: 'sust-hl',
+    });
     buscar.addEventListener('input', () => {
+      nav.reset();
       const q = buscar.value.trim();
       if (q.length < 2) { dd.style.display = 'none'; return; }
       const resultados = Buscador.porTexto(q, { sucursalId: state.sucursalId, limite: 12 })
