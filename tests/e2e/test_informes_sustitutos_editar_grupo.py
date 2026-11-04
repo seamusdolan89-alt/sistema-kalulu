@@ -12,6 +12,10 @@ usar el sistema para liberar y reasignar productos de un grupo real:
 2. El reporte puede mostrar también los productos ACTIVOS que no tienen ningún grupo de
    sustitutos (filtro "Mostrar también productos sin grupo"), cada uno con un botón
    "+ Agregar a un grupo" que abre un buscador acotado para elegir la referencia.
+3. Esos dos buscadores (sumar al grupo / agregar a un grupo) se navegan con flecha
+   arriba/abajo + Enter, como todos los demás buscadores del sistema (motor único,
+   `Buscador.attachDropdownKeyboard`) — faltaba conectarlo, pedido explícito del
+   usuario al ver el buscador sin esa navegación.
 
 Correr (server ya levantado en :8765, ver README.md):
 
@@ -73,6 +77,10 @@ def main():
             mk('eg-ref2',   'EG Referencia Con Seguidor');
             mk('eg-f2',     'EG Seguidor De Ref2');
             mk('eg-standalone', 'EG Standalone Para Filtro');
+            mk('eg-kb-standalone', 'EG Teclado Standalone');
+            mk('eg-kb-aaa', 'EG Teclado Candidato Aaa');
+            mk('eg-kb-bbb', 'EG Teclado Candidato Bbb');
+            mk('eg-kb-ccc', 'EG Teclado Candidato Ccc');
             sust('eg-ref1', 'eg-ref1');
             sust('eg-m1',   'eg-ref1');
             sust('eg-ref2', 'eg-ref2');
@@ -152,6 +160,29 @@ def main():
         # no tiene boton "+ Agregar a un grupo" (es decir, salio de la seccion "sin grupo").
         assert page.locator('.inf-btn-asignar-grupo[data-id="eg-standalone"]').count() == 0, (
             "Ya no deberia listarse en 'sin grupo' despues de asignarlo"
+        )
+        print("OK")
+
+        print("--- Navegacion con flechas en el buscador (igual que el resto del sistema) ---")
+        page.locator('.inf-btn-asignar-grupo[data-id="eg-kb-standalone"]').click()
+        page.wait_for_timeout(200)
+        page.fill("#sa-buscar", "EG Teclado Candidato")
+        page.wait_for_timeout(300)
+        items = page.locator("#sa-dd .sri")
+        assert items.count() == 3, f"Deberian aparecer los 3 candidatos: {items.count()}"
+        page.keyboard.press("ArrowDown")
+        page.keyboard.press("ArrowDown")
+        page.wait_for_timeout(100)
+        resaltado = page.locator("#sa-dd .sri.sust-hl")
+        assert resaltado.count() == 1 and "Bbb" in resaltado.inner_text(), (
+            f"Deberia resaltar el SEGUNDO candidato (Bbb) tras 2x ArrowDown: {resaltado.inner_text() if resaltado.count() else 'ninguno'!r}"
+        )
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(300)
+        assert not page.locator("#inf-sust-asignar").count(), "Enter sobre el resaltado deberia confirmar y cerrar"
+        e3 = estado_db(page)
+        assert e3.get("eg-kb-standalone") == "eg-kb-bbb", (
+            f"Deberia haber elegido el candidato resaltado con flechas (Bbb), no el primero: {e3}"
         )
         print("OK")
 
