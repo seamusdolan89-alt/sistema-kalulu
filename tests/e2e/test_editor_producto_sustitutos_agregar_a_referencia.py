@@ -11,7 +11,14 @@ sumarle productos. Mismo problema para un producto sin ningún grupo.
 Cubre:
 1. Referencia implícita: el cartel lo dice bien, aparece el campo y agregar un
    producto libre lo deja apuntando a él, sin perder a los seguidores previos.
-2. Agregar un producto que ya está en OTRO grupo avisa (cancelable) a quiénes arrastra.
+2. Agregar un MIEMBRO COMÚN de otro grupo lo mueve solo a él, SIN avisar ni arrastrar
+   al resto de su grupo viejo (bug real reportado por el usuario, 3/11/2026: antes
+   `addMiembroGrupo` usaba `aplicarCambioReferencia`, pensada para mover un GRUPO
+   ENTERO — mover un miembro común de otro grupo arrastraba también a todos sus ex
+   compañeros, cuando el usuario solo quería mover ese uno. El fix usa
+   `GruposSustitutos.moverMiembro`, la función ya construida para Importación).
+2b. Agregar un producto que es A SU VEZ referencia de otros sí avisa (cancelable) —
+    ahí no hay forma de moverlo solo, sus seguidores quedarían huérfanos.
 3. Producto sin grupo: agregar un miembro lo arma con ese producto de referencia.
 
 Correr (server ya levantado en :8765, ver README.md):
@@ -85,11 +92,15 @@ def main():
           mk('ar-libre', 'ARtest Producto Libre');   // sin grupo
           mk('ar-solo',  'ARtest Producto Solo');    // sin grupo, va a ser referencia nueva
           mk('ar-ajena', 'ARtest Ajena Ref');        // referencia de otro grupo...
-          mk('ar-ajeno', 'ARtest Ajeno Miembro');    // ...y su miembro
+          mk('ar-ajeno', 'ARtest Ajeno Miembro');    // ...y su miembro COMUN (nadie le apunta a el)
+          mk('ar-ajena2', 'ARtest Ajena2 Ref');      // otra referencia, CON seguidor propio...
+          mk('ar-ajeno2', 'ARtest Ajeno2 Miembro');  // ...que se arrastraria si se mueve ar-ajena2
           mk('ar-nuevo', 'ARtest Nuevo Miembro');
           sust('ar-maq', 'ar-bic');
           sust('ar-ajena', 'ar-ajena');
           sust('ar-ajeno', 'ar-ajena');
+          sust('ar-ajena2', 'ar-ajena2');
+          sust('ar-ajeno2', 'ar-ajena2');
         }""")
 
         print("--- 1) Referencia implicita: cartel correcto + campo para agregar ---")
@@ -108,18 +119,27 @@ def main():
         assert "ARtest Producto Libre" in lista and "ARtest Bic Maquina x2" in lista, lista
         print("OK")
 
-        print("--- 2) Agregar un producto de OTRO grupo avisa y se puede cancelar ---")
-        dlg["accept"] = False
+        print("--- 2) Agregar un MIEMBRO COMUN de otro grupo lo mueve SOLO a el, sin avisar ni arrastrar ---")
         dlg["messages"] = []
         agregar(page, "Ajeno Miembro")
-        assert dlg["messages"], "Deberia haber avisado que ya pertenece a otro grupo"
-        assert "ARtest Ajena Ref" in dlg["messages"][0], dlg["messages"][0]
-        assert refs(page).get("ar-ajeno") == "ar-ajena", "Cancelar no debe mover nada"
-        dlg["accept"] = True
-        agregar(page, "Ajeno Miembro")
+        assert not dlg["messages"], f"No deberia avisar nada: es un miembro comun, se puede mover solo: {dlg['messages']}"
         r = refs(page)
-        assert r.get("ar-ajeno") == "ar-bic", f"Al confirmar, se mueve al grupo de Bic: {r}"
-        assert r.get("ar-ajena") == "ar-bic", f"Arrastra a su referencia vieja (sin dejar huerfanos): {r}"
+        assert r.get("ar-ajeno") == "ar-bic", f"Deberia moverse al grupo de Bic: {r}"
+        assert r.get("ar-ajena") == "ar-ajena", f"BUG: no deberia arrastrar a su referencia vieja: {r}"
+        print("OK")
+
+        print("--- 2b) Agregar un producto que ES referencia de otros si avisa (cancelable) ---")
+        dlg["accept"] = False
+        dlg["messages"] = []
+        agregar(page, "Ajena2 Ref")
+        assert dlg["messages"], "Deberia haber avisado que arrastra a sus seguidores"
+        assert "ARtest Ajeno2 Miembro" in dlg["messages"][0], dlg["messages"][0]
+        assert refs(page).get("ar-ajena2") == "ar-ajena2", "Cancelar no debe mover nada"
+        dlg["accept"] = True
+        agregar(page, "Ajena2 Ref")
+        r = refs(page)
+        assert r.get("ar-ajena2") == "ar-bic", f"Al confirmar, se mueve al grupo de Bic: {r}"
+        assert r.get("ar-ajeno2") == "ar-bic", f"Arrastra a su seguidor (no se puede dejar huerfano): {r}"
         print("OK")
 
         print("--- 3) Producto sin grupo: agregar un miembro lo arma con el como referencia ---")
