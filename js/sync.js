@@ -260,7 +260,7 @@
     { name: 'productos',         applyFn: applyProductoFull },
     { name: 'clientes',          applyFn: applyClienteFull },
     { name: 'proveedores',       applyFn: applyProveedorFull },
-    // 'stock' NO se aplica acá — ver el mismo comentario en PULL_SOURCES.
+    // 'stock' (valor absoluto) NO se aplica acá — ver el mismo comentario en PULL_SOURCES.
     { name: 'stock_movimientos', applyFn: applyStockMovimiento },
     { name: 'promociones',       applyFn: applyPromocion },
     { name: 'consumo_interno',   applyFn: applyConsumoInternoFull },
@@ -2144,70 +2144,6 @@
     return total;
   }
 
-  // ─── Corte del ledger de stock (etapa 2, herramienta de una sola vez) ─────────
-  //
-  // Las dos compus corrieron backfillSaldoInicial() (etapa 1) POR SU CUENTA, cada una
-  // con SU stock.cantidad de ese momento. El id de ese movimiento es determinístico
-  // ('saldo_inicial:<producto>:<sucursal>', no un uuid al azar) — así que si en algún
-  // producto los dos números no coincidían, hoy cada compu tiene un 'saldo_inicial'
-  // propio y en conflicto, y nada lo resuelve solo: al sincronizar, applyStockMovimiento
-  // hace INSERT OR IGNORE, así que el que ya existe LOCALMENTE gana para siempre.
-  // Admin-POS nunca sube el suyo (ver adminPushWhereExtra en SYNC_SOURCES), así que en
-  // Firestore siempre queda el del POS del local — el único lado que hay que arreglar
-  // es la copia LOCAL de Admin-POS.
-  //
-  // Procedimiento (a mano, una sola vez, con las dos compus ya en esta versión):
-  //   1. En cualquiera de las dos: await SGA_Sync.diagnosticarSaldoInicial() — []
-  //      significa que los saldos YA COINCIDÍAN y no hace falta nada más.
-  //   2. Si hay diferencias: en Admin-POS (nunca en el POS del local, que es la fuente
-  //      autoritativa) → await SGA_Sync.prepararAdopcionLedger().
-  //   3. Repetir el diagnóstico: debería dar [].
-
-  async function diagnosticarSaldoInicial() {
-    if (!initialized || !firestoreDb) throw new Error('Firebase no conectado');
-    const locales = window.SGA_DB.query(`SELECT id, delta FROM stock_movimientos WHERE tipo = 'saldo_inicial'`);
-    const porId = new Map(locales.map(r => [r.id, r.delta]));
-
-    // Recorre TODA la colección paginando (mismo patrón que syncCollectionFull) y filtra
-    // por el prefijo del id en el cliente — es una herramienta manual, de una sola vez,
-    // no un canal de sync que necesite ser eficiente con meses de historial.
-    const diffs = [];
-    const vistos = new Set();
-    let lastDoc = null, batchSize;
-    do {
-      let q = firestoreDb.collection('stock_movimientos').orderBy('fecha').limit(400);
-      if (lastDoc) q = q.startAfter(lastDoc);
-      const snap = await q.get();
-      batchSize = snap.size;
-      for (const doc of snap.docs) {
-        if (typeof doc.id === 'string' && doc.id.startsWith('saldo_inicial:')) {
-          vistos.add(doc.id);
-          const remoto = doc.data().delta;
-          const local = porId.get(doc.id);
-          if (local === undefined || Math.abs((local || 0) - (remoto || 0)) > 0.0001) {
-            diffs.push({ id: doc.id, local: local ?? null, remoto });
-          }
-        }
-      }
-      lastDoc = snap.docs[snap.docs.length - 1];
-    } while (batchSize >= 400);
-
-    for (const [id, local] of porId) {
-      if (!vistos.has(id)) diffs.push({ id, local, remoto: null });
-    }
-    return diffs;
-  }
-
-  async function prepararAdopcionLedger() {
-    if (!window.ADMIN_MODE) {
-      throw new Error('prepararAdopcionLedger() se corre desde Admin-POS, adoptando el ledger '
-        + 'del POS del local (la fuente autoritativa) — nunca al revés.');
-    }
-    const saldosAbandonadosLocal = window.SGA_DB.abandonarSaldoInicialLocal();
-    const movimientosTraidos = await syncMonitoringData();
-    return { saldosAbandonadosLocal, movimientosTraidos };
-  }
-
   // ─── Auditoría de documentos huérfanos (23/9/2026) ────────────────────────────
   //
   // Riesgo anotado desde el 18/9 (ver memoria project_pulled_true_sin_aplicar_residual)
@@ -2225,7 +2161,7 @@
   //    misma tanda se aplica bien, el cursor igual avanza más allá del que falló.
   //
   // Herramientas de una sola vez, de solo lectura salvo que se pida explícitamente
-  // reparar — igual espíritu que diagnosticarSaldoInicial/prepararAdopcionLedger.
+  // reparar.
   // No cubren 'eliminaciones' (borrados, no hay "faltante" que auditar así) ni
   // 'producto_codigo_proveedor' (clave compuesta, no tiene un solo id). Tampoco
   // las colecciones sin tabla local propia o sin columna `id` (ej. system_config,
@@ -2453,6 +2389,70 @@
     return ok;
   }
 
+  // ─── Corte del ledger de stock (etapa 2, herramienta de una sola vez) ─────────
+  //
+  // Las dos compus corrieron backfillSaldoInicial() (etapa 1) POR SU CUENTA, cada una
+  // con SU stock.cantidad de ese momento. El id de ese movimiento es determinístico
+  // ('saldo_inicial:<producto>:<sucursal>', no un uuid al azar) — así que si en algún
+  // producto los dos números no coincidían, hoy cada compu tiene un 'saldo_inicial'
+  // propio y en conflicto, y nada lo resuelve solo: al sincronizar, applyStockMovimiento
+  // hace INSERT OR IGNORE, así que el que ya existe LOCALMENTE gana para siempre.
+  // Admin-POS nunca sube el suyo (ver adminPushWhereExtra en SYNC_SOURCES), así que en
+  // Firestore siempre queda el del POS del local — el único lado que hay que arreglar
+  // es la copia LOCAL de Admin-POS.
+  //
+  // Procedimiento (a mano, una sola vez, con las dos compus ya en esta versión):
+  //   1. En cualquiera de las dos: await SGA_Sync.diagnosticarSaldoInicial() — []
+  //      significa que los saldos YA COINCIDÍAN y no hace falta nada más.
+  //   2. Si hay diferencias: en Admin-POS (nunca en el POS del local, que es la fuente
+  //      autoritativa) → await SGA_Sync.prepararAdopcionLedger().
+  //   3. Repetir el diagnóstico: debería dar [].
+
+  async function diagnosticarSaldoInicial() {
+    if (!initialized || !firestoreDb) throw new Error('Firebase no conectado');
+    const locales = window.SGA_DB.query(`SELECT id, delta FROM stock_movimientos WHERE tipo = 'saldo_inicial'`);
+    const porId = new Map(locales.map(r => [r.id, r.delta]));
+
+    // Recorre TODA la colección paginando (mismo patrón que syncCollectionFull) y filtra
+    // por el prefijo del id en el cliente — es una herramienta manual, de una sola vez,
+    // no un canal de sync que necesite ser eficiente con meses de historial.
+    const diffs = [];
+    const vistos = new Set();
+    let lastDoc = null, batchSize;
+    do {
+      let q = firestoreDb.collection('stock_movimientos').orderBy('fecha').limit(400);
+      if (lastDoc) q = q.startAfter(lastDoc);
+      const snap = await q.get();
+      batchSize = snap.size;
+      for (const doc of snap.docs) {
+        if (typeof doc.id === 'string' && doc.id.startsWith('saldo_inicial:')) {
+          vistos.add(doc.id);
+          const remoto = doc.data().delta;
+          const local = porId.get(doc.id);
+          if (local === undefined || Math.abs((local || 0) - (remoto || 0)) > 0.0001) {
+            diffs.push({ id: doc.id, local: local ?? null, remoto });
+          }
+        }
+      }
+      lastDoc = snap.docs[snap.docs.length - 1];
+    } while (batchSize >= 400);
+
+    for (const [id, local] of porId) {
+      if (!vistos.has(id)) diffs.push({ id, local, remoto: null });
+    }
+    return diffs;
+  }
+
+  async function prepararAdopcionLedger() {
+    if (!window.ADMIN_MODE) {
+      throw new Error('prepararAdopcionLedger() se corre desde Admin-POS, adoptando el ledger '
+        + 'del POS del local (la fuente autoritativa) — nunca al revés.');
+    }
+    const saldosAbandonadosLocal = window.SGA_DB.abandonarSaldoInicialLocal();
+    const movimientosTraidos = await syncMonitoringData();
+    return { saldosAbandonadosLocal, movimientosTraidos };
+  }
+
   // ─── API pública ─────────────────────────────────────────────────────────────
 
   window.SGA_Sync = {
@@ -2464,12 +2464,12 @@
     pullUsuariosOnly,
     syncMonitoringData,
     wipeFirestoreCollections,
-    diagnosticarSaldoInicial,
-    prepararAdopcionLedger,
     auditarHuerfanosPOS,
     repararHuerfanosPOS,
     auditarHuerfanosAdmin,
     repararHuerfanosAdmin,
+    diagnosticarSaldoInicial,
+    prepararAdopcionLedger,
     getFirestore: () => firestoreDb,
     isInitialized: () => initialized,
     getStatus: () => ({ initialized, lastSyncAt }),
