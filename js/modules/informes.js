@@ -3,6 +3,7 @@
  */
 
 import GruposSustitutos from './grupos_sustitutos.js';
+import Buscador from './buscador_productos.js';
 
 const Informes = (() => {
   'use strict';
@@ -49,6 +50,7 @@ const Informes = (() => {
     diasSinMovimiento: 90,
     diasSinModificarPrecio: 90, // 0 = todos los productos (sin filtrar)
     tipoSalida: 'todos', // 'todos' | 'consumo' | 'rotura' | 'vencimiento'
+    sustMostrarSinGrupo: false, // informe "Grupos de Sustitutos": filtro de productos sin grupo
     mobilePeriod: 'mes', // 'hoy' | 'semana' | 'mes' | 'elegir-mes' — solo Admin-POS mobile
   };
 
@@ -1641,9 +1643,48 @@ const Informes = (() => {
     return [...grupos.values()];
   }
 
+  // Productos activos que ni son referencia de nadie ni tienen a nadie apuntándoles —
+  // candidatos a sumar a un grupo existente. Filtro aparte del informe principal
+  // (pedido del usuario, 4/11/2026): no tiene sentido mezclarlos en la misma tabla,
+  // que es por grupo, pero sirve poder verlos para decidir si agruparlos.
+  function queryProductosSinGrupo() {
+    return window.SGA_DB.query(`
+      SELECT p.id, p.nombre, cb.codigo, COALESCE(st.cantidad, 0) AS stock
+      FROM productos p
+      LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
+      LEFT JOIN stock st ON st.producto_id = p.id AND st.sucursal_id = ?
+      WHERE p.activo = 1
+        AND p.id NOT IN (SELECT producto_id FROM producto_sustitutos)
+      ORDER BY p.nombre COLLATE NOCASE
+    `, [state.sucursalId]);
+  }
+
+  function renderProductosSinGrupo(rows) {
+    if (!rows.length) return `<div class="inf-empty" style="margin-top:10px">No hay productos activos sin grupo de sustitutos.</div>`;
+    return `
+      <div class="inf-table-wrap" style="margin-top:10px">
+        <div style="font-weight:700;margin:4px 2px 8px">Productos sin grupo (${rows.length})</div>
+        <table class="inf-table">
+          <thead><tr><th>Nombre</th><th>Código</th><th class="num">Stock</th><th></th></tr></thead>
+          <tbody>
+            ${rows.map(r => `
+              <tr>
+                <td>${esc(r.nombre)}</td>
+                <td class="mono">${esc(r.codigo || '—')}</td>
+                <td class="num">${fmtNum(r.stock)}</td>
+                <td><button class="btn btn-sm inf-btn-asignar-grupo" data-id="${esc(r.id)}" data-nombre="${esc(r.nombre)}">+ Agregar a un grupo</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
   function renderGruposSustitutos(grupos) {
     const totMiembros = grupos.reduce((s, g) => s + g.miembros.length, 0);
     const conProblema = grupos.filter(g => g.anomalia).length;
+    const sinGrupo = state.sustMostrarSinGrupo ? queryProductosSinGrupo() : null;
     return `
       <div class="inf-report-header">
         <div class="inf-report-title">
@@ -1685,18 +1726,23 @@ const Informes = (() => {
                           : '',
                       ].filter(Boolean).join('<br>')
                     : '<span class="text-success">No</span>'}</td>
-                  <td>${g.anomalia
-                    ? `<div style="display:flex;flex-direction:column;gap:6px;min-width:150px">
-                         ${g.ref_real_nombre ? `<button class="btn btn-sm btn-primary inf-btn-aceptar-sug" data-ref-id="${esc(g.ref_id)}" title="Pasa estos miembros al grupo de &quot;${esc(g.ref_real_nombre)}&quot;">✔ Aceptar sugerencia</button>` : ''}
-                         <button class="btn btn-sm inf-btn-editar-grupo" data-ref-id="${esc(g.ref_id)}" title="Elegir qué productos quedan en el grupo y cuál es la referencia">✎ Editar grupo…</button>
-                       </div>`
-                    : ''}</td>
+                  <td>
+                    <div style="display:flex;flex-direction:column;gap:6px;min-width:150px">
+                      ${g.ref_real_nombre ? `<button class="btn btn-sm btn-primary inf-btn-aceptar-sug" data-ref-id="${esc(g.ref_id)}" title="Pasa estos miembros al grupo de &quot;${esc(g.ref_real_nombre)}&quot;">✔ Aceptar sugerencia</button>` : ''}
+                      <button class="btn btn-sm inf-btn-editar-grupo" data-ref-id="${esc(g.ref_id)}" title="Elegir qué productos quedan en el grupo, cuál es la referencia, o sumar uno nuevo">✎ Editar grupo…</button>
+                    </div>
+                  </td>
                 </tr>
               `).join('')}
             </tbody>
           </table>
         </div>
       `}
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--color-text-secondary);cursor:pointer;margin:14px 2px 0">
+        <input type="checkbox" id="inf-chk-sin-grupo" ${state.sustMostrarSinGrupo ? 'checked' : ''}>
+        Mostrar también productos activos sin grupo de sustitutos
+      </label>
+      ${sinGrupo ? renderProductosSinGrupo(sinGrupo) : ''}
     `;
   }
 
@@ -1705,6 +1751,12 @@ const Informes = (() => {
   function attachExportListeners() {
     ge('inf-btn-excel')?.addEventListener('click', exportExcel);
     ge('inf-btn-csv')?.addEventListener('click',   exportCSV);
+    ge('inf-chk-sin-grupo')?.addEventListener('change', e => {
+      state.sustMostrarSinGrupo = e.target.checked;
+      refrescarReporteSustitutos();
+    });
+    document.querySelectorAll('.inf-btn-asignar-grupo').forEach(btn =>
+      btn.addEventListener('click', () => abrirAsignarGrupoSustituto(btn.dataset.id, btn.dataset.nombre)));
     document.querySelectorAll('.inf-btn-aceptar-sug').forEach(btn =>
       btn.addEventListener('click', () => aceptarSugerenciaSustitutos(btn.dataset.refId)));
     document.querySelectorAll('.inf-btn-editar-grupo').forEach(btn =>
@@ -1721,6 +1773,56 @@ const Informes = (() => {
       resultsEl.scrollTop = scroll;
     }
     attachExportListeners();
+  }
+
+  // Asignar un producto SIN grupo a uno existente (o bootstrear uno nuevo con el elegido como
+  // referencia). El producto de origen no tiene grupo, así que no puede ser a su vez referencia
+  // de nadie (seguidoresDe siempre vacío) — GruposSustitutos.moverMiembro toma siempre el camino
+  // simple, sin arrastrar a nadie.
+  function abrirAsignarGrupoSustituto(prodId, prodNombre) {
+    if (!window.SGA_Permisos?.can('can_editar_productos')) {
+      alert('No tenés permiso para modificar grupos de sustitutos.');
+      return;
+    }
+    const overlay = document.createElement('div');
+    overlay.id = 'inf-sust-asignar';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    overlay.innerHTML = `
+      <div role="dialog" aria-label="Agregar a un grupo de sustitutos" style="background:#fff;border-radius:12px;max-width:480px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+        <div style="padding:16px 20px;border-bottom:1px solid #eee">
+          <div style="font-weight:700;font-size:1.05em">Agregar "${esc(prodNombre)}" a un grupo</div>
+          <div style="font-size:.85em;color:#667;margin-top:4px">Buscá el producto que ya es (o va a pasar a ser) la referencia del grupo.</div>
+        </div>
+        <div style="padding:16px 20px">
+          <input type="text" id="sa-buscar" class="input-full" placeholder="Buscar por nombre o código…" autocomplete="off">
+          <div id="sa-dd" style="display:none;max-height:220px;overflow-y:auto;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.15);margin-top:4px"></div>
+        </div>
+        <div style="padding:12px 20px;border-top:1px solid #eee;display:flex;justify-content:flex-end">
+          <button class="btn btn-sm" id="sa-cancelar">Cancelar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cerrar(); } };
+    const cerrar = () => { document.removeEventListener('keydown', onKey, true); overlay.remove(); };
+    document.addEventListener('keydown', onKey, true);
+    overlay.querySelector('#sa-cancelar').addEventListener('click', cerrar);
+    overlay.addEventListener('mousedown', e => { if (e.target === overlay) cerrar(); });
+
+    const buscar = ge('sa-buscar');
+    const dd = ge('sa-dd');
+    buscar.addEventListener('input', () => {
+      const q = buscar.value.trim();
+      if (q.length < 2) { dd.style.display = 'none'; return; }
+      const resultados = Buscador.porTexto(q, { sucursalId: state.sucursalId, limite: 12 }).filter(p => p.id !== prodId);
+      Buscador.pintarDropdown(dd, resultados, (p) => {
+        GruposSustitutos.moverMiembro(prodId, p.id);
+        window.SGA_Sync?.pushPending?.();
+        cerrar();
+        refrescarReporteSustitutos();
+      });
+    });
+    buscar.focus();
   }
 
   // "Editar grupo…": mismo concepto que el paso de confirmación de Compras (tildar qué productos
@@ -1749,6 +1851,23 @@ const Informes = (() => {
       if (activos.length) sugerida = activos[0].id;
     }
 
+    // Fila de un miembro (tilde + nombre/código/stock + radio de referencia). Reusada
+    // tanto en el render inicial como al sumar un producto nuevo por el buscador.
+    const filaMiembro = (r) => {
+      const hoy = GruposSustitutos.referenciaRealDe(r.id);
+      const nota = hoy && hoy !== r.id ? `hoy apunta a "${esc(nombreDe(hoy))}"` : (hoy === r.id ? 'hoy es referencia' : '');
+      return `<label style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f3f3f3;cursor:pointer">
+        <input type="checkbox" class="sg-miembro" value="${esc(r.id)}" checked>
+        <span style="flex:1;min-width:0">
+          <span style="font-weight:600">${esc(r.nombre)}${r.activo === 0 ? ' <span style="color:#c62828;font-weight:500">(inactivo)</span>' : ''}</span>
+          <span style="display:block;font-size:.78em;color:#889">${esc(r.codigo || 'sin código')} · stock ${fmtNum(r.stock)}${nota ? ' · ' + nota : ''}</span>
+        </span>
+        <span style="display:flex;align-items:center;gap:4px;font-size:.82em;color:#445;white-space:nowrap">
+          <input type="radio" name="sg-ref" class="sg-ref" value="${esc(r.id)}" ${r.id === sugerida ? 'checked' : ''}> Referencia
+        </span>
+      </label>`;
+    };
+
     const overlay = document.createElement('div');
     overlay.id = 'inf-sust-editor';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
@@ -1758,21 +1877,13 @@ const Informes = (() => {
           <div style="font-weight:700;font-size:1.05em">Editar grupo de sustitutos</div>
           <div style="font-size:.85em;color:#667;margin-top:4px">Tildá los productos que forman el grupo y marcá cuál es la <strong>referencia</strong> (el que se pide al proveedor). Los destildados salen del grupo.</div>
         </div>
-        <div style="padding:8px 20px;overflow-y:auto;flex:1">
-          ${rows.map(r => {
-            const hoy = GruposSustitutos.referenciaRealDe(r.id);
-            const nota = hoy && hoy !== r.id ? `hoy apunta a "${esc(nombreDe(hoy))}"` : (hoy === r.id ? 'hoy es referencia' : '');
-            return `<label style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f3f3f3;cursor:pointer">
-              <input type="checkbox" class="sg-miembro" value="${esc(r.id)}" checked>
-              <span style="flex:1;min-width:0">
-                <span style="font-weight:600">${esc(r.nombre)}${r.activo === 0 ? ' <span style="color:#c62828;font-weight:500">(inactivo)</span>' : ''}</span>
-                <span style="display:block;font-size:.78em;color:#889">${esc(r.codigo || 'sin código')} · stock ${fmtNum(r.stock)}${nota ? ' · ' + nota : ''}</span>
-              </span>
-              <span style="display:flex;align-items:center;gap:4px;font-size:.82em;color:#445;white-space:nowrap">
-                <input type="radio" name="sg-ref" class="sg-ref" value="${esc(r.id)}" ${r.id === sugerida ? 'checked' : ''}> Referencia
-              </span>
-            </label>`;
-          }).join('')}
+        <div style="padding:12px 20px 0;border-bottom:1px solid #eee;position:relative">
+          <input type="text" id="sg-buscar" class="input-full" placeholder="Sumar un producto al grupo por nombre o código…" autocomplete="off" style="margin-bottom:6px">
+          <div id="sg-dd" style="position:absolute;left:20px;right:20px;top:44px;z-index:10;display:none;max-height:220px;overflow-y:auto;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.15)"></div>
+          <div id="sg-nota-extra" style="font-size:.78em;color:#e65100;margin-bottom:10px"></div>
+        </div>
+        <div id="sg-lista" style="padding:8px 20px;overflow-y:auto;flex:1">
+          ${rows.map(filaMiembro).join('')}
         </div>
         <div style="padding:12px 20px;border-top:1px solid #eee">
           <div id="sg-aviso" style="font-size:.82em;color:#556;margin-bottom:10px"></div>
@@ -1808,6 +1919,41 @@ const Informes = (() => {
     };
     overlay.addEventListener('change', pintar);
     pintar();
+
+    // Buscador para sumar un producto nuevo al grupo (motor único, SGA_Buscador). Si lo
+    // elegido es a su vez referencia de otros (seguidoresDe), hay que sumar también a esos
+    // seguidores — dejarlo afuera crearía una cadena rota (ver diagnosticar/invariante #2).
+    const buscar = ge('sg-buscar');
+    const dd = ge('sg-dd');
+    buscar.addEventListener('input', () => {
+      const q = buscar.value.trim();
+      if (q.length < 2) { dd.style.display = 'none'; return; }
+      const resultados = Buscador.porTexto(q, { sucursalId: state.sucursalId, limite: 12 })
+        .filter(p => !ids.includes(p.id));
+      Buscador.pintarDropdown(dd, resultados, (p) => {
+        buscar.value = '';
+        dd.style.display = 'none';
+        const nuevosIds = [p.id, ...GruposSustitutos.seguidoresDe(p.id).map(f => f.id)]
+          .filter(id => !ids.includes(id));
+        if (!nuevosIds.length) return;
+        const nuevasRows = window.SGA_DB.query(`
+          SELECT p.id, p.nombre, p.activo, cb.codigo, COALESCE(st.cantidad, 0) AS stock
+          FROM productos p
+          LEFT JOIN codigos_barras cb ON cb.producto_id = p.id AND cb.es_principal = 1
+          LEFT JOIN stock st ON st.producto_id = p.id AND st.sucursal_id = ?
+          WHERE p.id IN (${nuevosIds.map(() => '?').join(',')})
+        `, [state.sucursalId, ...nuevosIds]);
+        ids.push(...nuevosIds);
+        rows.push(...nuevasRows);
+        ge('sg-lista').insertAdjacentHTML('beforeend', nuevasRows.map(filaMiembro).join(''));
+        overlay.querySelector('#sg-nota-extra').innerHTML = nuevosIds.length > 1
+          ? `Se sumaron también sus seguidores (si no los movés, quedarían apuntando a una referencia que a su vez apunta a otra): ` +
+            `${esc(nuevasRows.filter(r => r.id !== p.id).map(r => r.nombre).join(', '))}.`
+          : '';
+        pintar();
+      });
+    });
+    overlay.addEventListener('mousedown', e => { if (e.target.closest('#sg-dd') || e.target === buscar) return; dd.style.display = 'none'; });
 
     overlay.querySelector('#sg-cancelar').addEventListener('click', cerrar);
     overlay.addEventListener('mousedown', e => { if (e.target === overlay) cerrar(); });
