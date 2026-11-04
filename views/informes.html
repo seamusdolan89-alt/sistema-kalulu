@@ -131,8 +131,8 @@
 
   /* ── KPI ROW ─────────────────────────────────────────────────────────────── */
   .inf-kpi-row {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: 12px;
     padding: 16px 20px;
     border-bottom: 1px solid var(--color-border);
@@ -143,8 +143,7 @@
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     padding: 12px 18px;
-    min-width: 130px;
-    flex: 1;
+    min-width: 0;
   }
   .inf-kpi.highlight {
     background: var(--color-primary-light);
