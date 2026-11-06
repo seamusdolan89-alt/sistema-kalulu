@@ -4,6 +4,9 @@
 
 import GruposSustitutos from './grupos_sustitutos.js';
 import Buscador from './buscador_productos.js';
+// Import estatico (no window.SGA_Familia), igual que compras_v2.js/editor-producto.js/
+// operaciones_stock.js: el wizard de familia se abre tambien desde "Precios y Etiquetas".
+import Familia from './familia.js';
 
 const Informes = (() => {
   'use strict';
@@ -49,6 +52,8 @@ const Informes = (() => {
     data: null,
     diasSinMovimiento: 90,
     diasSinModificarPrecio: 90, // 0 = todos los productos (sin filtrar)
+    ventasDiasPrecio: 90,       // "Precios y Etiquetas": ventana (en días) de la columna "Cant. vendida"
+    soloConStockPrecio: false,  // "Precios y Etiquetas": ocultar productos sin stock
     tipoSalida: 'todos', // 'todos' | 'consumo' | 'rotura' | 'vencimiento'
     sustMostrarSinGrupo: false, // informe "Grupos de Sustitutos": filtro de productos sin grupo
     sustFiltroTexto: '', // informe "Grupos de Sustitutos": filtro por nombre/código
@@ -428,20 +433,46 @@ const Informes = (() => {
   // trackear nada nuevo, solo mostrarlo. diasSinModificarPrecio = 0 muestra
   // TODOS los productos (sin filtrar), para ver el listado completo con sus
   // dos fechas sin importar cuándo fue el último cambio.
-  function queryPreciosEtiquetas() {
+  //
+  // Revisión de precios (pedido del usuario, 6/11/2026): además de las fechas,
+  // cruza stock, unidades vendidas en una ventana de días, y la última compra
+  // CONFIRMADA y no anulada (con si cambió el costo en esa compra y si el
+  // precio se tocó desde entonces). `todos = true` ignora los filtros de
+  // pantalla (días sin modificar y "solo con stock") para exportar el catálogo
+  // completo. Orden por defecto = prioridad de revisión: con stock primero,
+  // dentro de eso lo que más se vende.
+  //
+  // "Precio modificado desde esa compra" es una aproximación a propósito:
+  // el sistema no guarda qué precio cambió en cada compra, solo la fecha del
+  // último cambio de precio del producto (ultima_modificacion_precio).
+  function queryPreciosEtiquetas(todos = false) {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - state.diasSinModificarPrecio);
     const cutoffISO = cutoff.toISOString();
-    const sinFiltro = state.diasSinModificarPrecio === 0;
+    const sinFiltro = todos || state.diasSinModificarPrecio === 0;
+    const soloStock = !todos && state.soloConStockPrecio;
+    const desdeVentas = new Date(Date.now() - state.ventasDiasPrecio * 86400000).toISOString();
+    const sid = state.sucursalId;
 
     return window.SGA_DB.query(`
       SELECT
         p.id,
         COALESCE((SELECT codigo FROM codigos_barras
                   WHERE producto_id = p.id AND es_principal = 1 LIMIT 1), '') AS codigo,
+        (SELECT GROUP_CONCAT(codigo, ';') FROM (
+           SELECT codigo FROM codigos_barras WHERE producto_id = p.id
+           ORDER BY es_principal DESC, codigo ASC)) AS todos_codigos,
         p.nombre,
         COALESCE(cat.nombre, '') AS categoria,
         COALESCE(pr.razon_social, '') AS proveedor,
+        p.costo,
+        p.markup_fijo,
+        COALESCE(s.cantidad, 0) AS stock_actual,
+        COALESCE(vt.cant, 0) AS cant_vendida,
+        lc.fecha AS compra_fecha,
+        lci.costo_modificado AS compra_costo_modificado,
+        lci.costo_anterior AS compra_costo_anterior,
+        lci.costo_unitario AS compra_costo,
         p.precio_venta,
         p.ultima_modificacion_precio,
         p.ultima_impresion_etiqueta,
@@ -455,10 +486,53 @@ const Informes = (() => {
       FROM productos p
       LEFT JOIN categorias cat ON p.categoria_id = cat.id
       LEFT JOIN proveedores pr ON p.proveedor_principal_id = pr.id
+      LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?
+      LEFT JOIN (
+        SELECT vi.producto_id, SUM(vi.cantidad) AS cant
+        FROM venta_items vi
+        JOIN ventas v ON v.id = vi.venta_id
+          AND v.estado = 'completada' AND v.sucursal_id = ? AND v.fecha >= ?
+        GROUP BY vi.producto_id
+      ) vt ON vt.producto_id = p.id
+      LEFT JOIN compra_items lci ON lci.id = (
+        SELECT ci.id FROM compra_items ci
+        JOIN compras c ON c.id = ci.compra_id
+        WHERE ci.producto_id = p.id
+          AND c.anulada_en IS NULL
+          AND COALESCE(c.estado, 'confirmada') = 'confirmada'
+          AND COALESCE(ci.tipo, 'producto') = 'producto'
+        ORDER BY c.fecha DESC, c.updated_at DESC LIMIT 1)
+      LEFT JOIN compras lc ON lc.id = lci.compra_id
       WHERE p.activo = 1
         AND (? OR p.ultima_modificacion_precio IS NULL OR p.ultima_modificacion_precio < ?)
-      ORDER BY (p.ultima_modificacion_precio IS NOT NULL), p.ultima_modificacion_precio ASC
-    `, [sinFiltro ? 1 : 0, cutoffISO]);
+        AND (? = 0 OR COALESCE(s.cantidad, 0) > 0)
+      ORDER BY (COALESCE(s.cantidad, 0) > 0) DESC, COALESCE(vt.cant, 0) DESC,
+               COALESCE(s.cantidad, 0) DESC, p.nombre
+    `, [sid, sid, desdeVentas, sinFiltro ? 1 : 0, cutoffISO, soloStock ? 1 : 0]);
+  }
+
+  // ── Precios y Etiquetas: cálculos derivados (los usan la pantalla y el export) ──
+
+  const puedeVerCostos     = () => !!window.SGA_Permisos?.can('can_ver_costos');
+  const puedeEditarPrecios = () => !!window.SGA_Permisos?.can('can_editar_productos');
+
+  // true / false / null (null = nunca se compró). Aproximación: ver comentario
+  // de queryPreciosEtiquetas().
+  function precioTocadoDesdeCompra(r) {
+    if (!r.compra_fecha) return null;
+    return !!(r.ultima_modificacion_precio &&
+              r.ultima_modificacion_precio.slice(0, 10) >= r.compra_fecha.slice(0, 10));
+  }
+
+  // Costo cambió en la última compra y el precio no se tocó desde entonces.
+  function precioAtrasado(r) {
+    return !!r.compra_costo_modificado && precioTocadoDesdeCompra(r) === false;
+  }
+
+  function margenPct(costo, precio) {
+    const c = parseFloat(costo) || 0, p = parseFloat(precio) || 0;
+    if (p <= 0 || c <= 0) return null;
+    return (p - c) / p * 100;
   }
 
   function querySalidasStock() {
@@ -724,10 +798,26 @@ const Informes = (() => {
               `<option value="${d}"${d === state.diasSinModificarPrecio ? ' selected' : ''}>Hace ${d}+ días</option>`
             ).join('')}
           </select>
+          <label style="margin-left:16px">Ventas de los últimos</label>
+          <select id="inf-dias-ventas-precio" class="inf-select" style="min-width:110px">
+            ${[30,60,90,180,365].map(d =>
+              `<option value="${d}"${d === state.ventasDiasPrecio ? ' selected' : ''}>${d} días</option>`
+            ).join('')}
+          </select>
+          <label style="margin-left:16px;display:inline-flex;align-items:center;gap:6px">
+            <input type="checkbox" id="inf-solo-stock-precio"${state.soloConStockPrecio ? ' checked' : ''}>
+            Solo con stock
+          </label>
         </div>
       `;
       ge('inf-dias-sin-precio')?.addEventListener('change', e => {
         state.diasSinModificarPrecio = Number(e.target.value);
+      });
+      ge('inf-dias-ventas-precio')?.addEventListener('change', e => {
+        state.ventasDiasPrecio = Number(e.target.value);
+      });
+      ge('inf-solo-stock-precio')?.addEventListener('change', e => {
+        state.soloConStockPrecio = e.target.checked;
       });
     } else if (state.reporte === 'salidas_stock') {
       bar.innerHTML = `
@@ -1445,12 +1535,17 @@ const Informes = (() => {
   // ── REPORT: Precios y Etiquetas ─────────────────────────────────────────────
 
   function renderPreciosEtiquetas(rows) {
+    const verCostos  = puedeVerCostos();
+    const editable   = puedeEditarPrecios();
     const nuncaPrecio   = rows.filter(r => !r.ultima_modificacion_precio).length;
-    const nuncaEtiqueta = rows.filter(r => !r.ultima_impresion_etiqueta).length;
+    const atrasados     = rows.filter(precioAtrasado).length;
     const pendientes    = rows.filter(r => r.pendiente_imprimir).length;
-    const filtroLabel   = state.diasSinModificarPrecio === 0
+    const conStock      = rows.filter(r => (r.stock_actual || 0) > 0).length;
+    const filtroLabel   = (state.diasSinModificarPrecio === 0
       ? 'Todos los productos'
-      : `Sin cambios de precio hace ${state.diasSinModificarPrecio}+ días`;
+      : `Sin cambios de precio hace ${state.diasSinModificarPrecio}+ días`)
+      + ` · Ventas: últimos ${state.ventasDiasPrecio} días`
+      + (state.soloConStockPrecio ? ' · Solo con stock' : '');
     return `
       <div class="inf-report-header">
         <div class="inf-report-title">
@@ -1459,21 +1554,30 @@ const Informes = (() => {
         </div>
         <div class="inf-export-btns">
           <button id="inf-btn-excel" class="btn btn-sm inf-btn-excel">↓ Excel</button>
+          <button id="inf-btn-excel-todos" class="btn btn-sm" title="Descarga todos los productos activos, sin los filtros de arriba">↓ Excel (todos)</button>
           <button id="inf-btn-csv"   class="btn btn-sm">↓ CSV</button>
         </div>
       </div>
       <div class="inf-kpi-row">
         <div class="inf-kpi"><div class="inf-kpi-label">Productos</div><div class="inf-kpi-value">${rows.length}</div></div>
-        <div class="inf-kpi danger"><div class="inf-kpi-label">Nunca modificaron precio</div><div class="inf-kpi-value text-danger">${nuncaPrecio}</div></div>
-        <div class="inf-kpi"><div class="inf-kpi-label">Nunca imprimieron etiqueta</div><div class="inf-kpi-value">${nuncaEtiqueta}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Con stock</div><div class="inf-kpi-value">${conStock}</div></div>
+        <div class="inf-kpi danger"><div class="inf-kpi-label">Costo subió y precio no</div><div class="inf-kpi-value text-danger">${atrasados}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Nunca modificaron precio</div><div class="inf-kpi-value">${nuncaPrecio}</div></div>
         <div class="inf-kpi highlight"><div class="inf-kpi-label">Etiqueta desactualizada</div><div class="inf-kpi-value">${pendientes}</div></div>
       </div>
+      ${editable ? `<div class="inf-hint" style="font-size:12px;color:var(--color-text-secondary);margin:4px 0 8px">
+        Escribí el precio nuevo en la columna <b>Nuevo precio</b> y apretá Enter (o salí del campo) para guardarlo.
+        Si el producto es de una familia, te pregunta si querés sincronizar al resto.</div>` : ''}
       ${rows.length === 0 ? `<div class="inf-empty">No hay productos en el filtro seleccionado.</div>` : `
         <div class="inf-table-wrap">
           <table class="inf-table">
             <thead><tr>
               <th>Código</th><th>Nombre</th><th>Categoría</th><th>Proveedor</th>
+              <th class="num">Stock</th><th class="num">Vendidas (${state.ventasDiasPrecio}d)</th>
+              ${verCostos ? '<th class="num">Costo</th><th class="num">Margen %</th>' : ''}
+              <th>Última compra</th><th>¿Costo cambió?</th><th>¿Precio tocado desde la compra?</th>
               <th class="num">Precio actual</th>
+              ${editable ? '<th class="num">Nuevo precio</th>' : ''}
               <th>Última modif. precio</th><th class="num">Días sin modificar</th>
               <th>Última impresión etiqueta</th><th>¿Etiqueta al día?</th>
             </tr></thead>
@@ -1483,13 +1587,29 @@ const Informes = (() => {
                 const diasPrecioStr = diasPrecio === null
                   ? '<span class="text-danger bold">Nunca</span>'
                   : `<span class="${diasPrecio > 180 ? 'text-danger' : diasPrecio > 90 ? 'text-warning' : ''}">${diasPrecio}d</span>`;
+                const tocado = precioTocadoDesdeCompra(r);
+                const mg = margenPct(r.costo, r.precio_venta);
                 return `
-                  <tr>
+                  <tr data-pid="${esc(r.id)}"${precioAtrasado(r) ? ' style="background:#fff8e1"' : ''}>
                     <td class="mono">${esc(r.codigo)}</td>
                     <td>${esc(r.nombre)}</td>
                     <td>${esc(r.categoria)}</td>
                     <td>${esc(r.proveedor)}</td>
-                    <td class="num">${fmtPeso(r.precio_venta)}</td>
+                    <td class="num ${r.stock_actual <= 0 ? 'text-danger' : ''}">${fmtNum(r.stock_actual)}</td>
+                    <td class="num">${fmtNum(r.cant_vendida)}</td>
+                    ${verCostos ? `
+                      <td class="num">${r.costo ? fmtPeso(r.costo) : '—'}</td>
+                      <td class="num inf-pe-margen ${mg !== null && mg < 15 ? 'text-danger' : ''}">${mg === null ? '—' : mg.toFixed(1) + '%'}</td>` : ''}
+                    <td>${r.compra_fecha ? fmtFechaCorta(r.compra_fecha.slice(0,10)) : '<span class="text-warning">Nunca</span>'}</td>
+                    <td>${r.compra_fecha ? (r.compra_costo_modificado ? '<span class="text-danger bold">Sí</span>' : 'No') : '—'}</td>
+                    <td>${tocado === null ? '—' : (tocado ? 'Sí' : (r.compra_costo_modificado ? '<span class="text-danger bold">No</span>' : 'No'))}</td>
+                    <td class="num inf-pe-precio">${fmtPeso(r.precio_venta)}</td>
+                    ${editable ? `<td class="num">
+                      <input type="number" class="inf-pe-nuevo" data-id="${esc(r.id)}" min="0" step="10"
+                             data-costo="${r.costo || 0}" data-actual="${r.precio_venta || 0}"
+                             style="width:90px;text-align:right" aria-label="Nuevo precio de ${esc(r.nombre)}">
+                      <div class="inf-pe-prev" style="font-size:11px;color:#8090a0;min-height:14px"></div>
+                    </td>` : ''}
                     <td>${r.ultima_modificacion_precio ? fmtFechaCorta(r.ultima_modificacion_precio.slice(0,10)) : '<span class="text-danger">Nunca</span>'}</td>
                     <td class="num">${diasPrecioStr}</td>
                     <td>${r.ultima_impresion_etiqueta ? fmtFechaCorta(r.ultima_impresion_etiqueta.slice(0,10)) : '<span class="text-warning">Nunca</span>'}</td>
@@ -1502,6 +1622,132 @@ const Informes = (() => {
         </div>
       `}
     `;
+  }
+
+  // ── Precios y Etiquetas: edición de precio en la misma pantalla ─────────────
+
+  function attachPreciosListeners() {
+    if (state.reporte !== 'precios_etiquetas') return;
+    const inputs = [...document.querySelectorAll('.inf-pe-nuevo')];
+    inputs.forEach((inp, i) => {
+      inp.addEventListener('input', () => mostrarPrevisualizacion(inp));
+      inp.addEventListener('keydown', e => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const nextId = inputs[i + 1]?.dataset.id || null;
+        guardarPrecioInline(inp, nextId);
+      });
+      inp.addEventListener('blur', () => guardarPrecioInline(inp, null));
+    });
+  }
+
+  // Antes/después del margen mientras se escribe -- el cambio todavía no se guardó.
+  function mostrarPrevisualizacion(inp) {
+    const prev = inp.parentElement.querySelector('.inf-pe-prev');
+    if (!prev) return;
+    const nuevo = parseFloat(inp.value);
+    if (!(nuevo > 0) || !puedeVerCostos()) { prev.textContent = ''; return; }
+    const costo = parseFloat(inp.dataset.costo) || 0;
+    const mg = margenPct(costo, nuevo);
+    prev.textContent = mg === null ? '' : `margen ${mg.toFixed(1)}%`;
+    prev.style.color = mg !== null && mg < 0 ? '#c62828' : '#8090a0';
+  }
+
+  let guardandoPrecio = false;
+
+  function guardarPrecioInline(inp, focoSiguienteId) {
+    if (guardandoPrecio) return;          // Enter dispara blur al re-renderizar: no guardar dos veces
+    const id    = inp.dataset.id;
+    const nuevo = window.SGA_Utils.roundMoney(parseFloat(inp.value));
+    const actual = parseFloat(inp.dataset.actual) || 0;
+    if (!(nuevo > 0) || Math.abs(nuevo - actual) < 0.005) {
+      if (focoSiguienteId) document.querySelector(`.inf-pe-nuevo[data-id="${focoSiguienteId}"]`)?.focus();
+      return;
+    }
+    if (!puedeEditarPrecios()) { alert('No tenés permiso para modificar precios.'); return; }
+    const row = (state.data || []).find(r => r.id === id);
+    if (!row) return;
+
+    const costo = parseFloat(row.costo) || 0;
+    if (costo > 0 && nuevo < costo) {
+      if (!confirm(`${row.nombre}: el precio nuevo (${fmtPeso(nuevo)}) es MENOR que el costo (${fmtPeso(costo)}). ¿Guardar igual?`)) {
+        inp.value = '';
+        mostrarPrevisualizacion(inp);
+        return;
+      }
+    }
+
+    // El bloqueo dura hasta que termine TODO el flujo (incluido el wizard de familia):
+    // al abrirse el wizard el input pierde el foco y su blur volveria a guardar el mismo
+    // precio y abriria un segundo wizard.
+    guardandoPrecio = true;
+    inp.dataset.actual = String(nuevo);
+    try {
+      // Mismo UPDATE que Compras/Editor/Operaciones de Stock: sync_status='pending'
+      // para que viaje al otro dispositivo, y ultima_modificacion_precio para que
+      // las etiquetas sugeridas detecten que hay que reimprimir.
+      const ts = window.SGA_Utils.formatISODate(new Date());
+      window.SGA_DB.run(
+        `UPDATE productos SET precio_venta=?, ultima_modificacion_precio=?, sync_status='pending', updated_at=? WHERE id=?`,
+        [nuevo, ts, ts, id]
+      );
+      aplicarPrecioEnFila(row, nuevo, null, ts);
+      window.SGA_Utils.showNotification('Precio actualizado', 'success', 1500);
+    } catch (e) {
+      guardandoPrecio = false;
+      alert('No se pudo guardar el precio: ' + e.message);
+      return;
+    }
+
+    const terminar = () => {
+      guardandoPrecio = false;
+      rerenderPreciosEtiquetas();
+      if (focoSiguienteId) document.querySelector(`.inf-pe-nuevo[data-id="${focoSiguienteId}"]`)?.focus();
+    };
+
+    // Familia: mismo wizard que al cambiar un precio en el Editor, en Compras o en
+    // Operaciones de Stock. Lo que se sincroniza ahí se refleja en las filas de ESTE
+    // reporte (si esos productos están en la lista) sin tener que volver a generarlo.
+    if (Familia.tieneFamilia(id)) {
+      Familia.showHerenciaModal({
+        prodId: id,
+        prodNombre: row.nombre,
+        nuevoCosto: costo,
+        nuevoPrecio: nuevo,
+        onSync: s => {
+          const hermano = (state.data || []).find(r => r.id === s.id);
+          if (hermano) aplicarPrecioEnFila(hermano, s.hp ? s.pvNvo : null, s.hc ? s.costoNvo : null,
+                                           window.SGA_Utils.formatISODate(new Date()));
+        },
+        onDone: terminar,
+      });
+    } else {
+      terminar();
+    }
+  }
+
+  // Refleja en la fila en memoria lo que ya se escribió en la base.
+  function aplicarPrecioEnFila(row, precio, costo, ts) {
+    if (precio != null) {
+      row.precio_venta = precio;
+      row.ultima_modificacion_precio = ts;
+      row.pendiente_imprimir = 1;   // el precio cambió después de la última impresión
+    }
+    if (costo != null) row.costo = costo;
+  }
+
+  // Redibuja SIN volver a consultar (no mueve el orden ni pierde el scroll).
+  function rerenderPreciosEtiquetas() {
+    const resultsEl = ge('inf-results');
+    if (!resultsEl || !state.data) return;
+    const scroll = resultsEl.scrollTop;
+    const wrap = resultsEl.querySelector('.inf-table-wrap');
+    const scrollWrap = wrap ? wrap.scrollTop : 0;
+    resultsEl.innerHTML = renderPreciosEtiquetas(state.data);
+    resultsEl.scrollTop = scroll;
+    const wrapNuevo = resultsEl.querySelector('.inf-table-wrap');
+    if (wrapNuevo) wrapNuevo.scrollTop = scrollWrap;
+    attachExportListeners();
   }
 
   // ── REPORT 9: Salidas de Stock (no venta) ─────────────────────────────────────
@@ -1766,8 +2012,11 @@ const Informes = (() => {
   // ── EXPORT ────────────────────────────────────────────────────────────────────
 
   function attachExportListeners() {
-    ge('inf-btn-excel')?.addEventListener('click', exportExcel);
-    ge('inf-btn-csv')?.addEventListener('click',   exportCSV);
+    ge('inf-btn-excel')?.addEventListener('click', () => exportExcel());
+    ge('inf-btn-csv')?.addEventListener('click',   () => exportCSV());
+    // "Precios y Etiquetas": catálogo completo, ignorando los filtros de pantalla.
+    ge('inf-btn-excel-todos')?.addEventListener('click', () => exportExcel(queryPreciosEtiquetas(true), true));
+    attachPreciosListeners();
     ge('inf-chk-sin-grupo')?.addEventListener('change', e => {
       state.sustMostrarSinGrupo = e.target.checked;
       rerenderVistaSustitutos();
@@ -2154,17 +2403,20 @@ const Informes = (() => {
     refrescarReporteSustitutos();
   }
 
-  function buildExportRows() {
-    const rows    = state.data || [];
+  // rowsOverride / sinFiltros: solo "Precios y Etiquetas" -> "Excel (todos)".
+  function buildExportRows(rowsOverride = null, sinFiltros = false) {
+    const rows    = rowsOverride || state.data || [];
     const rep     = state.reporte;
     const title   = REPORTES.find(r => r.id === rep)?.label || rep;
     const periodo = rep === 'aging_cc'    ? `Estado al ${new Date().toLocaleDateString('es-AR')}` :
                     rep === 'stock_muerto' ? `Sin ventas en los últimos ${state.diasSinMovimiento} días` :
                     rep === 'salidas_stock' ? `Período: ${fmtPeriodo()} · ${TIPO_SALIDA_LABEL[state.tipoSalida] || 'Todos los tipos'}` :
                     rep === 'sustitutos_grupos' ? `Estado al ${new Date().toLocaleDateString('es-AR')}` :
-                    rep === 'precios_etiquetas' ? (state.diasSinModificarPrecio === 0
+                    rep === 'precios_etiquetas' ? (sinFiltros || state.diasSinModificarPrecio === 0
                       ? 'Todos los productos'
-                      : `Sin cambios de precio hace ${state.diasSinModificarPrecio}+ días`) :
+                      : `Sin cambios de precio hace ${state.diasSinModificarPrecio}+ días`)
+                      + ` · Ventas: últimos ${state.ventasDiasPrecio} días`
+                      + (!sinFiltros && state.soloConStockPrecio ? ' · Solo con stock' : '') :
                     `Período: ${fmtPeriodo()}`;
 
     if (rep === 'ventas_producto' || rep === 'analitica_producto') {
@@ -2238,12 +2490,25 @@ const Informes = (() => {
       return { title, periodo, headers, data };
     }
     if (rep === 'precios_etiquetas') {
-      const headers = ['Código','Nombre','Categoría','Proveedor','Precio actual',
+      const verCostos = puedeVerCostos();
+      const headers = ['Código','Todos los códigos','Nombre','Categoría','Proveedor',
+                       'Stock actual', `Cant. vendida (${state.ventasDiasPrecio} días)`,
+                       ...(verCostos ? ['Costo actual','Margen %'] : []),
+                       'Última compra','¿Costo cambió en esa compra?','¿Precio tocado desde esa compra?',
+                       'Precio actual','Nuevo precio',
                        'Última modificación de precio','Días sin modificar',
                        'Última impresión de etiqueta','¿Etiqueta al día?'];
       const data = rows.map(r => {
         const dias = daysSince(r.ultima_modificacion_precio);
-        return [r.codigo, r.nombre, r.categoria, r.proveedor, r.precio_venta,
+        const tocado = precioTocadoDesdeCompra(r);
+        const mg = margenPct(r.costo, r.precio_venta);
+        return [r.codigo, r.todos_codigos || '', r.nombre, r.categoria, r.proveedor,
+          r.stock_actual, r.cant_vendida,
+          ...(verCostos ? [r.costo || '', mg === null ? '' : Math.round(mg * 10) / 10] : []),
+          r.compra_fecha ? r.compra_fecha.slice(0,10) : 'Nunca',
+          r.compra_fecha ? (r.compra_costo_modificado ? 'Sí' : 'No') : '',
+          tocado === null ? '' : (tocado ? 'Sí' : 'No'),
+          r.precio_venta, '',
           r.ultima_modificacion_precio ? r.ultima_modificacion_precio.slice(0,10) : 'Nunca',
           dias ?? 'Nunca',
           r.ultima_impresion_etiqueta ? r.ultima_impresion_etiqueta.slice(0,10) : 'Nunca',
@@ -2263,9 +2528,9 @@ const Informes = (() => {
     return null;
   }
 
-  function exportExcel() {
+  function exportExcel(rowsOverride = null, sinFiltros = false) {
     if (!window.XLSX) { alert('Librería XLSX no disponible.'); return; }
-    const ed = buildExportRows();
+    const ed = buildExportRows(rowsOverride, sinFiltros);
     if (!ed) return;
     const wsData = [[ed.title], [ed.periodo], [], ed.headers, ...ed.data];
     const ws = window.XLSX.utils.aoa_to_sheet(wsData);
