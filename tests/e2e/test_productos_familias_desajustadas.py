@@ -218,6 +218,13 @@ def main():
         assert hijo["sync_status"] == "pending", f"Tiene que quedar pending para viajar: {hijo}"
         print(f"OK - fd-hijo-distinto: {hijo}")
 
+        # Historial de precios (9/11/2026): el cambio del hijo por el wizard queda registrado.
+        h_hijo = q(page, "SELECT origen, ref_id, precio_anterior, precio_nuevo FROM precios_historial "
+                         "WHERE producto_id='fd-hijo-distinto' AND precio_nuevo = 500")
+        assert len(h_hijo) == 1 and h_hijo[0]["origen"] == "familia" and h_hijo[0]["ref_id"] == "fd-madre",             f"BUG: corregir una familia no dejó registro del cambio de precio del hijo: {h_hijo}"
+        assert h_hijo[0]["precio_anterior"] != 500, h_hijo
+        print(f"OK - historial del hijo: {h_hijo[0]}")
+
         print("--- El audit modal se reabre y ya no muestra la familia 'fd-madre' ---")
         assert modal.is_visible(), "El audit modal debería haberse reabierto solo"
         page.wait_for_timeout(200)
@@ -240,6 +247,10 @@ def main():
             f"La madre debería haberse corregido DIRECTO al precio del hijo elegido (450): {madre3}"
         assert madre3["sync_status"] == "pending", f"Tiene que quedar pending: {madre3}"
         print(f"OK - fd-madre3 corregida directo: {madre3}")
+        h_madre3 = q(page, "SELECT origen, precio_anterior, precio_nuevo FROM precios_historial "
+                           "WHERE producto_id='fd-madre3' AND precio_nuevo = 450")
+        assert len(h_madre3) == 1 and h_madre3[0]["origen"] == "familias_desajustadas",             f"BUG: la corrección directa de la madre no quedó registrada como cambio de precio: {h_madre3}"
+        print(f"OK - historial de la madre: {h_madre3[0]}")
 
         wizard2 = page.locator(".cv2-her-overlay")
         assert wizard2.is_visible(), "El wizard debería abrirse igual, para sincronizar a los hermanos"
@@ -254,6 +265,13 @@ def main():
         for h in hijos3:
             assert float(h["precio_venta"]) == 450.0, f"Debería haber quedado en 450: {h}"
         print(f"OK - los dos hijos siguen/quedan en 450: {hijos3}")
+        # Todo lo que cambió de precio en este flujo quedó con un origen declarado (nunca 'otro')
+        otros = q(page, "SELECT producto_id, origen FROM precios_historial WHERE origen = 'otro' AND producto_id LIKE 'fd-%'")
+        assert not otros, f"BUG: cambios de precio de familias sin origen: {otros}"
+        n_fam = q(page, "SELECT COUNT(*) AS n FROM precios_historial WHERE origen = 'familia' AND precio_nuevo IN (450, 500) "
+                        "AND producto_id IN ('fd-hijo-distinto','fd-hijo3a','fd-hijo3b')")[0]["n"]
+        assert n_fam >= 2, f"Los hijos corregidos por el wizard deben quedar registrados (origen 'familia'): {n_fam}"
+        print("OK - todo el flujo de familias deja historial de precios")
 
         assert modal.is_visible(), "El audit modal debería haberse reabierto solo (otra vez)"
         page.wait_for_timeout(200)
