@@ -1059,6 +1059,82 @@
       backfillSaldoInicial();
     } catch(e) { console.warn('stock_movimientos:', e.message); }
 
+    // ── precios_historial — registro inmutable de CADA cambio de costo / precio ───
+    // (pedido del usuario, 9/11/2026: "cualquiera sea el camino, debe quedar registro").
+    // Mismo diseno que stock_movimientos: solo se agregan filas (nunca se editan ni se
+    // borran), con id propio, y al sincronizar se aplican con INSERT OR IGNORE -- dos
+    // compus pueden cambiar el precio del mismo producto sin pisarse el registro.
+    //
+    // QUIEN lo escribe es un TRIGGER de SQLite sobre productos, no el codigo de cada
+    // pantalla: hay ~10 lugares que tocan costo/precio_venta (editor, compra, edicion de
+    // compra, familia, markup fijo, historial de compras, reporte de precios, importacion,
+    // edicion rapida...) y algunos arman el UPDATE dinamicamente; anotar cada uno a mano
+    // deja el riesgo de olvidarse uno (ya paso con sync_status). El trigger ve TODOS.
+    //
+    //  - Dispara solo con AFTER UPDATE (no con INSERT OR REPLACE): el apply de sync.js
+    //    reemplaza la fila entera, y ese cambio ya quedo registrado en la compu de origen
+    //    (llega por la coleccion 'precios_historial'). Si el trigger tambien viera el
+    //    apply, cada compu duplicaria el registro del cambio de la otra.
+    //  - Solo registra si el valor CAMBIA de verdad (el editor reescribe todas las
+    //    columnas en cada guardado).
+    //  - El origen/referencia se pasa por la tabla de una fila _hist_ctx (un trigger no
+    //    recibe parametros): ver conOrigenCambio(). Sin contexto queda origen='otro', y el
+    //    test e2e test_precios_historial.py falla si algun camino conocido cae ahi.
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS precios_historial (
+          id TEXT PRIMARY KEY,
+          producto_id TEXT NOT NULL,
+          fecha TEXT NOT NULL,
+          costo_anterior REAL,
+          costo_nuevo REAL,
+          costo_paquete_anterior REAL,
+          costo_paquete_nuevo REAL,
+          precio_anterior REAL,
+          precio_nuevo REAL,
+          origen TEXT NOT NULL,
+          ref_tipo TEXT,
+          ref_id TEXT,
+          detalle TEXT,
+          usuario_id TEXT,
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
+        )
+      `);
+      database.run(`CREATE INDEX IF NOT EXISTS idx_precios_hist_prod ON precios_historial(producto_id, fecha)`);
+      database.run(`
+        CREATE TABLE IF NOT EXISTS _hist_ctx (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          origen TEXT, ref_tipo TEXT, ref_id TEXT, detalle TEXT, usuario_id TEXT
+        )
+      `);
+      // Una fila fija. El contexto NUNCA debe sobrevivir a un arranque (si la app se cerro a
+      // mitad de una operacion quedaria pegado y mal-etiquetaria los cambios siguientes).
+      database.run(`INSERT OR IGNORE INTO _hist_ctx (id) VALUES (1)`);
+      database.run(`UPDATE _hist_ctx SET origen = NULL, ref_tipo = NULL, ref_id = NULL, detalle = NULL WHERE id = 1`);
+      // DROP + CREATE en cada arranque: si cambia la definicion, no queda una version vieja.
+      database.run(`DROP TRIGGER IF EXISTS trg_productos_historial_precios`);
+      database.run(`
+        CREATE TRIGGER trg_productos_historial_precios
+        AFTER UPDATE OF costo, costo_paquete, precio_venta ON productos
+        WHEN ABS(COALESCE(OLD.costo, 0) - COALESCE(NEW.costo, 0)) > 0.0001
+          OR ABS(COALESCE(OLD.costo_paquete, 0) - COALESCE(NEW.costo_paquete, 0)) > 0.0001
+          OR ABS(COALESCE(OLD.precio_venta, 0) - COALESCE(NEW.precio_venta, 0)) > 0.0001
+        BEGIN
+          INSERT INTO precios_historial
+            (id, producto_id, fecha, costo_anterior, costo_nuevo, costo_paquete_anterior,
+             costo_paquete_nuevo, precio_anterior, precio_nuevo, origen, ref_tipo, ref_id,
+             detalle, usuario_id, sync_status, updated_at)
+          SELECT lower(hex(randomblob(16))), NEW.id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                 OLD.costo, NEW.costo, OLD.costo_paquete, NEW.costo_paquete,
+                 OLD.precio_venta, NEW.precio_venta,
+                 COALESCE(c.origen, 'otro'), c.ref_tipo, c.ref_id, c.detalle, c.usuario_id,
+                 'pending', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          FROM (SELECT 1) LEFT JOIN _hist_ctx c ON c.id = 1;
+        END
+      `);
+    } catch(e) { console.warn('precios_historial:', e.message); }
+
     // ── venta_promociones — historial de uso de cada promoción ────────────────
     try {
       database.run(`
@@ -1664,6 +1740,14 @@
     }
 
     try {
+      // Quien hizo el cambio de costo/precio (precios_historial, ver el trigger): se toma
+      // del usuario logueado para CUALQUIER UPDATE a productos, venga de donde venga.
+      if (/^\s*UPDATE\s+productos\b/i.test(sql)) {
+        try {
+          database.run(`UPDATE _hist_ctx SET usuario_id = ? WHERE id = 1`,
+                       [window.SGA_Auth?.getCurrentUser?.()?.id || null]);
+        } catch (e) { /* sin tabla de contexto: el trigger registra sin usuario */ }
+      }
       const stmt = database.prepare(sql);
       stmt.bind(params);
       stmt.step();
@@ -2138,6 +2222,76 @@
     );
   }
 
+  // ── precios_historial: contexto de origen, alta y apply de sync ──────────────────
+  //
+  // conOrigenCambio({ origen, refTipo, refId, detalle }, fn): ejecuta fn() con ese contexto,
+  // de modo que cualquier cambio de costo/precio que haga (el trigger de productos lo ve)
+  // quede registrado con ESE origen (y no 'otro'). Acepta fn sincrona o que devuelva una
+  // promesa (el contexto se restaura al terminar). Se anidan bien: restaura el anterior.
+  //   origen: 'editor' | 'compra' | 'compra_edicion' | 'markup_fijo' | 'familia' |
+  //           'informe_precios' | 'historial_compras' | 'productos_rapido' | 'importacion' ...
+  function setHistCtx(c) {
+    try {
+      database.run(
+        `UPDATE _hist_ctx SET origen = ?, ref_tipo = ?, ref_id = ?, detalle = ?, usuario_id = ? WHERE id = 1`,
+        [c.origen || null, c.refTipo || null, c.refId || null, c.detalle || null,
+         window.SGA_Auth?.getCurrentUser?.()?.id || null]
+      );
+    } catch (e) { /* sin tabla de contexto: se registra igual, como 'otro' */ }
+  }
+
+  function conOrigenCambio(ctx, fn) {
+    let prev = null;
+    try { prev = query(`SELECT origen, ref_tipo, ref_id, detalle FROM _hist_ctx WHERE id = 1`)[0] || null; }
+    catch (e) { /* sin tabla */ }
+    setHistCtx(ctx || {});
+    const restaurar = () => setHistCtx(prev
+      ? { origen: prev.origen, refTipo: prev.ref_tipo, refId: prev.ref_id, detalle: prev.detalle }
+      : {});
+    let r;
+    try { r = fn(); }
+    catch (e) { restaurar(); throw e; }
+    if (r && typeof r.then === 'function') return r.finally(restaurar);
+    restaurar();
+    return r;
+  }
+
+  // Alta de un producto: deja una primera fila (anteriores en NULL) para que la pestana
+  // "Historial de precios" muestre con que costo/precio nacio. El trigger no la crea porque
+  // solo mira UPDATEs.
+  function registrarAltaPrecio(productoId, origen, refTipo, refId) {
+    const p = query(`SELECT costo, costo_paquete, precio_venta FROM productos WHERE id = ?`, [productoId])[0];
+    if (!p) return;
+    const ts = new Date().toISOString();
+    run(
+      `INSERT INTO precios_historial
+         (id, producto_id, fecha, costo_anterior, costo_nuevo, costo_paquete_anterior, costo_paquete_nuevo,
+          precio_anterior, precio_nuevo, origen, ref_tipo, ref_id, usuario_id, sync_status, updated_at)
+       VALUES (?, ?, ?, NULL, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, 'pending', ?)`,
+      [window.SGA_Utils.generateUUID(), productoId, ts, p.costo, p.costo_paquete, p.precio_venta,
+       origen || 'alta', refTipo || null, refId || null,
+       window.SGA_Auth?.getCurrentUser?.()?.id || null, ts]
+    );
+  }
+
+  // Receptor de sync: siempre INSERT OR IGNORE (un registro con ese id que ya esta NUNCA se
+  // pisa), y NO toca productos -- el costo/precio ya viaja por la sync propia de productos.
+  function aplicarPrecioHistorial(h) {
+    database.run(
+      `INSERT OR IGNORE INTO precios_historial
+         (id, producto_id, fecha, costo_anterior, costo_nuevo, costo_paquete_anterior, costo_paquete_nuevo,
+          precio_anterior, precio_nuevo, origen, ref_tipo, ref_id, detalle, usuario_id, sync_status, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', ?)`,
+      [h.id, h.producto_id, h.fecha,
+       h.costo_anterior ?? null, h.costo_nuevo ?? null,
+       h.costo_paquete_anterior ?? null, h.costo_paquete_nuevo ?? null,
+       h.precio_anterior ?? null, h.precio_nuevo ?? null,
+       h.origen || 'otro', h.ref_tipo || null, h.ref_id || null, h.detalle || null,
+       h.usuario_id || null, h.updated_at || h.fecha]
+    );
+    if (!batchMode) saveDatabase();
+  }
+
   function beginBatch() {
     batchMode = true;
     database.run('BEGIN TRANSACTION');
@@ -2224,6 +2378,9 @@
     setStockAbsoluto,
     bootstrapStockAbsoluto,
     aplicarMovimientoStock,
+    conOrigenCambio,
+    registrarAltaPrecio,
+    aplicarPrecioHistorial,
     verificarIntegridadStock,
     backfillSaldoInicial,
     abandonarSaldoInicialLocal,

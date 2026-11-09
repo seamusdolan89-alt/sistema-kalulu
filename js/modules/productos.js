@@ -599,6 +599,7 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
     if (!nombre) { alert('El nombre es obligatorio'); return; }
 
     const now = window.SGA_Utils.formatISODate(new Date());
+    window.SGA_DB.conOrigenCambio({ origen: 'productos_rapido', detalle: 'Edición rápida desde Productos' }, () =>
     window.SGA_DB.run(`
       UPDATE productos SET
         nombre = ?, categoria_id = ?, proveedor_principal_id = ?,
@@ -615,7 +616,7 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
       getElement('edit-activo').checked ? 1 : 0,
       now, now,
       state.editingProduct.id
-    ]);
+    ]));
 
     const newBarcode = getElement('edit-codigo_barras').value.trim();
     const oldBarcode = state.editingProduct.codigo_barras;
@@ -778,6 +779,7 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
 
     try {
       if (existe) {
+        window.SGA_DB.conOrigenCambio({ origen: 'productos_rapido', detalle: 'Edición rápida desde Productos' }, () =>
         window.SGA_DB.run(`
           UPDATE productos SET
             nombre = ?, descripcion = ?, categoria_id = ?, proveedor_principal_id = ?,
@@ -795,7 +797,7 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
           prod.precio_lista_por, prod.precio_lista_divisor,
           prod.fecha_modificacion, prod.sync_status, prod.updated_at, prod.activo,
           prod.id
-        ]);
+        ]));
       } else {
         window.SGA_DB.run(`
           INSERT INTO productos (
@@ -814,6 +816,7 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
           prod.precio_lista_por, prod.precio_lista_divisor,
           prod.fecha_alta, prod.fecha_modificacion, prod.activo, prod.sync_status, prod.updated_at
         ]);
+        window.SGA_DB.registrarAltaPrecio(prod.id, 'alta_productos');
       }
 
 
@@ -1486,10 +1489,11 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
           if (nuevo_madre_id !== undefined)        { setParts.push('producto_madre_id = ?');           setVals.push(nuevo_madre_id); }
           if (setParts.length) {
             setVals.push(now, now, producto_id);
-            window.SGA_DB.run(
-              `UPDATE productos SET ${setParts.join(', ')}, fecha_modificacion = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
-              setVals
-            );
+            window.SGA_DB.conOrigenCambio({ origen: 'importacion', detalle: 'Importación de productos' }, () =>
+              window.SGA_DB.run(
+                `UPDATE productos SET ${setParts.join(', ')}, fecha_modificacion = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
+                setVals
+              ));
           }
           results.actualizados++;
         } else {
@@ -1520,6 +1524,7 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
             `INSERT INTO productos (${insertCols.join(', ')}) VALUES (${insertVals.map(() => '?').join(', ')})`,
             insertVals
           );
+          window.SGA_DB.registrarAltaPrecio(producto_id, 'alta_importacion');
           results.importados++;
         }
 
@@ -1669,10 +1674,11 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
       const maxPrecio = Math.max(...conPrecio.map(p => p.precio_venta));
       conPrecio.forEach(p => {
         if (p.precio_venta !== maxPrecio) {
-          window.SGA_DB.run(
-            `UPDATE productos SET precio_venta = ?, fecha_modificacion = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
-            [maxPrecio, now, now, p.id]
-          );
+          window.SGA_DB.conOrigenCambio({ origen: 'importacion', detalle: 'Se unificó el precio de la familia al importar' }, () =>
+            window.SGA_DB.run(
+              `UPDATE productos SET precio_venta = ?, fecha_modificacion = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
+              [maxPrecio, now, now, p.id]
+            ));
           results.preciosAjustados.push({
             nombre: p.nombre,
             precio_anterior: p.precio_venta,
@@ -2337,11 +2343,12 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
             `SELECT COALESCE(unidades_por_paquete_compra, 1) AS uppc FROM productos WHERE id=?`, [f.id]
           )[0] || {}).uppc) || 1;
           const ts = window.SGA_Utils.formatISODate(new Date());
-          window.SGA_DB.run(
-            `UPDATE productos SET costo=?, costo_paquete=?, precio_venta=?, ultima_modificacion_precio=?,
-               sync_status='pending', updated_at=? WHERE id=?`,
-            [nuevoCosto, window.SGA_Utils.roundMoney(nuevoCosto * uppc), nuevoPrecio, ts, ts, f.id]
-          );
+          window.SGA_DB.conOrigenCambio({ origen: 'familias_desajustadas', detalle: 'Corrección masiva de familia' }, () =>
+            window.SGA_DB.run(
+              `UPDATE productos SET costo=?, costo_paquete=?, precio_venta=?, ultima_modificacion_precio=?,
+                 sync_status='pending', updated_at=? WHERE id=?`,
+              [nuevoCosto, window.SGA_Utils.roundMoney(nuevoCosto * uppc), nuevoPrecio, ts, ts, f.id]
+            ));
         }
 
         // El wizard (.cv2-her-overlay, z-index 600) queda DEBAJO de este modal

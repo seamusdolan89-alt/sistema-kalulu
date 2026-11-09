@@ -412,7 +412,10 @@ const SGA_Familia = (() => {
       if (!fields.length) return;
       fields.push("sync_status='pending'", 'updated_at=?');
       vals.push(ts, m.id);
-      db().run(`UPDATE productos SET ${fields.join(',')} WHERE id=?`, vals);
+      // Historial de precios: queda "por familia", con el producto que originó el cambio.
+      db().conOrigenCambio({ origen: 'familia', refTipo: 'productos', refId: prodId,
+                             detalle: `Heredado de ${prodNombre || 'otro producto de la familia'}` },
+        () => db().run(`UPDATE productos SET ${fields.join(',')} WHERE id=?`, vals));
       // Quien abrio el wizard decide que hacer con lo sincronizado: compras lo
       // usa para el resumen final, el editor de productos no lo necesita.
       if (typeof onSync === 'function') {

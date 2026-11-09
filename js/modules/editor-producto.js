@@ -20,7 +20,8 @@ const EditorProducto = (() => {
     { id: 'promociones',    icon: '🏷️', label: 'Promociones' },
     { id: 'vencimientos',   icon: '📅', label: 'Vencimientos' },
     { id: 'transacciones',  icon: '📊', label: 'Transacciones' },
-    { id: 'imagen',         icon: '🖼️', label: 'Imagen' },
+    { id: 'historial-precios', icon: '📈', label: 'Historial de precios' },
+    { id: 'imagen',        icon: '🖼️', label: 'Imagen' },
   ];
 
   const state = {
@@ -648,6 +649,41 @@ const EditorProducto = (() => {
     </div>
   </div>
 
+  <!-- ── HISTORIAL DE PRECIOS ──────────────────────────────────── -->
+  <div id="section-historial-precios" class="editor-section" style="display:none">
+    <h3 class="ed-section-title">📈 Historial de precios</h3>
+    <p class="ed-text-muted" style="margin:0 0 12px;font-size:13px">
+      Cada cambio de costo o de precio de venta de este producto, venga de donde venga
+      (editor, compra, familia, informes, importación). Solo se agregan registros: no se editan ni se borran.
+    </p>
+    <div class="form-row" style="margin-bottom:12px;align-items:flex-end">
+      <div class="form-group">
+        <label>Mostrar</label>
+        <select id="ed-hp-filtro" class="select-full">
+          <option value="">Todos los cambios</option>
+          <option value="costo">Solo cambios de costo</option>
+          <option value="precio">Solo cambios de precio de venta</option>
+        </select>
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="ed-tx-table">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Origen</th>
+            <th style="text-align:right">Costo</th>
+            <th style="text-align:right">Precio de venta</th>
+            <th style="text-align:right">Margen</th>
+            <th>Usuario</th>
+            <th>Detalle</th>
+          </tr>
+        </thead>
+        <tbody id="ed-hp-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- ── IMAGEN ─────────────────────────────────────────────────── -->
   <div id="section-imagen" class="editor-section" style="display:none">
     <h3 class="ed-section-title">🖼️ Imagen</h3>
@@ -835,6 +871,7 @@ const EditorProducto = (() => {
     if (sectionId === 'sustitutos')     renderSustitutos();
     if (sectionId === 'familia')        renderFamilia();
     if (sectionId === 'transacciones')  renderTransacciones();
+    if (sectionId === 'historial-precios') renderHistorialPrecios();
     if (sectionId === 'promociones')    renderPromociones();
     if (sectionId === 'datos-basicos')  renderBarcodes();
   };
@@ -2207,6 +2244,98 @@ const EditorProducto = (() => {
     });
   };
 
+  // ── HISTORIAL DE PRECIOS ───────────────────────────────────────────────────
+  // Lee precios_historial (lo escribe un trigger de productos, ver db.js: cubre editor,
+  // compras, familia, informes, importacion... sin que esta pantalla sepa de ellos).
+
+  const HP_ORIGEN = {
+    editor:               ['Editor de producto',     'background:#1565C0;color:white'],
+    compra:               ['Compra',                 'background:#2E7D32;color:white'],
+    compra_edicion:       ['Edición de compra',      'background:#2E7D32;color:white'],
+    anulacion_compra:     ['Anulación de compra',    'background:#B71C1C;color:white'],
+    markup_fijo:          ['Markup predeterminado',  'background:#00695C;color:white'],
+    familia:              ['Familia',                'background:#6A1B9A;color:white'],
+    familias_desajustadas:['Corrección de familias', 'background:#6A1B9A;color:white'],
+    informe_precios:      ['Informe de precios',     'background:#E65100;color:white'],
+    historial_compras:    ['Historial de compras',   'background:#2E7D32;color:white'],
+    productos_rapido:     ['Edición rápida',         'background:#1565C0;color:white'],
+    importacion:          ['Importación',            'background:#F9A825;color:#222'],
+    otro:                 ['Otro',                   'background:#9E9E9E;color:white'],
+  };
+  const hpOrigen = (o) => {
+    if (HP_ORIGEN[o]) return HP_ORIGEN[o];
+    if (String(o || '').startsWith('alta')) return ['Alta del producto', 'background:#455A64;color:white'];
+    return [o || 'Otro', 'background:#9E9E9E;color:white'];
+  };
+
+  const renderHistorialPrecios = () => {
+    const tbody = ge('ed-hp-tbody');
+    if (!tbody) return;
+    const filtro = (ge('ed-hp-filtro') || {}).value || '';
+    const money = (n) => window.SGA_Utils.formatCurrency(n);
+    const cambio = (a, b) => Math.abs((parseFloat(a) || 0) - (parseFloat(b) || 0)) > 0.0001;
+
+    let filas = [];
+    try {
+      filas = window.SGA_DB.query(`
+        SELECT h.*, COALESCE(u.nombre, '') AS usuario_nombre,
+               c.numero_factura AS compra_factura, COALESCE(pr.razon_social, '') AS compra_proveedor
+        FROM precios_historial h
+        LEFT JOIN usuarios u ON u.id = h.usuario_id
+        LEFT JOIN compras c ON h.ref_tipo = 'compras' AND c.id = h.ref_id
+        LEFT JOIN proveedores pr ON pr.id = c.proveedor_id
+        WHERE h.producto_id = ?
+        ORDER BY h.fecha DESC, h.rowid DESC`, [state.productoId]);
+    } catch (e) { /* tabla todavia no creada */ }
+
+    if (filtro === 'costo')  filas = filas.filter(h => h.costo_anterior == null || cambio(h.costo_anterior, h.costo_nuevo) || cambio(h.costo_paquete_anterior, h.costo_paquete_nuevo));
+    if (filtro === 'precio') filas = filas.filter(h => h.precio_anterior == null || cambio(h.precio_anterior, h.precio_nuevo));
+
+    if (!filas.length) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--color-text-secondary);padding:28px">
+        Sin cambios registrados todavía. De acá en adelante, cada cambio de costo o precio queda anotado.</td></tr>`;
+      return;
+    }
+
+    // "$100 → $120 (+20%)" -- o solo el valor si es el alta (no hay anterior); "—" si ese valor no cambió.
+    const celda = (ant, nuevo, extraTitulo) => {
+      if (ant == null) return `<span title="${escapeHtml(extraTitulo || '')}">${nuevo == null ? '—' : money(nuevo)}</span>`;
+      if (!cambio(ant, nuevo)) return '<span style="color:#9e9e9e">—</span>';
+      const a = parseFloat(ant) || 0, n = parseFloat(nuevo) || 0;
+      const pct = a > 0 ? ((n - a) / a * 100) : null;
+      const color = n > a ? '#d32f2f' : '#388E3C';   // en costo, subir es "malo"; el color es solo orientativo
+      return `<span title="${escapeHtml(extraTitulo || '')}">${money(a)} → <strong>${money(n)}</strong></span>` +
+             (pct === null ? '' : ` <span style="color:${color};font-size:11px">(${pct > 0 ? '+' : ''}${pct.toFixed(1)}%)</span>`);
+    };
+
+    tbody.innerHTML = filas.map(h => {
+      const [label, estilo] = hpOrigen(h.origen);
+      const mg = (parseFloat(h.precio_nuevo) > 0 && parseFloat(h.costo_nuevo) > 0)
+        ? ((h.precio_nuevo - h.costo_nuevo) / h.precio_nuevo * 100) : null;
+      const paquete = (h.costo_paquete_anterior != null && cambio(h.costo_paquete_anterior, h.costo_paquete_nuevo))
+        ? `Costo por paquete: ${money(h.costo_paquete_anterior)} → ${money(h.costo_paquete_nuevo)}` : '';
+      let detalle = h.detalle ? escapeHtml(h.detalle) : '';
+      if (h.ref_tipo === 'compras' && h.ref_id) {
+        const txt = `Compra${h.compra_proveedor ? ' a ' + escapeHtml(h.compra_proveedor) : ''}${h.compra_factura ? ' — Factura ' + escapeHtml(h.compra_factura) : ''}`;
+        detalle = (detalle ? detalle + ' · ' : '') +
+          `<a href="#" class="ed-hp-link" data-ref="${escapeHtml(h.ref_id)}" style="color:var(--color-primary)">${txt}</a>`;
+      }
+      return `<tr>
+        <td style="font-size:12px;white-space:nowrap">${fmtFecha(h.fecha)}</td>
+        <td><span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;${estilo}">${escapeHtml(label)}</span></td>
+        <td style="text-align:right">${celda(h.costo_anterior, h.costo_nuevo, paquete)}</td>
+        <td style="text-align:right">${celda(h.precio_anterior, h.precio_nuevo)}</td>
+        <td style="text-align:right;font-size:12px;color:${mg !== null && mg < 15 ? '#d32f2f' : 'inherit'}">${mg === null ? '—' : mg.toFixed(1) + '%'}</td>
+        <td style="font-size:12px">${escapeHtml(h.usuario_nombre || '—')}</td>
+        <td style="font-size:12px">${detalle || '—'}</td>
+      </tr>`;
+    }).join('');
+
+    tbody.querySelectorAll('.ed-hp-link').forEach(el => {
+      el.addEventListener('click', (e) => { e.preventDefault(); navegarAOperacion('compra', el.dataset.ref); });
+    });
+  };
+
   const navegarAOperacion = (tipo, refId) => {
     if (tipo === 'venta') {
       sessionStorage.setItem('highlight_venta', refId);
@@ -2608,6 +2737,7 @@ const EditorProducto = (() => {
 
     // Transacciones ledger
     ge('ed-btn-tx-filtrar') && ge('ed-btn-tx-filtrar').addEventListener('click', loadLedger);
+    ge('ed-hp-filtro') && ge('ed-hp-filtro').addEventListener('change', renderHistorialPrecios);
     ge('ed-btn-registrar-movimiento') && ge('ed-btn-registrar-movimiento').addEventListener('click', openRegistrarMovimientoModal);
 
     // Vencimientos toggle
@@ -2829,6 +2959,7 @@ const EditorProducto = (() => {
           fecha_alta, fecha_modificacion, sync_status, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
       `, [newId, ...fieldValues, now, now, now]);
+      window.SGA_DB.registrarAltaPrecio(newId, 'alta_editor');
 
       state.barcodes.forEach(bc => {
         window.SGA_DB.run(
@@ -2843,6 +2974,7 @@ const EditorProducto = (() => {
       return;
     }
 
+    window.SGA_DB.conOrigenCambio({ origen: 'editor', detalle: 'Editor de producto' }, () =>
     window.SGA_DB.run(`
       UPDATE productos SET
         nombre = ?, descripcion = ?,
@@ -2864,7 +2996,7 @@ const EditorProducto = (() => {
       precioChanged ? 1 : 0, now,
       now, now,
       state.productoId,
-    ]);
+    ]));
 
     // Save barcodes: delete removed
     state.barcodesDeleted.forEach(id => {

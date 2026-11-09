@@ -278,14 +278,16 @@ const ComprasV2 = (() => {
   // llegan hasta la fila de esa pantalla sin tener que volver a consultar
   // la DB (evita el problema de orden: para cuando showSuccessScreen lee
   // productos.precio_venta, este UPDATE ya corrió y lo pisó).
-  function aplicarMarkupFijo(item, costoNuevo, ts) {
+  function aplicarMarkupFijo(item, costoNuevo, ts, compraId = null) {
     const row = db().query('SELECT markup_fijo, precio_venta FROM productos WHERE id=?', [item.productoId])[0];
     if (row?.markup_fijo == null) return;
     const nuevoPrecio = window.SGA_Utils.roundTo10(costoNuevo * (1 + row.markup_fijo / 100));
-    db().run(
+    // Historial de precios: este cambio sale del markup predeterminado, no de una edicion manual.
+    db().conOrigenCambio({ origen: 'markup_fijo', refTipo: 'compras', refId: compraId,
+                           detalle: `Markup predeterminado ${row.markup_fijo}%` }, () => db().run(
       `UPDATE productos SET precio_venta=?, ultima_modificacion_precio=?, sync_status='pending', updated_at=? WHERE id=?`,
       [nuevoPrecio, ts, ts, item.productoId]
-    );
+    ));
     item.markupFijo      = row.markup_fijo;
     item.markupPvAntes   = parseFloat(row.precio_venta) || 0;
     item.markupPvNuevo   = nuevoPrecio;
@@ -1681,6 +1683,7 @@ const ComprasV2 = (() => {
         alert('Error al crear el producto. Revisá la consola.');
         return;
       }
+      db().registrarAltaPrecio(prodId, 'alta_compra');
 
       if (barcode && barcode.trim()) {
         db().run(`
@@ -3318,11 +3321,11 @@ const ComprasV2 = (() => {
         // costo del producto: su costo (normalmente $0) no es el costo real
         // de reposición, y pisarlo arruinaría precios/márgenes.
         if (!item.esMuestra && costoNeto > 0 && Math.abs(costoNeto - costoAnt) > 0.001) {
-          db().run(
+          db().conOrigenCambio({ origen: 'compra', refTipo: 'compras', refId: compraId }, () => db().run(
             `UPDATE productos SET costo=?, costo_paquete=?, sync_status='pending', updated_at=? WHERE id=?`,
             [costoNeto, window.SGA_Utils.roundMoney(costoNeto * udsPaq), ts, item.productoId]
-          );
-          aplicarMarkupFijo(item, costoNeto, ts);
+          ));
+          aplicarMarkupFijo(item, costoNeto, ts, compraId);
         }
 
         // IVA: queda registrado en el producto para futuras compras (Factura A)
@@ -3582,11 +3585,11 @@ const ComprasV2 = (() => {
             [item.productoId, compraId, state.fecha]
           );
           if (!masReciente.length) {
-            db().run(
+            db().conOrigenCambio({ origen: 'compra_edicion', refTipo: 'compras', refId: compraId }, () => db().run(
               `UPDATE productos SET costo=?, costo_paquete=?, sync_status='pending', updated_at=? WHERE id=?`,
               [costoNeto, window.SGA_Utils.roundMoney(costoNeto * udsPaq), ts, item.productoId]
-            );
-            aplicarMarkupFijo(item, costoNeto, ts);
+            ));
+            aplicarMarkupFijo(item, costoNeto, ts, compraId);
           }
         }
         if (item.iva) {
@@ -4769,8 +4772,10 @@ const ComprasV2 = (() => {
       // corrección manual, con su propio ✓ Guardado.
       items[idx].markupAutoShown = false;
 
-      db().run(`UPDATE productos SET precio_venta=?, ultima_modificacion_precio=?, sync_status='pending', updated_at=? WHERE id=?`,
-               [nuevoPrecio, nowISO(), nowISO(), prodId]);
+      db().conOrigenCambio({ origen: 'compra', refTipo: 'compras', refId: compraId,
+                             detalle: 'Precio de venta revisado tras la compra' }, () =>
+        db().run(`UPDATE productos SET precio_venta=?, ultima_modificacion_precio=?, sync_status='pending', updated_at=? WHERE id=?`,
+                 [nuevoPrecio, nowISO(), nowISO(), prodId]));
       items[idx].pvGuardado = nuevoPrecio;
       items[idx].ignorado   = false;
       const hasFam = checkHasFamily(prodId);

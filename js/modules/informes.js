@@ -1687,10 +1687,11 @@ const Informes = (() => {
       // para que viaje al otro dispositivo, y ultima_modificacion_precio para que
       // las etiquetas sugeridas detecten que hay que reimprimir.
       const ts = window.SGA_Utils.formatISODate(new Date());
-      window.SGA_DB.run(
-        `UPDATE productos SET precio_venta=?, ultima_modificacion_precio=?, sync_status='pending', updated_at=? WHERE id=?`,
-        [nuevo, ts, ts, id]
-      );
+      window.SGA_DB.conOrigenCambio({ origen: 'informe_precios', detalle: 'Informes → Precios y Etiquetas' }, () =>
+        window.SGA_DB.run(
+          `UPDATE productos SET precio_venta=?, ultima_modificacion_precio=?, sync_status='pending', updated_at=? WHERE id=?`,
+          [nuevo, ts, ts, id]
+        ));
       aplicarPrecioEnFila(row, nuevo, null, ts);
       window.SGA_Utils.showNotification('Precio actualizado', 'success', 1500);
     } catch (e) {

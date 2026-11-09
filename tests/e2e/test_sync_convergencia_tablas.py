@@ -102,6 +102,16 @@ EXCEPCIONES_DISENO = {
     # (que el movimiento en si llegue) SI converge -- eso es lo que hace falta que funcione.
     ("stock_movimientos", "POS -> Admin"):   "append-only por diseno: un movimiento no se edita, se corrige con uno nuevo",
     ("stock_movimientos", "Admin -> POS"):   "idem",
+    # Historial de cambios de costo/precio (precios_historial, 9/11/2026): igual que el ledger de
+    # stock, es append-only e inmutable por diseno (aplicarPrecioHistorial hace INSERT OR IGNORE) --
+    # un registro no se edita, un cambio nuevo es OTRA fila. El ALTA (que el registro llegue) SI
+    # converge, y es lo que prueba test_precios_historial_sync.py con dos dispositivos.
+    ("precios_historial", "POS -> Admin"):   "append-only por diseno: un registro de cambio no se edita, se agrega otro",
+    ("precios_historial", "Admin -> POS"):   "idem",
+    # _hist_ctx: una sola fila FIJA por dispositivo, con el origen/usuario "en curso" que lee el
+    # trigger de productos. Es estado local de la sesion, nunca debe viajar (cada compu tiene la suya).
+    ("_hist_ctx", "POS -> Admin"):           "contexto local de una fila para el trigger de precios_historial; no sincroniza",
+    ("_hist_ctx", "Admin -> POS"):           "idem",
 }
 # Columnas que NO viajan a proposito: (tabla, columna) -> motivo.
 EXCEPCIONES_COLUMNA = {
