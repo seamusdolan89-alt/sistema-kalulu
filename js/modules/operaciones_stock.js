@@ -305,10 +305,10 @@ const OperacionesStock = (() => {
 
       // 6. Costo: solo donde esta era la ultima compra y nada lo movio despues
       for (const c of r.costos) {
-        db().run(
+        db().conOrigenCambio({ origen: 'anulacion_compra', refTipo: 'compras', refId: compraId }, () => db().run(
           `UPDATE productos SET costo = ?, costo_paquete = ?, sync_status = 'pending', updated_at = ? WHERE id = ?`,
           [c.a, window.SGA_Utils.roundMoney(c.a * c.udsPaq), ts, c.productoId]
-        );
+        ));
       }
 
       // db().run() no propaga errores: se comprueba antes de dar la anulacion por buena
@@ -819,10 +819,11 @@ const OperacionesStock = (() => {
         }
 
         const ts = window.SGA_Utils.formatISODate(new Date());
-        db().run(
+        db().conOrigenCambio({ origen: 'historial_compras', refTipo: 'compras', refId: compra?.id || null,
+                               detalle: 'Precio editado desde el historial de compras' }, () => db().run(
           `UPDATE productos SET precio_venta=?, ultima_modificacion_precio=?, sync_status='pending', updated_at=? WHERE id=?`,
           [nuevoPrecio, ts, ts, prodId]
-        );
+        ));
         item.producto_precio_venta = nuevoPrecio;
         inp.value = nuevoPrecio.toFixed(2);
 

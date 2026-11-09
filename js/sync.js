@@ -114,6 +114,12 @@
     // ganador en Firestore es siempre el mismo dispositivo, sin carrera por quién llega primero.
     { table: 'stock_movimientos', collection: 'stock_movimientos', pk: 'id',   denormalize: null,
       adminPushWhereExtra: "AND id NOT LIKE 'saldo_inicial:%'" },
+    // Historial de cambios de costo/precio (9/11/2026). Append-only con id propio, igual que
+    // stock_movimientos: el receptor es INSERT OR IGNORE, asi que dos compus que cambian el
+    // precio del mismo producto no se pisan el registro. Lo escribe un trigger de productos
+    // (db.js), que NO se dispara con el apply de productos (INSERT OR REPLACE) -- por eso no
+    // hay duplicados: cada cambio se registra una sola vez, en la compu donde se hizo.
+    { table: 'precios_historial', collection: 'precios_historial', pk: 'id',   denormalize: null },
     { table: 'categorias',        collection: 'categorias',        pk: 'id',   denormalize: null },
     // Las marcas de borrado viajan como cualquier otra tabla; del otro lado
     // applyEliminacion las convierte en el DELETE correspondiente.
@@ -167,6 +173,7 @@
     'ajustes_precio_pendientes', // ajuste de precios post-compra — mismo módulo Compras, desktop-only
     'clientes',                  // pedido explícito del usuario (17/9) — no lo necesita desde el celular
     'sugerencias',                // buzón de consultas/sugerencias — no es una de las 5 áreas mobile (BACKLOG.md)
+    'precios_historial',          // pestaña "Historial de precios" del Editor de Producto — desktop-only
   ];
 
   // window.innerWidth es estable durante la sesión (un celular no cambia de
@@ -209,6 +216,7 @@
     // por 'stock_movimientos' (ledger etapa 2): applyStockMovimiento es idempotente por id,
     // así que aplicar el mismo movimiento dos veces (reintento, doble pull) no duplica nada.
     { collection: 'stock_movimientos', applyFn: applyStockMovimiento },
+    { collection: 'precios_historial', applyFn: applyPrecioHistorial },
     // Caja: el admin tambien escribe estas filas (pagar a un proveedor en efectivo
     // contra la caja abierta del local -> egresos_caja; cobrar la deuda de un
     // cliente -> ingresos_caja; una venta; un consumo interno). La caja esperada
@@ -262,6 +270,7 @@
     { name: 'proveedores',       applyFn: applyProveedorFull },
     // 'stock' (valor absoluto) NO se aplica acá — ver el mismo comentario en PULL_SOURCES.
     { name: 'stock_movimientos', applyFn: applyStockMovimiento },
+    { name: 'precios_historial', applyFn: applyPrecioHistorial },
     { name: 'promociones',       applyFn: applyPromocion },
     { name: 'consumo_interno',   applyFn: applyConsumoInternoFull },
     { name: 'pedidos_abiertos',  applyFn: applyPedidoAbierto },
@@ -1591,6 +1600,13 @@
     window.SGA_DB.aplicarMovimientoStock(data);
   }
 
+  // Historial de precios: solo INSERT OR IGNORE (ver db.js aplicarPrecioHistorial). A
+  // proposito NO escribe en productos: el costo/precio actual ya viaja por la sync de
+  // productos; esto es solo el registro de cambios.
+  function applyPrecioHistorial(data) {
+    window.SGA_DB.aplicarPrecioHistorial(data);
+  }
+
   function applyMedioCobroFull(data) {
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO medios_cobro (id, nombre, icono, activo, orden, sync_status, updated_at)
@@ -2009,6 +2025,8 @@
       // apenas llegue el primer movimiento de un producto, ese numero se recalcula desde
       // la suma real de movimientos (ver aplicarMovimientoStock en db.js).
       { name: 'stock_movimientos', applyFn: applyStockMovimiento,  label: 'Movimientos de stock' },
+      // Crece con el tiempo de uso (historial) -> lote de fondo, como el resto.
+      { name: 'precios_historial', applyFn: applyPrecioHistorial,  label: 'Historial de precios' },
       { name: 'gastos_pagos',      applyFn: applyGastoPago,        label: 'Pagos de gastos' },
       { name: 'system_config',     applyFn: applySystemConfig,     label: 'Configuración' },
       { name: 'flujo_forecast',    applyFn: applyFlujoForecast,    label: 'Flujo — proyección' },
