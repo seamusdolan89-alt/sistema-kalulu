@@ -24,6 +24,9 @@ jobs:
       - name: Chequeo estático — tablas con sync_status registradas en sync.js
         run: python tests/check_sync_tablas.py
 
+      - name: Chequeo estático — módulos/vistas precacheados en sw.js (offline)
+        run: python tests/check_sw_precache.py
+
       - name: Instalar Playwright + Chromium
         run: |
           pip install playwright

@@ -33,6 +33,7 @@
       // Load sql.js from CDN via dynamic script
       window.SQL = await new Promise((resolve, reject) => {
         const script = document.createElement('script');
+        script.crossOrigin = 'anonymous'; // permite cachear offline sin opaque response (ver sw.js)
         script.src = 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js';
         script.onload = async () => {
           try {
