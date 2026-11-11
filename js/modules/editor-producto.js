@@ -2336,18 +2336,109 @@ const EditorProducto = (() => {
     });
   };
 
+  // "Ver detalle" de una venta/compra NUNCA navegó de verdad -- los
+  // sessionStorage 'highlight_venta'/'highlight_compra' que seteaba antes no
+  // los lee ningún módulo (ni pos.js ni compras_v2.js), y encima el hash
+  // apuntaba a '#compras', una ruta que no existe (el módulo real es
+  // 'compras_v2' desde que se renombró) -- eso es el 404 reportado por el
+  // usuario (11/11/2026). En vez de navegar fuera del editor, abre un modal
+  // de solo lectura acá mismo, reusando los mismos datos que ya expone
+  // Cuentas Corrientes de Proveedores / Clientes para su propio "Ver".
   const navegarAOperacion = (tipo, refId) => {
     if (tipo === 'venta') {
-      sessionStorage.setItem('highlight_venta', refId);
-      sessionStorage.setItem('highlight_back_producto', state.productoId);
-      window.location.hash = '#pos';
+      showVentaDetalle(refId);
     } else if (tipo === 'compra') {
-      sessionStorage.setItem('highlight_compra', refId);
-      sessionStorage.setItem('highlight_back_producto', state.productoId);
-      window.location.hash = '#compras';
+      showCompraDetalle(refId);
     } else {
       showAjusteDetalle(refId);
     }
+  };
+
+  // Consulta propia (no via window.SGA_PagosProveedores: ese módulo recién
+  // se carga si el usuario ya entró a Cuentas Corrientes de Proveedores en
+  // esta sesión, y esta pantalla se llega a cualquiera de los dos editores
+  // sin pasar por ahí) -- mismo query que getDetalleCompra() ya duplica en
+  // operaciones_stock.js y cuenta_corriente_proveedores.js.
+  const getDetalleCompraLocal = (compraId) => {
+    const compra = window.SGA_DB.query(`
+      SELECT c.*, p.razon_social AS proveedor_nombre, u.nombre AS usuario_nombre
+      FROM compras c
+      LEFT JOIN proveedores p ON p.id = c.proveedor_id
+      LEFT JOIN usuarios u ON u.id = c.usuario_id
+      WHERE c.id = ?
+    `, [compraId])[0];
+    if (!compra) return null;
+    compra.items = window.SGA_DB.query(`
+      SELECT ci.*, pr.nombre AS producto_nombre
+      FROM compra_items ci
+      LEFT JOIN productos pr ON pr.id = ci.producto_id
+      WHERE ci.compra_id = ?
+      ORDER BY pr.nombre
+    `, [compraId]);
+    return compra;
+  };
+
+  const showCompraDetalle = (compraId) => {
+    try {
+      const c = getDetalleCompraLocal(compraId);
+      if (!c) { showToast('Compra no encontrada'); return; }
+      const money = (n) => window.SGA_Utils.formatCurrency(n);
+      const filas = c.items.map(it => `
+        <tr>
+          <td>${escapeHtml(it.producto_nombre || '(producto eliminado)')}</td>
+          <td style="text-align:right">${it.cantidad}</td>
+          <td style="text-align:right">${money(it.costo_unitario)}</td>
+        </tr>`).join('');
+      openFamiliaModal(`
+        <h4 style="margin:0 0 16px;font-size:16px">🔍 Detalle de compra</h4>
+        <table style="width:100%;font-size:13px;border-collapse:collapse;margin-bottom:12px">
+          <tr><td style="padding:5px 0;color:#666;width:90px">Proveedor</td><td style="padding:5px 0;font-weight:600">${escapeHtml(c.proveedor_nombre || '–')}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Factura</td><td style="padding:5px 0">${escapeHtml(c.numero_factura || '–')}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Fecha</td><td style="padding:5px 0">${fmtFecha(c.fecha)}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Total</td><td style="padding:5px 0;font-weight:600">${money(c.total)}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Usuario</td><td style="padding:5px 0">${escapeHtml(c.usuario_nombre || '–')}</td></tr>
+        </table>
+        <table style="width:100%;font-size:12px;border-collapse:collapse">
+          <thead><tr style="color:#666;text-align:left"><th>Producto</th><th style="text-align:right">Cant.</th><th style="text-align:right">Costo</th></tr></thead>
+          <tbody>${filas || '<tr><td colspan="3" style="text-align:center;color:#999;padding:10px">Sin productos</td></tr>'}</tbody>
+        </table>
+        <div style="margin-top:16px">
+          <button id="fam-btn-cancel" class="btn btn-outline btn-sm">Cerrar</button>
+        </div>
+      `, () => {});
+    } catch (e) { showToast('Error al cargar la compra'); }
+  };
+
+  const showVentaDetalle = (ventaId) => {
+    try {
+      const v = window.SGA_Clientes.getVentaDetalle(ventaId);
+      if (!v) { showToast('Venta no encontrada'); return; }
+      const money = (n) => window.SGA_Utils.formatCurrency(n);
+      const filas = v.items.map(it => `
+        <tr>
+          <td>${escapeHtml(it.producto_nombre || '(producto eliminado)')}</td>
+          <td style="text-align:right">${it.cantidad}</td>
+          <td style="text-align:right">${money(it.precio_unitario)}</td>
+        </tr>`).join('');
+      const pagos = v.pagos.length
+        ? v.pagos.map(p => `${escapeHtml(p.medio || 'efectivo')}: ${money(p.monto)}`).join(' + ')
+        : '–';
+      openFamiliaModal(`
+        <h4 style="margin:0 0 16px;font-size:16px">🔍 Detalle de venta</h4>
+        <table style="width:100%;font-size:13px;border-collapse:collapse;margin-bottom:12px">
+          <tr><td style="padding:5px 0;color:#666;width:90px">Fecha</td><td style="padding:5px 0">${fmtFecha(v.fecha)}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Total</td><td style="padding:5px 0;font-weight:600">${money(v.total)}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Pagos</td><td style="padding:5px 0">${pagos}</td></tr>
+        </table>
+        <table style="width:100%;font-size:12px;border-collapse:collapse">
+          <thead><tr style="color:#666;text-align:left"><th>Producto</th><th style="text-align:right">Cant.</th><th style="text-align:right">Precio</th></tr></thead>
+          <tbody>${filas || '<tr><td colspan="3" style="text-align:center;color:#999;padding:10px">Sin productos</td></tr>'}</tbody>
+        </table>
+        <div style="margin-top:16px">
+          <button id="fam-btn-cancel" class="btn btn-outline btn-sm">Cerrar</button>
+        </div>
+      `, () => {});
+    } catch (e) { showToast('Error al cargar la venta'); }
   };
 
   const showAjusteDetalle = (ajusteId) => {
