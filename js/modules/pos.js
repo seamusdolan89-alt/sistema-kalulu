@@ -908,17 +908,29 @@ export const POS = (() => {
           }
           const combos = Math.floor(totalUnits / required);
           if (combos > 0) {
-            let discPerCombo = 0;
-            if (promo.aplica_a === 'item_mas_barato' && promo.tipo_descuento === 'porcentaje') {
+            let disc = 0;
+            if ((promo.precio_combo || 0) > 0) {
+              // "Precio combo" en un pool flexible (ej. "2 de estas variedades por
+              // $40.000"): no hay cantidad_requerida fija por producto como en el
+              // combo fijo, así que no hay un único "comboSub" -- se arman los
+              // `combos` grupos de `required` unidades con las unidades MÁS CARAS
+              // del pool (más generoso para el cliente, mismo criterio que
+              // "item_mas_barato" ya usa para el descuento por porcentaje) y se
+              // compara esa suma contra combos × precio_combo.
+              const precios = [];
+              for (const ci of matched) for (let k = 0; k < ci.cantidad; k++) precios.push(ci.precioUnitario);
+              precios.sort((a, b) => b - a);
+              const comboSub = precios.slice(0, combos * required).reduce((s, p) => s + p, 0);
+              disc = Math.max(0, comboSub - combos * promo.precio_combo);
+            } else if (promo.aplica_a === 'item_mas_barato' && promo.tipo_descuento === 'porcentaje') {
               const sorted = [...matched].sort((a, b) => a.precioUnitario - b.precioUnitario);
-              discPerCombo = sorted[0].precioUnitario * ((promo.valor_descuento || 0) / 100);
+              disc = sorted[0].precioUnitario * ((promo.valor_descuento || 0) / 100) * combos;
             } else if (promo.tipo_descuento === 'porcentaje') {
               const sub = matched.reduce((s, ci) => s + ci.precioUnitario * Math.min(ci.cantidad, required), 0);
-              discPerCombo = sub * ((promo.valor_descuento || 0) / 100);
+              disc = sub * ((promo.valor_descuento || 0) / 100) * combos;
             } else {
-              discPerCombo = promo.valor_descuento || 0;
+              disc = (promo.valor_descuento || 0) * combos;
             }
-            const disc = discPerCombo * combos;
             totalDiscount += disc;
             applied.push({ promo, discount: disc, times: combos });
             for (const pid of pidSet) promoPids.add(pid);
