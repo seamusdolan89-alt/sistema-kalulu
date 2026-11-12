@@ -61,6 +61,23 @@ export default {
     const savePromocion = (data, items) => {
       const id = data.id || uuid();
       const ts = now();
+
+      // Al editar una promo existente, "activa" (se maneja aparte con
+      // Activar/Desactivar) y "stock_vendido" (contador real de uso) NO se
+      // tocan con el guardado del formulario -- se preservan los valores que
+      // ya tenía. Si se hardcodearan acá (1 y 0), editar una promo pausada la
+      // reactivaría sola y perdería su historial de unidades vendidas.
+      let activa = 1, stockVendido = 0;
+      if (data.id) {
+        const existente = window.SGA_DB.query(
+          `SELECT activa, stock_vendido FROM promociones WHERE id = ?`, [data.id]
+        )[0];
+        if (existente) {
+          activa = existente.activa;
+          stockVendido = existente.stock_vendido || 0;
+        }
+      }
+
       window.SGA_DB.run(`
         INSERT OR REPLACE INTO promociones
           (id, nombre, tipo, descripcion, fecha_desde, fecha_hasta, activa,
@@ -76,13 +93,13 @@ export default {
         data.descripcion || '',
         data.fecha_desde || null,
         data.fecha_hasta || null,
-        1,
+        activa,
         data.aplica_a || 'todos',
         data.valor_descuento || 0,
         data.tipo_descuento === 'precio_combo' ? 'monto_fijo' : (data.tipo_descuento || 'porcentaje'),
         data.precio_combo || 0,
         data.stock_maximo || 0,
-        0,
+        stockVendido,
         data.flexible ? 1 : 0,
         data.solo_clientes_registrados ? 1 : 0,
         data.cantidad_total_requerida || 1,
@@ -398,6 +415,7 @@ export default {
           ${datesHtml}
           <div class="promo-card-footer">
             <button class="btn-promo-action btn-promo-ver" data-id="${p.id}" style="background:#f0f4ff;border-color:#c5cdf9;color:#667eea">Ver detalles</button>
+            <button class="btn-promo-action btn-promo-editar" data-id="${p.id}" title="Modificar esta promoción">✏️ Editar</button>
             <button class="btn-promo-action btn-promo-toggle" data-id="${p.id}" data-activa="${isActiva ? 1 : 0}">
               ${isActiva ? '⏸ Desactivar' : '▶ Activar'}
             </button>
@@ -408,6 +426,12 @@ export default {
 
       grid.querySelectorAll('.btn-promo-ver').forEach(btn => {
         btn.addEventListener('click', () => showDetailPanel(btn.dataset.id));
+      });
+      grid.querySelectorAll('.btn-promo-editar').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const promo = window.SGA_DB.query(`SELECT * FROM promociones WHERE id = ?`, [btn.dataset.id])[0];
+          if (promo) openModal(promo);
+        });
       });
       grid.querySelectorAll('.btn-promo-toggle').forEach(btn => {
         btn.addEventListener('click', () => {
