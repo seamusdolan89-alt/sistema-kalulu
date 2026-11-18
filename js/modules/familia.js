@@ -253,7 +253,7 @@ const SGA_Familia = (() => {
         <tr data-mid="${esc(m.id)}" ${m.es_lider ? 'class="cv2-her-row-lider"' : ''}>
           <td class="cv2-her-td-num c">${i + 1}</td>
           <td class="cv2-her-td-nombre">${liderBadge}${esc(m.nombre)}</td>
-          <td class="cv2-her-td-stock c">[${m.stock_actual}]</td>
+          <td class="cv2-her-td-stock c">[${Math.round((m.stock_actual || 0) * 1000) / 1000}]</td>
           <td class="cv2-her-td-readonly r">${fmt$(m.costo_actual)}</td>
           <td class="c">
             <input type="checkbox" class="cv2-her-chk cv2-her-chk-costo"

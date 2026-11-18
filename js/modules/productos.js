@@ -355,9 +355,9 @@ const Productos = (() => {
 
     const suc = window.SGA_Auth?.getCurrentUser?.()?.sucursal_id || null;
     const stock = suc
-      ? (window.SGA_DB.query(
+      ? Math.round((window.SGA_DB.query(
           'SELECT COALESCE(cantidad, 0) AS qty FROM stock WHERE producto_id = ? AND sucursal_id = ?',
-          [productoId, suc])[0]?.qty || 0)
+          [productoId, suc])[0]?.qty || 0) * 1000) / 1000
       : 0;
 
     const fecha = (f) => f ? String(f).split('-').reverse().join('/') : null;
@@ -472,7 +472,7 @@ Deja de venderse en el POS y no vuelve a pedirse.${extra}`)) return;
           <td>${costoCell}</td>
           <td>${formatCurrency(producto.precio_venta || 0)}</td>
           <td>${margenCell}</td>
-          <td>${stock}</td>
+          <td>${Math.round(stock * 1000) / 1000}</td>
           <td>${producto.stock_minimo || 0}</td>
           <td style="${madreStyle}">${madreDisplay}</td>
           <td>${estadoLabel}${pausaEstadoLine}</td>
