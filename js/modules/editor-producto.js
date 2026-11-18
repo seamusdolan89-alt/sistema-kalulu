@@ -905,7 +905,7 @@ const EditorProducto = (() => {
 
     const stockRows = window.SGA_DB.query(`
       SELECT s.id AS sucursal_id, s.nombre AS sucursal_nombre,
-        COALESCE(st.cantidad, 0) AS cantidad
+        ROUND(COALESCE(st.cantidad, 0), 3) AS cantidad
       FROM sucursales s
       LEFT JOIN stock st ON st.producto_id = ? AND st.sucursal_id = s.id
       WHERE s.activa = 1
@@ -1054,7 +1054,7 @@ const EditorProducto = (() => {
       const members = window.SGA_DB.query(`
         SELECT ps.producto_id, p.nombre,
           cb.codigo AS codigo_barras,
-          COALESCE(st.cantidad, 0) AS stock
+          ROUND(COALESCE(st.cantidad, 0), 3) AS stock
         FROM producto_sustitutos ps
         JOIN productos p ON p.id = ps.producto_id
         LEFT JOIN codigos_barras cb ON cb.producto_id = ps.producto_id AND cb.es_principal = 1
@@ -1115,7 +1115,7 @@ const EditorProducto = (() => {
       const miembros = window.SGA_DB.query(`
         SELECT ps.producto_id, p.nombre,
           cb.codigo AS codigo_barras,
-          COALESCE(st.cantidad, 0) AS stock
+          ROUND(COALESCE(st.cantidad, 0), 3) AS stock
         FROM producto_sustitutos ps
         JOIN productos p ON p.id = ps.producto_id
         LEFT JOIN codigos_barras cb ON cb.producto_id = ps.producto_id AND cb.es_principal = 1
