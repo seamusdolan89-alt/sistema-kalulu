@@ -1136,6 +1136,33 @@
       `);
     } catch(e) { console.warn('precios_historial:', e.message); }
 
+    // ── accesos_usuarios — quién inició y quién cerró sesión (19/11/2026) ─────
+    // Registro inmutable, una fila por evento, id UUID propio (nunca se reusa ni se edita):
+    // sincroniza como stock_movimientos / precios_historial (INSERT OR IGNORE al recibir),
+    // así que POS y Admin-POS convergen sin pisarse. Lo escriben auth.js (login/logout) vía
+    // registrarAcceso(). evento: 'login' | 'logout' (botón Salir) | 'logout_auto' (la sesión
+    // venció por cambio de jornada, ver auth.js). `superficie` = 'pos' | 'admin-pos' y
+    // `dispositivo_id` identifica el navegador (localStorage), para saber QUÉ compu generó
+    // cada evento aunque las dos tablas se mezclen. Cerrar la pestaña/apagar la compu NO deja
+    // evento (el navegador no avisa de forma confiable): un 'login' sin 'logout' posterior del
+    // mismo dispositivo y superficie significa "se cerró sin pasar por Salir".
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS accesos_usuarios (
+          id TEXT PRIMARY KEY,
+          usuario_id TEXT,
+          evento TEXT NOT NULL,
+          fecha TEXT NOT NULL,
+          superficie TEXT,
+          dispositivo_id TEXT,
+          motivo TEXT,
+          sync_status TEXT DEFAULT 'pending',
+          updated_at TEXT
+        )
+      `);
+      database.run(`CREATE INDEX IF NOT EXISTS idx_accesos_fecha ON accesos_usuarios(fecha)`);
+    } catch(e) { console.warn('accesos_usuarios:', e.message); }
+
     // ── venta_promociones — historial de uso de cada promoción ────────────────
     try {
       database.run(`
@@ -2293,6 +2320,44 @@
     if (!batchMode) saveDatabase();
   }
 
+  // ── accesos_usuarios: registrar un inicio/cierre de sesión y apply de sync ─────
+  // Id del navegador: se genera una vez y queda en localStorage (no en sessionStorage: tiene
+  // que sobrevivir al cierre de la pestaña para reconocer "la misma compu" al otro día).
+  function getDispositivoId() {
+    try {
+      let id = localStorage.getItem('sga_device_id');
+      if (!id) { id = window.SGA_Utils.generateUUID(); localStorage.setItem('sga_device_id', id); }
+      return id;
+    } catch (e) { return null; }
+  }
+
+  // Nunca tira: un fallo del registro no puede impedir entrar ni salir del sistema.
+  // El llamador (auth.js) hace `await flush()` después, porque login/logout navegan enseguida.
+  function registrarAcceso(evento, usuarioId, motivo) {
+    try {
+      const ts = new Date().toISOString();
+      run(
+        `INSERT INTO accesos_usuarios
+           (id, usuario_id, evento, fecha, superficie, dispositivo_id, motivo, sync_status, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+        [window.SGA_Utils.generateUUID(), usuarioId || null, evento, ts,
+         window.ADMIN_MODE ? 'admin-pos' : 'pos', getDispositivoId(), motivo || null, ts]
+      );
+    } catch (e) { console.warn('registrarAcceso:', e.message); }
+  }
+
+  // Receptor de sync: siempre INSERT OR IGNORE (un evento ya recibido NUNCA se pisa).
+  function aplicarAcceso(a) {
+    database.run(
+      `INSERT OR IGNORE INTO accesos_usuarios
+         (id, usuario_id, evento, fecha, superficie, dispositivo_id, motivo, sync_status, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'synced', ?)`,
+      [a.id, a.usuario_id || null, a.evento || 'login', a.fecha, a.superficie || null,
+       a.dispositivo_id || null, a.motivo || null, a.updated_at || a.fecha]
+    );
+    if (!batchMode) saveDatabase();
+  }
+
   function beginBatch() {
     batchMode = true;
     database.run('BEGIN TRANSACTION');
@@ -2382,6 +2447,8 @@
     conOrigenCambio,
     registrarAltaPrecio,
     aplicarPrecioHistorial,
+    registrarAcceso,
+    aplicarAcceso,
     verificarIntegridadStock,
     backfillSaldoInicial,
     abandonarSaldoInicialLocal,

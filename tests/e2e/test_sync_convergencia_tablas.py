@@ -108,6 +108,11 @@ EXCEPCIONES_DISENO = {
     # converge, y es lo que prueba test_precios_historial_sync.py con dos dispositivos.
     ("precios_historial", "POS -> Admin"):   "append-only por diseno: un registro de cambio no se edita, se agrega otro",
     ("precios_historial", "Admin -> POS"):   "idem",
+    # Registro de inicios/cierres de sesion (accesos_usuarios, 19/11/2026): igual, append-only e
+    # inmutable por diseno (aplicarAcceso hace INSERT OR IGNORE) -- un evento de login/logout es un
+    # hecho que ya ocurrio, no se edita. El ALTA (que el evento llegue al otro lado) SI converge.
+    ("accesos_usuarios", "POS -> Admin"):    "append-only por diseno: un evento de acceso no se edita, se agrega otro",
+    ("accesos_usuarios", "Admin -> POS"):    "idem",
     # _hist_ctx: una sola fila FIJA por dispositivo, con el origen/usuario "en curso" que lee el
     # trigger de productos. Es estado local de la sesion, nunca debe viajar (cada compu tiene la suya).
     ("_hist_ctx", "POS -> Admin"):           "contexto local de una fila para el trigger de precios_historial; no sincroniza",

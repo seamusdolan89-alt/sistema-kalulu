@@ -207,7 +207,7 @@
     if (!expiryIntervalId) {
       expiryIntervalId = setInterval(() => {
         if (currentUser && isSessionExpired()) {
-          logout().then(() => location.reload());
+          logout('jornada').then(() => location.reload());
         }
       }, SESSION_EXPIRY_CHECK_MS);
     }
@@ -241,12 +241,31 @@
 
     sessionStorage.setItem('sga_user', JSON.stringify(currentUser));
     sessionStorage.setItem('sga_login_at', new Date().toISOString());
+    // Registro de accesos (accesos_usuarios). Login y logout navegan enseguida (location.href),
+    // asi que se espera el guardado a disco antes de devolver el control.
+    await registrarAcceso('login', u.id);
     return currentUser;
+  }
+
+  // Deja una fila en accesos_usuarios. NUNCA tira ni demora de mas: un fallo del registro no
+  // puede impedir entrar ni salir del sistema.
+  async function registrarAcceso(evento, usuarioId, motivo) {
+    try {
+      if (!window.SGA_DB?.registrarAcceso) return;
+      window.SGA_DB.registrarAcceso(evento, usuarioId, motivo);
+      if (window.SGA_DB.flush) await window.SGA_DB.flush();
+    } catch (e) { console.warn('registrarAcceso:', e.message); }
   }
 
   // ─── Sesión ─────────────────────────────────────────────────────────────────
 
-  async function logout() {
+  // motivo: 'jornada' = la sesion vencio sola por el cambio de jornada (ver arriba);
+  // cualquier otro valor / ninguno = el usuario toco "Salir".
+  async function logout(motivo) {
+    if (currentUser) {
+      await registrarAcceso(motivo === 'jornada' ? 'logout_auto' : 'logout', currentUser.id,
+                            motivo === 'jornada' ? 'sesion vencida por cambio de jornada' : null);
+    }
     currentUser = null;
     sessionStorage.removeItem('sga_user');
     sessionStorage.removeItem('sga_login_at');
@@ -258,6 +277,11 @@
 
   function restoreSession() {
     if (isSessionExpired()) {
+      // La pestaña seguia abierta (o se restauro) de una jornada anterior: se cierra aca.
+      try {
+        const viejo = JSON.parse(sessionStorage.getItem('sga_user') || 'null');
+        if (viejo?.id) registrarAcceso('logout_auto', viejo.id, 'sesion vencida por cambio de jornada (detectado al abrir)');
+      } catch (_) { /* sin usuario legible: no hay a quien atribuirselo */ }
       sessionStorage.removeItem('sga_user');
       sessionStorage.removeItem('sga_login_at');
       currentUser = null;

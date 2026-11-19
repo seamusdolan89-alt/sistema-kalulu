@@ -120,6 +120,10 @@
     // (db.js), que NO se dispara con el apply de productos (INSERT OR REPLACE) -- por eso no
     // hay duplicados: cada cambio se registra una sola vez, en la compu donde se hizo.
     { table: 'precios_historial', collection: 'precios_historial', pk: 'id',   denormalize: null },
+    // Registro de inicios/cierres de sesion (19/11/2026). Append-only con id propio, igual que
+    // precios_historial: el receptor es INSERT OR IGNORE, asi que POS y Admin-POS se pasan sus
+    // eventos sin pisarse. Lo escribe auth.js (login/logout) via SGA_DB.registrarAcceso.
+    { table: 'accesos_usuarios',  collection: 'accesos_usuarios',  pk: 'id',   denormalize: null },
     { table: 'categorias',        collection: 'categorias',        pk: 'id',   denormalize: null },
     // Las marcas de borrado viajan como cualquier otra tabla; del otro lado
     // applyEliminacion las convierte en el DELETE correspondiente.
@@ -174,6 +178,7 @@
     'clientes',                  // pedido explícito del usuario (17/9) — no lo necesita desde el celular
     'sugerencias',                // buzón de consultas/sugerencias — no es una de las 5 áreas mobile (BACKLOG.md)
     'precios_historial',          // pestaña "Historial de precios" del Editor de Producto — desktop-only
+    'accesos_usuarios',           // registro de inicios/cierres de sesión — no lo lee ninguna de las 5 áreas mobile
   ];
 
   // window.innerWidth es estable durante la sesión (un celular no cambia de
@@ -217,6 +222,7 @@
     // así que aplicar el mismo movimiento dos veces (reintento, doble pull) no duplica nada.
     { collection: 'stock_movimientos', applyFn: applyStockMovimiento },
     { collection: 'precios_historial', applyFn: applyPrecioHistorial },
+    { collection: 'accesos_usuarios',  applyFn: applyAcceso },
     // Caja: el admin tambien escribe estas filas (pagar a un proveedor en efectivo
     // contra la caja abierta del local -> egresos_caja; cobrar la deuda de un
     // cliente -> ingresos_caja; una venta; un consumo interno). La caja esperada
@@ -271,6 +277,7 @@
     // 'stock' (valor absoluto) NO se aplica acá — ver el mismo comentario en PULL_SOURCES.
     { name: 'stock_movimientos', applyFn: applyStockMovimiento },
     { name: 'precios_historial', applyFn: applyPrecioHistorial },
+    { name: 'accesos_usuarios',  applyFn: applyAcceso },
     { name: 'promociones',       applyFn: applyPromocion },
     { name: 'consumo_interno',   applyFn: applyConsumoInternoFull },
     { name: 'pedidos_abiertos',  applyFn: applyPedidoAbierto },
@@ -1607,6 +1614,10 @@
     window.SGA_DB.aplicarPrecioHistorial(data);
   }
 
+  function applyAcceso(data) {
+    window.SGA_DB.aplicarAcceso(data);
+  }
+
   function applyMedioCobroFull(data) {
     window.SGA_DB.run(`
       INSERT OR REPLACE INTO medios_cobro (id, nombre, icono, activo, orden, sync_status, updated_at)
@@ -2027,6 +2038,8 @@
       { name: 'stock_movimientos', applyFn: applyStockMovimiento,  label: 'Movimientos de stock' },
       // Crece con el tiempo de uso (historial) -> lote de fondo, como el resto.
       { name: 'precios_historial', applyFn: applyPrecioHistorial,  label: 'Historial de precios' },
+      // Crece con el tiempo de uso (una fila por login/logout) -> lote de fondo.
+      { name: 'accesos_usuarios',  applyFn: applyAcceso,           label: 'Accesos de usuarios' },
       { name: 'gastos_pagos',      applyFn: applyGastoPago,        label: 'Pagos de gastos' },
       { name: 'system_config',     applyFn: applySystemConfig,     label: 'Configuración' },
       { name: 'flujo_forecast',    applyFn: applyFlujoForecast,    label: 'Flujo — proyección' },
