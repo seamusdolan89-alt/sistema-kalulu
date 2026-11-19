@@ -294,6 +294,75 @@ const ComprasV2 = (() => {
     item.markupAutoShown = true;
   }
 
+  // Markup del PROVEEDOR actual (pedido del usuario, 18/11/2026): la pantalla
+  // de Ajuste de Precios sugería el precio nuevo a partir de "cuánto subió el
+  // costo", pero eso no dice nada de si el markup resultante es bueno -- solo
+  // preserva el que ya tenía, sea sano o no. En vez de inventar un rango fijo
+  // (que no tiene sentido igual para todos los proveedores), se arma una
+  // distribución con el markup REAL de los productos que este proveedor te
+  // vendió en los últimos 60 días: un producto que no le comprás hace meses
+  // no dice nada de la política de precios vigente con ESE proveedor.
+  // Devuelve null si hay muy pocos datos (<3) para que comparar sea honesto.
+  const MARKUP_DIST_DIAS = 60;
+  const MARKUP_DIST_MIN_N = 3;
+
+  function getDistribucionMarkupProveedor(proveedorId, excluirCompraId = null) {
+    if (!proveedorId) return null;
+    const desde = new Date(Date.now() - MARKUP_DIST_DIAS * 86400000).toISOString().slice(0, 10);
+    // Excluye la compra que se está ajustando AHORA: a esta altura
+    // (commitCompra ya corrió) productos.costo de sus líneas ya es el nuevo,
+    // pero productos.precio_venta todavía es el VIEJO -- a la espera de lo
+    // que se decida en esta misma pantalla. Sin excluirla, la distribución
+    // de este mismo proveedor se ensuciaría con ese desfasaje transitorio,
+    // circular con lo que se está por clasificar.
+    const rows = db().query(
+      `SELECT DISTINCT p.id, p.precio_venta, p.costo
+       FROM productos p
+       JOIN compra_items ci ON ci.producto_id = p.id
+       JOIN compras c ON c.id = ci.compra_id
+       WHERE c.proveedor_id = ? AND c.fecha >= ?
+         AND COALESCE(c.estado,'confirmada') != 'anulada'
+         AND c.id != ?
+         AND p.costo > 0 AND p.precio_venta > 0`,
+      [proveedorId, desde, excluirCompraId || '']
+    );
+    const markups = rows.map(r => ((parseFloat(r.precio_venta) / parseFloat(r.costo)) - 1) * 100)
+                         .sort((a, b) => a - b);
+    if (markups.length < MARKUP_DIST_MIN_N) return null;
+    // Percentil con interpolación lineal (nearest-rank daría saltos feos con n chico).
+    const percentil = p => {
+      const idx = (markups.length - 1) * p;
+      const lo = Math.floor(idx), hi = Math.ceil(idx);
+      return lo === hi ? markups[lo] : markups[lo] + (markups[hi] - markups[lo]) * (idx - lo);
+    };
+    return { n: markups.length, p33: percentil(0.33), p66: percentil(0.66) };
+  }
+
+  // bajo/normal/alto según en qué tercio de la distribución del proveedor cae.
+  // null si no hay distribución (sin base) o el markup no se pudo calcular.
+  function clasificarMarkup(markupPct, dist) {
+    if (dist == null || markupPct == null || isNaN(markupPct)) return null;
+    if (markupPct < dist.p33) return 'bajo';
+    if (markupPct > dist.p66) return 'alto';
+    return 'normal';
+  }
+
+  const MARKUP_BADGE_COLOR = { bajo: '#c62828', normal: '#2e7d32', alto: '#e65100' };
+
+  // Devuelve el HTML del badge de markup (color según distribución del
+  // proveedor) para usar tanto en el render inicial como en las actualizaciones
+  // en vivo (ver updateMarkupBadge en showSuccessScreen).
+  function markupBadgeHtml(markupPct, dist, idx = null) {
+    if (markupPct == null || isNaN(markupPct)) return '';
+    const clase = clasificarMarkup(markupPct, dist);
+    const color = clase ? MARKUP_BADGE_COLOR[clase] : '#8090a0';
+    const title = dist
+      ? `Markup ${clase} frente a lo que le compraste a este proveedor en los últimos ${MARKUP_DIST_DIAS} días (n=${dist.n})`
+      : 'Sin suficientes compras recientes de este proveedor para comparar';
+    const idxAttr = idx != null ? ` data-idx="${idx}"` : '';
+    return `<div class="cv2-post-markup-badge"${idxAttr} style="color:${color}" title="${esc(title)}">${markupPct.toFixed(1)}%</div>`;
+  }
+
   function itemGross(item) {
     if (isAjuste(item)) {
       const m = Math.abs(parseFloat(item.monto) || 0);
@@ -4286,6 +4355,12 @@ const ComprasV2 = (() => {
     const root = ge('cv2-root');
     if (!root) return;
 
+    // Distribución de markup del proveedor de ESTA compra (ver
+    // getDistribucionMarkupProveedor) -- se recalcula en cada render, nunca se
+    // guarda: siempre tiene que reflejar las compras recientes tal cual están
+    // ahora, incluso al retomar una compra pausada hace unos días.
+    const distProveedor = getDistribucionMarkupProveedor(state.proveedorId, compraId);
+
     // Enrich items with current precio_venta from DB (or use pre-enriched on retomar).
     // Los ajustes (envío/descuento) no son productos — no hay precio que sugerir.
     // Las muestras tampoco: su costo (~$0) no debe disparar una sugerencia de
@@ -4393,6 +4468,17 @@ const ComprasV2 = (() => {
       // corrección se vea como un "✓ Guardado" normal (ya no es el automático).
       const markupAuto = it.markupFijo != null && it.markupAutoShown === true;
 
+      // Markup real (pedido del usuario, 18/11/2026): el actual contra el
+      // costo que ya tenía, y el que quedaría con el precio que se está
+      // mostrando ahora mismo (sugerido, o el que haya quedado guardado /
+      // mantenido) -- no siempre es pvSugerido, por eso usa la misma cuenta
+      // que decide el `value` del input, un poco más abajo.
+      const precioMostrado  = markupAuto ? it.pvSugerido
+                             : yaGuardada ? Number(it.pvGuardado)
+                             : yaIgnorada ? it.pvActual : it.pvSugerido;
+      const markupActualPct = it.costoAnt > 0.001 ? ((it.pvActual / it.costoAnt) - 1) * 100 : null;
+      const markupNuevoPct  = it.costoNvo > 0.001 ? ((precioMostrado / it.costoNvo) - 1) * 100 : null;
+
       const actionHtml = markupAuto
         ? `<div class="cv2-post-aldia-wrap">
              <span class="cv2-post-badge-markup" title="Precio recalculado solo por el markup predeterminado de este producto">Markup fijo (${esc(String(it.markupFijo))}%)</span>
@@ -4431,7 +4517,10 @@ const ComprasV2 = (() => {
           <td class="cv2-post-costo-ant r">${fmt$(it.costoAnt)}</td>
           <td class="cv2-post-costo-nuevo r">${fmt$(it.costoNvo)}</td>
           <td class="c"><span class="${varClass}">${varText}</span></td>
-          <td class="cv2-post-pv-actual r">${fmt$(it.pvActual)}</td>
+          <td class="cv2-post-pv-actual r">
+            ${fmt$(it.pvActual)}
+            ${markupBadgeHtml(markupActualPct, distProveedor)}
+          </td>
           <td>
             <div class="cv2-post-precio-input-wrap">
               <input type="number" class="cv2-post-precio-input" data-idx="${i}"
@@ -4443,6 +4532,7 @@ const ComprasV2 = (() => {
                      step="0.01" min="0">
               <button class="cv2-post-recalc-btn" data-idx="${i}" title="Recalcular precio sugerido">&#x21bb;</button>
             </div>
+            ${markupBadgeHtml(markupNuevoPct, distProveedor, i)}
             <div class="cv2-post-bajo-costo-warn" data-idx="${i}" style="display:none">
               ⚠ Precio por debajo del costo
             </div>
@@ -4504,6 +4594,28 @@ const ComprasV2 = (() => {
             Se procesaron <strong>${totalArticulos}</strong> artículos distintos,
             sumando <strong>${totalUds} unidades totales</strong> al stock.
           </span>
+        </div>
+
+        <!-- Markup de referencia del proveedor (pedido del usuario, 18/11/2026):
+             el color de los badges de markup no alcanza solo -- hace falta poder
+             ver el número contra el que se está comparando. -->
+        <div class="cv2-post-markup-ref-banner">
+          <span class="cv2-post-banner-icon">📊</span>
+          ${distProveedor ? `
+            <span>
+              <strong>Markup de referencia de ${esc(_prov)}</strong>
+              (últimos ${MARKUP_DIST_DIAS} días, ${distProveedor.n} productos comprados):
+              <span style="color:${MARKUP_BADGE_COLOR.bajo}">● bajo &lt; ${distProveedor.p33.toFixed(1)}%</span> ·
+              <span style="color:${MARKUP_BADGE_COLOR.normal}">● normal ${distProveedor.p33.toFixed(1)}–${distProveedor.p66.toFixed(1)}%</span> ·
+              <span style="color:${MARKUP_BADGE_COLOR.alto}">● alto &gt; ${distProveedor.p66.toFixed(1)}%</span>
+            </span>
+          ` : `
+            <span>
+              Todavía no hay suficientes compras de <strong>${esc(_prov)}</strong> en los últimos ${MARKUP_DIST_DIAS} días
+              (hacen falta al menos ${MARKUP_DIST_MIN_N} productos distintos) para calcular un markup de referencia —
+              los porcentajes de abajo se muestran sin color.
+            </span>
+          `}
         </div>
 
         <!-- Table -->
@@ -4681,6 +4793,27 @@ const ComprasV2 = (() => {
       input.classList.toggle('cv2-post-input-bajo-costo', bajo);
     }
 
+    // Recalcula el badge de markup "Nuevo Precio" a partir de lo que esté
+    // puesto AHORA en el input (no siempre pvSugerido: la cajera lo puede
+    // haber corregido a mano) -- se llama en cada punto donde el valor del
+    // input cambia, sea por tipeo, por "recalcular" o por guardar/ignorar.
+    function updateMarkupBadge(idx) {
+      const tr     = root.querySelector(`.cv2-post-tr[data-idx="${idx}"]`);
+      const input  = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
+      const badge  = root.querySelector(`.cv2-post-markup-badge[data-idx="${idx}"]`);
+      if (!tr || !input || !badge) return;
+      const costo  = parseFloat(tr.dataset.costo) || 0;
+      const precio = parseFloat(input.value) || 0;
+      const markupPct = costo > 0.001 && precio > 0 ? ((precio / costo) - 1) * 100 : null;
+      if (markupPct == null) { badge.textContent = ''; badge.removeAttribute('title'); return; }
+      const clase = clasificarMarkup(markupPct, distProveedor);
+      badge.style.color = clase ? MARKUP_BADGE_COLOR[clase] : '#8090a0';
+      badge.textContent = `${markupPct.toFixed(1)}%`;
+      badge.title = distProveedor
+        ? `Markup ${clase} frente a lo que le compraste a este proveedor en los últimos ${MARKUP_DIST_DIAS} días (n=${distProveedor.n})`
+        : 'Sin suficientes compras recientes de este proveedor para comparar';
+    }
+
     function markRowSaved(idx) {
       const actWrap = root.querySelector(`.cv2-post-tr[data-idx="${idx}"] .cv2-post-td-accion`);
       const input   = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
@@ -4692,6 +4825,7 @@ const ComprasV2 = (() => {
         if (!isNaN(guardado)) input.value = guardado.toFixed(2);
         input.disabled = true; input.style.opacity = '0.6';
       }
+      updateMarkupBadge(idx);
       // El ✎ es el mismo que ya usaban las filas "Al dia": si te equivocaste
       // de precio, se corrige aca y no hay que ir al producto despues.
       if (actWrap) actWrap.innerHTML = `
@@ -4714,6 +4848,7 @@ const ComprasV2 = (() => {
         input.value = item.pvSugerido.toFixed(2);
         input.disabled = true; input.style.opacity = '0.6';
       }
+      updateMarkupBadge(idx);
       if (actWrap) actWrap.innerHTML = `
         <div class="cv2-post-aldia-wrap">
           <span class="cv2-post-badge-markup" title="Precio recalculado solo por el markup predeterminado de este producto">Markup fijo (${esc(String(item.markupFijo))}%)</span>
@@ -4730,6 +4865,7 @@ const ComprasV2 = (() => {
       const tr       = root.querySelector(`.cv2-post-tr[data-idx="${idx}"]`);
       const pvActual = parseFloat(input?.dataset.pvactual) || 0;
       if (input)   { input.value = pvActual.toFixed(2); input.disabled = true; input.style.opacity = '0.5'; }
+      updateMarkupBadge(idx);
       if (actWrap) actWrap.innerHTML = `
         <div class="cv2-post-aldia-wrap">
           <span class="cv2-post-badge-mantenido">Precio Mantenido</span>
@@ -4796,15 +4932,18 @@ const ComprasV2 = (() => {
         input.value = parseFloat(input.dataset.sugerido).toFixed(2);
         input.classList.remove('modified');
         checkBajoCosto(idx);
+        updateMarkupBadge(idx);
       });
     });
 
-    // ── Input: modified flag + bajo-costo ─────────────────────────────────────
+    // ── Input: modified flag + bajo-costo + markup en vivo ────────────────────
     root.querySelectorAll('.cv2-post-precio-input').forEach(input => {
       input.addEventListener('input', () => {
+        const idx = parseInt(input.dataset.idx, 10);
         const sugerido = parseFloat(input.dataset.sugerido).toFixed(2);
         input.classList.toggle('modified', input.value !== sugerido);
-        checkBajoCosto(parseInt(input.dataset.idx, 10));
+        checkBajoCosto(idx);
+        updateMarkupBadge(idx);
       });
     });
 
@@ -4854,6 +4993,7 @@ const ComprasV2 = (() => {
           .addEventListener('click', () => doSaveRow(idx, prodId));
         if (input) { input.focus(); input.select(); }
         checkBajoCosto(idx);
+        updateMarkupBadge(idx);
       }
 
       if (cancelBtn) {
@@ -4870,6 +5010,7 @@ const ComprasV2 = (() => {
         const actWrap = root.querySelector(`.cv2-post-tr[data-idx="${idx}"] .cv2-post-td-accion`);
         const input   = root.querySelector(`.cv2-post-precio-input[data-idx="${idx}"]`);
         if (input) input.value = parseFloat(input.dataset.pvactual).toFixed(2);
+        updateMarkupBadge(idx);
         if (actWrap) actWrap.innerHTML = aldiaWrapHtml(idx, prodId);
       }
     });
