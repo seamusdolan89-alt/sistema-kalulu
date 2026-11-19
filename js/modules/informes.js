@@ -23,6 +23,7 @@ const Informes = (() => {
     { id: 'salidas_stock',      label: 'Salidas de Stock (no venta)' },
     { id: 'sustitutos_grupos',  label: 'Grupos de Sustitutos' },
     { id: 'precios_etiquetas',  label: 'Precios y Etiquetas' },
+    { id: 'accesos_usuarios',   label: 'Accesos de Usuarios' },
   ];
 
   // can_informes (ruta) es el acceso a la SECCIÓN; cada id de REPORTES tiene
@@ -581,6 +582,9 @@ const Informes = (() => {
     if (!permitidos.some(r => r.id === state.reporte)) {
       state.reporte = permitidos[0]?.id || null;
     }
+    // El bloque mobile (Admin-POS en celular) es el informe "Ventas por Vendedor": solo se arma
+    // si el usuario tiene ESE permiso (antes aparecia con cualquier informe habilitado).
+    const mobileVendedor = permitidos.some(r => r.id === 'ventas_vendedor');
 
     const root = ge('inf-root');
     if (!root) return;
@@ -592,9 +596,11 @@ const Informes = (() => {
     // siempre (no solo si la pantalla es angosta): es CSS quien decide qué
     // bloque se ve, así que no hace falta detectar el ancho acá ni
     // recalcular en un resize.
-    state.mobilePeriod = 'mes';
-    setMobilePeriod('mes');
-    attachMobileListeners();
+    if (mobileVendedor) {
+      state.mobilePeriod = 'mes';
+      setMobilePeriod('mes');
+      attachMobileListeners();
+    }
   }
 
   // ── ADMIN-POS MOBILE: VENTAS POR VENDEDOR SIMPLIFICADO ──────────────────────
@@ -755,8 +761,9 @@ const Informes = (() => {
       </div>
 
       <!-- Admin-POS mobile: un solo reporte, sin selector — ver CSS
-           .inf-mobile-only (BACKLOG.md, "Admin-POS responsive"). -->
-      <div class="inf-mobile-only">
+           .inf-mobile-only (BACKLOG.md, "Admin-POS responsive"). Solo se dibuja con el
+           permiso de ESE informe (can_informes_ventas_vendedor). -->
+      ${permitidos.some(r => r.id === 'ventas_vendedor') ? `<div class="inf-mobile-only">
         <div class="inf-m-header"><h2>📊 Ventas por Vendedor</h2></div>
         <div class="inf-m-periods">
           <button class="inf-m-chip" data-mperiod="hoy">Hoy</button>
@@ -767,7 +774,7 @@ const Informes = (() => {
         <input type="month" id="inf-m-mes-input" class="inf-m-mes-input">
         <div id="inf-m-kpis" class="inf-m-kpis"></div>
         <div id="inf-m-vendedores" class="inf-m-vendedores"></div>
-      </div>
+      </div>` : ''}
     `;
   }
 
@@ -949,6 +956,10 @@ const Informes = (() => {
             state.data = queryPreciosEtiquetas();
             resultsEl.innerHTML = renderPreciosEtiquetas(state.data);
             break;
+          case 'accesos_usuarios':
+            state.data = queryAccesosUsuarios();
+            resultsEl.innerHTML = renderAccesosUsuarios(state.data);
+            break;
           default:
             resultsEl.innerHTML = `<div class="inf-error">Reporte no reconocido.</div>`;
         }
@@ -977,6 +988,130 @@ const Informes = (() => {
         </div>
         ${exportBtns}
       </div>
+    `;
+  }
+
+  // ── REPORT: Accesos de Usuarios ───────────────────────────────────────────────
+  // Una fila por SESIÓN: quién inició, cuándo, en qué superficie/equipo, y quién y cómo la cerró.
+  // Sale de accesos_usuarios (eventos login / logout / logout_auto, ver auth.js). Los eventos se
+  // emparejan por equipo+superficie: un login sin logout antes del siguiente login del mismo equipo
+  // = se cerró sin pasar por "Salir" (cerrar la pestaña / apagar la compu no deja evento).
+  const COMO_CIERRE = {
+    logout:      'Salir (manual)',
+    logout_auto: 'Automático (cambio de jornada)',
+    sin_cierre:  'Sin cierre registrado',
+    abierta:     'Sin cierre registrado (sigue abierta o se cerró sin Salir)',
+  };
+
+  function queryAccesosUsuarios() {
+    const desde = toUTC(state.desde);
+    const hasta = toUTC(addOneDay(state.hasta));
+    // Se leen eventos desde el inicio del período hasta HOY (no solo hasta `hasta`): el cierre de
+    // una sesión iniciada dentro del período puede ocurrir después.
+    const ev = window.SGA_DB.query(`
+      SELECT a.id, a.evento, a.fecha, a.superficie, a.dispositivo_id, a.motivo, a.usuario_id,
+             COALESCE(u.nombre, CASE WHEN a.usuario_id IS NULL THEN '' ELSE '(usuario borrado)' END) AS usuario
+        FROM accesos_usuarios a LEFT JOIN usuarios u ON u.id = a.usuario_id
+       WHERE a.fecha >= ?
+       ORDER BY a.fecha, a.rowid`, [desde]);
+
+    const abiertas = {};  // equipo|superficie -> sesión abierta
+    const sesiones = [];
+    const clave = (e) => (e.dispositivo_id || '?') + '|' + (e.superficie || '?');
+    for (const e of ev) {
+      const k = clave(e);
+      if (e.evento === 'login') {
+        if (abiertas[k]) {                       // el anterior nunca se cerró: se cerró sin Salir
+          abiertas[k].como = 'sin_cierre';
+          abiertas[k].siguiente = e;
+          sesiones.push(abiertas[k]);
+        }
+        abiertas[k] = { inicio: e, cierre: null, como: 'abierta', siguiente: null };
+      } else {                                   // logout / logout_auto
+        if (abiertas[k]) {
+          abiertas[k].cierre = e; abiertas[k].como = e.evento;
+          sesiones.push(abiertas[k]); delete abiertas[k];
+        } else {                                 // el login fue antes del período
+          sesiones.push({ inicio: null, cierre: e, como: e.evento, siguiente: null });
+        }
+      }
+    }
+    Object.values(abiertas).forEach(sn => sesiones.push(sn));
+
+    return sesiones
+      .filter(sn => {
+        const f = (sn.inicio || sn.cierre).fecha;
+        return f >= desde && f < hasta;
+      })
+      .map(sn => {
+        const ref = sn.inicio || sn.cierre;
+        const dur = (sn.inicio && sn.cierre)
+          ? Math.max(0, Math.round((new Date(sn.cierre.fecha) - new Date(sn.inicio.fecha)) / 60000)) : null;
+        return {
+          usuario:     sn.inicio ? sn.inicio.usuario : '—',
+          cerro:       sn.cierre ? sn.cierre.usuario : '',
+          superficie:  ref.superficie === 'admin-pos' ? 'Admin-POS' : ref.superficie === 'pos' ? 'POS' : (ref.superficie || ''),
+          equipo:      (ref.dispositivo_id || '').slice(0, 6),
+          inicio:      sn.inicio ? sn.inicio.fecha : null,
+          cierre:      sn.cierre ? sn.cierre.fecha : null,
+          duracion_min: dur,
+          como:        sn.como,
+          siguiente:   sn.siguiente ? `${sn.siguiente.usuario} (${new Date(sn.siguiente.fecha).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })})` : '',
+        };
+      })
+      .sort((a, b) => ((b.inicio || b.cierre) || '').localeCompare((a.inicio || a.cierre) || ''));
+  }
+
+  const fmtFechaHora = (iso) => iso
+    ? new Date(iso).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+  const fmtDuracion = (min) => {
+    if (min == null) return '—';
+    const h = Math.floor(min / 60), m = min % 60;
+    return h ? `${h} h ${String(m).padStart(2, '0')} min` : `${m} min`;
+  };
+
+  function renderAccesosUsuarios(rows) {
+    const usuarios = new Set(rows.map(r => r.usuario).filter(u => u && u !== '—'));
+    const nSalir   = rows.filter(r => r.como === 'logout').length;
+    const nAuto    = rows.filter(r => r.como === 'logout_auto').length;
+    const nSin     = rows.filter(r => r.como === 'sin_cierre' || r.como === 'abierta').length;
+    return `
+      ${reportHeader('Accesos de Usuarios')}
+      <div class="inf-kpi-row">
+        <div class="inf-kpi"><div class="inf-kpi-label">Sesiones</div><div class="inf-kpi-value">${fmtNum(rows.length)}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Usuarios distintos</div><div class="inf-kpi-value">${fmtNum(usuarios.size)}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Cerradas con Salir</div><div class="inf-kpi-value">${fmtNum(nSalir)}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Cierre automático (jornada)</div><div class="inf-kpi-value">${fmtNum(nAuto)}</div></div>
+        <div class="inf-kpi ${nSin ? 'highlight' : ''}"><div class="inf-kpi-label">Sin cierre registrado</div><div class="inf-kpi-value">${fmtNum(nSin)}</div></div>
+      </div>
+      ${rows.length === 0 ? `<div class="inf-empty">No hay inicios de sesión registrados en el período seleccionado.</div>` : `
+        <div class="inf-table-wrap">
+          <table class="inf-table">
+            <thead><tr>
+              <th>Usuario</th><th>Superficie</th><th>Equipo</th>
+              <th>Inicio</th><th>Cierre</th><th class="num">Duración</th>
+              <th>Cerró</th><th>Cómo se cerró</th>
+            </tr></thead>
+            <tbody>
+              ${rows.map(r => `
+                <tr>
+                  <td><strong>${esc(r.usuario)}</strong></td>
+                  <td>${esc(r.superficie)}</td>
+                  <td title="Código del navegador/equipo que generó el evento">${esc(r.equipo)}</td>
+                  <td>${r.inicio ? esc(fmtFechaHora(r.inicio)) : '<span class="text-muted">antes del período</span>'}</td>
+                  <td>${r.cierre ? esc(fmtFechaHora(r.cierre)) : '—'}</td>
+                  <td class="num">${esc(fmtDuracion(r.duracion_min))}</td>
+                  <td>${esc(r.cerro)}</td>
+                  <td>${esc(COMO_CIERRE[r.como] || r.como)}${r.siguiente ? `<br><small class="text-muted">siguiente ingreso en ese equipo: ${esc(r.siguiente)}</small>` : ''}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+        <p class="text-muted" style="padding:0 20px 16px;font-size:12px">
+          El sistema no puede detectar que se cerró la pestaña o se apagó la compu: una sesión "sin cierre registrado"
+          es una que no pasó por <em>Salir</em> ni venció por cambio de jornada (7 am). El registro empezó el día en que se
+          activó esta función: no hay datos de accesos anteriores.
+        </p>`}
     `;
   }
 
@@ -2461,6 +2596,13 @@ const Informes = (() => {
           r.ultimo_pago   ? r.ultimo_pago.slice(0,10)   : '',
           dias ?? '', cats[catIdx]];
       });
+      return { title, periodo, headers, data };
+    }
+    if (rep === 'accesos_usuarios') {
+      const headers = ['Usuario','Superficie','Equipo','Inicio','Cierre','Duración (min)','Cerró','Cómo se cerró','Siguiente ingreso en el equipo'];
+      const data = rows.map(r => [r.usuario, r.superficie, r.equipo,
+        r.inicio ? fmtFechaHora(r.inicio) : '', r.cierre ? fmtFechaHora(r.cierre) : '',
+        r.duracion_min ?? '', r.cerro, COMO_CIERRE[r.como] || r.como, r.siguiente]);
       return { title, periodo, headers, data };
     }
     if (rep === 'resumen_diario') {
