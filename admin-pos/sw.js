@@ -66,7 +66,7 @@ const OWN_PATHS = [
   'js/utils.js', 'js/db.js', 'js/auth.js', 'js/sync.js', 'js/firebase-config.js',
   'js/print.js', 'js/icons.js', 'js/seed.js', 'js/app.js',
 
-  'js/modules/configuracion.js', 'js/modules/proveedores.js', 'js/modules/promociones.js',
+  'js/modules/configuracion.js', 'js/modules/config_impresion.js', 'js/modules/impresion.js', 'js/modules/proveedores.js', 'js/modules/promociones.js',
   'js/modules/limpieza_prueba.js', 'js/modules/usuarios.js', 'js/modules/inicio.js',
   'js/modules/adelanto_pago.js', 'js/modules/ajuste_stock.js', 'js/modules/ajuste_stock_positivo.js',
   'js/modules/consumo_interno.js', 'js/modules/roturas.js', 'js/modules/flujo.js',
@@ -79,7 +79,7 @@ const OWN_PATHS = [
   'js/modules/operaciones_stock.js', 'js/modules/editor-producto.js', 'js/modules/productos.js',
 
   'views/editor-producto.html', 'views/vencimientos.html', 'views/roturas.html',
-  'views/gastos.html', 'views/proveedores.html', 'views/configuracion.html',
+  'views/gastos.html', 'views/proveedores.html', 'views/configuracion.html', 'views/config_impresion.html',
   'views/flujo.html', 'views/limpieza_prueba.html', 'views/usuarios.html',
   'views/etiquetas.html', 'views/ajuste_stock.html', 'views/ajuste_stock_positivo.html',
   'views/consumo_interno.html', 'views/caja.html', 'views/inicio.html',

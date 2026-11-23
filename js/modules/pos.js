@@ -3,6 +3,9 @@
 // del preload de app.js dejaba ese control mudo en una pestaña vieja.
 import './clientes.js';
 import Buscador from './buscador_productos.js';
+// Motor de impresion del ticket (documento aislado + ancho de rollo configurable). Antes el boton
+// "Imprimir ticket" hacia window.print() de la pantalla ENTERA, con los botones y todo.
+import Impresion from './impresion.js';
 
 /**
  * pos.js — Point of Sale (POS) Module - DATA LAYER ONLY
@@ -2343,7 +2346,12 @@ export const POS = (() => {
       if (!inp?.readOnly) setTimeout(() => inp?.focus(), 80);
     };
 
+    // Ultimo ticket mostrado: es el que imprime el boton "Imprimir ticket" (sea una venta recien
+    // confirmada o una reimpresion desde el detalle de una venta).
+    let ultimoTicket = null;
+
     const showModalTicket = (ticketData) => {
+      ultimoTicket = ticketData;
       const suc = ticketData.sucursal || {};
       ge('ticket-content').innerHTML = `
         <div class="ticket-center"><strong>${suc.nombre || 'Sistema Kalulu'}</strong><br>
@@ -3076,7 +3084,11 @@ export const POS = (() => {
     });
 
     // Ticket
-    safeOn('btn-ticket-imprimir', 'click', () => window.print());
+    // Se imprime SOLO el ticket (documento aislado en un iframe oculto), nunca la pantalla.
+    safeOn('btn-ticket-imprimir', 'click', () => {
+      if (!ultimoTicket) return;
+      Impresion.imprimirTicket(ultimoTicket);
+    });
     safeOn('btn-ticket-close',   'click', finalizeSaleAndGoDashboard);
     safeOn('btn-ticket-volver',  'click', finalizeAndNewSale);
     safeOn('btn-ticket-confirmar','click', finalizeSaleAndGoDashboard);

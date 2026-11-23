@@ -11,6 +11,8 @@
  * { id, nombre, precio_venta, codigo, cantidad }), those items are pre-loaded.
  */
 import Buscador from './buscador_productos.js';
+// Tamano/modelo de etiqueta configurable por equipo (pantalla Configuracion de impresion).
+import Impresion from './impresion.js';
 
 const JSBARCODE_CDN = 'https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js';
 
@@ -787,97 +789,17 @@ const mod = {
 
     const labelsHTML = labels.map(l => this._buildLabelHTML(l)).join('\n');
 
+    // Hoja (varias por hoja) o rollo de etiquetas, con el tamano configurado en ESTE equipo.
+    const cfgEtiq = Impresion.getConfig().etiquetas;
+    const geo = Impresion.etiquetaGeometria(cfgEtiq);
+
     const html = `<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
 <title>Etiquetas de Precio</title>
 <script src="${JSBARCODE_CDN}"><\/script>
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-@page { size: A4 portrait; margin: 0; }
-html, body {
-  width: 210mm;
-  font-family: Arial, Helvetica, sans-serif;
-  background: white;
-}
-.grid {
-  width: 210mm;
-  display: grid;
-  grid-template-columns: repeat(3, 70mm);
-  grid-auto-rows: 29.7mm;
-}
-/* ── Label shell ── */
-.etiq {
-  width: 70mm;
-  height: 29.7mm;
-  border: 0.3pt solid #aaa;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-/* ── Top: product name ── */
-.etiq-top {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2mm 3mm 0.5mm 3mm;
-  overflow: hidden;
-}
-.etiq-nombre {
-  font-size: 9.5pt;
-  font-weight: 700;
-  line-height: 1.2;
-  text-align: center;
-  word-wrap: break-word;
-  overflow-wrap: break-word;
-  hyphens: auto;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  width: 100%;
-}
-/* ── Bottom row: logo | price | barcode ── */
-.etiq-bottom {
-  height: 14.5mm;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  padding: 0 2mm 1.5mm 2mm;
-  gap: 1.5mm;
-}
-.etiq-logo {
-  width: 10mm;
-  height: 10mm;
-  flex-shrink: 0;
-}
-.etiq-precio {
-  flex: 1;
-  font-size: 11pt;
-  font-weight: 900;
-  text-align: center;
-  white-space: nowrap;
-  letter-spacing: -0.3pt;
-}
-/* Barcode area — horizontal, no rotation */
-.etiq-barcode {
-  width: 30mm;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-.bc-svg {
-  display: block;
-  width: 30mm;   /* forces SVG to scale to this width */
-  height: auto;  /* aspect ratio preserved via viewBox */
-  max-height: 12mm;
-}
-</style>
+<style>${Impresion.etiquetaCSS(cfgEtiq)}</style>
 </head>
 <body>
 <div class="grid">
@@ -900,7 +822,7 @@ ${labelsHTML}
         lineColor: '#000000'
       });
       /* CSS overrides JsBarcode's inline width/height attrs */
-      svg.style.cssText = 'display:block;width:30mm;height:auto;max-height:12mm';
+      svg.style.cssText = 'display:block;width:${geo.bcW}mm;height:auto;max-height:${geo.bcMaxH}mm';
     } catch(e) {
       svg.closest('.etiq-barcode').innerHTML =
         '<div style="font-size:6pt;color:#bbb;word-break:break-all;padding:1mm;text-align:center">' + code + '</div>';

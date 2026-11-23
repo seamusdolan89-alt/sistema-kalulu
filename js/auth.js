@@ -73,6 +73,7 @@
     { key: 'can_clientes',     label: 'Gestionar clientes',    grupo: 'Otros', riesgo: 'bajo',  tipo: 'bool', default: false },
     { key: 'can_promociones',  label: 'Gestionar promociones', grupo: 'Otros', riesgo: 'bajo',  tipo: 'bool', default: false },
     { key: 'can_etiquetas',    label: 'Imprimir etiquetas',    grupo: 'Otros', riesgo: 'bajo',  tipo: 'bool', default: false },
+    { key: 'can_config_impresion', label: 'Configurar la impresión (ticket de venta y etiquetas)', grupo: 'Otros', riesgo: 'bajo', tipo: 'bool', default: false },
 
     // ── INFORMES ──────────────────────────────────────────────────────────
     // can_informes es el acceso a la SECCIÓN (gate de ruta en app.js, igual que

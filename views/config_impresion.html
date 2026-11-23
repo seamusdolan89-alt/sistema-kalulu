@@ -1,0 +1,152 @@
+<!-- views/config_impresion.html — Configuración de impresión: ticket de venta y etiquetas -->
+<div class="page-header">
+  <h2>⚙️ Configuración de impresión</h2>
+</div>
+
+<p style="max-width:760px;font-size:13px;color:var(--color-text-secondary);margin:0 0 4px;">
+  Esta configuración vale <strong>solo para esta computadora</strong> (cada impresora está conectada a una compu distinta,
+  por eso no se sincroniza). Ajustá, imprimí la prueba y guardá.
+</p>
+
+<div style="max-width:760px;">
+
+  <!-- ═══ TICKET DE VENTA ═══ -->
+  <div class="card" style="margin-top:var(--spacing-lg);padding:20px 24px;">
+    <h3 style="margin:0 0 4px;font-size:1rem;color:var(--color-text);">🧾 Ticket de venta (impresora térmica de rollo)</h3>
+    <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 14px;">
+      El largo del ticket lo define su contenido; solo se configura el ancho del rollo.
+    </p>
+
+    <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;">
+      <div style="flex:1;min-width:300px;">
+        <div class="form-group">
+          <label for="ci-t-papel" style="font-weight:600;font-size:13px;">Ancho del rollo</label>
+          <select id="ci-t-papel" style="max-width:220px;">
+            <option value="58">58 mm</option>
+            <option value="80">80 mm</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="ci-t-util" style="font-weight:600;font-size:13px;">Ancho útil de impresión (mm)</label>
+          <input type="number" id="ci-t-util" min="30" max="120" step="1" style="max-width:120px;">
+          <p style="font-size:12px;color:var(--color-text-secondary);margin:4px 0 0;">
+            Lo que la impresora <em>realmente</em> imprime: en un rollo de 58 mm suele ser unos 48 mm, y en uno de 80 mm unos 72 mm.
+            Si el ticket sale cortado a los costados, bajalo; si queda angosto, subilo. El ticket de prueba te muestra el borde.
+          </p>
+        </div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;">
+          <div class="form-group">
+            <label for="ci-t-fuente" style="font-weight:600;font-size:13px;">Tamaño de letra (px)</label>
+            <input type="number" id="ci-t-fuente" min="8" max="20" step="1" style="max-width:100px;">
+          </div>
+          <div class="form-group">
+            <label for="ci-t-copias" style="font-weight:600;font-size:13px;">Copias</label>
+            <input type="number" id="ci-t-copias" min="1" max="5" step="1" style="max-width:100px;">
+          </div>
+        </div>
+        <div class="form-group">
+          <label style="font-weight:600;font-size:13px;display:block;margin-bottom:4px;">Qué mostrar</label>
+          <label style="display:block;font-size:13px;"><input type="checkbox" id="ci-t-dir"> Dirección de la sucursal</label>
+          <label style="display:block;font-size:13px;"><input type="checkbox" id="ci-t-vend"> Vendedor</label>
+          <label style="display:block;font-size:13px;"><input type="checkbox" id="ci-t-cli"> Cliente (si la venta tiene)</label>
+        </div>
+        <div class="form-group">
+          <label for="ci-t-enc" style="font-weight:600;font-size:13px;">Línea extra bajo el nombre (ej. teléfono, CUIT)</label>
+          <input type="text" id="ci-t-enc" maxlength="120" style="width:100%;">
+        </div>
+        <div class="form-group">
+          <label for="ci-t-pie" style="font-weight:600;font-size:13px;">Mensaje al pie</label>
+          <input type="text" id="ci-t-pie" maxlength="160" style="width:100%;">
+        </div>
+        <button class="btn btn-secondary" id="ci-t-prueba">🖨️ Imprimir ticket de prueba</button>
+      </div>
+
+      <div style="flex:0 0 auto;">
+        <div style="font-size:12px;font-weight:600;color:var(--color-text-secondary);margin-bottom:6px;">Vista previa</div>
+        <div style="background:#e9e9e9;padding:12px;border-radius:6px;">
+          <iframe id="ci-t-preview" title="Vista previa del ticket" style="border:0;background:#fff;display:block;box-shadow:0 1px 4px rgba(0,0,0,.25);"></iframe>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ ETIQUETAS ═══ -->
+  <div class="card" style="margin-top:var(--spacing-lg);padding:20px 24px;">
+    <h3 style="margin:0 0 4px;font-size:1rem;color:var(--color-text);">🏷️ Etiquetas de precio</h3>
+    <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 14px;">
+      Elegí cómo es el papel de etiquetas de esta impresora. Los textos, el logo y el código de barras se ajustan solos al tamaño.
+    </p>
+
+    <div class="form-group">
+      <label for="ci-e-preset" style="font-weight:600;font-size:13px;">Modelo</label>
+      <select id="ci-e-preset" style="max-width:420px;"></select>
+    </div>
+
+    <div id="ci-e-campos" style="display:flex;gap:14px;flex-wrap:wrap;">
+      <div class="form-group" id="ci-e-g-modo">
+        <label for="ci-e-modo" style="font-weight:600;font-size:13px;">Tipo de papel</label>
+        <select id="ci-e-modo">
+          <option value="hoja">Hoja con varias etiquetas</option>
+          <option value="rollo">Rollo (una etiqueta por vez)</option>
+        </select>
+      </div>
+      <div class="form-group" id="ci-e-g-papel">
+        <label for="ci-e-papel" style="font-weight:600;font-size:13px;">Hoja</label>
+        <select id="ci-e-papel"><option>A4</option><option>Carta</option></select>
+      </div>
+      <div class="form-group" id="ci-e-g-cols">
+        <label for="ci-e-cols" style="font-weight:600;font-size:13px;">Columnas</label>
+        <input type="number" id="ci-e-cols" min="1" max="8" step="1" style="max-width:80px;">
+      </div>
+      <div class="form-group">
+        <label for="ci-e-ancho" style="font-weight:600;font-size:13px;">Ancho etiqueta (mm)</label>
+        <input type="number" id="ci-e-ancho" min="15" max="210" step="0.1" style="max-width:110px;">
+      </div>
+      <div class="form-group">
+        <label for="ci-e-alto" style="font-weight:600;font-size:13px;">Alto etiqueta (mm)</label>
+        <input type="number" id="ci-e-alto" min="10" max="297" step="0.1" style="max-width:110px;">
+      </div>
+      <div class="form-group" id="ci-e-g-msup">
+        <label for="ci-e-msup" style="font-weight:600;font-size:13px;">Margen superior (mm)</label>
+        <input type="number" id="ci-e-msup" min="0" max="60" step="0.1" style="max-width:110px;">
+      </div>
+      <div class="form-group" id="ci-e-g-mizq">
+        <label for="ci-e-mizq" style="font-weight:600;font-size:13px;">Margen izquierdo (mm)</label>
+        <input type="number" id="ci-e-mizq" min="0" max="60" step="0.1" style="max-width:110px;">
+      </div>
+      <div class="form-group" id="ci-e-g-gx">
+        <label for="ci-e-gx" style="font-weight:600;font-size:13px;">Separación horizontal (mm)</label>
+        <input type="number" id="ci-e-gx" min="0" max="20" step="0.1" style="max-width:110px;">
+      </div>
+      <div class="form-group" id="ci-e-g-gy">
+        <label for="ci-e-gy" style="font-weight:600;font-size:13px;">Separación vertical (mm)</label>
+        <input type="number" id="ci-e-gy" min="0" max="20" step="0.1" style="max-width:110px;">
+      </div>
+    </div>
+
+    <div id="ci-e-info" style="font-size:13px;margin:4px 0 10px;"></div>
+    <button class="btn btn-secondary" id="ci-e-prueba">🖨️ Imprimir hoja de prueba de etiquetas</button>
+    <p style="font-size:12px;color:var(--color-text-secondary);margin:8px 0 0;">
+      La prueba usa etiquetas de ejemplo (no toca ningún producto ni su “última impresión”).
+      Necesita internet para dibujar el código de barras, igual que Etiquetas.
+    </p>
+  </div>
+
+  <!-- ═══ Guardar ═══ -->
+  <div style="margin:var(--spacing-lg) 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    <button class="btn btn-primary" id="ci-guardar" style="padding:9px 22px;">Guardar configuración</button>
+    <button class="btn btn-outline" id="ci-reset">Restablecer valores originales</button>
+    <span id="ci-msg" style="font-size:13px;display:none;"></span>
+  </div>
+
+  <div class="card" style="padding:14px 20px;margin-bottom:var(--spacing-lg);background:#f7f9fb;">
+    <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Para imprimir sin que aparezca el cuadro de diálogo</div>
+    <div style="font-size:12px;color:var(--color-text-secondary);line-height:1.5;">
+      El navegador siempre pregunta antes de imprimir. Si querés que el ticket salga directo al tocar el botón, abrí el
+      sistema desde un acceso directo de Chrome o Edge con la opción <code>--kiosk-printing</code> y dejá la impresora térmica
+      como predeterminada de Windows. En el diálogo (la primera vez) conviene poner: márgenes <em>Ninguno</em>, escala
+      <em>100%</em> y sin encabezados ni pies de página. El papel del driver de la impresora tiene que ser el del rollo
+      (58 o 80 mm, de largo continuo).
+    </div>
+  </div>
+</div>

@@ -48,6 +48,7 @@
     'gastos':          () => import('./modules/gastos.js').then(m => m.default),
     'adelanto_pago':   () => import('./modules/adelanto_pago.js').then(m => m.default),
     'configuracion':   () => import('./modules/configuracion.js').then(m => m.default),
+    'config_impresion': () => import('./modules/config_impresion.js').then(m => m.default),
     'flujo':           () => import('./modules/flujo.js').then(m => m.default),
     'aprobaciones_pendientes': () => import('./modules/aprobaciones_pendientes.js').then(m => m.default),
     'sugerencias':      () => import('./modules/sugerencias.js').then(m => m.default),
@@ -187,14 +188,14 @@
   // Módulos del admin-pos (panel remoto): siempre completo. "inicio" queda
   // afuera a propósito — es un dashboard del POS del local (ver inicio.js),
   // no del panel del dueño.
-  const ADMIN_POS_MODULES = ['inicio', 'pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'ajuste_stock', 'ajuste_stock_positivo', 'adelanto_pago', 'configuracion', 'flujo', 'aprobaciones_pendientes', 'sugerencias'];
+  const ADMIN_POS_MODULES = ['inicio', 'pos', 'cajas', 'productos', 'clientes', 'compras_v2', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'config_impresion', 'informes', 'gastos', 'usuarios', 'vencimientos', 'roturas', 'consumo_interno', 'ajuste_stock', 'ajuste_stock_positivo', 'adelanto_pago', 'configuracion', 'flujo', 'aprobaciones_pendientes', 'sugerencias'];
 
   function getAllowedModules() {
     if (window.ADMIN_MODE) return ADMIN_POS_MODULES;
     const u = window.SGA_Auth.getCurrentUser();
     if (!u) return [];
     // Admin: acceso total
-    if (u.rol === 'admin') return ['inicio', 'pos', 'cajas', 'productos', 'clientes', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'informes', 'gastos', 'usuarios', 'adelanto_pago', 'sugerencias'];
+    if (u.rol === 'admin') return ['inicio', 'pos', 'cajas', 'productos', 'clientes', 'operaciones_stock', 'ordenes', 'proveedores', 'cuenta_corriente_proveedores', 'promociones', 'etiquetas', 'config_impresion', 'informes', 'gastos', 'usuarios', 'adelanto_pago', 'sugerencias'];
     // Colaboradores: según permisos individuales
     const P = window.SGA_Permisos;
     // 'sugerencias' siempre visible: cargar una consulta o una idea no es una
@@ -214,6 +215,7 @@
     if (P.can('can_informes'))          allowed.push('informes');
     if (P.can('can_gastos'))            allowed.push('gastos');
     if (P.can('can_etiquetas'))         allowed.push('etiquetas');
+    if (P.can('can_config_impresion'))  allowed.push('config_impresion');
     return allowed;
   }
 
@@ -257,6 +259,7 @@
     informes:                      'can_informes',
     gastos:                        'can_gastos',
     etiquetas:                     'can_etiquetas',
+    config_impresion:              'can_config_impresion',
   };
 
   function isRouteAllowed(route) {
@@ -324,6 +327,7 @@
       { name: 'gastos', icon: 'gastos', text: 'Gastos Generales' },
       { name: 'usuarios', icon: 'usuarios', text: 'Usuarios' },
       { name: 'flujo', icon: 'flujo', text: 'Flujo de Fondos', adminPosOnly: true },
+      { name: 'config_impresion', icon: 'configuracion', text: 'Configuración de impresión' },
       { name: 'configuracion', icon: 'configuracion', text: 'Configuración', adminOnly: true, adminPosOnly: true },
     ];
 
