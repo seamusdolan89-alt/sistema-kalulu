@@ -4399,6 +4399,12 @@ const ComprasV2 = (() => {
       return { ...it, costoAnt, costoNvo, pvActual, cantUds, varPct, pvSugerido };
     });
 
+    // El id de la compra viaja en los items: "Pausar -> Retomar" y "Volver" desde el Resumen Final
+    // vuelven a entrar aca SIN compraId, y los precios revisados se guardaban en el historial sin
+    // saber de que compra eran (el detalle de compra no podia marcarlos).
+    compraId = compraId || items.find(it => it.compraIdAjuste)?.compraIdAjuste || null;
+    items.forEach(it => { it.compraIdAjuste = compraId; });
+
     const totalArticulos = items.length;
     const totalUds       = items.reduce((s, it) => s + it.cantUds, 0);
     // Use snap fields when restoring from a paused state
@@ -4916,7 +4922,7 @@ const ComprasV2 = (() => {
       items[idx].ignorado   = false;
       const hasFam = checkHasFamily(prodId);
       if (hasFam) {
-        showHerenciaModal({ prodId, prodNombre: item.nombre, nuevoCosto: item.costoNvo,
+        showHerenciaModal({ compraId, prodId, prodNombre: item.nombre, nuevoCosto: item.costoNvo,
                             nuevoPrecio, onDone: () => markRowSaved(idx) });
       } else {
         markRowSaved(idx);
@@ -5076,6 +5082,7 @@ const ComprasV2 = (() => {
       const [it, ...resto] = cola;
       it.markupFamiliaPreguntado = true;
       showHerenciaModal({
+        compraId,
         prodId: it.productoId, prodNombre: it.nombre,
         nuevoCosto: it.costoNvo, nuevoPrecio: it.pvSugerido,
         onDone: () => procesarFamiliaPendientesMarkup(resto),
@@ -5347,9 +5354,9 @@ const ComprasV2 = (() => {
   // El wizard de familia vive en js/modules/familia.js (se comparte con el
   // editor de productos). Aca solo se le pasa el callback que alimenta el
   // resumen final de la compra.
-  function showHerenciaModal({ prodId, prodNombre, nuevoCosto, nuevoPrecio, onDone }) {
+  function showHerenciaModal({ prodId, prodNombre, nuevoCosto, nuevoPrecio, onDone, compraId = null }) {
     Familia.showHerenciaModal({
-      prodId, prodNombre, nuevoCosto, nuevoPrecio, onDone,
+      prodId, prodNombre, nuevoCosto, nuevoPrecio, onDone, compraId,
       onSync: (info) => {
         if (!state.herenciaSincronizados.find(x => x.id === info.id)) {
           state.herenciaSincronizados.push(info);

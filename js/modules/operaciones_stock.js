@@ -128,6 +128,57 @@ const OperacionesStock = (() => {
     return compra;
   }
 
+  // ── PRECIOS DE VENTA CAMBIADOS AL CARGAR UNA COMPRA ────────────────────────
+  //
+  // Pedido del dueño (24/11/2026): en "Detalle de compra" resaltar los productos cuyo PRECIO DE
+  // VENTA se modificó durante la carga de esa compra (lo que la cajera ve en "Resumen de Cambios").
+  // Sale de precios_historial (lo escribe un trigger, sincroniza a Admin-POS):
+  //   - cambios con referencia a esta compra: markup predeterminado, revision de precios post-compra
+  //     y familia sincronizada desde ese paso.
+  //   - 'compra' SIN referencia: un ajuste pausado y retomado se guardaba sin el id de la compra
+  //     (arreglado en compras_v2.js, esto cubre lo anterior). Se atribuye a esta compra si cayo en
+  //     los 7 dias siguientes a su carga y no hubo despues otra compra de ese producto.
+  // A proposito NO cuentan las ediciones hechas desde ESTA pantalla (origen 'historial_compras').
+  // Devuelve Map(producto_id -> { antes, despues }) solo si el precio neto cambio.
+  function getCambiosPrecioDeCompra(compraId) {
+    // Momento real de carga: el primer movimiento de stock de la compra (compras.fecha es la fecha
+    // de la factura, que puede ser anterior). Una compra sin movimientos propios usa esa fecha.
+    const cargada = (alias) => `COALESCE((SELECT MIN(sm.fecha) FROM stock_movimientos sm
+        WHERE sm.ref_tipo = 'compras' AND sm.ref_id = ${alias}.id), ${alias}.fecha)`;
+    const filas = db().query(`
+      SELECT h.producto_id, h.precio_anterior, h.precio_nuevo
+        FROM precios_historial h
+        JOIN compras c ON c.id = ?
+       WHERE ABS(COALESCE(h.precio_anterior, 0) - COALESCE(h.precio_nuevo, 0)) > 0.001
+         AND h.producto_id IN (SELECT producto_id FROM compra_items WHERE compra_id = c.id)
+         AND (
+           (h.ref_tipo = 'compras' AND h.ref_id = c.id
+              AND h.origen IN ('compra', 'compra_edicion', 'markup_fijo', 'familia'))
+           OR
+           (h.origen = 'compra' AND h.ref_id IS NULL
+              AND h.fecha >= ${cargada('c')}
+              AND julianday(h.fecha) - julianday(${cargada('c')}) <= 7
+              AND NOT EXISTS (
+                SELECT 1 FROM compra_items ci2 JOIN compras c2 ON c2.id = ci2.compra_id
+                 WHERE ci2.producto_id = h.producto_id AND c2.id <> c.id
+                   AND COALESCE(c2.estado, 'confirmada') <> 'anulada'
+                   AND ${cargada('c2')} > ${cargada('c')} AND ${cargada('c2')} <= h.fecha))
+         )
+       ORDER BY h.fecha, h.rowid
+    `, [compraId]);
+    const cambios = new Map();
+    for (const f of filas) {
+      const c = cambios.get(f.producto_id);
+      if (c) c.despues = f.precio_nuevo;
+      else cambios.set(f.producto_id, { antes: f.precio_anterior, despues: f.precio_nuevo });
+    }
+    // Si se cambio y se volvio al valor de antes, no hubo modificacion.
+    for (const [id, c] of cambios) {
+      if (Math.abs((c.antes || 0) - (c.despues || 0)) <= 0.001) cambios.delete(id);
+    }
+    return cambios;
+  }
+
   // ── ANULAR UNA COMPRA (cargada por error) ──────────────────────────────────
   //
   // Para facturas mal cargadas (monto o proveedor equivocado, duplicada...). NO
@@ -521,6 +572,10 @@ const OperacionesStock = (() => {
     });
   }
 
+  // Fondo semitransparente de las filas con precio de venta cambiado (mismo celeste que el
+  // "chip" de precio del Resumen de Cambios que ve la cajera).
+  const COLOR_PRECIO_CAMBIADO = 'rgba(33, 150, 243, 0.18)';
+
   // Margen de venta: null si no hay precio cargado (no aplica calificación de color).
   function calcMargenPct(costo, precio) {
     costo  = parseFloat(costo)  || 0;
@@ -555,6 +610,10 @@ const OperacionesStock = (() => {
     // dejar elegir el IVA de VENTA (independiente del de la compra) para
     // poder calcular el Precio Neto de venta igual.
     const facturaA = (compra.condicion_compra || '') === 'Factura A';
+
+    // Productos cuyo precio de venta se modificó al cargar esta compra (solo Admin-POS, que es
+    // donde se ven y revisan los precios).
+    const cambiosPrecio = isAdmin ? getCambiosPrecioDeCompra(compra.id) : new Map();
 
     const estadoCompra = compra.estado || 'confirmada';
     const estadoColor  = ESTADO_COLOR[estadoCompra] || '#445566';
@@ -606,6 +665,12 @@ const OperacionesStock = (() => {
         <div style="margin:0 0 10px;padding:7px 12px;background:#f0f6ff;border:1px solid #cfe0fb;border-radius:6px;font-size:12px;color:#2c4a72;display:flex;align-items:center;gap:6px">
           <span style="font-size:14px">✏️</span>
           Esta pantalla es tu revisión de precios de esta compra: el campo <strong>Precio Venta</strong> se edita acá mismo, se guarda solo al salir del campo — <strong>Enter</strong> guarda y pasa directo al siguiente producto.
+        </div>
+      ` : ''}
+      ${cambiosPrecio.size ? `
+        <div class="ops-leyenda-precio" style="margin:0 0 10px;display:flex;align-items:center;gap:8px;font-size:12px;color:#445566">
+          <span style="display:inline-block;width:22px;height:14px;border-radius:3px;background:${COLOR_PRECIO_CAMBIADO};box-shadow:inset 4px 0 0 #1976d2"></span>
+          Resaltado: ${cambiosPrecio.size === 1 ? '1 producto cambió' : `${cambiosPrecio.size} productos cambiaron`} su precio de venta al cargar esta compra.
         </div>
       ` : ''}
       <div style="overflow-x:auto">
@@ -673,7 +738,11 @@ const OperacionesStock = (() => {
             // margen gracias al descuento (pedido del usuario, 27/10/2026).
             const margenBruto = (esMuestra || !tieneDescuento) ? null : calcMargenPct(costoBruto, precioActual);
             const margenColor = margen == null ? '#8090a0' : margen < 0 ? '#c62828' : margen < 15 ? '#e65100' : '#445566';
-            const rowBg = esMuestra ? '#f6f2ff' : (tieneDescuento ? '#fff8e1' : '');
+            // El resaltado de precio cambiado tiene prioridad sobre el fondo de muestra / descuento
+            // (esos se siguen identificando por su etiqueta y por el costo tachado).
+            const cambioPv = cambiosPrecio.get(it.producto_id);
+            const rowBg = cambioPv ? COLOR_PRECIO_CAMBIADO
+              : esMuestra ? '#f6f2ff' : (tieneDescuento ? '#fff8e1' : '');
 
             // IVA / Costo Final / Precio Neto / Markup (pedido del usuario, 27/10/2026).
             // costo_unitario y costoNeto son EX-IVA (ver calcIvaCalc en compras_v2.js:
@@ -703,7 +772,7 @@ const OperacionesStock = (() => {
             // mejoró el markup gracias al descuento (pedido del usuario, 28/10/2026).
             const markupBruto = (esMuestra || !tieneDescuento || costoBruto <= 0) ? null : (precioNeto / costoBruto);
 
-            return `<tr class="ops-detalle-row" data-idx="${idx}" style="border-bottom:1px solid #eef0f3${rowBg ? `;background:${rowBg}` : ''}">
+            return `<tr class="ops-detalle-row${cambioPv ? ' ops-precio-cambiado' : ''}" data-idx="${idx}"${cambioPv ? ` title="Precio de venta cambiado al cargar esta compra: ${fmt$(cambioPv.antes)} → ${fmt$(cambioPv.despues)}"` : ''} style="border-bottom:1px solid #eef0f3${rowBg ? `;background:${rowBg}` : ''}${cambioPv ? ';box-shadow:inset 4px 0 0 #1976d2' : ''}">
               <td style="padding:8px 10px">${esc(it.producto_nombre || '—')}${esMuestra ? ' <span style="font-size:11px;font-weight:700;color:#6a1fc9">🎁 Muestra</span>' : ''}${tieneDescuento ? ` <span style="font-size:11px;font-weight:700;color:#e65100;background:#fff3e0;border:1px solid #ffcc80;border-radius:4px;padding:1px 6px" title="Esta línea tuvo un descuento del proveedor">🏷️ -${descPct.toFixed(1)}% dto.</span>` : ''}</td>
               <td style="padding:8px 10px;text-align:right">${it.cantidad}</td>
               <td style="padding:8px 10px;color:#607080">${esc(it.unidad_compra || 'Unidad')}</td>
