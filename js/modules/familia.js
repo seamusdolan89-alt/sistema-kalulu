@@ -166,7 +166,9 @@ const SGA_Familia = (() => {
     return tieneHijos(prodId);              // o es madre de alguien
   }
 
-  function showHerenciaModal({ prodId, prodNombre, nuevoCosto, nuevoPrecio, onDone, onSync }) {
+  // compraId (opcional): si el wizard se abre durante la carga de una compra, el historial de precios
+  // referencia esa compra (el detalle de compra resalta lo que cambio); sin el, el producto origen.
+  function showHerenciaModal({ prodId, prodNombre, nuevoCosto, nuevoPrecio, onDone, onSync, compraId = null }) {
     const done = () => { if (typeof onDone === 'function') onDone(); };
     ensureCss();
     const thisProd = db().query(
@@ -413,7 +415,7 @@ const SGA_Familia = (() => {
       fields.push("sync_status='pending'", 'updated_at=?');
       vals.push(ts, m.id);
       // Historial de precios: queda "por familia", con el producto que originó el cambio.
-      db().conOrigenCambio({ origen: 'familia', refTipo: 'productos', refId: prodId,
+      db().conOrigenCambio({ origen: 'familia', refTipo: compraId ? 'compras' : 'productos', refId: compraId || prodId,
                              detalle: `Heredado de ${prodNombre || 'otro producto de la familia'}` },
         () => db().run(`UPDATE productos SET ${fields.join(',')} WHERE id=?`, vals));
       // Quien abrio el wizard decide que hacer con lo sincronizado: compras lo
