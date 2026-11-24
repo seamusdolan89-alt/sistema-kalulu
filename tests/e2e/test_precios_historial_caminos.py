@@ -204,6 +204,14 @@ def main():
         texto = page.locator("#ed-hp-tbody").inner_text()
         assert "Compra" in texto and "Markup predeterminado" in texto, f"La pestaña debe mostrar compra y markup: {texto!r}"
         assert page.locator("#ed-hp-tbody tr").count() == 2, "A tiene 2 cambios registrados"
+        # El valor que NO cambió se muestra igual (el vigente en ese momento), no "—" (24/11/2026):
+        # en el cambio de costo se ve a qué precio se vendía (130) y en el de precio, el costo (200).
+        celdas = page.evaluate("""() => [...document.querySelectorAll('#ed-hp-tbody tr')].map(tr =>
+            ({ origen: tr.cells[1].innerText, costo: tr.cells[2].innerText, precio: tr.cells[3].innerText }))""")
+        fila_costo = next(c for c in celdas if "→" in c["costo"])
+        fila_precio = next(c for c in celdas if "→" in c["precio"])
+        assert "130,00" in fila_costo["precio"], f"BUG: el cambio de costo no muestra el precio de venta vigente: {celdas}"
+        assert "200,00" in fila_precio["costo"], f"BUG: el cambio de precio no muestra el costo vigente: {celdas}"
         page.locator("#ed-hp-filtro").select_option("precio")
         page.wait_for_timeout(200)
         solo_precio = page.locator("#ed-hp-tbody").inner_text()
