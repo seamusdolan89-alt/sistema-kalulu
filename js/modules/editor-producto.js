@@ -2297,10 +2297,15 @@ const EditorProducto = (() => {
       return;
     }
 
-    // "$100 → $120 (+20%)" -- o solo el valor si es el alta (no hay anterior); "—" si ese valor no cambió.
+    // "$100 → $120 (+20%)" -- o solo el valor si es el alta (no hay anterior). Si ese valor NO cambió
+    // se muestra igual, en gris: es el que regía en el momento de este registro (pedido del dueño,
+    // 24/11/2026: al registrar un cambio de costo quiere ver a qué precio se estaba vendiendo).
     const celda = (ant, nuevo, extraTitulo) => {
       if (ant == null) return `<span title="${escapeHtml(extraTitulo || '')}">${nuevo == null ? '—' : money(nuevo)}</span>`;
-      if (!cambio(ant, nuevo)) return '<span style="color:#9e9e9e">—</span>';
+      if (!cambio(ant, nuevo)) {
+        return nuevo == null ? '<span style="color:#9e9e9e">—</span>'
+          : `<span class="ed-hp-sin-cambio" style="color:#757575" title="Sin cambio: valor vigente al momento de este registro">${money(nuevo)}</span>`;
+      }
       const a = parseFloat(ant) || 0, n = parseFloat(nuevo) || 0;
       const pct = a > 0 ? ((n - a) / a * 100) : null;
       const color = n > a ? '#d32f2f' : '#388E3C';   // en costo, subir es "malo"; el color es solo orientativo
