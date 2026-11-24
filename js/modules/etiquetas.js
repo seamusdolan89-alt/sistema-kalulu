@@ -172,14 +172,7 @@ const mod = {
   _deshacerImpresion() {
     const u = this._state.ultimaImpresion;
     if (!u) return;
-    const ts = new Date().toISOString();
-    for (const m of u.marcasPrevias) {
-      window.SGA_DB.run(
-        `UPDATE productos SET ultima_impresion_etiqueta = ?,
-           sync_status = 'pending', updated_at = ? WHERE id = ?`,
-        [m.anterior, ts, m.id]
-      );
-    }
+    this.restaurarMarcas(u.marcasPrevias);
     this._state.items = u.items.map(i => ({ ...i }));
     this._state.ultimaImpresion = null;
     this._loadSugeridas();
@@ -779,15 +772,31 @@ const mod = {
     const { items } = this._state;
     if (items.length === 0) return;
 
-    // Expand items by quantity into a flat label array
-    const labels = [];
-    items.forEach(it => {
-      for (let i = 0; i < it.cantidad; i++) {
-        labels.push({ nombre: it.nombre, precio: it.precio_venta, codigo: it.codigo });
-      }
-    });
+    const { marcasPrevias } = this.imprimirEtiquetas(items);
 
-    const labelsHTML = labels.map(l => this._buildLabelHTML(l)).join('\n');
+    // Se vacia el carrito: dejarlo cargado hacia que al agregar la tanda
+    // siguiente el boton dijera "Imprimir (85)" y volviera a sacar las 73 ya
+    // impresas. Queda el aviso por si la impresion salio mal.
+    this._state.ultimaImpresion = {
+      items: items.map(i => ({ ...i })),
+      marcasPrevias,
+      etiquetas: items.reduce((t, i) => t + (i.cantidad || 0), 0),
+    };
+    this._state.items = [];
+    this._loadSugeridas();
+    this._render();
+    this._bind();
+  },
+
+  /**
+   * Documento HTML completo de las etiquetas (lo abre una pestaña y se imprime solo).
+   * labels: [{ nombre, precio, codigo, precioAnterior? }] — una entrada por etiqueta.
+   * formato: 'normal' (la de siempre) | 'promo' (oferta: precio anterior tachado y % de descuento).
+   */
+  construirHTML(labels, { formato = 'normal', vigenciaHasta = null } = {}) {
+    const labelsHTML = labels.map(l => formato === 'promo'
+      ? this._buildLabelPromoHTML(l, vigenciaHasta)
+      : this._buildLabelHTML(l)).join('\n');
 
     // Hoja (varias por hoja) o rollo de etiquetas, con el tamano configurado en ESTE equipo.
     const cfgEtiq = Impresion.getConfig().etiquetas;
@@ -799,7 +808,7 @@ const mod = {
 <meta charset="UTF-8">
 <title>Etiquetas de Precio</title>
 <script src="${JSBARCODE_CDN}"><\/script>
-<style>${Impresion.etiquetaCSS(cfgEtiq)}</style>
+<style>${Impresion.etiquetaCSS(cfgEtiq)}${formato === 'promo' ? Impresion.etiquetaPromoCSS(cfgEtiq) : ''}</style>
 </head>
 <body>
 <div class="grid">
@@ -833,7 +842,25 @@ ${labelsHTML}
 <\/script>
 </body>
 </html>`;
+    return html;
+  },
 
+  /**
+   * Imprime y marca la "ultima impresion" de cada producto. Unica via de impresion: la usan esta
+   * pantalla e Informes -> Bajas de Precio.
+   * items: [{ id, nombre, precio_venta, codigo, cantidad, precioAnterior? }]
+   * Devuelve { marcasPrevias, etiquetas } para poder deshacer.
+   */
+  imprimirEtiquetas(items, { formato = 'normal', vigenciaHasta = null } = {}) {
+    // Expand items by quantity into a flat label array
+    const labels = [];
+    items.forEach(it => {
+      for (let i = 0; i < it.cantidad; i++) {
+        labels.push({ nombre: it.nombre, precio: it.precio_venta, codigo: it.codigo, precioAnterior: it.precioAnterior });
+      }
+    });
+
+    const html = this.construirHTML(labels, { formato, vigenciaHasta });
     const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const win = window.open(url, '_blank');
@@ -866,21 +893,54 @@ ${labelsHTML}
         [printedAt, printedAt, id]
       );
     });
-
-    // Se vacia el carrito: dejarlo cargado hacia que al agregar la tanda
-    // siguiente el boton dijera "Imprimir (85)" y volviera a sacar las 73 ya
-    // impresas. Queda el aviso por si la impresion salio mal.
-    this._state.ultimaImpresion = {
-      items: items.map(i => ({ ...i })),
-      marcasPrevias,
-      etiquetas: items.reduce((t, i) => t + (i.cantidad || 0), 0),
-    };
-    this._state.items = [];
-    this._loadSugeridas();
-    this._render();
-    this._bind();
     // Revoke after 2 minutes
     setTimeout(() => URL.revokeObjectURL(url), 120_000);
+    return { marcasPrevias, etiquetas: labels.length };
+  },
+
+  /** Deshace las marcas de "ultima impresion" que dejo imprimirEtiquetas. */
+  restaurarMarcas(marcasPrevias) {
+    const ts = new Date().toISOString();
+    for (const m of marcasPrevias) {
+      window.SGA_DB.run(
+        `UPDATE productos SET ultima_impresion_etiqueta = ?,
+           sync_status = 'pending', updated_at = ? WHERE id = ?`,
+        [m.anterior, ts, m.id]
+      );
+    }
+  },
+
+  // Formato PROMOCION: banda "OFERTA" con el % de descuento, precio anterior tachado y el precio
+  // nuevo grande. Pensado para impresora en blanco y negro (alto contraste, sin color).
+  // vigenciaHasta ('YYYY-MM-DD', opcional): una oferta tiene que decir desde y hasta cuando vale
+  // (Ley 24.240, art. 7); "desde" es el dia en que se imprime.
+  _buildLabelPromoHTML(label, vigenciaHasta = null) {
+    const antes = parseFloat(label.precioAnterior) || 0;
+    const ahora = parseFloat(label.precio) || 0;
+    // Se TRUNCA (no se redondea): nunca anunciar mas descuento del real. El epsilon evita que
+    // 1 - 120/150 = 0.19999999999999996 caiga en 19.
+    const pct = (antes > ahora && antes > 0) ? Math.floor((1 - ahora / antes) * 100 + 1e-6) : 0;
+    const diaMes = (d) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const vigencia = vigenciaHasta
+      ? `Válido del ${diaMes(new Date())} al ${diaMes(new Date(vigenciaHasta + 'T00:00:00'))} o hasta agotar stock`
+      : '';
+    const barcodeCol = label.codigo
+      ? `<div class="etiq-barcode"><svg class="bc-svg" data-code="${this._esc(label.codigo)}"></svg></div>`
+      : '';
+    const largoPrecio = this._fmt(ahora).length;   // "$ 1.800,00" = 10 caracteres entra al tamaño grande
+    return `
+  <div class="etiq etiq-promo">
+    <div class="promo-banda"><span>OFERTA</span>${pct > 0 ? `<span class="promo-pct">-${pct}%</span>` : ''}</div>
+    <div class="promo-nombre-wrap"><div class="promo-nombre">${this._esc(label.nombre)}</div></div>
+    <div class="promo-bottom">
+      <div class="promo-precios">
+        ${antes > ahora ? `<div class="promo-antes">Antes <s>${this._esc(this._fmt(antes))}</s></div>` : ''}
+        <div class="promo-ahora${largoPrecio >= 12 ? ' muy-largo' : largoPrecio === 11 ? ' largo' : ''}">${this._esc(this._fmt(ahora))}</div>
+      </div>
+      ${barcodeCol}
+    </div>
+    ${vigencia ? `<div class="promo-vigencia">${this._esc(vigencia)}</div>` : ''}
+  </div>`;
   },
 
   _buildLabelHTML(label) {

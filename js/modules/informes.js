@@ -7,6 +7,8 @@ import Buscador from './buscador_productos.js';
 // Import estatico (no window.SGA_Familia), igual que compras_v2.js/editor-producto.js/
 // operaciones_stock.js: el wizard de familia se abre tambien desde "Precios y Etiquetas".
 import Familia from './familia.js';
+// Unica via de impresion de etiquetas (marca "ultima impresion"): la usa "Bajas de Precio".
+import Etiquetas from './etiquetas.js';
 
 const Informes = (() => {
   'use strict';
@@ -23,6 +25,7 @@ const Informes = (() => {
     { id: 'salidas_stock',      label: 'Salidas de Stock (no venta)' },
     { id: 'sustitutos_grupos',  label: 'Grupos de Sustitutos' },
     { id: 'precios_etiquetas',  label: 'Precios y Etiquetas' },
+    { id: 'bajas_precio',       label: 'Bajas de Precio (etiquetas de oferta)' },
     { id: 'accesos_usuarios',   label: 'Accesos de Usuarios' },
   ];
 
@@ -59,6 +62,9 @@ const Informes = (() => {
     sustMostrarSinGrupo: false, // informe "Grupos de Sustitutos": filtro de productos sin grupo
     sustFiltroTexto: '', // informe "Grupos de Sustitutos": filtro por nombre/código
     mobilePeriod: 'mes', // 'hoy' | 'semana' | 'mes' | 'elegir-mes' — solo Admin-POS mobile
+    bajasFormato: 'promo',  // "Bajas de Precio": formato de etiqueta a imprimir ('promo' | 'normal')
+    bajasSoloStock: false,
+    bajasVigencia: null,    // "Vigente hasta" de la oferta (YYYY-MM-DD); null = default (+7 dias), '' = sin fecha
   };
 
   const ge  = (id) => document.getElementById(id);
@@ -956,6 +962,10 @@ const Informes = (() => {
             state.data = queryPreciosEtiquetas();
             resultsEl.innerHTML = renderPreciosEtiquetas(state.data);
             break;
+          case 'bajas_precio':
+            state.data = queryBajasPrecio();
+            resultsEl.innerHTML = renderBajasPrecio(state.data);
+            break;
           case 'accesos_usuarios':
             state.data = queryAccesosUsuarios();
             resultsEl.innerHTML = renderAccesosUsuarios(state.data);
@@ -964,6 +974,7 @@ const Informes = (() => {
             resultsEl.innerHTML = `<div class="inf-error">Reporte no reconocido.</div>`;
         }
         attachExportListeners();
+        attachBajasListeners();
       } catch (e) {
         console.error('[Informes]', e);
         resultsEl.innerHTML = `<div class="inf-error">Error al generar el reporte: ${esc(e.message)}</div>`;
@@ -1113,6 +1124,190 @@ const Informes = (() => {
           activó esta función: no hay datos de accesos anteriores.
         </p>`}
     `;
+  }
+
+  // ── REPORT: Bajas de Precio (etiquetas de oferta) ─────────────────────────────
+  // Productos cuyo precio de venta BAJÓ en el período, para elegir cuáles etiquetas imprimir, en
+  // formato Promoción (precio anterior tachado + % de descuento) o normal. Sale de precios_historial
+  // (registra cada cambio desde el 9/11/2026). "Antes" = el precio que tenía al empezar el período;
+  // entra solo si quedó más barato al final del período Y sigue más barato hoy (la etiqueta muestra
+  // el precio de hoy).
+  function queryBajasPrecio() {
+    const desde = toUTC(state.desde);
+    const hasta = toUTC(addOneDay(state.hasta));
+    const filas = window.SGA_DB.query(`
+      SELECT producto_id, fecha, precio_anterior, precio_nuevo
+        FROM precios_historial
+       WHERE fecha >= ? AND fecha < ?
+         AND precio_anterior IS NOT NULL
+         AND ABS(COALESCE(precio_anterior, 0) - COALESCE(precio_nuevo, 0)) > 0.001
+       ORDER BY fecha, rowid`, [desde, hasta]);
+
+    const porProd = new Map();
+    for (const f of filas) {
+      let x = porProd.get(f.producto_id);
+      if (!x) porProd.set(f.producto_id, x = { antes: f.precio_anterior, despues: f.precio_nuevo, fechaBaja: null });
+      x.despues = f.precio_nuevo;
+      if (f.precio_nuevo < f.precio_anterior) x.fechaBaja = f.fecha;
+    }
+
+    const ids = [...porProd.keys()].filter(id => porProd.get(id).despues < porProd.get(id).antes - 0.001);
+    const out = [];
+    for (const id of ids) {
+      const x = porProd.get(id);
+      const p = window.SGA_DB.query(`
+        SELECT p.nombre, p.precio_venta, p.activo, p.ultima_impresion_etiqueta, p.ultima_modificacion_precio,
+               COALESCE((SELECT codigo FROM codigos_barras WHERE producto_id = p.id
+                          ORDER BY es_principal DESC, codigo LIMIT 1), '') AS codigo,
+               COALESCE((SELECT SUM(cantidad) FROM stock WHERE producto_id = p.id AND sucursal_id = ?), 0) AS stock_actual
+          FROM productos p WHERE p.id = ?`, [state.sucursalId, id])[0];
+      if (!p || !p.activo) continue;
+      const actual = parseFloat(p.precio_venta) || 0;
+      if (actual <= 0 || actual >= x.antes - 0.001) continue;
+      out.push({
+        id, nombre: p.nombre, codigo: p.codigo, precio_antes: x.antes, precio_actual: actual,
+        baja_pct: (1 - actual / x.antes) * 100, fecha_baja: x.fechaBaja,
+        stock_actual: p.stock_actual, ultima_impresion: p.ultima_impresion_etiqueta,
+        // true = ya se imprimió una etiqueta después del último cambio de precio
+        etiqueta_al_dia: !!p.ultima_impresion_etiqueta &&
+          !((p.ultima_modificacion_precio || '') > String(p.ultima_impresion_etiqueta).replace(' ', 'T')),
+      });
+    }
+    return out.sort((a, b) => b.baja_pct - a.baja_pct || a.nombre.localeCompare(b.nombre));
+  }
+
+  const puedeImprimirEtiquetas = () => !!window.SGA_Permisos?.can('can_etiquetas');
+
+  function vigenciaPorDefecto() {
+    const d = new Date(); d.setDate(d.getDate() + 7);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  function renderBajasPrecio(rows) {
+    const conStock = rows.filter(r => r.stock_actual > 0).length;
+    const imprime = puedeImprimirEtiquetas();
+    return `
+      ${reportHeader('Bajas de Precio')}
+      <div class="inf-kpi-row">
+        <div class="inf-kpi highlight"><div class="inf-kpi-label">Productos que bajaron</div><div class="inf-kpi-value">${fmtNum(rows.length)}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Con stock</div><div class="inf-kpi-value">${fmtNum(conStock)}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Etiqueta sin actualizar</div><div class="inf-kpi-value">${fmtNum(rows.filter(r => !r.etiqueta_al_dia).length)}</div></div>
+      </div>
+      ${rows.length === 0 ? `<div class="inf-empty">Ningún producto bajó de precio en el período seleccionado. El historial de precios se registra desde el 9/11/2026.</div>` : `
+        <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;padding:10px 20px;">
+          ${imprime ? `
+            <strong style="font-size:13px">Formato de etiqueta:</strong>
+            <label style="font-size:13px"><input type="radio" name="inf-bajas-formato" value="promo"${state.bajasFormato === 'promo' ? ' checked' : ''}> 🏷️ Promoción (oferta)</label>
+            <label style="font-size:13px"><input type="radio" name="inf-bajas-formato" value="normal"${state.bajasFormato === 'normal' ? ' checked' : ''}> Normal</label>
+            <label id="inf-bajas-vig-wrap" style="font-size:13px;${state.bajasFormato === 'promo' ? '' : 'display:none'}"
+                   title="Se imprime en la etiqueta: la oferta tiene que decir hasta cuándo vale. Borralo para no imprimirlo.">
+              Vigente hasta <input type="date" id="inf-bajas-vigencia" class="inf-date" value="${state.bajasVigencia ?? vigenciaPorDefecto()}"></label>
+            <button id="inf-bajas-imprimir" class="btn btn-primary" disabled>🖨️ Imprimir etiquetas</button>
+          ` : `<span style="font-size:13px;color:var(--color-text-secondary)">Para imprimir etiquetas hace falta el permiso “Imprimir etiquetas”.</span>`}
+          <label style="font-size:13px;margin-left:auto"><input type="checkbox" id="inf-bajas-solo-stock"${state.bajasSoloStock ? ' checked' : ''}> Solo con stock</label>
+        </div>
+        <div id="inf-bajas-aviso"></div>
+        <div class="inf-table-wrap">
+          <table class="inf-table" id="inf-bajas-tabla">
+            <thead><tr>
+              ${imprime ? '<th style="width:34px"><input type="checkbox" id="inf-bajas-todos" title="Seleccionar todos los visibles" aria-label="Seleccionar todos"></th>' : ''}
+              <th>Producto</th><th>Código</th>
+              <th class="num">Antes</th><th class="num">Ahora</th><th class="num">Baja</th>
+              <th>Fecha de la baja</th><th class="num">Stock</th><th>Etiqueta</th>
+              ${imprime ? '<th class="num">Cant. etiquetas</th>' : ''}
+            </tr></thead>
+            <tbody>
+              ${rows.map(r => `
+                <tr data-baja="${esc(r.id)}" data-stock="${r.stock_actual > 0 ? 1 : 0}" style="cursor:${imprime ? 'pointer' : 'default'};${state.bajasSoloStock && !(r.stock_actual > 0) ? 'display:none' : ''}">
+                  ${imprime ? `<td><input type="checkbox" class="inf-bajas-chk" aria-label="Seleccionar ${esc(r.nombre)}"></td>` : ''}
+                  <td><strong>${esc(r.nombre)}</strong></td>
+                  <td>${esc(r.codigo)}</td>
+                  <td class="num"><s>${fmtPeso(r.precio_antes)}</s></td>
+                  <td class="num"><strong>${fmtPeso(r.precio_actual)}</strong></td>
+                  <td class="num text-success">-${r.baja_pct.toFixed(1)}%</td>
+                  <td>${r.fecha_baja ? esc(new Date(r.fecha_baja).toLocaleDateString('es-AR')) : '—'}</td>
+                  <td class="num">${fmtNum(r.stock_actual, Number.isInteger(r.stock_actual) ? 0 : 3)}</td>
+                  <td>${r.etiqueta_al_dia ? '<span class="text-success">Impresa</span>' : '<span class="text-warning">Sin actualizar</span>'}</td>
+                  ${imprime ? `<td class="num"><input type="number" class="inf-bajas-cant" value="1" min="1" max="99" step="1" style="width:64px;text-align:right"></td>` : ''}
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`}
+    `;
+  }
+
+  function attachBajasListeners() {
+    if (state.reporte !== 'bajas_precio') return;
+    const tabla = ge('inf-bajas-tabla');
+    if (!tabla) return;
+    const filas = () => [...tabla.querySelectorAll('tbody tr[data-baja]')];
+    const elegidas = () => filas().filter(tr => tr.style.display !== 'none' && tr.querySelector('.inf-bajas-chk')?.checked);
+    const refrescar = () => {
+      const btn = ge('inf-bajas-imprimir');
+      if (!btn) return;
+      const n = elegidas().reduce((s, tr) => s + (parseInt(tr.querySelector('.inf-bajas-cant').value, 10) || 0), 0);
+      btn.disabled = n === 0;
+      btn.textContent = n ? `🖨️ Imprimir etiquetas (${n})` : '🖨️ Imprimir etiquetas';
+    };
+
+    ge('inf-bajas-solo-stock')?.addEventListener('change', e => {
+      state.bajasSoloStock = e.target.checked;
+      filas().forEach(tr => {
+        const ocultar = state.bajasSoloStock && tr.dataset.stock !== '1';
+        tr.style.display = ocultar ? 'none' : '';
+        // lo que no se ve no se imprime
+        if (ocultar && tr.querySelector('.inf-bajas-chk')) tr.querySelector('.inf-bajas-chk').checked = false;
+      });
+      refrescar();
+    });
+    ge('inf-bajas-todos')?.addEventListener('change', e => {
+      filas().filter(tr => tr.style.display !== 'none')
+        .forEach(tr => { tr.querySelector('.inf-bajas-chk').checked = e.target.checked; });
+      refrescar();
+    });
+    document.querySelectorAll('input[name="inf-bajas-formato"]').forEach(r =>
+      r.addEventListener('change', () => {
+        state.bajasFormato = r.value;
+        const w = ge('inf-bajas-vig-wrap');
+        if (w) w.style.display = r.value === 'promo' ? '' : 'none';
+      }));
+    ge('inf-bajas-vigencia')?.addEventListener('change', e => { state.bajasVigencia = e.target.value; });
+    filas().forEach(tr => tr.addEventListener('click', e => {
+      const chk = tr.querySelector('.inf-bajas-chk');
+      if (!chk) return;
+      if (e.target.tagName !== 'INPUT') chk.checked = !chk.checked;   // clic en la fila = marcar
+      refrescar();
+    }));
+    tabla.addEventListener('input', refrescar);
+
+    ge('inf-bajas-imprimir')?.addEventListener('click', () => {
+      const items = elegidas().map(tr => {
+        const r = (state.data || []).find(x => x.id === tr.dataset.baja);
+        const cantidad = Math.min(99, Math.max(1, parseInt(tr.querySelector('.inf-bajas-cant').value, 10) || 1));
+        return { id: r.id, nombre: r.nombre, precio_venta: r.precio_actual, precioAnterior: r.precio_antes, codigo: r.codigo, cantidad };
+      });
+      if (!items.length) return;
+      const res = Etiquetas.imprimirEtiquetas(items, {
+        formato: state.bajasFormato,
+        vigenciaHasta: ge('inf-bajas-vigencia')?.value || null,
+      });
+      const aviso = ge('inf-bajas-aviso');
+      aviso.innerHTML = `
+        <div style="margin:0 20px 10px;padding:10px 14px;background:#f1f8e9;border:1px solid #dcedc8;border-radius:8px;font-size:13px;color:#33691e;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <span>Se mandaron a imprimir <strong>${res.etiquetas}</strong> ${res.etiquetas === 1 ? 'etiqueta' : 'etiquetas'}.</span>
+          <button id="inf-bajas-deshacer" class="btn btn-sm">¿Salió mal? Dejarlas como sin imprimir</button>
+        </div>`;
+      items.forEach(it => {
+        const tr = tabla.querySelector(`tr[data-baja="${CSS.escape(it.id)}"]`);
+        if (tr) tr.cells[8].innerHTML = '<span class="text-success">Impresa</span>';
+      });
+      ge('inf-bajas-deshacer').addEventListener('click', () => {
+        Etiquetas.restaurarMarcas(res.marcasPrevias);
+        window.SGA_Utils.showNotification('Listo: vuelven a figurar como estaban antes de imprimir', 'success');
+        generar();
+      });
+    });
+    refrescar();
   }
 
   // ── REPORT 1: Ventas por Producto ─────────────────────────────────────────────
@@ -2596,6 +2791,13 @@ const Informes = (() => {
           r.ultimo_pago   ? r.ultimo_pago.slice(0,10)   : '',
           dias ?? '', cats[catIdx]];
       });
+      return { title, periodo, headers, data };
+    }
+    if (rep === 'bajas_precio') {
+      const headers = ['Producto','Código','Precio antes','Precio actual','Baja %','Fecha de la baja','Stock','Etiqueta'];
+      const data = rows.map(r => [r.nombre, r.codigo, r.precio_antes, r.precio_actual,
+        Math.round(r.baja_pct * 10) / 10, r.fecha_baja ? r.fecha_baja.slice(0, 10) : '', r.stock_actual,
+        r.etiqueta_al_dia ? 'Impresa' : 'Sin actualizar']);
       return { title, periodo, headers, data };
     }
     if (rep === 'accesos_usuarios') {

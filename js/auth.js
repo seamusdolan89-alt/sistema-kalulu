@@ -94,6 +94,7 @@
     { key: 'can_informes_salidas_stock',        label: 'Salidas de Stock (no venta)',          grupo: 'Informes', riesgo: 'bajo',  tipo: 'bool', default: false, requiere: 'can_informes' },
     { key: 'can_informes_sustitutos_grupos',    label: 'Grupos de Sustitutos',                 grupo: 'Informes', riesgo: 'bajo',  tipo: 'bool', default: false, requiere: 'can_informes' },
     { key: 'can_informes_precios_etiquetas',    label: 'Precios y Etiquetas',                  grupo: 'Informes', riesgo: 'bajo',  tipo: 'bool', default: false, requiere: 'can_informes' },
+    { key: 'can_informes_bajas_precio',          label: 'Bajas de Precio (etiquetas de oferta)',  grupo: 'Informes', riesgo: 'bajo',  tipo: 'bool', default: false, requiere: 'can_informes' },
     { key: 'can_informes_accesos_usuarios',     label: 'Accesos de Usuarios (quién inició/cerró sesión)', grupo: 'Informes', riesgo: 'medio', tipo: 'bool', default: false, requiere: 'can_informes' },
   ];
 
