@@ -273,7 +273,7 @@ const api = {
   imprimirHTML,
   imprimirTicket(ticketData) { return api.imprimirHTML(api.buildTicketHTML(ticketData)); },
   imprimirTicketPrueba() { return api.imprimirHTML(api.buildTicketPruebaHTML()); },
-  etiquetaGeometria, etiquetaCSS, validarEtiquetas,
+  etiquetaGeometria, etiquetaCSS, etiquetaPromoCSS, validarEtiquetas,
   buildEtiquetasPruebaHTML,
   // Abre la hoja de prueba en una pestaña (igual que Etiquetas; el clic del usuario evita el bloqueo de popups).
   imprimirEtiquetasPrueba() {
@@ -446,6 +446,38 @@ ${rollo ? '.etiq:last-child { break-after: auto; page-break-after: auto; }' : ''
   height: auto;  /* aspect ratio preserved via viewBox */
   max-height: ${g.bcMaxH}mm;
 }
+`;
+}
+
+// Formato PROMOCION (se agrega DESPUES de etiquetaCSS). Blanco y negro, alto contraste; los fondos
+// negros necesitan print-color-adjust: exact o Chrome no los imprime. Escala con la misma `k`.
+function etiquetaPromoCSS(e) {
+  const g = etiquetaGeometria(e);
+  const r = (v) => Math.round(v * g.k * 100) / 100;
+  // El codigo no baja de ~28 mm en la etiqueta estandar: mas chico, al lector le cuesta leerlo.
+  const bcW = Math.round(Math.min(28 * g.k, e.ancho * 0.42) * 100) / 100;
+  return `
+.etiq-promo { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.promo-banda { flex-shrink: 0; display: flex; justify-content: space-between; align-items: center;
+  background: #000; color: #fff; padding: ${r(0.5)}mm ${r(2.5)}mm; font-size: ${r(10)}pt; font-weight: 900;
+  letter-spacing: ${r(1)}pt; line-height: 1.15; }
+.promo-pct { background: #fff; color: #000; letter-spacing: 0; padding: 0 ${r(1.5)}mm; border-radius: ${r(0.8)}mm; }
+.promo-nombre-wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+  padding: ${r(0.4)}mm ${r(2)}mm; overflow: hidden; }
+.promo-nombre { width: 100%; text-align: center; font-weight: 700; font-size: ${r(8)}pt; line-height: 1.15;
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.promo-bottom { flex-shrink: 0; display: flex; align-items: center; gap: ${r(1.5)}mm; height: ${r(13)}mm;
+  padding: 0 ${r(2)}mm ${r(1)}mm; }
+.promo-precios { flex: 1; min-width: 0; text-align: center; white-space: nowrap; }
+.promo-vigencia { flex-shrink: 0; text-align: center; font-size: ${r(5.5)}pt; line-height: 1.1; padding: 0 ${r(1)}mm ${r(0.6)}mm;
+  white-space: nowrap; overflow: hidden; }
+.promo-antes { font-size: ${r(7.5)}pt; line-height: 1.1; }
+.promo-antes s { text-decoration-thickness: ${r(0.3)}mm; }
+.promo-ahora { font-size: ${r(17)}pt; font-weight: 900; letter-spacing: -0.5pt; line-height: 1.1; }
+.promo-ahora.largo { font-size: ${r(14.5)}pt; }
+.promo-ahora.muy-largo { font-size: ${r(12.5)}pt; }
+.etiq-promo .etiq-barcode { width: ${bcW}mm; }
+.etiq-promo .bc-svg { width: ${bcW}mm !important; max-height: ${r(11)}mm !important; }
 `;
 }
 
