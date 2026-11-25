@@ -208,6 +208,13 @@ def main():
         # en el cambio de costo se ve a qué precio se vendía (130) y en el de precio, el costo (200).
         celdas = page.evaluate("""() => [...document.querySelectorAll('#ed-hp-tbody tr')].map(tr =>
             ({ origen: tr.cells[1].innerText, costo: tr.cells[2].innerText, precio: tr.cells[3].innerText }))""")
+        # "viejo → nuevo" en un solo renglon, aun con la pantalla angosta (25/11/2026)
+        page.set_viewport_size({"width": 1000, "height": 900})
+        page.wait_for_timeout(200)
+        partidos = page.evaluate("""() => [...document.querySelectorAll('#ed-hp-tbody .ed-hp-cambio')]
+            .map(e => new Set([...e.getClientRects()].map(r => Math.round(r.top))).size).filter(renglones => renglones !== 1).length""")
+        assert page.locator("#ed-hp-tbody .ed-hp-cambio").count() >= 2 and partidos == 0,             f"BUG: 'viejo → nuevo' se parte en dos renglones ({partidos})"
+        page.set_viewport_size({"width": 1900, "height": 1300})
         fila_costo = next(c for c in celdas if "→" in c["costo"])
         fila_precio = next(c for c in celdas if "→" in c["precio"])
         assert "130,00" in fila_costo["precio"], f"BUG: el cambio de costo no muestra el precio de venta vigente: {celdas}"

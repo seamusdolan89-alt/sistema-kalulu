@@ -103,6 +103,10 @@ def main():
         assert nombres(page) == ["Doble Baja", "Baja Simple"], f"BUG: lista {nombres(page)}"
         t = fila(page, "b-003").inner_text()
         assert "200,00" in t and "140,00" in t and "-30.0%" in t, f"Doble baja mal calculada: {t}"
+        # Sin tachado en el reporte: cruzaba el numero y un 8 se leia como 0 (25/11/2026). En la etiqueta si.
+        tachados = page.evaluate("""() => [...document.querySelectorAll('#inf-bajas-tabla tbody td')]
+            .filter(td => td.querySelector('s') || getComputedStyle(td).textDecorationLine.includes('line-through')).length""")
+        assert tachados == 0, "BUG: el precio 'Antes' del reporte no tiene que ir tachado"
         print("OK -", nombres(page))
 
         print("=== 2) Seleccion, formato promocion, marca y deshacer ===")

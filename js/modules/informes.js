@@ -1213,7 +1213,7 @@ const Informes = (() => {
                   ${imprime ? `<td><input type="checkbox" class="inf-bajas-chk" aria-label="Seleccionar ${esc(r.nombre)}"></td>` : ''}
                   <td><strong>${esc(r.nombre)}</strong></td>
                   <td>${esc(r.codigo)}</td>
-                  <td class="num"><s>${fmtPeso(r.precio_antes)}</s></td>
+                  <td class="num inf-bajas-antes" style="color:var(--color-text-secondary)">${fmtPeso(r.precio_antes)}</td>
                   <td class="num"><strong>${fmtPeso(r.precio_actual)}</strong></td>
                   <td class="num text-success">-${r.baja_pct.toFixed(1)}%</td>
                   <td>${r.fecha_baja ? esc(new Date(r.fecha_baja).toLocaleDateString('es-AR')) : '—'}</td>

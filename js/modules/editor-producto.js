@@ -2309,7 +2309,9 @@ const EditorProducto = (() => {
       const a = parseFloat(ant) || 0, n = parseFloat(nuevo) || 0;
       const pct = a > 0 ? ((n - a) / a * 100) : null;
       const color = n > a ? '#d32f2f' : '#388E3C';   // en costo, subir es "malo"; el color es solo orientativo
-      return `<span title="${escapeHtml(extraTitulo || '')}">${money(a)} → <strong>${money(n)}</strong></span>` +
+      // nowrap: "viejo → nuevo" siempre en un solo renglón. Partido en dos, la flecha quedaba al final
+      // de una línea y no se entendía hacia dónde había ido el precio (el % sí puede bajar de línea).
+      return `<span class="ed-hp-cambio" style="white-space:nowrap" title="${escapeHtml(extraTitulo || '')}">${money(a)} → <strong>${money(n)}</strong></span>` +
              (pct === null ? '' : ` <span style="color:${color};font-size:11px">(${pct > 0 ? '+' : ''}${pct.toFixed(1)}%)</span>`);
     };
 
