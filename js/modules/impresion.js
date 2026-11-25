@@ -43,6 +43,19 @@ const DEFAULTS = {
     gapX: 0,             // separación entre etiquetas (solo modo hoja)
     gapY: 0,
   },
+  // Etiquetas de PROMOCION (Informes -> Bajas de Precio): tamaño propio, algo mas grande.
+  etiquetasPromo: {
+    preset: 'a4_3x8',
+    modo: 'hoja',
+    papel: 'A4',
+    columnas: 3,
+    ancho: 70,
+    alto: 37.1,
+    margenSup: 0,
+    margenIzq: 0,
+    gapX: 0,
+    gapY: 0,
+  },
 };
 
 // Los presets son divisiones PAREJAS de la hoja (no modelos comerciales con nombre: no se puede
@@ -52,6 +65,7 @@ const PRESETS_ETIQUETA = {
   a4_3x8:   { label: 'Hoja A4 · 3 × 8 (70 × 37,1 mm)',                  modo: 'hoja', papel: 'A4', columnas: 3, ancho: 70,   alto: 37.1 },
   a4_4x12:  { label: 'Hoja A4 · 4 × 12 (52,5 × 24,7 mm)',               modo: 'hoja', papel: 'A4', columnas: 4, ancho: 52.5, alto: 24.7 },
   a4_2x7:   { label: 'Hoja A4 · 2 × 7 (105 × 42,4 mm)',                 modo: 'hoja', papel: 'A4', columnas: 2, ancho: 105,  alto: 42.4 },
+  a4_2x5:   { label: 'Hoja A4 · 2 × 5 (105 × 59,4 mm)',                 modo: 'hoja', papel: 'A4', columnas: 2, ancho: 105,  alto: 59.4 },
   rollo_50x30: { label: 'Rollo de etiquetas · 50 × 30 mm',              modo: 'rollo', columnas: 1, ancho: 50, alto: 30 },
   rollo_40x25: { label: 'Rollo de etiquetas · 40 × 25 mm',              modo: 'rollo', columnas: 1, ancho: 40, alto: 25 },
   rollo_60x40: { label: 'Rollo de etiquetas · 60 × 40 mm',              modo: 'rollo', columnas: 1, ancho: 60, alto: 40 },
@@ -79,9 +93,25 @@ const sinEmoji = (s) => String(s == null ? '' : s)
 const money = (n) => window.SGA_Utils.formatCurrency(n);
 
 // ── Configuración (localStorage) ──────────────────────────────────────────────
+function normalizarEtiquetas(raw, def) {
+  const e = Object.assign({}, def, raw || {});
+  const modo = e.modo === 'rollo' ? 'rollo' : 'hoja';
+  return {
+    preset: PRESETS_ETIQUETA[e.preset] ? e.preset : 'custom',
+    modo,
+    papel: PAPELES[e.papel] ? e.papel : 'A4',
+    columnas: modo === 'rollo' ? 1 : Math.round(num(e.columnas, def.columnas, 1, 8)),
+    ancho: num(e.ancho, def.ancho, 15, 210),
+    alto: num(e.alto, def.alto, 10, 297),
+    margenSup: num(e.margenSup, 0, 0, 60),
+    margenIzq: num(e.margenIzq, 0, 0, 60),
+    gapX: num(e.gapX, 0, 0, 20),
+    gapY: num(e.gapY, 0, 0, 20),
+  };
+}
+
 function normalizar(raw) {
   const t = Object.assign({}, DEFAULTS.ticket, raw?.ticket || {});
-  const e = Object.assign({}, DEFAULTS.etiquetas, raw?.etiquetas || {});
 
   const anchoPapel = num(t.anchoPapel, 58, 40, 120);
   const ticket = {
@@ -96,20 +126,9 @@ function normalizar(raw) {
     pie: String(t.pie == null ? DEFAULTS.ticket.pie : t.pie).slice(0, 160),
   };
 
-  const modo = e.modo === 'rollo' ? 'rollo' : 'hoja';
-  const etiquetas = {
-    preset: PRESETS_ETIQUETA[e.preset] ? e.preset : 'custom',
-    modo,
-    papel: PAPELES[e.papel] ? e.papel : 'A4',
-    columnas: modo === 'rollo' ? 1 : Math.round(num(e.columnas, 3, 1, 8)),
-    ancho: num(e.ancho, 70, 15, 210),
-    alto: num(e.alto, 29.7, 10, 297),
-    margenSup: num(e.margenSup, 0, 0, 60),
-    margenIzq: num(e.margenIzq, 0, 0, 60),
-    gapX: num(e.gapX, 0, 0, 20),
-    gapY: num(e.gapY, 0, 0, 20),
-  };
-  return { ticket, etiquetas };
+  const etiquetas = normalizarEtiquetas(raw?.etiquetas, DEFAULTS.etiquetas);
+  const etiquetasPromo = normalizarEtiquetas(raw?.etiquetasPromo, DEFAULTS.etiquetasPromo);
+  return { ticket, etiquetas, etiquetasPromo };
 }
 
 function getConfig() {
@@ -452,32 +471,31 @@ ${rollo ? '.etiq:last-child { break-after: auto; page-break-after: auto; }' : ''
 // Formato PROMOCION (se agrega DESPUES de etiquetaCSS). Blanco y negro, alto contraste; los fondos
 // negros necesitan print-color-adjust: exact o Chrome no los imprime. Escala con la misma `k`.
 function etiquetaPromoCSS(e) {
-  const g = etiquetaGeometria(e);
-  const r = (v) => Math.round(v * g.k * 100) / 100;
-  // El codigo no baja de ~28 mm en la etiqueta estandar: mas chico, al lector le cuesta leerlo.
-  const bcW = Math.round(Math.min(28 * g.k, e.ancho * 0.42) * 100) / 100;
+  // Escala propia, con base en la etiqueta de promo estandar (70 x 37,1 mm): el precio es lo que
+  // tiene que verse desde lejos. El codigo de barras escala con el ANCHO (angosto, cuesta leerlo).
+  const kw = e.ancho / 70;
+  const k = Math.min(2.2, Math.max(0.5, Math.min(kw, e.alto / 37.1)));
+  const r = (v) => Math.round(v * k * 100) / 100;
+  const bcW = Math.round(Math.min(30 * kw, e.ancho * 0.46) * 100) / 100;
   return `
 .etiq-promo { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .promo-banda { flex-shrink: 0; display: flex; justify-content: space-between; align-items: center;
-  background: #000; color: #fff; padding: ${r(0.5)}mm ${r(2.5)}mm; font-size: ${r(10)}pt; font-weight: 900;
-  letter-spacing: ${r(1)}pt; line-height: 1.15; }
+  background: #000; color: #fff; padding: ${r(0.6)}mm ${r(2.5)}mm; font-size: ${r(12)}pt; font-weight: 900;
+  letter-spacing: ${r(1.2)}pt; line-height: 1.15; }
 .promo-pct { background: #fff; color: #000; letter-spacing: 0; padding: 0 ${r(1.5)}mm; border-radius: ${r(0.8)}mm; }
 .promo-nombre-wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
-  padding: ${r(0.4)}mm ${r(2)}mm; overflow: hidden; }
-.promo-nombre { width: 100%; text-align: center; font-weight: 700; font-size: ${r(8)}pt; line-height: 1.15;
+  padding: ${r(0.3)}mm ${r(2)}mm; overflow: hidden; }
+.promo-nombre { width: 100%; text-align: center; font-weight: 700; font-size: ${r(9)}pt; line-height: 1.12;
   overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.promo-bottom { flex-shrink: 0; display: flex; align-items: center; gap: ${r(1.5)}mm; height: ${r(13)}mm;
-  padding: 0 ${r(2)}mm ${r(1)}mm; }
-.promo-precios { flex: 1; min-width: 0; text-align: center; white-space: nowrap; }
-.promo-vigencia { flex-shrink: 0; text-align: center; font-size: ${r(5.5)}pt; line-height: 1.1; padding: 0 ${r(1)}mm ${r(0.6)}mm;
-  white-space: nowrap; overflow: hidden; }
-.promo-antes { font-size: ${r(7.5)}pt; line-height: 1.1; }
-.promo-antes s { text-decoration-thickness: ${r(0.3)}mm; }
-.promo-ahora { font-size: ${r(17)}pt; font-weight: 900; letter-spacing: -0.5pt; line-height: 1.1; }
-.promo-ahora.largo { font-size: ${r(14.5)}pt; }
-.promo-ahora.muy-largo { font-size: ${r(12.5)}pt; }
+.promo-ahora { flex-shrink: 0; text-align: center; white-space: nowrap; font-size: ${r(32)}pt; font-weight: 900;
+  letter-spacing: -1pt; line-height: 1.06; }
+.promo-ahora.largo { font-size: ${r(25)}pt; }
+.promo-pie { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: ${r(1)}mm;
+  height: ${r(9.5)}mm; padding: 0 ${r(2)}mm ${r(0.8)}mm; }
+.promo-antes { flex: 1; min-width: 0; text-align: center; white-space: nowrap; font-size: ${r(10)}pt; }
+.promo-antes s { text-decoration-thickness: ${r(0.35)}mm; }
 .etiq-promo .etiq-barcode { width: ${bcW}mm; }
-.etiq-promo .bc-svg { width: ${bcW}mm !important; max-height: ${r(11)}mm !important; }
+.etiq-promo .bc-svg { width: ${bcW}mm !important; max-height: ${r(8.7)}mm !important; }
 `;
 }
 

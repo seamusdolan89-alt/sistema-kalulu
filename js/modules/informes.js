@@ -64,7 +64,6 @@ const Informes = (() => {
     mobilePeriod: 'mes', // 'hoy' | 'semana' | 'mes' | 'elegir-mes' — solo Admin-POS mobile
     bajasFormato: 'promo',  // "Bajas de Precio": formato de etiqueta a imprimir ('promo' | 'normal')
     bajasSoloStock: false,
-    bajasVigencia: null,    // "Vigente hasta" de la oferta (YYYY-MM-DD); null = default (+7 dias), '' = sin fecha
   };
 
   const ge  = (id) => document.getElementById(id);
@@ -1178,11 +1177,6 @@ const Informes = (() => {
 
   const puedeImprimirEtiquetas = () => !!window.SGA_Permisos?.can('can_etiquetas');
 
-  function vigenciaPorDefecto() {
-    const d = new Date(); d.setDate(d.getDate() + 7);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  }
-
   function renderBajasPrecio(rows) {
     const conStock = rows.filter(r => r.stock_actual > 0).length;
     const imprime = puedeImprimirEtiquetas();
@@ -1199,9 +1193,6 @@ const Informes = (() => {
             <strong style="font-size:13px">Formato de etiqueta:</strong>
             <label style="font-size:13px"><input type="radio" name="inf-bajas-formato" value="promo"${state.bajasFormato === 'promo' ? ' checked' : ''}> 🏷️ Promoción (oferta)</label>
             <label style="font-size:13px"><input type="radio" name="inf-bajas-formato" value="normal"${state.bajasFormato === 'normal' ? ' checked' : ''}> Normal</label>
-            <label id="inf-bajas-vig-wrap" style="font-size:13px;${state.bajasFormato === 'promo' ? '' : 'display:none'}"
-                   title="Se imprime en la etiqueta: la oferta tiene que decir hasta cuándo vale. Borralo para no imprimirlo.">
-              Vigente hasta <input type="date" id="inf-bajas-vigencia" class="inf-date" value="${state.bajasVigencia ?? vigenciaPorDefecto()}"></label>
             <button id="inf-bajas-imprimir" class="btn btn-primary" disabled>🖨️ Imprimir etiquetas</button>
           ` : `<span style="font-size:13px;color:var(--color-text-secondary)">Para imprimir etiquetas hace falta el permiso “Imprimir etiquetas”.</span>`}
           <label style="font-size:13px;margin-left:auto"><input type="checkbox" id="inf-bajas-solo-stock"${state.bajasSoloStock ? ' checked' : ''}> Solo con stock</label>
@@ -1266,12 +1257,7 @@ const Informes = (() => {
       refrescar();
     });
     document.querySelectorAll('input[name="inf-bajas-formato"]').forEach(r =>
-      r.addEventListener('change', () => {
-        state.bajasFormato = r.value;
-        const w = ge('inf-bajas-vig-wrap');
-        if (w) w.style.display = r.value === 'promo' ? '' : 'none';
-      }));
-    ge('inf-bajas-vigencia')?.addEventListener('change', e => { state.bajasVigencia = e.target.value; });
+      r.addEventListener('change', () => { state.bajasFormato = r.value; }));
     filas().forEach(tr => tr.addEventListener('click', e => {
       const chk = tr.querySelector('.inf-bajas-chk');
       if (!chk) return;
@@ -1287,10 +1273,7 @@ const Informes = (() => {
         return { id: r.id, nombre: r.nombre, precio_venta: r.precio_actual, precioAnterior: r.precio_antes, codigo: r.codigo, cantidad };
       });
       if (!items.length) return;
-      const res = Etiquetas.imprimirEtiquetas(items, {
-        formato: state.bajasFormato,
-        vigenciaHasta: ge('inf-bajas-vigencia')?.value || null,
-      });
+      const res = Etiquetas.imprimirEtiquetas(items, { formato: state.bajasFormato });
       const aviso = ge('inf-bajas-aviso');
       aviso.innerHTML = `
         <div style="margin:0 20px 10px;padding:10px 14px;background:#f1f8e9;border:1px solid #dcedc8;border-radius:8px;font-size:13px;color:#33691e;display:flex;gap:12px;align-items:center;flex-wrap:wrap">

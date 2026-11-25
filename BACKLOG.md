@@ -6,6 +6,12 @@ No es un audit exhaustivo del código — es lo que se sabe pendiente en cada mo
 
 ## Pendiente
 
+### Conectar las bajas de precio con el módulo Promociones (vigencia de la oferta)
+Pedido del dueño (24/11/2026): hoy "Informes → Bajas de Precio" imprime etiquetas de promoción SIN
+fecha de vigencia. Antes de desarrollar fin de promoción (aviso para reimprimir la etiqueta normal al
+vencer, vigencia impresa), conectar el ajuste de precios con el módulo Promociones ya existente.
+Considerar al hacerlo: la Ley 24.240 (art. 7) pide que una oferta indique inicio y fin.
+
 ### OCR de facturas de compra
 - **Estado real (verificado 2026-09):** el lado servidor existe (`functions/index.js`, función `interpretarFacturaCompra`, usa la API de Claude vía `ANTHROPIC_API_KEY` como secret de Firebase) pero **no está deployada** (falta activar el plan Blaze del proyecto Firebase y configurar el secret) **ni conectada a ninguna pantalla** — ningún módulo del cliente la llama todavía.
 - La ruta "carga manual" (`compras_v2.js`, flujo tipo POS de 5 pasos) cubre el caso de uso mientras tanto.

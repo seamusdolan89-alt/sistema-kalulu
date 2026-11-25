@@ -5,6 +5,8 @@
  * particular (ver el comentario de impresion.js). Disponible en POS y en Admin-POS.
  */
 import Impresion from './impresion.js';
+// Para la hoja de prueba de promocion: mismo armado de etiqueta que la impresion real.
+import Etiquetas from './etiquetas.js';
 
 const ConfigImpresion = (() => {
   'use strict';
@@ -52,7 +54,24 @@ const ConfigImpresion = (() => {
         gapX: ge('ci-e-gx').value,
         gapY: ge('ci-e-gy').value,
       },
+      etiquetasPromo: leerPromo(),
     };
+  }
+
+  // El tamaño de promocion se elige entre los modelos (sin "Personalizado").
+  function leerPromo() {
+    const id = ge('ci-p-preset').value;
+    if (!PRESETS[id] || id === 'custom') return Impresion.getConfig().etiquetasPromo;
+    const p = PRESETS[id];
+    return { preset: id, modo: p.modo, papel: p.papel || 'A4', columnas: p.columnas, ancho: p.ancho, alto: p.alto,
+             margenSup: 0, margenIzq: 0, gapX: 0, gapY: 0 };
+  }
+
+  function refrescarPromo() {
+    const e = Impresion.normalizar({ etiquetasPromo: leerPromo() }).etiquetasPromo;
+    ge('ci-p-info').innerHTML = e.modo === 'hoja'
+      ? `Entran <strong>${Impresion.validarEtiquetas(e).porHoja}</strong> etiquetas de promoción por hoja.`
+      : `Se imprime una etiqueta de ${e.ancho} × ${e.alto} mm por vez.`;
   }
 
   function escribirForm(cfg) {
@@ -82,6 +101,8 @@ const ConfigImpresion = (() => {
     ge('ci-e-mizq').value = e.margenIzq;
     ge('ci-e-gx').value = e.gapX;
     ge('ci-e-gy').value = e.gapY;
+    ge('ci-p-preset').value = cfg.etiquetasPromo.preset;
+    refrescarPromo();
   }
 
   // ── Etiquetas: qué campos aplican y cuáles son editables ─────────────────────
@@ -147,6 +168,8 @@ const ConfigImpresion = (() => {
 
     ge('ci-e-preset').innerHTML = Object.entries(PRESETS)
       .map(([id, p]) => `<option value="${id}">${p.label}</option>`).join('');
+    ge('ci-p-preset').innerHTML = Object.entries(PRESETS).filter(([id]) => id !== 'custom')
+      .map(([id, p]) => `<option value="${id}">${p.label.replace(' — el de siempre', '')}</option>`).join('');
     escribirForm(Impresion.getConfig());
     refrescarEtiquetas();
     refrescarPreview();
@@ -160,6 +183,18 @@ const ConfigImpresion = (() => {
       .forEach(id => ge(id).addEventListener('input', refrescarPreview));
 
     ge('ci-e-preset').addEventListener('change', refrescarEtiquetas);
+    ge('ci-p-preset').addEventListener('change', refrescarPromo);
+    ge('ci-p-prueba').addEventListener('click', () => {
+      const cfg = Impresion.normalizar(leerForm());
+      const e = cfg.etiquetasPromo;
+      const n = e.modo === 'rollo' ? 2 : Math.max(1, Impresion.validarEtiquetas(e).porHoja);
+      const html = Etiquetas.construirHTML(Array.from({ length: n }, (_, i) => ({
+        nombre: `Producto de prueba en promoción N° ${i + 1}`, precio: 1800, precioAnterior: 2200, codigo: '7791234567895',
+      })), { formato: 'promo', cfg });
+      const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+      if (!window.open(url, '_blank')) alert('El navegador bloqueó la ventana emergente. Permití los popups e intentá de nuevo.');
+      setTimeout(() => URL.revokeObjectURL(url), 120_000);
+    });
     ['ci-e-modo', 'ci-e-papel', 'ci-e-cols', 'ci-e-ancho', 'ci-e-alto', 'ci-e-msup', 'ci-e-mizq', 'ci-e-gx', 'ci-e-gy']
       .forEach(id => ge(id).addEventListener('input', refrescarEtiquetas));
 

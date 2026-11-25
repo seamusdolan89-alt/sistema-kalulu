@@ -115,8 +115,10 @@ def main():
         boton.click()
         html = ultimo_html(page)
         assert html.count('class="etiq etiq-promo"') == 3, "Una etiqueta de promo por cantidad"
-        assert "Válido del " in html and " o hasta agotar stock" in html, "La oferta tiene que decir su vigencia"
-        for s in ("OFERTA", "-20%", "Antes <s>$ 150,00</s>", "$ 120,00", "print-color-adjust: exact"):
+        assert "Válido" not in html and page.locator("#inf-bajas-vigencia").count() == 0, "Sin fecha de vigencia"
+        assert ",00" not in html.split("<body>")[1], "La etiqueta de promocion va sin decimales"
+        assert "repeat(3, 70mm)" in html and "grid-auto-rows: 37.1mm" in html, "La promo usa su tamaño (A4 3x8 por defecto)"
+        for s in ("OFERTA", "-20%", "Antes <s>$ 150</s>", ">$ 120<", "print-color-adjust: exact"):
             assert s in html, f"Falta {s!r} en la etiqueta de promocion"
         assert "Doble Baja" not in html, "Se imprimio un producto no seleccionado"
         marcas = {r["id"]: r["ultima_impresion_etiqueta"] for r in q(page, "SELECT id, ultima_impresion_etiqueta FROM productos WHERE id IN ('b-001','b-003')")}
@@ -140,6 +142,17 @@ def main():
         html = ultimo_html(page)
         assert html.count('class="etiq"') == 1 and "etiq-promo" not in html and "OFERTA" not in html
         assert "repeat(3, 70mm)" in html, "Usa la configuracion de etiquetas de este equipo"
+        print("OK")
+
+        print("=== 3b) Con centavos se muestran; el tamaño de promo se configura aparte ===")
+        res = page.evaluate("""async () => { const E = (await import('/js/modules/etiquetas.js')).default;
+            window.SGA_Impresion.saveConfig({ etiquetasPromo: { preset: 'a4_2x5', modo: 'hoja', papel: 'A4', columnas: 2, ancho: 105, alto: 59.4 } });
+            const it = [{ nombre: 'Con centavos', precio: 7380.5, precioAnterior: 8000, codigo: '7791234567895' }];
+            return { promo: E.construirHTML(it, { formato: 'promo' }), normal: E.construirHTML(it) }; }""")
+        assert "$ 7.380,50" in res["promo"] and "$ 8.000</s>" in res["promo"], "Si hay centavos, la etiqueta tiene que decirlos"
+        assert "repeat(2, 105mm)" in res["promo"] and "grid-auto-rows: 59.4mm" in res["promo"]
+        assert "repeat(3, 70mm)" in res["normal"] and "grid-auto-rows: 29.7mm" in res["normal"], "La normal no cambia"
+        page.evaluate("() => localStorage.removeItem('sga_print_config')")
         print("OK")
 
         print("=== 4) Sin permiso de etiquetas: se ve pero no se imprime ===")
