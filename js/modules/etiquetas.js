@@ -793,13 +793,15 @@ const mod = {
    * labels: [{ nombre, precio, codigo, precioAnterior? }] — una entrada por etiqueta.
    * formato: 'normal' (la de siempre) | 'promo' (oferta: precio anterior tachado y % de descuento).
    */
-  construirHTML(labels, { formato = 'normal', vigenciaHasta = null } = {}) {
+  construirHTML(labels, { formato = 'normal', cfg = null } = {}) {
     const labelsHTML = labels.map(l => formato === 'promo'
-      ? this._buildLabelPromoHTML(l, vigenciaHasta)
+      ? this._buildLabelPromoHTML(l)
       : this._buildLabelHTML(l)).join('\n');
 
     // Hoja (varias por hoja) o rollo de etiquetas, con el tamano configurado en ESTE equipo.
-    const cfgEtiq = Impresion.getConfig().etiquetas;
+    // La promocion tiene SU tamaño de etiqueta (mas grande), configurado aparte.
+    const config = cfg || Impresion.getConfig();
+    const cfgEtiq = formato === 'promo' ? config.etiquetasPromo : config.etiquetas;
     const geo = Impresion.etiquetaGeometria(cfgEtiq);
 
     const html = `<!DOCTYPE html>
@@ -822,7 +824,7 @@ ${labelsHTML}
     try {
       JsBarcode(svg, code, {
         width: 1.3,
-        height: 36,
+        height: ${formato === 'promo' ? 20 : 36},
         displayValue: true,
         fontSize: 8,
         margin: 3,
@@ -851,7 +853,7 @@ ${labelsHTML}
    * items: [{ id, nombre, precio_venta, codigo, cantidad, precioAnterior? }]
    * Devuelve { marcasPrevias, etiquetas } para poder deshacer.
    */
-  imprimirEtiquetas(items, { formato = 'normal', vigenciaHasta = null } = {}) {
+  imprimirEtiquetas(items, { formato = 'normal' } = {}) {
     // Expand items by quantity into a flat label array
     const labels = [];
     items.forEach(it => {
@@ -860,7 +862,7 @@ ${labelsHTML}
       }
     });
 
-    const html = this.construirHTML(labels, { formato, vigenciaHasta });
+    const html = this.construirHTML(labels, { formato });
     const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const win = window.open(url, '_blank');
@@ -910,37 +912,37 @@ ${labelsHTML}
     }
   },
 
-  // Formato PROMOCION: banda "OFERTA" con el % de descuento, precio anterior tachado y el precio
-  // nuevo grande. Pensado para impresora en blanco y negro (alto contraste, sin color).
-  // vigenciaHasta ('YYYY-MM-DD', opcional): una oferta tiene que decir desde y hasta cuando vale
-  // (Ley 24.240, art. 7); "desde" es el dia en que se imprime.
-  _buildLabelPromoHTML(label, vigenciaHasta = null) {
+  // Formato PROMOCION: banda "OFERTA" con el % de descuento, precio nuevo bien grande y el anterior
+  // tachado. Pensado para impresora en blanco y negro (alto contraste, sin color). Sin fecha de
+  // vigencia por ahora: eso queda para cuando se conecte con el modulo Promociones (BACKLOG.md).
+  _buildLabelPromoHTML(label) {
     const antes = parseFloat(label.precioAnterior) || 0;
     const ahora = parseFloat(label.precio) || 0;
     // Se TRUNCA (no se redondea): nunca anunciar mas descuento del real. El epsilon evita que
     // 1 - 120/150 = 0.19999999999999996 caiga en 19.
     const pct = (antes > ahora && antes > 0) ? Math.floor((1 - ahora / antes) * 100 + 1e-6) : 0;
-    const diaMes = (d) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
-    const vigencia = vigenciaHasta
-      ? `Válido del ${diaMes(new Date())} al ${diaMes(new Date(vigenciaHasta + 'T00:00:00'))} o hasta agotar stock`
-      : '';
     const barcodeCol = label.codigo
       ? `<div class="etiq-barcode"><svg class="bc-svg" data-code="${this._esc(label.codigo)}"></svg></div>`
       : '';
-    const largoPrecio = this._fmt(ahora).length;   // "$ 1.800,00" = 10 caracteres entra al tamaño grande
+    const precio = this._fmtPromo(ahora);
     return `
   <div class="etiq etiq-promo">
     <div class="promo-banda"><span>OFERTA</span>${pct > 0 ? `<span class="promo-pct">-${pct}%</span>` : ''}</div>
     <div class="promo-nombre-wrap"><div class="promo-nombre">${this._esc(label.nombre)}</div></div>
-    <div class="promo-bottom">
-      <div class="promo-precios">
-        ${antes > ahora ? `<div class="promo-antes">Antes <s>${this._esc(this._fmt(antes))}</s></div>` : ''}
-        <div class="promo-ahora${largoPrecio >= 12 ? ' muy-largo' : largoPrecio === 11 ? ' largo' : ''}">${this._esc(this._fmt(ahora))}</div>
-      </div>
+    <div class="promo-ahora${precio.length > 10 ? ' largo' : ''}">${this._esc(precio)}</div>
+    <div class="promo-pie">
+      <div class="promo-antes">${antes > ahora ? `Antes <s>${this._esc(this._fmtPromo(antes))}</s>` : ''}</div>
       ${barcodeCol}
     </div>
-    ${vigencia ? `<div class="promo-vigencia">${this._esc(vigencia)}</div>` : ''}
   </div>`;
+  },
+
+  // Precio de la etiqueta de promocion: sin ",00" para poder usar letra mas grande. Si el precio
+  // TIENE centavos se muestran: la etiqueta nunca puede decir un precio distinto del que se cobra.
+  _fmtPromo(price) {
+    const n = Number(price) || 0;
+    if (Math.abs(n - Math.round(n)) >= 0.005) return this._fmt(n);
+    return '$ ' + Math.round(n).toLocaleString('es-AR', { maximumFractionDigits: 0 });
   },
 
   _buildLabelHTML(label) {

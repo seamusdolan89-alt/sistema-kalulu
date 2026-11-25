@@ -136,6 +136,21 @@ def main():
         assert "se cortaría" in page.locator("#ci-e-info").inner_text(), "Falta el aviso de que 4 x 70 mm no entra en A4"
         print("OK")
 
+        print("=== 4b) Tamaño propio para las etiquetas de promocion ===")
+        assert page.locator("#ci-p-preset").input_value() == "a4_3x8", "Por defecto la promo es A4 3x8"
+        assert "24" in page.locator("#ci-p-info").inner_text()
+        page.select_option("#ci-p-preset", "a4_2x7")
+        page.wait_for_timeout(200)
+        capturar_blob(page)
+        page.locator("#ci-p-prueba").click()
+        html = ultimo_blob(page)
+        assert "repeat(2, 105mm)" in html and html.count('class="etiq etiq-promo"') == 14, "Hoja de prueba de promo 2x7"
+        page.locator("#ci-guardar").click()
+        page.wait_for_timeout(300)
+        guardado = json.loads(page.evaluate("() => localStorage.getItem('sga_print_config')"))
+        assert guardado["etiquetasPromo"]["preset"] == "a4_2x7" and guardado["etiquetasPromo"]["alto"] == 42.4
+        print("OK")
+
         # ── 5. Etiquetas imprime con la config ─────────────────────────────────
         print("=== 5) La pantalla de Etiquetas imprime con la configuracion ===")
         item = [{"id": "p1", "nombre": "Producto de prueba", "precio_venta": 1500, "codigo": "7790001112223", "cantidad": 2}]
