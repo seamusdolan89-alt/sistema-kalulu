@@ -81,6 +81,37 @@ const SGA_Clientes = (() => {
     return { cond, params };
   }
 
+  // ── Última visita / última compra ────────────────────────────────────────────
+  // Se CALCULAN desde las ventas y los cobros. Antes salían de la columna clientes.ultima_visita,
+  // que solo se escribía al cobrar deuda o al usar saldo a favor: una venta común (efectivo, MP o
+  // fiada) no la tocaba y un cliente que había comprado hace 3 días figuraba "47 días sin comprar"
+  // (25/11/2026). Calculado, vale también para todo el historial y para ventas de cualquier compu.
+  //   ultima_compra = última venta completada
+  //   ultima_visita = lo más reciente entre esa compra y el último pago (de una venta no anulada)
+  // Pone ambos campos en cada fila (pisa la columna vieja, que ya no se muestra).
+  function conUltimasFechas(filas) {
+    if (!filas.length) return filas;
+    const ids = filas.length === 1 ? [filas[0].id] : null;   // la ficha no necesita agrupar todo
+    const filtro = (col) => ids ? `AND ${col} = ?` : '';
+    const maximos = (sql) => new Map(db().query(sql, ids || []).map(r => [r.cliente_id, r.fecha]));
+    const compras = maximos(`
+      SELECT cliente_id, MAX(fecha) AS fecha FROM ventas
+       WHERE estado = 'completada' AND cliente_id IS NOT NULL ${filtro('cliente_id')}
+       GROUP BY cliente_id`);
+    const pagos = maximos(`
+      SELECT cc.cliente_id, MAX(cc.fecha) AS fecha FROM cuenta_corriente cc
+        LEFT JOIN ventas v ON v.id = cc.venta_id
+       WHERE cc.tipo = 'pago' AND (cc.venta_id IS NULL OR v.estado = 'completada') ${filtro('cc.cliente_id')}
+       GROUP BY cc.cliente_id`);
+    for (const f of filas) {
+      const compra = compras.get(f.id) || null;
+      const pago = pagos.get(f.id) || null;
+      f.ultima_compra = compra;
+      f.ultima_visita = (compra && pago) ? (new Date(pago) > new Date(compra) ? pago : compra) : (compra || pago);
+    }
+    return filas;
+  }
+
   function getAll({ search = '', soloConDeuda = false, soloMasters = false, activo = 1 } = {}) {
     const sc = buildSearchCond(search);
     const activoCond = activo === 'todos' ? '' : `AND c.activo = ${activo ? 1 : 0}`;
@@ -97,6 +128,7 @@ const SGA_Clientes = (() => {
         ${masterCond}
       ORDER BY c.nombre, c.apellido
     `, sc.params);
+    conUltimasFechas(rows);
 
     if (soloConDeuda) return rows.filter(r => r.saldo_actual > 0);
 
@@ -132,6 +164,7 @@ const SGA_Clientes = (() => {
     `, [id]);
     if (!rows.length) return null;
     const c = rows[0];
+    conUltimasFechas([c]);
     c.saldo_actual = getSaldoActual(id);
     c.tope_disponible = getTopeDisponible(id);
 
@@ -143,6 +176,7 @@ const SGA_Clientes = (() => {
         FROM clientes cl WHERE cl.cliente_master_id = ? AND cl.activo = 1
         ORDER BY cl.nombre
       `, [id]);
+      conUltimasFechas(c.miembros);
       c.deuda_lote = getSaldoLote(id);
     } else if (c.cliente_master_id) {
       c.master = db().query(
@@ -481,6 +515,15 @@ const ClientesUI = (() => {
   'use strict';
 
   const ge = (id) => document.getElementById(id);
+
+  // Días de calendario (hora local) desde una fecha: comprado ayer a la tarde = 1, aunque hayan
+  // pasado menos de 24 horas.
+  function diasDesde(iso) {
+    if (!iso) return null;
+    const a = new Date(iso), b = new Date();
+    const dia = (d) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+    return Math.max(0, Math.round((dia(b) - dia(a)) / 86400000));
+  }
 
   // Format helpers (fall through to SGA_Utils if available)
   const fmt = (n) => {
@@ -953,15 +996,13 @@ const ClientesUI = (() => {
 
   function renderStatsSection(c) {
     const s = c.stats || {};
-    const diasDesdeVisita = c.ultima_visita
-      ? Math.floor((Date.now() - new Date(c.ultima_visita)) / 86400000)
-      : null;
+    const diasSinComprar = diasDesde(c.ultima_compra);
 
     const sgrid = ge('stats-grid');
     if (sgrid) {
       sgrid.innerHTML = [
         { label: 'Última visita', value: fmtDate(c.ultima_visita) },
-        { label: 'Días sin comprar', value: diasDesdeVisita != null ? `${diasDesdeVisita} días` : '—' },
+        { label: 'Días sin comprar', value: diasSinComprar != null ? `${diasSinComprar} ${diasSinComprar === 1 ? 'día' : 'días'}` : '—' },
         { label: 'Compras este mes', value: `${fmt(s.total_comprado_mes)} (${s.ventas_mes || 0} ventas)` },
         { label: 'Compras este año', value: fmt(s.total_comprado_anio) },
         { label: 'Ticket promedio', value: fmt(s.ticket_promedio) },
