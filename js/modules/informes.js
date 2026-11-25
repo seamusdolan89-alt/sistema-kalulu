@@ -266,25 +266,59 @@ const Informes = (() => {
     }));
   }
 
+  // Saldo = suma de TODOS los movimientos del cliente, igual que la pantalla Clientes y el POS. Antes
+  // se filtraba por sucursal_id, pero los cobros hechos desde Clientes y los saldos importados se
+  // guardan SIN sucursal: el informe contaba la deuda y no los pagos (25/11/2026, un cliente que
+  // debia $62.709 figuraba con $250.615).
   function queryAgingCC() {
-    const sid = state.sucursalId;
-    return window.SGA_DB.query(`
-      SELECT
-        c.id,
-        c.nombre,
-        c.apellido,
-        COALESCE(c.telefono, '') AS telefono,
-        COALESCE(c.tope_deuda, 0) AS tope_deuda,
-        SUM(cc.monto) AS balance,
-        MIN(CASE WHEN cc.tipo = 'venta_fiada' THEN cc.fecha END) AS primera_deuda,
-        MAX(CASE WHEN cc.tipo = 'venta_fiada' THEN cc.fecha END) AS ultima_compra,
-        MAX(CASE WHEN cc.tipo = 'pago'        THEN cc.fecha END) AS ultimo_pago
-      FROM clientes c
-      JOIN cuenta_corriente cc ON cc.cliente_id = c.id AND cc.sucursal_id = ?
-      GROUP BY c.id
-      HAVING balance > 0.01
-      ORDER BY balance DESC
-    `, [sid]);
+    const movs = window.SGA_DB.query(`
+      SELECT c.id, c.nombre, c.apellido, COALESCE(c.telefono, '') AS telefono,
+             COALESCE(c.tope_deuda, 0) AS tope_deuda,
+             cc.tipo, cc.monto, cc.fecha, cc.descripcion, cc.venta_id, v.estado AS venta_estado
+        FROM cuenta_corriente cc
+        JOIN clientes c ON c.id = cc.cliente_id
+        LEFT JOIN ventas v ON v.id = cc.venta_id
+       WHERE cc.cliente_id IN (SELECT cliente_id FROM cuenta_corriente GROUP BY cliente_id HAVING SUM(monto) > 0.01)
+       ORDER BY cc.cliente_id, cc.fecha, cc.rowid`);
+
+    const porCliente = new Map();
+    for (const m of movs) {
+      let c = porCliente.get(m.id);
+      if (!c) porCliente.set(m.id, c = { id: m.id, nombre: m.nombre, apellido: m.apellido || '',
+                                         telefono: m.telefono, tope_deuda: m.tope_deuda, movs: [] });
+      c.movs.push(m);
+    }
+    return [...porCliente.values()].map(c => Object.assign(c, analizarDeuda(c.movs), { movs: undefined }))
+      .sort((x, y) => y.balance - x.balance);
+  }
+
+  // Deuda IMPAGA mas vieja: los pagos (y creditos) cancelan primero las deudas mas antiguas. Antes los
+  // "dias de mora" salian de la primera compra fiada de la historia, aunque estuviera paga: un cliente
+  // que paga siempre figuraba con meses de mora.
+  function analizarDeuda(movs) {
+    const balance = movs.reduce((a, m) => a + (m.monto || 0), 0);
+
+    // Una venta anulada deja su movimiento original y uno de reversion (signo contrario, con el
+    // codigo de la venta en la descripcion): se sacan los dos, no son ni deuda ni pago.
+    const fuera = new Set();
+    movs.forEach((m, i) => {
+      if (!m.venta_id || !m.venta_estado || m.venta_estado === 'completada') return;
+      const j = movs.findIndex((x, k) => !fuera.has(k) && k !== i && x.tipo === 'ajuste'
+        && Math.abs(x.monto + m.monto) < 0.005 && String(x.descripcion || '').includes(m.venta_id.substring(0, 8)));
+      if (j >= 0) { fuera.add(i); fuera.add(j); }
+    });
+    const validos = movs.filter((_, i) => !fuera.has(i));
+
+    let credito = validos.reduce((a, m) => a + (m.monto < 0 ? -m.monto : 0), 0);
+    let deudaDesde = null;
+    for (const m of validos) {
+      if (!(m.monto > 0)) continue;
+      if (credito >= m.monto - 0.005) { credito -= m.monto; continue; }   // esta deuda ya esta cubierta
+      deudaDesde = m.fecha;
+      break;
+    }
+    const ultima = (tipo) => validos.filter(m => m.tipo === tipo).reduce((f, m) => (!f || m.fecha > f ? m.fecha : f), null);
+    return { balance, deuda_desde: deudaDesde, ultima_compra: ultima('venta_fiada'), ultimo_pago: ultima('pago') };
   }
 
   // Resumen diario de CAJA: todo lo que entro cada dia, con su origen y por medio, para que coincida
@@ -1634,7 +1668,7 @@ const Informes = (() => {
 
   function renderAgingCC(rows) {
     const totBalance = rows.reduce((s, r) => s + (r.balance || 0), 0);
-    const criticos   = rows.filter(r => daysSince(r.primera_deuda) > 90).length;
+    const criticos   = rows.filter(r => daysSince(r.deuda_desde) > 90).length;
     const hoy        = new Date().toLocaleDateString('es-AR');
     return `
       <div class="inf-report-header">
@@ -1659,12 +1693,12 @@ const Informes = (() => {
               <th>Cliente</th><th>Teléfono</th>
               <th class="num">Saldo deudor</th><th class="num">Tope</th>
               <th class="num">% del tope</th>
-              <th>Primera deuda</th><th>Última compra</th><th>Último pago</th>
+              <th title="Fecha de la compra más vieja que todavía no está pagada">Impaga desde</th><th>Última compra</th><th>Último pago</th>
               <th class="num">Días de mora</th><th>Categoría</th>
             </tr></thead>
             <tbody>
               ${rows.map(r => {
-                const dias = daysSince(r.primera_deuda);
+                const dias = daysSince(r.deuda_desde);
                 const pctTope = r.tope_deuda > 0 ? (r.balance / r.tope_deuda * 100).toFixed(0) : '—';
                 const sobreTope = r.tope_deuda > 0 && r.balance > r.tope_deuda;
                 const cats = ['Reciente','Normal','Alta','Crítica'];
@@ -1676,7 +1710,7 @@ const Informes = (() => {
                     <td class="num bold ${sobreTope ? 'text-danger' : ''}">${fmtPeso(r.balance)}</td>
                     <td class="num text-muted">${r.tope_deuda > 0 ? fmtPeso(r.tope_deuda) : '—'}</td>
                     <td class="num ${sobreTope ? 'text-danger bold' : ''}">${pctTope}${pctTope !== '—' ? '%' : ''}</td>
-                    <td>${fmtFechaCorta(r.primera_deuda)}</td>
+                    <td>${fmtFechaCorta(r.deuda_desde)}</td>
                     <td>${fmtFechaCorta(r.ultima_compra)}</td>
                     <td>${fmtFechaCorta(r.ultimo_pago)}</td>
                     <td class="num"><span class="aging-badge ${agingClass(dias)}">${agingLabel(dias)}</span></td>
@@ -2763,13 +2797,13 @@ const Informes = (() => {
     }
     if (rep === 'aging_cc') {
       const headers = ['Cliente','Teléfono','Saldo deudor','Tope crédito',
-                       'Primera deuda','Última compra','Último pago','Días de mora','Categoría'];
+                       'Impaga desde','Última compra','Último pago','Días de mora','Categoría'];
       const cats = ['Reciente','Normal','Alta','Crítica'];
       const data = rows.map(r => {
-        const dias   = daysSince(r.primera_deuda);
+        const dias   = daysSince(r.deuda_desde);
         const catIdx = dias === null ? 0 : dias <= 30 ? 0 : dias <= 60 ? 1 : dias <= 90 ? 2 : 3;
         return [`${r.nombre} ${r.apellido}`, r.telefono, r.balance, r.tope_deuda,
-          r.primera_deuda ? r.primera_deuda.slice(0,10) : '',
+          r.deuda_desde ? r.deuda_desde.slice(0,10) : '',
           r.ultima_compra ? r.ultima_compra.slice(0,10) : '',
           r.ultimo_pago   ? r.ultimo_pago.slice(0,10)   : '',
           dias ?? '', cats[catIdx]];
