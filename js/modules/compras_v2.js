@@ -390,21 +390,38 @@ const ComprasV2 = (() => {
     return state.items.reduce((s, it) => s + itemSubtotal(it), 0);
   }
 
-  // Carrito, pero neto del Impuesto Interno declarado en la cabecera — SOLO
-  // para comparar contra "Subtotal Neto" (Factura A). El costo de cada línea
-  // se carga tal cual lo imprime el proveedor (con el interno adentro: es lo
-  // que de verdad se paga por unidad, y así tiene que quedar en costo/margen
-  // del producto), pero la propia factura excluye ese interno del "Neto" —
-  // sin este ajuste, cualquier compra con Impuesto Interno marca "≠ carrito"
-  // para siempre, aunque esté todo bien cargado, y la única forma de que
-  // cierre era simular un descuento que en realidad no existe (pedido real
-  // del usuario, 29/9/2026, factura de Oslé con Impuesto Interno en jugos).
-  // El Impuesto Interno en sí no da crédito fiscal (a diferencia del IVA):
-  // no hace falta discriminarlo por producto, alcanza con el total de la
-  // cabecera.
+  // Los proveedores facturan el Impuesto Interno de dos formas, y las dos son
+  // correctas (se detecta solo, comparando contra el "Subtotal Neto"):
+  //  - INCLUIDO en el precio de cada línea (Oslé, 29/9/2026): el carrito supera
+  //    al Neto justo por el interno.
+  //  - APARTE (La Serenísima, 26/11/2026): el carrito coincide con el Neto y el
+  //    interno se suma abajo, con las percepciones. Restarlo siempre marcaba
+  //    "≠ carrito" en falso.
+  // Si no coincide ninguna (carga incompleta o con un error) se asume "aparte".
+  function internoIncluidoEnCostos() {
+    const interno = parseFloat(state.impInterno) || 0;
+    if (!isFacturaA() || interno <= 0 || !(state.subtotalNeto > 0)) return false;
+    const carrito = calcTotal();
+    const difAparte   = Math.abs(state.subtotalNeto - carrito);
+    const difIncluido = Math.abs(state.subtotalNeto - (carrito - interno));
+    return difIncluido <= TOLERANCIA_CONTROL && difIncluido < difAparte;
+  }
+
+  // Carrito llevado a lo que la cabecera llama "Subtotal Neto" — SOLO para el
+  // control. El costo de cada línea se carga tal cual lo imprime el proveedor.
   function calcNetoParaControl() {
-    const neto = calcTotal();
-    return isFacturaA() ? neto - (parseFloat(state.impInterno) || 0) : neto;
+    return calcTotal() - (internoIncluidoEnCostos() ? parseFloat(state.impInterno) : 0);
+  }
+
+  // Importes de la cabecera que se pagan pero no salen de ningún renglón del
+  // carrito: percepciones y, si no vino dentro de los precios, el interno.
+  function calcOtrosImpuestos() {
+    const vacio = { interno: 0, percIva: 0, percIibb: 0, total: 0 };
+    if (!isFacturaA() || !state.items.length) return vacio;
+    const interno  = internoIncluidoEnCostos() ? 0 : (parseFloat(state.impInterno) || 0);
+    const percIva  = parseFloat(state.percepcionIva)  || 0;
+    const percIibb = parseFloat(state.percepcionIibb) || 0;
+    return { interno, percIva, percIibb, total: interno + percIva + percIibb };
   }
 
   // Monto real de la factura, CON impuestos incluidos. En Factura A el costo
@@ -431,13 +448,14 @@ const ComprasV2 = (() => {
    *
    * Distinto de calcMontoFactura(), que devuelve el total DECLARADO en la
    * cabecera. En Factura A los costos se cargan sin IVA, asi que hay que
-   * sumarselo para poder compararlo contra el total de la factura impresa; en
-   * B y C el costo ya viene con IVA adentro.
+   * sumarselo (y tambien los otros impuestos de la cabecera) para poder
+   * compararlo contra el total de la factura impresa; en B y C el costo ya
+   * viene con todo adentro.
    */
   function calcTotalCarrito() {
     const neto = calcTotal();
     if (!isFacturaA()) return neto;
-    return neto + calcIvaCalc('10.5') + calcIvaCalc('21');
+    return neto + calcIvaCalc('10.5') + calcIvaCalc('21') + calcOtrosImpuestos().total;
   }
 
   function calcMontoFactura() {
@@ -863,9 +881,6 @@ const ComprasV2 = (() => {
     const countEl = ge('cv2-item-count');
     if (countEl) countEl.textContent = `${state.items.length} producto${state.items.length !== 1 ? 's' : ''}`;
 
-    const itemsEl = ge('cv2-summary-items');
-    if (itemsEl) itemsEl.textContent = state.items.length;
-
     const subtotalEl = ge('cv2-summary-subtotal');
     // El subtotal va NETO, o sea la suma de la columna Subtotal, que ya tiene
     // aplicado el descuento de cada linea. Antes mostraba el bruto: no cerraba
@@ -881,7 +896,8 @@ const ComprasV2 = (() => {
     const iva21Wrap  = ge('cv2-summary-iva21-wrap');
     if (iva105Wrap && iva21Wrap) {
       const show = isFacturaA();
-      iva105Wrap.style.display = show ? '' : 'none';
+      // El 10,5% se muestra solo si lo usa el carrito o la cabecera: la barra no tiene lugar de sobra.
+      iva105Wrap.style.display = show && (state.iva105 > 0.01 || calcIvaCalc('10.5') > 0.001) ? '' : 'none';
       iva21Wrap.style.display  = show ? '' : 'none';
       if (show) {
         const calc105 = calcIvaCalc('10.5');
@@ -893,6 +909,21 @@ const ComprasV2 = (() => {
         iva105Wrap.classList.toggle('cv2-summary-mismatch', state.iva105 > 0.01 && Math.abs(state.iva105 - calc105) > 0.5);
         iva21Wrap.classList.toggle('cv2-summary-mismatch', state.iva21 > 0.01 && Math.abs(state.iva21 - calc21) > 0.5);
       }
+    }
+
+    // Percepciones e interno: un solo casillero (el detalle va en el tooltip),
+    // y solo si la factura trae alguno.
+    const otrosWrap = ge('cv2-summary-otros-wrap');
+    if (otrosWrap) {
+      const o = calcOtrosImpuestos();
+      otrosWrap.style.display = o.total > 0.001 ? '' : 'none';
+      const percep = o.percIva + o.percIibb > 0.001;
+      ge('cv2-summary-otros-label').textContent =
+        o.interno > 0.001 ? (percep ? 'Int. + Percep.' : 'Imp. Interno') : 'Percepciones';
+      ge('cv2-summary-otros').textContent = fmt$(o.total);
+      otrosWrap.title = 'Tomado de la cabecera:\n' + [
+        ['Impuesto Interno', o.interno], ['Percepción IVA', o.percIva], ['Percepción IIBB', o.percIibb],
+      ].filter(([, v]) => v > 0.001).map(([n, v]) => `${n}: ${fmt$(v)}`).join('\n');
     }
 
     // "Total Compra" es lo que suma el carrito: acompaña lo que vas cargando.
