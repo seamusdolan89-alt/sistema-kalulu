@@ -108,6 +108,7 @@ def serenisima(context, errors):
             return [...document.querySelectorAll('.cv2-summary-totals .cv2-summary-item')]
               .filter(e => e.offsetParent).every(e => e.getBoundingClientRect().left >= c.left - 1); }""")
     assert barra_entera(), "La barra de totales se corta por la izquierda"
+    assert page.locator("#cv2-summary-items").inner_text() == "1", "Falta el total de items"
     assert not page.locator("#cv2-summary-iva105-wrap").is_visible(), "IVA 10,5% en cero no ocupa lugar"
 
     # Con las dos alicuotas a la vista no entra todo en un renglon: baja, no se corta.

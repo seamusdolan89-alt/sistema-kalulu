@@ -881,6 +881,9 @@ const ComprasV2 = (() => {
     const countEl = ge('cv2-item-count');
     if (countEl) countEl.textContent = `${state.items.length} producto${state.items.length !== 1 ? 's' : ''}`;
 
+    const itemsEl = ge('cv2-summary-items');
+    if (itemsEl) itemsEl.textContent = state.items.length;
+
     const subtotalEl = ge('cv2-summary-subtotal');
     // El subtotal va NETO, o sea la suma de la columna Subtotal, que ya tiene
     // aplicado el descuento de cada linea. Antes mostraba el bruto: no cerraba
