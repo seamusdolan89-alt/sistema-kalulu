@@ -932,10 +932,10 @@
           (id, orden_id, producto_id, cantidad_pedida, cantidad_recibida, estado,
            costo_unitario, costo_anterior, codigo_proveedor,
            stock_actual, stock_minimo, cantidad_deseada,
-           ventas_30d, ventas_prom_6m, dias_sin_stock_6m, dias_sin_stock_30d,
+           ventas_30d, ventas_prom_6m, dias_sin_stock_6m, dias_sin_stock_30d, vencidos_30d,
            cantidad_sugerida, cantidad_final, unidad_pedida,
            notas, descripcion_libre)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [item.id, data.id, item.producto_id,
          item.cantidad_pedida, item.cantidad_recibida || 0,
          item.estado || 'pendiente',
@@ -946,6 +946,7 @@
          item.ventas_30d || 0, item.ventas_prom_6m || 0,
          item.dias_sin_stock_6m || 0,
          item.dias_sin_stock_30d ?? null,
+         item.vencidos_30d ?? null,
          item.cantidad_sugerida ?? null, item.cantidad_final ?? null,
          item.unidad_pedida || 'unidad',
          item.notas ?? null, item.descripcion_libre ?? null]

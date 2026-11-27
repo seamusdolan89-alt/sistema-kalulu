@@ -6,7 +6,7 @@
 
 import Buscador from './buscador_productos.js';
 import GruposSustitutos from './grupos_sustitutos.js';
-import { crearCalculadorSinStock } from './quiebres.js';
+import { crearCalculadorSinStock, inicioUltimosDias } from './quiebres.js';
 // REGLA: los grupos de sustitutos (tabla producto_sustitutos) se leen y se escriben SOLO por el
 // motor (grupos_sustitutos.js): stockDelGrupo, miembrosDe, referenciaRealDe, agruparConReferencia,
 // aplicarCambioReferencia, moverMiembro, quitarDelGrupo... Nunca con SQL propio en esta pantalla:
@@ -66,6 +66,23 @@ const Ordenes = (() => {
   function idsDelGrupo(productoId) {
     const miembros = GruposSustitutos.miembrosDe(productoId);
     return miembros.length > 1 ? miembros.map(m => m.id) : [productoId];
+  }
+
+  /**
+   * Unidades dadas de baja por vencimiento en los últimos N días (hoy incluido), de los productos
+   * indicados. Son dos caminos: la pantalla Vencimientos y la devolución de un cliente por producto
+   * vencido ya aprobada (mientras está pendiente no se descontó nada). Se lee consumo_interno, que
+   * es donde quedan las dos.
+   */
+  function vencidosUltimos(ids, sucursalId, dias) {
+    return db().query(`
+      SELECT COALESCE(SUM(cantidad), 0) AS total
+      FROM consumo_interno
+      WHERE sucursal_id = ?
+        AND producto_id IN (${ids.map(() => '?').join(',')})
+        AND motivo IN ('vencimiento', 'Devolución — producto vencido')
+        AND fecha >= ?
+    `, [sucursalId, ...ids, inicioUltimosDias(dias)])[0]?.total || 0;
   }
 
   /**
@@ -158,6 +175,7 @@ const Ordenes = (() => {
         ventas30d:        v30d,
         ventasProm6m:     Math.round((v6m / 6) * 100) / 100,
         diasSinStock30d:  diasSS,
+        vencidos30d:      vencidosUltimos(idsDelGrupo(refId), sucursalId, 30),
         cantidadSugerida: cantPedido,
         unidadPedida:     aPedir.pedido_unidad || 'unidad',
       });
@@ -189,13 +207,13 @@ const Ordenes = (() => {
           INSERT INTO orden_compra_items
             (id, orden_id, producto_id, cantidad_pedida, estado,
              stock_actual, stock_minimo, cantidad_deseada,
-             ventas_30d, ventas_prom_6m, dias_sin_stock_30d,
+             ventas_30d, ventas_prom_6m, dias_sin_stock_30d, vencidos_30d,
              cantidad_sugerida, cantidad_final, unidad_pedida)
-          VALUES (?, ?, ?, ?, 'pendiente', ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+          VALUES (?, ?, ?, ?, 'pendiente', ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
         `, [
           uuid(), ordenId, it.productoId, it.cantidadSugerida, it.stockActual,
           it.stockMinimo, it.cantidadDeseada, it.ventas30d,
-          it.ventasProm6m, it.diasSinStock30d, it.cantidadSugerida, it.unidadPedida,
+          it.ventasProm6m, it.diasSinStock30d, it.vencidos30d, it.cantidadSugerida, it.unidadPedida,
         ]);
       }
 
@@ -339,15 +357,16 @@ const Ordenes = (() => {
       INSERT INTO orden_compra_items
         (id, orden_id, producto_id, cantidad_pedida, estado,
          stock_actual, stock_minimo, cantidad_deseada,
-         ventas_30d, ventas_prom_6m, dias_sin_stock_30d,
+         ventas_30d, ventas_prom_6m, dias_sin_stock_30d, vencidos_30d,
          cantidad_sugerida, cantidad_final, unidad_pedida)
-      VALUES (?, ?, ?, ?, 'pendiente', ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+      VALUES (?, ?, ?, ?, 'pendiente', ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
     `, [
       uuid(), ordenId, productoId, prod.cant_pedido || 0,
       stockAct, prod.stock_minimo || 0, prod.cant_pedido || 0,
       ventasGrupoUltimos(productoId, 30),
       Math.round((ventasGrupoUltimos(productoId, 180) / 6) * 100) / 100,
       crearCalculadorSinStock(sucursalId, 30)(idsDelGrupo(productoId)),
+      vencidosUltimos(idsDelGrupo(productoId), sucursalId, 30),
       prod.cant_pedido || 0,
       prod.pedido_unidad || 'unidad',
     ]);
@@ -374,9 +393,9 @@ const Ordenes = (() => {
       INSERT INTO orden_compra_items
         (id, orden_id, producto_id, cantidad_pedida, estado,
          stock_actual, stock_minimo, cantidad_deseada,
-         ventas_30d, ventas_prom_6m, dias_sin_stock_30d,
+         ventas_30d, ventas_prom_6m, dias_sin_stock_30d, vencidos_30d,
          cantidad_sugerida, cantidad_final, unidad_pedida, descripcion_libre)
-      VALUES (?, ?, NULL, ?, 'pendiente', NULL, NULL, NULL, NULL, NULL, NULL, ?, NULL, ?, ?)
+      VALUES (?, ?, NULL, ?, 'pendiente', NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, NULL, ?, ?)
     `, [uuid(), ordenId, 1, 1, 'unidad', desc]);
 
     db().run(
@@ -685,6 +704,7 @@ const Ordenes = (() => {
         <th>Vtas 30d</th>
         <th>Prom. 6m</th>
         <th title="Días de los últimos 30 que terminaron sin stock, contados al generar la orden">Sin stock 30d</th>
+        <th title="Unidades dadas de baja por vencimiento en los últimos 30 días, contadas al generar la orden">Vencidos 30d</th>
         <th style="text-align:left;min-width:140px">Notas</th>
         <th></th>
       </tr>`;
@@ -704,7 +724,7 @@ const Ordenes = (() => {
     }
 
     if (!orden.items.length) {
-      tbody.innerHTML = `<tr><td colspan="${editable ? 10 : 5}" style="text-align:center;padding:24px;color:#8090a0">Sin productos en esta orden.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="${editable ? 11 : 5}" style="text-align:center;padding:24px;color:#8090a0">Sin productos en esta orden.</td></tr>`;
       return;
     }
 
@@ -714,6 +734,7 @@ const Ordenes = (() => {
 
     tbody.innerHTML = orden.items.map(it => {
       const esLibre = !it.producto_id;
+      const vencidos = it.vencidos_30d;     // null: orden anterior a esta columna
       const dias = it.dias_sin_stock_30d;   // null: orden anterior a esta cuenta, o sin historial
       const diasCls = esLibre || dias == null ? '' : (dias === 0 ? 'ord-dias-ok' : dias <= 5 ? 'ord-dias-warn' : 'ord-dias-crit');
       const cantFinal = it.cantidad_final != null ? it.cantidad_final : it.cantidad_sugerida;
@@ -755,6 +776,7 @@ const Ordenes = (() => {
           <td>${valorGrupo('ventas30', it.ventas_30d)}</td>
           <td>${valorGrupo('ventas6m', it.ventas_prom_6m)}</td>
           <td class="${diasCls}">${esLibre || dias == null ? '—' : valorGrupo('sinstock', dias)}</td>
+          <td class="${vencidos > 0 ? 'ord-dias-crit' : ''}">${esLibre || vencidos == null ? '—' : valorGrupo('vencidos', vencidos)}</td>
           <td><input class="ord-cell-input ord-cell-input-text" type="text"
             value="${esc(it.notas || '')}" placeholder="—"></td>
           <td class="ord-acciones-cell" style="white-space:nowrap;text-align:right">
@@ -833,7 +855,7 @@ const Ordenes = (() => {
   }
 
   /**
-   * Detalle de un valor compuesto (stock, ventas 30d, promedio 6m o días sin stock) de un
+   * Detalle de un valor compuesto (stock, ventas 30d, promedio 6m, días sin stock o vencidos) de un
    * grupo de sustitutos: la fila de la orden solo muestra el total del grupo
    * (ver stockEfectivo/generarOrdenCompra) — este overlay abre el desglose
    * por miembro para que se entienda de dónde sale ese número. Solo lectura:
@@ -852,11 +874,13 @@ const Ordenes = (() => {
       ventas30: 'Ventas de los últimos 30 días del grupo',
       ventas6m: 'Promedio mensual (6 meses) del grupo',
       sinstock: 'Días sin stock en los últimos 30 días',
+      vencidos: 'Unidades vencidas en los últimos 30 días',
     };
 
     const diasSinStock = tipo === 'sinstock' ? crearCalculadorSinStock(sucId, 30) : null;
     const valorDe = (id) => {
       if (diasSinStock) return diasSinStock([id]);
+      if (tipo === 'vencidos') return vencidosUltimos([id], sucId, 30);
       if (tipo === 'ventas30') return ventasUltimos(id, 30);
       if (tipo === 'ventas6m') return Math.round((ventasUltimos(id, 180) / 6) * 100) / 100;
       return db().query(
