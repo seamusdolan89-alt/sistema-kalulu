@@ -39,7 +39,7 @@ const SGA_PagosProveedores = (() => {
   // haria aparecer deuda falsa por cada gasto historico ya saldado.
   function _getGastosCtaCte(proveedorId) {
     return db().query(
-      `SELECT id, fecha, comprobante, descripcion, monto
+      `SELECT id, fecha, comprobante, descripcion, monto, tipo, condicion_nd
        FROM gastos
        WHERE proveedor_id = ? AND metodo_pago = 'cuenta_corriente'
        ORDER BY fecha ASC, rowid ASC`,
@@ -109,7 +109,8 @@ const SGA_PagosProveedores = (() => {
           id:             g.id,
           tipo:           'gasto',
           fecha:          g.fecha,
-          numero_factura: g.comprobante || null,
+          numero_factura: g.tipo === 'nota_debito' ? _refND(g) : (g.comprobante || null),
+          es_nd:          g.tipo === 'nota_debito',
           factura_pv:     null,
           descripcion:    g.descripcion || null,
           total:          parseFloat(g.monto) || 0,
@@ -143,6 +144,49 @@ const SGA_PagosProveedores = (() => {
         return { ...p, credito_disponible: credito, metodos };
       })
       .filter(p => p.credito_disponible > 0.01);
+  }
+
+  // "ND A 0001-00012 · Interés o recargo"
+  function _refND(g) {
+    return 'ND' + (g.condicion_nd ? ' ' + g.condicion_nd : '')
+      + (g.comprobante ? ' ' + g.comprobante : '')
+      + (g.descripcion ? ' · ' + g.descripcion : '');
+  }
+
+  // Lineas de una nota (credito o debito) normalizadas: subtotal NETO de IVA.
+  function _lineasDeNota(items, conceptoPorDefecto) {
+    const num = v => parseFloat(v) || 0;
+    const lineas = [];
+    for (const it of items) {
+      if (it.tipo === 'concepto') {
+        const sub = num(it.subtotal);
+        if (sub <= 0 && !(it.concepto || '').trim()) continue;
+        lineas.push({ tipo: 'concepto', producto_id: null, concepto: (it.concepto || '').trim() || conceptoPorDefecto,
+                      cantidad: 0, costo_unitario: 0, subtotal: sub, iva: it.iva || null, mueve_stock: 0 });
+      } else {
+        const cant = num(it.cantidad), costo = num(it.costo_unitario);
+        if (!it.producto_id || cant <= 0) continue;
+        lineas.push({ tipo: 'producto', producto_id: it.producto_id, concepto: null,
+                      cantidad: cant, costo_unitario: costo, subtotal: cant * costo, iva: it.iva || null,
+                      mueve_stock: it.mueve_stock === false || it.mueve_stock === 0 ? 0 : 1 });
+      }
+    }
+    return lineas;
+  }
+
+  // Desglose fiscal y total de una nota. El total escrito a mano manda sobre lo calculado.
+  function _fiscalDeNota(lineas, letra, fiscal, totalEscrito) {
+    const num = v => parseFloat(v) || 0;
+    const letraA = letra === 'A';
+    const neto = lineas.reduce((s, l) => s + l.subtotal, 0);
+    const ivaCalc = r => letraA ? lineas.filter(l => l.iva === r).reduce((s, l) => s + l.subtotal * (parseFloat(r) / 100), 0) : 0;
+    const subtotalNeto = fiscal.subtotal_neto != null ? num(fiscal.subtotal_neto) : neto;
+    const iva105 = fiscal.iva_105 != null ? num(fiscal.iva_105) : ivaCalc('10.5');
+    const iva21  = fiscal.iva_21  != null ? num(fiscal.iva_21)  : ivaCalc('21');
+    const impInt = num(fiscal.imp_interno), percIva = num(fiscal.percepcion_iva), percIibb = num(fiscal.percepcion_iibb);
+    const totalCalc = letraA ? subtotalNeto + iva105 + iva21 + impInt + percIva + percIibb : neto;
+    const total = num(totalEscrito) > 0 ? num(totalEscrito) : totalCalc;
+    return { subtotalNeto, iva105, iva21, impInt, percIva, percIibb, total };
   }
 
   // "NC A 0001-00012 (provisoria)" — lo que se ve en el ledger y en los avisos.
@@ -181,7 +225,8 @@ const SGA_PagosProveedores = (() => {
         tipo:           'gasto',
         id:             g.id,
         fecha:          g.fecha,
-        referencia:     g.comprobante || g.descripcion || 'Gasto',
+        referencia:     g.tipo === 'nota_debito' ? _refND(g) : (g.comprobante || g.descripcion || 'Gasto'),
+        es_nd:          g.tipo === 'nota_debito',
         debe:           monto,
         haber:          0,
         condicion_pago: 'pendiente',
@@ -396,34 +441,9 @@ const SGA_PagosProveedores = (() => {
 
     const user = window.SGA_Auth?.getCurrentUser?.() || {};
     const sucursalId = opts.sucursal_id || user.sucursal_id || null;
-    const letraA = condicion_nc === 'A';
-    const num = v => parseFloat(v) || 0;
-
-    // Lineas normalizadas: subtotal NETO de IVA
-    const lineas = [];
-    for (const it of items) {
-      if (it.tipo === 'concepto') {
-        const sub = num(it.subtotal);
-        if (sub <= 0 && !(it.concepto || '').trim()) continue;
-        lineas.push({ tipo: 'concepto', producto_id: null, concepto: (it.concepto || '').trim() || 'Descuento',
-                      cantidad: 0, costo_unitario: 0, subtotal: sub, iva: it.iva || null, mueve_stock: 0 });
-      } else {
-        const cant = num(it.cantidad), costo = num(it.costo_unitario);
-        if (!it.producto_id || cant <= 0) continue;
-        lineas.push({ tipo: 'producto', producto_id: it.producto_id, concepto: null,
-                      cantidad: cant, costo_unitario: costo, subtotal: cant * costo, iva: it.iva || null,
-                      mueve_stock: it.mueve_stock === false || it.mueve_stock === 0 ? 0 : 1 });
-      }
-    }
-
-    const neto = lineas.reduce((s, l) => s + l.subtotal, 0);
-    const ivaCalc = r => letraA ? lineas.filter(l => l.iva === r).reduce((s, l) => s + l.subtotal * (parseFloat(r) / 100), 0) : 0;
-    const subtotalNeto = fiscal.subtotal_neto != null ? num(fiscal.subtotal_neto) : neto;
-    const iva105 = fiscal.iva_105 != null ? num(fiscal.iva_105) : ivaCalc('10.5');
-    const iva21  = fiscal.iva_21  != null ? num(fiscal.iva_21)  : ivaCalc('21');
-    const impInt = num(fiscal.imp_interno), percIva = num(fiscal.percepcion_iva), percIibb = num(fiscal.percepcion_iibb);
-    const totalCalc = letraA ? subtotalNeto + iva105 + iva21 + impInt + percIva + percIibb : neto;
-    const total = num(opts.total) > 0 ? num(opts.total) : totalCalc;
+    const lineas = _lineasDeNota(items, 'Descuento');
+    const { subtotalNeto, iva105, iva21, impInt, percIva, percIibb, total } =
+      _fiscalDeNota(lineas, condicion_nc, fiscal, opts.total);
     if (total <= 0.01) return { success: false, error: 'La nota de crédito no tiene importe' };
 
     const pagoId = uid();
@@ -508,6 +528,154 @@ const SGA_PagosProveedores = (() => {
       console.error('SGA_PagosProveedores.crearNotaCredito:', e);
       return { success: false, error: e.message };
     }
+  }
+
+  // ── Nota de debito de proveedor ────────────────────────────────────────────
+  //
+  // Es un comprobante que SUMA deuda: se guarda como un gasto "queda a pagar" con
+  // tipo 'nota_debito' (asi el saldo, los comprobantes pendientes, los pagos, "Imputar…"
+  // y el ledger la entienden como a cualquier comprobante) mas sus lineas. Una linea de
+  // producto puede ingresar stock; no toca costos ni precios. No crea gastos_pagos ni
+  // egreso de caja: la plata se registra cuando se paga.
+
+  const MOTIVOS_ND = {
+    ajuste:     'Ajuste / diferencia de precio',
+    viaticos:   'Flete o envases',
+    interes:    'Interés o recargo',
+    mercaderia: 'Mercadería recibida',
+    otros:      'Otro gasto',
+  };
+
+  function crearNotaDebito(opts) {
+    if (!window.ADMIN_MODE) return { success: false, error: 'Las notas de débito se cargan solo desde Admin-POS' };
+    const {
+      proveedor_id, fecha, usuario_id = null, observaciones = null, motivo = 'ajuste',
+      numero_comprobante = null, condicion_nd = '', compra_origen_id = null,
+      items = [], fiscal = {},
+    } = opts;
+    if (!proveedor_id) return { success: false, error: 'proveedor_id requerido' };
+
+    const user = window.SGA_Auth?.getCurrentUser?.() || {};
+    const sucursalId = opts.sucursal_id || user.sucursal_id || null;
+    const lineas = _lineasDeNota(items, 'Concepto');
+    if (lineas.some(l => l.tipo === 'producto' && l.mueve_stock) && !sucursalId) {
+      return { success: false, error: 'No se sabe en qué sucursal ingresar el stock' };
+    }
+    const f = _fiscalDeNota(lineas, condicion_nd, fiscal, opts.total);
+    if (f.total <= 0.01) return { success: false, error: 'La nota de débito no tiene importe' };
+
+    const id = uid();
+    const ts = now();
+    const fechaND = fecha || ts.slice(0, 10);
+    const ivas = [f.iva105 > 0 ? '10.5' : null, f.iva21 > 0 ? '21' : null].filter(Boolean);
+    const letraA = condicion_nd === 'A';
+
+    try {
+      db().beginBatch();
+      db().run(
+        `INSERT INTO gastos
+           (id, sucursal_id, usuario_id, fecha, periodo, categoria, descripcion, monto, metodo_pago,
+            comprobante, proveedor_id, observaciones, tipo, condicion_nd, compra_origen_id,
+            subtotal_neto, iva_105, iva_21, iva_monto, iva_alicuota, imp_interno, percepcion_iva, iibb_monto,
+            sync_status, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'cuenta_corriente', ?, ?, ?, 'nota_debito', ?, ?,
+                 ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+        [id, sucursalId, usuario_id, fechaND, fechaND.slice(0, 7), motivo,
+         MOTIVOS_ND[motivo] || MOTIVOS_ND.otros, f.total, numero_comprobante || null, proveedor_id,
+         observaciones || null, condicion_nd || null, compra_origen_id || null,
+         letraA ? f.subtotalNeto : null, letraA ? f.iva105 : null, letraA ? f.iva21 : null,
+         letraA ? f.iva105 + f.iva21 : null, letraA && ivas.length === 1 ? ivas[0] : null,
+         letraA ? f.impInt : null, letraA ? f.percIva : null, letraA ? f.percIibb : null, ts]
+      );
+      for (const l of lineas) {
+        db().run(
+          `INSERT INTO gastos_items
+             (id, gasto_id, tipo, producto_id, concepto, cantidad, costo_unitario, subtotal, iva, mueve_stock)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [uid(), id, l.tipo, l.producto_id, l.concepto, l.cantidad, l.costo_unitario, l.subtotal, l.iva, l.mueve_stock]
+        );
+        if (l.tipo === 'producto' && l.mueve_stock) {
+          db().moverStock({
+            productoId: l.producto_id, sucursalId, delta: l.cantidad,
+            tipo: 'nd_ingreso', refTipo: 'gastos', refId: id,
+            motivo: `Ingreso por ND de proveedor${numero_comprobante ? ' ' + numero_comprobante : ''}`, fecha: ts,
+          });
+        }
+      }
+      // db().run() no propaga errores: se comprueba que quedo todo antes de darla por buena
+      const okG = db().query(`SELECT COUNT(*) AS n FROM gastos WHERE id = ?`, [id])[0]?.n || 0;
+      const okI = db().query(`SELECT COUNT(*) AS n FROM gastos_items WHERE gasto_id = ?`, [id])[0]?.n || 0;
+      if (!okG || okI !== lineas.length) {
+        db().rollbackBatch();
+        return { success: false, error: 'No se pudo guardar la nota de débito (revisá la consola)' };
+      }
+      db().commitBatch();
+      return { success: true, id, total: f.total, envio: enviarYa() };
+    } catch (e) {
+      db().rollbackBatch();
+      console.error('SGA_PagosProveedores.crearNotaDebito:', e);
+      return { success: false, error: e.message };
+    }
+  }
+
+  function getNotaDebito(id) {
+    const nd = db().query(
+      `SELECT g.*, pr.razon_social AS proveedor_nombre, u.nombre AS usuario_nombre,
+              c.factura_pv, c.numero_factura AS factura_numero
+       FROM gastos g
+       LEFT JOIN proveedores pr ON pr.id = g.proveedor_id
+       LEFT JOIN usuarios u ON u.id = g.usuario_id
+       LEFT JOIN compras c ON c.id = g.compra_origen_id
+       WHERE g.id = ? AND g.tipo = 'nota_debito'`, [id]
+    )[0];
+    if (!nd) return null;
+    nd.referencia = _refND(nd);
+    nd.items = db().query(
+      `SELECT i.*, p.nombre AS producto_nombre FROM gastos_items i
+       LEFT JOIN productos p ON p.id = i.producto_id WHERE i.gasto_id = ? ORDER BY i.rowid`, [id]
+    );
+    nd.imputaciones = _impsDeComprobante('gasto_id', id);
+    return nd;
+  }
+
+  // Anular = borrar la ND con sus lineas (con marca, para que viaje). Lo que se le habia
+  // imputado vuelve a quedar como credito disponible de ese pago, y el stock que ingreso sale.
+  function anularNotaDebito(id) {
+    if (!window.ADMIN_MODE) return { success: false, error: 'Anular una nota de débito solo se puede desde Admin-POS' };
+    const nd = getNotaDebito(id);
+    if (!nd) return { success: false, error: 'Nota de débito no encontrada' };
+    try {
+      db().beginBatch();
+      for (const it of nd.items) {
+        if (it.tipo !== 'producto' || !it.mueve_stock || !it.producto_id) continue;
+        db().moverStock({
+          productoId: it.producto_id, sucursalId: nd.sucursal_id, delta: -(parseFloat(it.cantidad) || 0),
+          tipo: 'nd_anulacion', refTipo: 'gastos', refId: id,
+          motivo: `Anulación de ND${nd.comprobante ? ' ' + nd.comprobante : ''}`,
+          fecha: now(), crearSiNoExiste: false,
+        });
+      }
+      for (const i of db().query(`SELECT id FROM imputaciones_pagos WHERE gasto_id = ?`, [id])) {
+        db().run(`DELETE FROM imputaciones_pagos WHERE id = ?`, [i.id]);
+        db().registrarEliminacion('imputaciones_pagos', i.id);
+      }
+      db().run(`DELETE FROM gastos_items WHERE gasto_id = ?`, [id]);
+      db().run(`DELETE FROM gastos WHERE id = ?`, [id]);
+      db().registrarEliminacion('gastos', id);
+      const quedan = db().query(`SELECT COUNT(*) AS n FROM gastos WHERE id = ?`, [id])[0]?.n || 0;
+      const quedanImp = db().query(`SELECT COUNT(*) AS n FROM imputaciones_pagos WHERE gasto_id = ?`, [id])[0]?.n || 0;
+      if (quedan || quedanImp) {
+        db().rollbackBatch();
+        return { success: false, error: 'No se pudo anular la nota de débito (revisá la consola)' };
+      }
+      db().commitBatch();
+    } catch (e) {
+      db().rollbackBatch();
+      console.error('SGA_PagosProveedores.anularNotaDebito:', e);
+      return { success: false, error: e.message };
+    }
+    enviarYa();
+    return { success: true, total: parseFloat(nd.monto) || 0 };
   }
 
   // ── NC provisoria por "Producto no entregado" ──────────────────────────────
@@ -804,7 +972,8 @@ const SGA_PagosProveedores = (() => {
         tipo:       'gasto',
         id:         g.id,
         fecha:      g.fecha,
-        referencia: g.comprobante || g.descripcion || 'Gasto',
+        referencia: g.tipo === 'nota_debito' ? _refND(g) : (g.comprobante || g.descripcion || 'Gasto'),
+        es_nd:      g.tipo === 'nota_debito',
         total:      monto,
         pagado,
         saldo_item: monto - pagado,
@@ -931,7 +1100,7 @@ const SGA_PagosProveedores = (() => {
 
     const imputaciones = db().query(
       `SELECT ip.id, ip.compra_id, ip.gasto_id, ip.monto_imputado, ip.fecha,
-              c.factura_pv, c.numero_factura, g.comprobante, g.descripcion
+              c.factura_pv, c.numero_factura, g.comprobante, g.descripcion, g.tipo AS gasto_tipo, g.condicion_nd
        FROM imputaciones_pagos ip
        LEFT JOIN compras c ON c.id = ip.compra_id
        LEFT JOIN gastos  g ON g.id = ip.gasto_id
@@ -941,7 +1110,7 @@ const SGA_PagosProveedores = (() => {
       tipo: i.gasto_id && !i.compra_id ? 'gasto' : 'compra',
       monto: parseFloat(i.monto_imputado) || 0,
       referencia: i.gasto_id && !i.compra_id
-        ? (i.comprobante || i.descripcion || 'Gasto')
+        ? (i.gasto_tipo === 'nota_debito' ? _refND(i) : (i.comprobante || i.descripcion || 'Gasto'))
         : ([i.factura_pv, i.numero_factura].filter(Boolean).join('-') || '(compra sin número)'),
     }));
 
@@ -1081,6 +1250,10 @@ const SGA_PagosProveedores = (() => {
     calcularNoEntregado,
     acreditarNoEntregado,
     completarNotaCredito,
+    crearNotaDebito,
+    getNotaDebito,
+    anularNotaDebito,
+    MOTIVOS_ND,
     imputar,
     getResumenProveedores,
     getSesionActiva,
@@ -1269,6 +1442,7 @@ const CuentaCorrienteProveedores = (() => {
                   <button class="ccprov-btn-icon btn-ver-detalle" data-id="${esc(p.id)}" data-nombre="${esc(p.razon_social)}" title="Ver cuenta corriente">📋</button>
                   <button class="ccprov-btn-icon btn-pagar" data-id="${esc(p.id)}" data-nombre="${esc(p.razon_social)}" title="Registrar pago">💳</button>
                   ${NotaCreditoWizard.puede() ? `<button class="ccprov-btn-icon btn-nc" data-id="${esc(p.id)}" data-nombre="${esc(p.razon_social)}" title="Registrar nota de crédito" aria-label="Registrar nota de crédito">🧾</button>` : ''}
+                  ${NotaCreditoWizard.puedeND() ? `<button class="ccprov-btn-icon btn-nd" data-id="${esc(p.id)}" title="Registrar nota de débito" aria-label="Registrar nota de débito">📈</button>` : ''}
                   <button class="ccprov-btn-icon btn-remitos-prov${remitosN > 0 ? ' btn-remitos-active' : ''}" data-id="${esc(p.id)}" data-nombre="${esc(p.razon_social)}" title="Remitos pendientes de factura" style="${remitosN === 0 ? 'opacity:0.4' : ''}">
                     📄${remitosN > 0 ? `<span class="ccprov-remito-badge">${remitosN}</span>` : ''}
                   </button>
@@ -1300,6 +1474,9 @@ const CuentaCorrienteProveedores = (() => {
     wrap.querySelectorAll('.btn-nc').forEach(btn => {
       btn.addEventListener('click', () => openModalNC(btn.dataset.id));
     });
+    wrap.querySelectorAll('.btn-nd').forEach(btn => {
+      btn.addEventListener('click', () => openModalND(btn.dataset.id));
+    });
     wrap.querySelectorAll('.btn-remitos-prov').forEach(btn => {
       btn.addEventListener('click', () => openRemitosProvModal(btn.dataset.id, btn.dataset.nombre));
     });
@@ -1324,6 +1501,7 @@ const CuentaCorrienteProveedores = (() => {
         </div>
         <div class="ccprov-header-right">
           ${NotaCreditoWizard.puede() ? `<button class="ccprov-btn-secondary" id="btn-nueva-nc-general">+ Registrar NC</button>` : ''}
+          ${NotaCreditoWizard.puedeND() ? `<button class="ccprov-btn-secondary" id="btn-nueva-nd-general">+ Registrar ND</button>` : ''}
           <button class="ccprov-btn-primary" id="btn-nuevo-pago-general">+ Registrar Pago</button>
         </div>
       </div>
@@ -1358,6 +1536,7 @@ const CuentaCorrienteProveedores = (() => {
 
     ge('btn-nuevo-pago-general').addEventListener('click', () => openModalPago(null, null));
     ge('btn-nueva-nc-general')?.addEventListener('click', () => openModalNC(null));
+    ge('btn-nueva-nd-general')?.addEventListener('click', () => openModalND(null));
 
     // Auto-focus search
     ge('ccprov-search').focus();
@@ -1378,6 +1557,10 @@ const CuentaCorrienteProveedores = (() => {
     ? `<button class="ledger-btn-completar" data-completar-nc="${esc(pagoId)}" title="Cargar el N° y el importe de la NC real del proveedor">Completar NC</button>`
     : '';
 
+  // Ver: en cualquier superficie. Anular: igual que un pago (admin, en Admin-POS).
+  const btnsND = (id) => ` <button class="ledger-btn-ver" data-ver-nd="${esc(id)}" title="Ver el detalle de esta nota de débito">Ver</button>`
+    + (puedeAnularPagos() ? `<button class="ledger-btn-anular" data-anular-nd="${esc(id)}" title="Anular esta nota de débito">Anular</button>` : '');
+
   function buildTablaPlana(ledger, saldo) {
     if (!ledger.length) return `
       <div class="ccprov-empty">
@@ -1396,12 +1579,13 @@ const CuentaCorrienteProveedores = (() => {
           ${ledger.map(e => `
             <tr class="ledger-row-${e.tipo}">
               <td>${fmtFecha(e.fecha)}</td>
-              <td><span class="ledger-type-badge ledger-type-${e.tipo}">${e.tipo === 'compra' ? 'Compra' : e.tipo === 'nc' ? 'NC' : 'Pago'}</span></td>
+              <td><span class="ledger-type-badge ledger-type-${e.es_nd ? 'nd' : e.tipo}">${e.es_nd ? 'ND' : e.tipo === 'compra' ? 'Compra' : e.tipo === 'gasto' ? 'Gasto' : e.tipo === 'nc' ? 'NC' : 'Pago'}</span></td>
               <td>
                 ${esc(e.referencia)}
                 ${e.tipo === 'compra' && e.saldo_item > 0.01 ? `<span class="ledger-saldo-parcial"> · Saldo: ${fmt$(e.saldo_item)}</span>` : ''}
                 ${e.tipo === 'compra' ? `<button class="ledger-btn-ver" data-ver-compra="${esc(e.id)}" title="Ver el detalle de esta compra">Ver</button>` : ''}
                 ${e.tipo === 'nc' ? btnCompletar(e.id, e.provisoria) : ''}
+                ${e.es_nd ? btnsND(e.id) : ''}
                 ${e.tipo === 'pago' || e.tipo === 'nc' ? btnAnular(e.id) : ''}
               </td>
               <td class="right">${e.debe > 0 ? `<span class="ledger-debe">${fmt$(e.debe)}</span>` : '—'}</td>
@@ -1451,8 +1635,8 @@ const CuentaCorrienteProveedores = (() => {
           ${compras.map(c => `
             <tr class="ledger-row-compra${c.saldo_item < 0.01 ? ' ledger-row-compra-saldada' : ''}">
               <td>${fmtFecha(c.fecha)}</td>
-              <td><span class="ledger-type-badge ${c.tipo === 'gasto' ? 'ledger-type-gasto' : 'ledger-type-compra'}">${c.tipo === 'gasto' ? 'Gasto' : 'Compra'}</span></td>
-              <td>${esc(c.referencia)} ${c.tipo === 'compra' ? `<button class="ledger-btn-ver" data-ver-compra="${esc(c.id)}" title="Ver el detalle de esta compra">Ver</button>` : ''}</td>
+              <td><span class="ledger-type-badge ${c.es_nd ? 'ledger-type-nd' : c.tipo === 'gasto' ? 'ledger-type-gasto' : 'ledger-type-compra'}">${c.es_nd ? 'ND' : c.tipo === 'gasto' ? 'Gasto' : 'Compra'}</span></td>
+              <td>${esc(c.referencia)} ${c.tipo === 'compra' ? `<button class="ledger-btn-ver" data-ver-compra="${esc(c.id)}" title="Ver el detalle de esta compra">Ver</button>` : ''}${c.es_nd ? btnsND(c.id) : ''}</td>
               <td class="right"><span class="ledger-debe">${fmt$(c.total)}</span></td>
               <td class="right">—</td>
               <td class="right">
@@ -1610,7 +1794,7 @@ const CuentaCorrienteProveedores = (() => {
           <div class="ledger-imputar-box">
             ${filas.map(c => `
               <div class="ledger-imputar-row">
-                <span class="ledger-type-badge ${c.tipo === 'gasto' ? 'ledger-type-gasto' : 'ledger-type-compra'}">${c.tipo === 'gasto' ? 'Gasto' : 'Compra'}</span>
+                <span class="ledger-type-badge ${c.es_nd ? 'ledger-type-nd' : c.tipo === 'gasto' ? 'ledger-type-gasto' : 'ledger-type-compra'}">${c.es_nd ? 'ND' : c.tipo === 'gasto' ? 'Gasto' : 'Compra'}</span>
                 <span class="lir-ref">${esc(c.ref)}</span>
                 <span style="color:var(--color-text-secondary)">saldo ${fmt$(c.saldo)}</span>
                 <input type="number" class="imp-row-input" data-id="${esc(c.id)}" data-money="true"
@@ -1693,7 +1877,7 @@ const CuentaCorrienteProveedores = (() => {
     const impHtml = r.imputaciones.length
       ? `<p style="margin:12px 0 4px">Esto está aplicado a:</p>
          <ul style="margin:0 0 8px 18px;padding:0">
-           ${r.imputaciones.map(i => `<li>${i.tipo === 'gasto' ? 'Gasto' : 'Factura'} <strong>${esc(i.referencia)}</strong> — ${fmt$(i.monto)}</li>`).join('')}
+           ${r.imputaciones.map(i => `<li>${i.tipo !== 'gasto' ? 'Factura' : i.referencia.startsWith('ND') ? 'Nota de débito' : 'Gasto'} <strong>${esc(i.referencia)}</strong> — ${fmt$(i.monto)}</li>`).join('')}
          </ul>
          <p style="margin:0">Al anularlo, esos comprobantes <strong>vuelven a quedar pendientes</strong>.</p>`
       : `<p style="margin:12px 0 0">Esto no está aplicado a ningún comprobante: se pierden ${fmt$(r.total)} de crédito a favor.</p>`;
@@ -1896,6 +2080,112 @@ const CuentaCorrienteProveedores = (() => {
     });
   }
 
+  // ── Nota de debito: detalle y anulacion ────────────────────────────────────
+
+  function openModalDetalleND(id, proveedorId, proveedorNombre) {
+    PagoWizard.ensureCss();
+    const overlay = ge('ccprov-overlay');
+    if (!overlay) return;
+    const nd = data().getNotaDebito(id);
+    if (!nd) { alert('No se encontró esa nota de débito.'); return; }
+    const fact = [nd.factura_pv, nd.factura_numero].filter(Boolean).join('-');
+    const fiscales = [['Neto', nd.subtotal_neto], ['IVA 10,5%', nd.iva_105], ['IVA 21%', nd.iva_21],
+      ['Imp. interno', nd.imp_interno], ['Percepción IVA', nd.percepcion_iva], ['Percepción IIBB', nd.iibb_monto]]
+      .filter(([, v]) => parseFloat(v) > 0).map(([l, v]) => `${l}: ${fmt$(v)}`).join(' · ');
+    overlay.innerHTML = `
+      <div class="ccprov-modal" id="nd-detalle" style="max-width:600px">
+        <div class="ccprov-modal-hdr">
+          <span>\u{1F9FE} ${esc(nd.referencia)} \u2014 ${esc(proveedorNombre)}</span>
+          <button class="ccprov-modal-close" id="btn-detnd-close" aria-label="Cerrar" title="Cerrar">\u2715</button>
+        </div>
+        <div class="ccprov-modal-body" style="font-size:13px">
+          <div style="display:flex;gap:14px;flex-wrap:wrap;color:var(--color-text-secondary)">
+            <span>${fmtFecha(nd.fecha)}</span>
+            <span>${esc(nd.descripcion || '')}</span>
+            ${fact ? `<span>Factura asociada: ${esc(fact)}</span>` : ''}
+            <span>Cargada por: ${esc(nd.usuario_nombre || '—')}</span>
+          </div>
+          <table class="ccprov-table">
+            <thead><tr><th>Detalle</th><th class="right">Cant.</th><th class="right">Subtotal neto</th></tr></thead>
+            <tbody>
+              ${nd.items.length ? nd.items.map(it => `
+                <tr>
+                  <td>${it.tipo === 'producto'
+                    ? `${esc(it.producto_nombre || '(producto eliminado)')}${it.mueve_stock ? ' <small>(ingresó stock)</small>' : ''}`
+                    : esc(it.concepto || '')}</td>
+                  <td class="right">${it.tipo === 'producto' ? it.cantidad : '—'}</td>
+                  <td class="right">${fmt$(it.subtotal)}</td>
+                </tr>`).join('') : '<tr><td colspan="3" style="text-align:center">Sin líneas (solo importe)</td></tr>'}
+            </tbody>
+            <tfoot><tr><td colspan="2">Total</td><td class="right">${fmt$(nd.monto)}</td></tr></tfoot>
+          </table>
+          ${fiscales ? `<div style="color:var(--color-text-secondary)">${fiscales}</div>` : ''}
+          ${nd.observaciones ? `<div>Observaciones: ${esc(nd.observaciones)}</div>` : ''}
+        </div>
+        <div class="ccprov-modal-ftr"><button class="btn btn-primary" id="btn-detnd-ok">Cerrar</button></div>
+      </div>`;
+    overlay.classList.remove('hidden');
+    const close = () => { overlay.classList.add('hidden'); overlay.innerHTML = ''; };
+    ge('btn-detnd-close').addEventListener('click', close);
+    ge('btn-detnd-ok').addEventListener('click', close);
+  }
+
+  function openModalAnularND(id, proveedorId, proveedorNombre) {
+    PagoWizard.ensureCss();
+    const overlay = ge('ccprov-overlay');
+    if (!overlay) return;
+    const nd = data().getNotaDebito(id);
+    if (!nd) { alert('No se encontró esa nota de débito.'); return; }
+    const stock = nd.items.filter(i => i.tipo === 'producto' && i.mueve_stock);
+    overlay.innerHTML = `
+      <div class="ccprov-modal" style="max-width:560px">
+        <div class="ccprov-modal-hdr">
+          <span>\u{1F5D1} Anular nota de débito \u2014 ${esc(proveedorNombre)}</span>
+          <button class="ccprov-modal-close" id="btn-andnd-close" aria-label="Cerrar" title="Cerrar">\u2715</button>
+        </div>
+        <div class="ccprov-modal-body" style="font-size:13px">
+          <p style="margin:0">${esc(nd.referencia)} del <strong>${fmtFecha(nd.fecha)}</strong> por <strong>${fmt$(nd.monto)}</strong></p>
+          ${nd.imputaciones.length
+            ? `<p style="margin:0">Tiene pagos aplicados (${nd.imputaciones.map(i => `${esc(i.desc)} ${fmt$(i.monto)}`).join(', ')}):
+               esa plata <strong>vuelve a quedar como crédito disponible</strong>.</p>` : ''}
+          ${stock.length
+            ? `<p style="margin:0">Se descuenta el stock que ingresó: ${stock.map(s => `${esc(s.producto_nombre || 'Producto')} (−${s.cantidad})`).join(', ')}.</p>` : ''}
+          <div id="andnd-error" style="display:none;color:#c62828"></div>
+        </div>
+        <div class="ccprov-modal-ftr">
+          <button class="btn btn-outline" id="btn-andnd-cancel">Cancelar</button>
+          <button class="btn btn-danger" id="btn-andnd-ok">Anular nota de débito</button>
+        </div>
+      </div>`;
+    overlay.classList.remove('hidden');
+    const close = () => { overlay.classList.add('hidden'); overlay.innerHTML = ''; };
+    ge('btn-andnd-close').addEventListener('click', close);
+    ge('btn-andnd-cancel').addEventListener('click', close);
+    ge('btn-andnd-ok').addEventListener('click', () => {
+      const res = data().anularNotaDebito(id);
+      if (!res.success) {
+        const err = ge('andnd-error');
+        err.textContent = res.error || 'No se pudo anular.';
+        err.style.display = 'block';
+        return;
+      }
+      close();
+      renderDetalle(proveedorId, proveedorNombre);
+      window.SGA_Utils?.showNotification?.('Nota de débito anulada', 'success');
+    });
+  }
+
+  function openModalND(proveedorId) {
+    NotaCreditoWizard.abrir({
+      esND: true,
+      proveedorId,
+      onSaved: () => {
+        if (state.view === 'detalle') renderDetalle(state.proveedorId, state.proveedorNombre);
+        else renderLista();
+      },
+    });
+  }
+
   function renderLedgerContent(proveedorId, saldo) {
     const wrap = ge('ccprov-ledger-wrap');
     if (!wrap) return;
@@ -1908,6 +2198,12 @@ const CuentaCorrienteProveedores = (() => {
     }
     wrap.querySelectorAll('[data-ver-compra]').forEach(btn => {
       btn.addEventListener('click', () => openModalDetalleCompra(btn.dataset.verCompra));
+    });
+    wrap.querySelectorAll('[data-ver-nd]').forEach(btn => {
+      btn.addEventListener('click', () => openModalDetalleND(btn.dataset.verNd, proveedorId, state.proveedorNombre));
+    });
+    wrap.querySelectorAll('[data-anular-nd]').forEach(btn => {
+      btn.addEventListener('click', () => openModalAnularND(btn.dataset.anularNd, proveedorId, state.proveedorNombre));
     });
     wrap.querySelectorAll('[data-imputar-pago]').forEach(btn => {
       btn.addEventListener('click', () => openModalImputar(
@@ -1968,6 +2264,7 @@ const CuentaCorrienteProveedores = (() => {
         </div>
         <div class="ccprov-header-right">
           ${NotaCreditoWizard.puede() ? `<button class="ccprov-btn-secondary" id="btn-registrar-nc">+ Registrar NC</button>` : ''}
+          ${NotaCreditoWizard.puedeND() ? `<button class="ccprov-btn-secondary" id="btn-registrar-nd">+ Registrar ND</button>` : ''}
           <button class="ccprov-btn-primary" id="btn-registrar-pago">+ Registrar Pago</button>
         </div>
       </div>
@@ -2026,6 +2323,7 @@ const CuentaCorrienteProveedores = (() => {
     });
     ge('btn-registrar-pago').addEventListener('click', () => openModalPago(proveedorId, proveedorNombre));
     ge('btn-registrar-nc')?.addEventListener('click', () => openModalNC(proveedorId));
+    ge('btn-registrar-nd')?.addEventListener('click', () => openModalND(proveedorId));
     ge('btn-ledger-agrupado').addEventListener('click', () => {
       state.ledgerMode = 'agrupado';
       renderLedgerContent(proveedorId, saldo);

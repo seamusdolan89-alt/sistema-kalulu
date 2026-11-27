@@ -1732,6 +1732,38 @@
       `);
     } catch(e) { console.warn('gastos:', e.message); }
 
+    // Nota de debito de proveedor: es un gasto "queda a pagar" (suma deuda y se paga como una
+    // factura) marcado con tipo 'nota_debito', con su desglose fiscal y sus lineas.
+    // subtotal_neto, iva_monto e iibb_monto (percepcion IIBB) ya existian.
+    for (const sql of [
+      "ALTER TABLE gastos ADD COLUMN tipo TEXT",
+      "ALTER TABLE gastos ADD COLUMN condicion_nd TEXT",
+      "ALTER TABLE gastos ADD COLUMN compra_origen_id TEXT",
+      "ALTER TABLE gastos ADD COLUMN iva_105 REAL",
+      "ALTER TABLE gastos ADD COLUMN iva_21 REAL",
+      "ALTER TABLE gastos ADD COLUMN imp_interno REAL",
+      "ALTER TABLE gastos ADD COLUMN percepcion_iva REAL",
+    ]) {
+      try { database.run(sql); } catch(e) { /* column already exists */ }
+    }
+    // Lineas de una ND: 'producto' (ingresa stock salvo mueve_stock=0) o 'concepto' (solo plata).
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS gastos_items (
+          id TEXT PRIMARY KEY,
+          gasto_id TEXT NOT NULL REFERENCES gastos(id),
+          tipo TEXT NOT NULL DEFAULT 'producto',
+          producto_id TEXT,
+          concepto TEXT,
+          cantidad REAL DEFAULT 0,
+          costo_unitario REAL DEFAULT 0,
+          subtotal REAL DEFAULT 0,
+          iva TEXT,
+          mueve_stock INTEGER DEFAULT 1
+        )
+      `);
+    } catch(e) { console.warn('gastos_items:', e.message); }
+
     // (18/9/2026) La tabla caja_admin ("Caja Seamus", fondo personal del admin) se
     // dejo de crear: la funcion no se usaba y sus retiros/pagos ya no se registran.
     // En bases existentes la tabla y su historial siguen ahi, sin tocar (no se hace
@@ -1919,7 +1951,7 @@
     ventas:         [['venta_items', 'venta_id'], ['venta_pagos', 'venta_id']],
     clientes:       [],
     proveedores:    [],
-    gastos:         [],
+    gastos:         [['gastos_items', 'gasto_id']],
     cuenta_corriente: [],
     ingresos_caja:    [],
     // Anular un pago a proveedor (SGA_PagosProveedores.anularPago): se borra el

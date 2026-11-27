@@ -76,7 +76,7 @@
     { table: 'sesiones_caja',     collection: 'sesiones_caja',     pk: 'id',   denormalize: null },
     { table: 'egresos_caja',      collection: 'egresos_caja',      pk: 'id',   denormalize: null },
     { table: 'ingresos_caja',     collection: 'ingresos_caja',     pk: 'id',   denormalize: null },
-    { table: 'gastos',            collection: 'gastos',            pk: 'id',   denormalize: null },
+    { table: 'gastos',            collection: 'gastos',            pk: 'id',   denormalize: denormalizeGasto },
     { table: 'compras',           collection: 'compras',           pk: 'id',   denormalize: denormalizeCompra },
     // Los remitos viajan con sus items adentro, igual que compras y ordenes:
     // remito_items no tiene sync_status propio.
@@ -1062,6 +1062,8 @@
   }
 
   function applyGasto(data) {
+    // Una nota de debito anulada deja marca de borrado: un documento viejo no la resucita.
+    if (window.SGA_DB.fueEliminado('gastos', data.id)) return;
     if (tienePendienteLocal('gastos', 'id = ?', [data.id])) return;
     const now = new Date().toISOString();
     window.SGA_DB.run(`
@@ -1069,8 +1071,9 @@
         (id, sucursal_id, usuario_id, fecha, categoria, descripcion, monto,
          metodo_pago, proveedor_id, observaciones, periodo, subcategoria,
          comprobante, subtotal_neto, iva_alicuota, iva_monto, iibb_monto,
+         tipo, condicion_nd, compra_origen_id, iva_105, iva_21, imp_interno, percepcion_iva,
          sync_status, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'synced',?)`,
       [data.id, data.sucursal_id, data.usuario_id, data.fecha,
        data.categoria, data.descripcion, data.monto,
        data.metodo_pago || 'efectivo', data.proveedor_id || null,
@@ -1078,8 +1081,25 @@
        data.subcategoria || null,
        data.comprobante || null, data.subtotal_neto ?? null,
        data.iva_alicuota || null, data.iva_monto ?? null, data.iibb_monto ?? null,
+       data.tipo || null, data.condicion_nd || null, data.compra_origen_id || null,
+       data.iva_105 ?? null, data.iva_21 ?? null, data.imp_interno ?? null, data.percepcion_iva ?? null,
        data.updated_at || now]
     );
+
+    // Lineas de una nota de debito: reemplazo completo del conjunto.
+    if (Array.isArray(data._items)) {
+      window.SGA_DB.run(`DELETE FROM gastos_items WHERE gasto_id = ?`, [data.id]);
+      for (const it of data._items) {
+        window.SGA_DB.run(`
+          INSERT INTO gastos_items
+            (id, gasto_id, tipo, producto_id, concepto, cantidad, costo_unitario, subtotal, iva, mueve_stock)
+          VALUES (?,?,?,?,?,?,?,?,?,?)`,
+          [it.id, data.id, it.tipo || 'producto', it.producto_id || null, it.concepto || null,
+           it.cantidad || 0, it.costo_unitario || 0, it.subtotal || 0, it.iva || null,
+           it.mueve_stock == null ? 1 : Number(it.mueve_stock)]
+        );
+      }
+    }
   }
 
   // Venta pausada en una caja (pos.js pausarVenta): se ve y se retoma desde otra
@@ -1349,6 +1369,13 @@
       : null;
     return { ...pago, _metodos: metodos, _imputaciones: imputaciones, _items: items,
              proveedor_nombre: proveedor?.razon_social || null };
+  }
+
+  function denormalizeGasto(gasto) {
+    const items = window.SGA_DB.query(
+      `SELECT * FROM gastos_items WHERE gasto_id = ?`, [gasto.id]
+    ) || [];
+    return { ...gasto, _items: items };
   }
 
   function denormalizeCuentaCorriente(cc) {

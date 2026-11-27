@@ -59,6 +59,7 @@ HIJOS_EMBEBIDOS = {
     "pagos_proveedores": [("pagos_proveedores_metodos", "pago_id"), ("imputaciones_pagos", "pago_id"),
                           ("pagos_proveedores_items", "pago_id")],
     "promociones":       [("promocion_items", "promocion_id")],
+    "gastos":            [("gastos_items", "gasto_id")],
 }
 
 # Hijos que la app REALMENTE borra (DELETE FROM <hijo> en js/, verificado leyendo
@@ -73,6 +74,7 @@ HIJOS_CON_BORRADO_REAL = {
     ("ordenes_compra", "orden_compra_items"),                      # ordenes.js
     ("productos", "codigos_barras"), ("productos", "producto_sustitutos"),  # editor-producto.js
     ("promociones", "promocion_items"),                            # promociones.js
+    ("gastos", "gastos_items"),                # reemplazo al aplicar; se borran al anular una ND
 }
 
 # Tablas cuyo borrado el codigo realmente registra con registrarEliminacion().
@@ -80,7 +82,9 @@ BORRADO_CON_MARCA = ["productos", "promociones", "ordenes_compra", "cuenta_corri
                      "pedidos_abiertos", "compras_pausadas",
                      # Anular un pago a proveedor (SGA_PagosProveedores.anularPago): borra el pago con sus
                      # medios e imputaciones (via HIJOS_DE) y, si salio efectivo de una caja abierta, el egreso.
-                     "pagos_proveedores", "egresos_caja"]
+                     "pagos_proveedores", "egresos_caja",
+                     # Anular una nota de debito (anularNotaDebito): el gasto con sus lineas.
+                     "gastos"]
 
 # --- Excepciones ----------------------------------------------------------------
 # clave: (tabla, sentido). Valor: motivo.

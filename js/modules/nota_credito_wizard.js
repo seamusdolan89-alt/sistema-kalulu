@@ -19,6 +19,11 @@
  * Se abre desde Cuentas Corrientes ("+ Registrar NC") y desde el Historial de
  * compras (con la factura de referencia ya elegida).
  *
+ * Con `esND: true` es la NOTA DE DÉBITO (solo Admin-POS): suma deuda; las líneas de
+ * producto INGRESAN stock (salvo destildarlo) y los conceptos son gastos. La factura
+ * asociada es informativa y no hay "aplicar": se paga como cualquier comprobante
+ * (SGA_PagosProveedores.crearNotaDebito).
+ *
  * Expone window.SGA_NotaCreditoWizard.
  */
 
@@ -118,9 +123,17 @@ const SGA_NotaCreditoWizard = (() => {
     return !!window.SGA_Permisos?.can?.('can_cta_cte_proveedores');
   }
 
+  // La nota de debito es una carga administrativa: solo desde Admin-POS.
+  function puedeND() {
+    return !!window.ADMIN_MODE && puede();
+  }
+
   const IVA_OPTS = `<option value="">—</option><option value="10.5">10,5%</option><option value="21">21%</option>`;
 
-  async function abrir({ proveedorId = null, compraOrigenId = null, onSaved = null } = {}) {
+  async function abrir({ proveedorId = null, compraOrigenId = null, onSaved = null, esND = false } = {}) {
+    const nombreNota = esND ? 'nota de débito' : 'nota de crédito';
+    const sigla = esND ? 'ND' : 'NC';
+    const colStock = esND ? 'Sube stock' : 'Baja stock';
     ensureCss();
     // La capa de datos vive en cuenta_corriente_proveedores.js (window.SGA_PagosProveedores).
     if (!window.SGA_PagosProveedores) await import('./cuenta_corriente_proveedores.js');
@@ -154,7 +167,7 @@ const SGA_NotaCreditoWizard = (() => {
     overlay.innerHTML = `
       <div class="ccprov-modal" id="ncw-modal">
         <div class="ccprov-modal-hdr">
-          <span>🧾 Registrar Nota de Crédito de Proveedor</span>
+          <span>${esND ? '📈 Registrar Nota de Débito de Proveedor' : '🧾 Registrar Nota de Crédito de Proveedor'}</span>
           <button class="ccprov-modal-close" id="ncw-close" aria-label="Cerrar" title="Cerrar">✕</button>
         </div>
         <div class="ccprov-modal-body">
@@ -175,12 +188,12 @@ const SGA_NotaCreditoWizard = (() => {
 
           <div class="ccprov-field-row">
             <div class="ccprov-field">
-              <label for="ncw-letra">Tipo de NC</label>
+              <label for="ncw-letra">Tipo de ${sigla}</label>
               <select class="ccprov-input" id="ncw-letra">
                 <option value="">— (sin discriminar IVA)</option>
-                <option value="A">NC A (discrimina IVA)</option>
-                <option value="B">NC B</option>
-                <option value="C">NC C</option>
+                <option value="A">${sigla} A (discrimina IVA)</option>
+                <option value="B">${sigla} B</option>
+                <option value="C">${sigla} C</option>
               </select>
             </div>
             <div class="ccprov-field" style="flex:1.5">
@@ -188,13 +201,20 @@ const SGA_NotaCreditoWizard = (() => {
               <input type="text" class="ccprov-input" id="ncw-numero" placeholder="0001-00000123" autocomplete="off">
             </div>
             <div class="ccprov-field" style="flex:2">
-              <label for="ncw-ref">Factura de referencia</label>
+              <label for="ncw-ref">${esND ? 'Factura asociada (opcional)' : 'Factura de referencia'}</label>
               <select class="ccprov-input" id="ncw-ref"></select>
             </div>
           </div>
+          ${esND ? `
+          <div class="ccprov-field">
+            <label for="ncw-motivo">Motivo</label>
+            <select class="ccprov-input" id="ncw-motivo">
+              ${Object.entries(data().MOTIVOS_ND).map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}
+            </select>
+          </div>` : ''}
 
           <div id="ncw-cuerpo">
-            <div class="ccprov-section-title">Productos devueltos (bajan el stock)</div>
+            <div class="ccprov-section-title">${esND ? 'Productos que ingresan (suben el stock) — solo si llegó mercadería' : 'Productos devueltos (bajan el stock)'}</div>
             <div class="ncw-buscador" id="ncw-buscador-wrap">
               <input type="text" class="ccprov-input" id="ncw-buscar" placeholder="Buscar producto por nombre o código…" autocomplete="off">
               <div class="ncw-dd" id="ncw-dd"></div>
@@ -202,7 +222,7 @@ const SGA_NotaCreditoWizard = (() => {
             <div id="ncw-prod-wrap" style="margin-top:8px"></div>
 
             <div class="ccprov-section-title" style="margin-top:14px;display:flex;justify-content:space-between;align-items:center">
-              <span>Descuentos / conceptos (solo plata)</span>
+              <span>${esND ? 'Gastos / ajustes (solo plata)' : 'Descuentos / conceptos (solo plata)'}</span>
               <button type="button" class="ccprov-btn-secondary" id="ncw-add-conc" style="padding:4px 10px;font-size:12px">+ Agregar concepto</button>
             </div>
             <div id="ncw-conc-wrap"></div>
@@ -224,12 +244,12 @@ const SGA_NotaCreditoWizard = (() => {
           </div>
 
           <div class="ncw-total-box">
-            <label for="ncw-total">Total de la NC</label>
+            <label for="ncw-total">Total de la ${sigla}</label>
             <input type="number" class="ccprov-input" id="ncw-total" min="0" step="any" data-money="true">
           </div>
           <div id="ncw-total-hint" style="text-align:right;font-size:12px;color:var(--color-text-secondary);margin-top:-12px"></div>
 
-          <div>
+          <div ${esND ? 'style="display:none"' : ''}>
             <div class="ccprov-section-title">¿Aplicarla a una factura?</div>
             <div class="ncw-radio" id="ncw-aplicar">
               <label><input type="radio" name="ncw-aplicar" value="libre"> Dejarla como crédito libre (se aplica después con "Imputar…")</label>
@@ -247,7 +267,7 @@ const SGA_NotaCreditoWizard = (() => {
         </div>
         <div class="ccprov-modal-ftr">
           <button class="ccprov-btn-secondary" id="ncw-cancel">Cancelar</button>
-          <button class="ccprov-btn-primary" id="ncw-guardar">Guardar nota de crédito</button>
+          <button class="ccprov-btn-primary" id="ncw-guardar">Guardar ${nombreNota}</button>
         </div>
       </div>`;
     overlay.classList.remove('hidden');
@@ -259,7 +279,7 @@ const SGA_NotaCreditoWizard = (() => {
     modal.addEventListener('input', e => { if (e.target.id !== 'ncw-proveedor') tocado = true; });
     const cancelar = () => {
       const hayLineas = !!modal.querySelector('#ncw-prod-wrap input, #ncw-conc-wrap input');
-      if ((tocado || hayLineas) && !confirm('La nota de crédito NO está guardada.\n\n¿Descartarla?')) return;
+      if ((tocado || hayLineas) && !confirm(`La ${nombreNota} NO está guardada.\n\n¿Descartarla?`)) return;
       close();
     };
     const onKey = e => { if (e.key === 'Escape' && !overlay.classList.contains('hidden')) { e.preventDefault(); e.stopPropagation(); cancelar(); } };
@@ -277,7 +297,7 @@ const SGA_NotaCreditoWizard = (() => {
         `SELECT id, fecha, numero_factura, factura_pv, total FROM compras
          WHERE proveedor_id = ? AND COALESCE(estado,'confirmada') != 'anulada'
          ORDER BY fecha DESC LIMIT 80`, [provId]);
-      sel.innerHTML = '<option value="">— Sin referencia (crédito libre) —</option>' + compras.map(c => {
+      sel.innerHTML = `<option value="">${esND ? '— Sin factura asociada —' : '— Sin referencia (crédito libre) —'}</option>` + compras.map(c => {
         const ref = [c.factura_pv, c.numero_factura].filter(Boolean).join('-') || c.id.slice(-6).toUpperCase();
         const saldo = saldos.get(c.id);
         return `<option value="${esc(c.id)}">${esc(ref)} · ${fmtFecha(c.fecha)} · ${fmt$(c.total)}${saldo != null ? ` (saldo ${fmt$(saldo)})` : ' (saldada)'}</option>`;
@@ -340,6 +360,7 @@ const SGA_NotaCreditoWizard = (() => {
     };
 
     const actualizarModoProductos = () => {
+      if (esND) { pintarLineas(); return; }   // en una ND la factura es informativa: no toca las lineas
       const refId = ge('ncw-ref').value;
       st.modoProd = refId ? 'compra' : 'libre';
       if (refId) cargarProductosDeCompra(refId);
@@ -377,7 +398,7 @@ const SGA_NotaCreditoWizard = (() => {
         pw.innerHTML = st.prod.length ? `
           <table class="ncw-lineas"><thead><tr>
             <th>Producto</th><th class="r">Cant.</th><th class="r">Costo neto u.</th>
-            <th class="ncw-col-iva">IVA</th><th class="r">Subtotal</th><th title="Baja el stock">Baja stock</th><th></th>
+            <th class="ncw-col-iva">IVA</th><th class="r">Subtotal</th><th title="${colStock}">${colStock}</th><th></th>
           </tr></thead><tbody>
           ${st.prod.map((l, i) => `<tr data-i="${i}">
             <td>${esc(l.nombre)}</td>
@@ -385,11 +406,11 @@ const SGA_NotaCreditoWizard = (() => {
             <td class="r"><input type="number" data-f="costo" min="0" step="any" data-money="true" value="${l.costo}" aria-label="Costo neto unitario"></td>
             <td class="ncw-col-iva"><select data-f="iva" aria-label="IVA">${IVA_OPTS}</select></td>
             <td class="r ncw-sub">${fmt$(l.cantidad * l.costo)}</td>
-            <td style="text-align:center"><input type="checkbox" data-f="baja" ${l.bajaStock ? 'checked' : ''} aria-label="Baja el stock"></td>
+            <td style="text-align:center"><input type="checkbox" data-f="baja" ${l.bajaStock ? 'checked' : ''} aria-label="${colStock}"></td>
             <td><button type="button" class="ncw-del" data-del="prod" aria-label="Quitar" title="Quitar">✕</button></td>
           </tr>`).join('')}
           </tbody></table>`
-          : `<div class="ncw-sin-lineas">Sin productos: buscá arriba lo que se le devuelve al proveedor.</div>`;
+          : `<div class="ncw-sin-lineas">${esND ? 'Sin productos.' : 'Sin productos: buscá arriba lo que se le devuelve al proveedor.'}</div>`;
       }
       pw.querySelectorAll('tr[data-i]').forEach(tr => {
         const sel = tr.querySelector('select[data-f="iva"]');
@@ -402,7 +423,7 @@ const SGA_NotaCreditoWizard = (() => {
           <th>Concepto</th><th class="r">Monto neto</th><th class="ncw-col-iva">IVA</th><th></th>
         </tr></thead><tbody>
         ${st.conc.map((l, i) => `<tr data-i="${i}">
-          <td><input type="text" class="ncw-concepto" data-f="concepto" value="${esc(l.concepto)}" placeholder="Ej.: bonificación por pronto pago" aria-label="Concepto"></td>
+          <td><input type="text" class="ncw-concepto" data-f="concepto" value="${esc(l.concepto)}" placeholder="${esND ? 'Ej.: flete, recargo por pago fuera de término' : 'Ej.: bonificación por pronto pago'}" aria-label="Concepto"></td>
           <td class="r"><input type="number" data-f="monto" min="0" step="any" data-money="true" value="${l.monto || ''}" aria-label="Monto neto"></td>
           <td class="ncw-col-iva"><select data-f="iva" aria-label="IVA">${IVA_OPTS}</select></td>
           <td><button type="button" class="ncw-del" data-del="conc" aria-label="Quitar" title="Quitar">✕</button></td>
@@ -536,7 +557,7 @@ const SGA_NotaCreditoWizard = (() => {
       const provId = ge('ncw-proveedor').value;
       if (!provId) return showError('Seleccioná un proveedor.');
       const total = num(ge('ncw-total').value);
-      if (total <= 0.01) return showError('La nota de crédito no tiene importe: cargá líneas o escribí el total.');
+      if (total <= 0.01) return showError(`La ${nombreNota} no tiene importe: cargá líneas o escribí el total.`);
       const prodActivos = lineasProdActivas();
       if (prodActivos.some(l => l.cantidad <= 0)) return showError('Hay un producto con cantidad 0.');
       const excedido = prodActivos.find(l => l.max != null && l.cantidad > l.max + 1e-9);
@@ -572,13 +593,16 @@ const SGA_NotaCreditoWizard = (() => {
         };
       }
 
-      const res = data().crearNotaCredito(opts);
+      const res = esND
+        ? data().crearNotaDebito({ ...opts, condicion_nd: letra, motivo: ge('ncw-motivo').value })
+        : data().crearNotaCredito(opts);
       if (!res.success) return showError('Error al guardar: ' + res.error);
 
       close();
       window.SGA_Sync?.pushPending?.();
       if (typeof onSaved === 'function') { try { onSaved(res, provId); } catch (e) { console.warn('onSaved:', e); } }
-      const msg = res.credito_sobrante > 0.01
+      const msg = esND ? `Nota de débito registrada: ${fmt$(res.total)}`
+        : res.credito_sobrante > 0.01
         ? `Nota de crédito registrada. Crédito disponible: ${fmt$(res.credito_sobrante)}`
         : 'Nota de crédito registrada.';
       window.SGA_Utils?.showNotification?.(msg, 'success');
@@ -594,7 +618,7 @@ const SGA_NotaCreditoWizard = (() => {
     setTimeout(() => (ge('ncw-proveedor').value ? ge('ncw-buscar') : ge('ncw-proveedor')).focus(), 60);
   }
 
-  return { abrir, puede, ensureCss };
+  return { abrir, puede, puedeND, ensureCss };
 })();
 
 window.SGA_NotaCreditoWizard = SGA_NotaCreditoWizard;

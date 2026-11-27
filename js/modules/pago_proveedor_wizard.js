@@ -525,7 +525,7 @@ const SGA_PagoProveedorWizard = (() => {
               return `
               <tr>
                 <td>${fmtFecha(c.fecha)}</td>
-                <td>${esc(ref)}${esGasto ? ' <span style="font-size:11px;color:#8090a0">(gasto)</span>' : ''}</td>
+                <td>${esc(ref)}${esGasto && !c.es_nd ? ' <span style="font-size:11px;color:#8090a0">(gasto)</span>' : ''}</td>
                 <td class="right">${fmt$(c.total)}</td>
                 <td class="right" style="color:#e65100;font-weight:600">${fmt$(c.saldo)}</td>
                 <td class="right">

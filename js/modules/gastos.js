@@ -111,7 +111,7 @@ const Gastos = (() => {
 
   function getHistorial(provId, limit = 8) {
     return db().query(
-      `SELECT g.id, g.periodo, g.categoria, g.subcategoria, g.descripcion,
+      `SELECT g.id, g.tipo, g.periodo, g.categoria, g.subcategoria, g.descripcion,
               g.monto, g.metodo_pago, g.comprobante,
               g.subtotal_neto, g.iva_alicuota, g.iva_monto, g.iibb_monto,
               COALESCE((SELECT SUM(p.monto) FROM gastos_pagos p WHERE p.gasto_id=g.id), 0) AS total_pagado
@@ -628,12 +628,15 @@ const Gastos = (() => {
               const addPagoBtn = (isSueldo && pendiente > 0.01)
                 ? `<button class="gc-btn-add-pago-hist" data-gasto-id="${r.id}" data-pendiente="${pendiente.toFixed(2)}" title="Registrar pago">+ Pago</button>`
                 : '';
-              const editBtn = `<button class="gc-btn-edit-hist" data-gasto-id="${r.id}" title="Editar">✏️</button>`;
+              // Una nota de debito se ve aca pero se administra desde la cuenta corriente del proveedor.
+              const esND = r.tipo === 'nota_debito';
+              const editBtn = esND ? '<small title="Se ve y se anula desde Cuentas Corrientes">Cta. cte.</small>'
+                : `<button class="gc-btn-edit-hist" data-gasto-id="${r.id}" title="Editar">✏️</button>`;
               return `
                 <tr data-gasto-id="${r.id}">
                   <td><strong>${pLabel(r.periodo)}</strong></td>
                   <td class="gc-td-cat">
-                    ${catLabel(r.categoria)}
+                    ${esND ? 'Nota de débito' : catLabel(r.categoria)}
                     ${r.subcategoria ? `<br><small>${subcatLabel(r.subcategoria)}</small>` : ''}
                   </td>
                   <td>${esc(r.descripcion || '—')}</td>

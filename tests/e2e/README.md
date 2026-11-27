@@ -143,6 +143,8 @@ sale "vacío" inesperadamente.
 | `test_ordenes_sin_stock_30d.py` | Órdenes → "Sin stock 30d": misma cuenta que el reporte de quiebres (grupo = suma), foto al generar y al agregar, detalle del grupo, órdenes viejas con "—"; y "Vencidos 30d" (baja por vencimiento + devolución vencida aprobada, sin roturas ni bajas viejas) |
 | `test_pago_proveedor_seguro.py` | Pago a proveedor: la ventana no se cierra con un clic afuera, confirma antes de descartar, muestra confirmación, sube apenas se guarda, avisa sin conexión y si falla el disco |
 | `test_pestana_unica.py` | Una sola pestaña por base: bloqueo de la segunda, "Usar acá" sin perder datos, POS y Admin-POS conviven |
+| `test_caja_ventanas_seguras.py` | Egreso e ingreso de caja: no se cierran con un clic afuera, confirman antes de descartar, muestran confirmación y suben al guardar |
+| `test_nota_debito_proveedor.py` | Nota de débito de proveedor (solo Admin-POS): suma deuda, ingresa stock si se tilda, no toca costos, se paga como comprobante, se anula, y sincroniza |
 | `test_sync_monitor_atrasados.py` | Admin-POS trae documentos que llegan con hora anterior al cursor (20 min por ciclo, 3 días una vez por día), sin revivir anulados |
 | `test_informes_aging_cc.py` | Aging Cuenta Corriente (25/11/2026) con el cobro real: descuenta cobros e importados guardados sin sucursal, "Impaga desde"/mora según la deuda impaga más vieja (pagos FIFO), saldados fuera, ventas anuladas ignoradas y total = suma de saldos |
 | `test_clientes_ultima_visita.py` | "Última visita" / "Días sin comprar" calculados desde ventas y cobros (25/11/2026): lista, estadísticas y tabla de familia; compra reciente con la columna vieja atrasada, pago sin compra, venta anulada, sin movimientos y ajustes |
