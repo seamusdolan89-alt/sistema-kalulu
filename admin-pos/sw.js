@@ -75,7 +75,7 @@ const OWN_PATHS = [
   'js/modules/sugerencias.js', 'js/modules/ordenes.js', 'js/modules/vencimientos.js',
   'js/modules/etiquetas.js', 'js/modules/peek_productos.js', 'js/modules/cuenta_corriente_proveedores.js',
   'js/modules/nota_credito_wizard.js', 'js/modules/caja.js', 'js/modules/pos.js',
-  'js/modules/compras_v2.js', 'js/modules/familia.js', 'js/modules/informes.js',
+  'js/modules/compras_v2.js', 'js/modules/familia.js', 'js/modules/informes.js', 'js/modules/quiebres.js',
   'js/modules/operaciones_stock.js', 'js/modules/editor-producto.js', 'js/modules/productos.js',
 
   'views/editor-producto.html', 'views/vencimientos.html', 'views/roturas.html',

@@ -3,6 +3,7 @@
  */
 
 import GruposSustitutos from './grupos_sustitutos.js';
+import { analizarQuiebres, cierresDeDias, inicioHistorial, leerMovimiento } from './quiebres.js';
 import Buscador from './buscador_productos.js';
 // Import estatico (no window.SGA_Familia), igual que compras_v2.js/editor-producto.js/
 // operaciones_stock.js: el wizard de familia se abre tambien desde "Precios y Etiquetas".
@@ -184,80 +185,14 @@ const Informes = (() => {
   // (stock_movimientos), asi que no hay historia anterior a su primer movimiento.
   // Un grupo de sustitutos es UN renglon y quiebra cuando la SUMA del grupo llega a 0; los
   // negativos NO se toman como 0 (suelen ser una venta sin escanear): se marcan "revisar stock".
-  const EPS_STOCK = 0.0001;
-
   function diaLocal(d) {
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  }
-
-  // Momento en que se "cierra" cada dia de calendario del rango (hoy: ahora). Se calcula una sola
-  // vez por informe: se recorre por cada producto.
-  function cierresDeDias(ini, fin) {
-    const cierres = [];
-    const dia = new Date(ini);
-    dia.setHours(0, 0, 0, 0);
-    const finD = new Date(fin);
-    while (dia < finD) {
-      dia.setDate(dia.getDate() + 1);
-      cierres.push((dia < finD ? dia : finD).toISOString());
-    }
-    return cierres;
-  }
-
-  // movs: [{ t, delta, ref, prod }] ordenados por t. ini/fin: ISO. nuevo: dado de alta dentro del
-  // rango (no "venia sin stock": todavia no existia).
-  function analizarQuiebres(movs, ini, fin, cierres, nuevo) {
-    let saldo = 0, i = 0;
-    const porProd = new Map();
-    const negativos = new Set();
-    const aplicar = (m) => {
-      saldo += m.delta;
-      porProd.set(m.prod, (porProd.get(m.prod) || 0) + m.delta);
-    };
-    const mirarNegativos = () => porProd.forEach((v, id) => { if (v < -EPS_STOCK) negativos.add(id); });
-
-    while (i < movs.length && movs[i].t <= ini) aplicar(movs[i++]);
-    mirarNegativos();
-
-    const episodios = [];
-    let sinStock = saldo <= EPS_STOCK;
-    const venia = sinStock && !nuevo;
-    if (venia) episodios.push({ desde: ini, hasta: null });
-    let veces = 0;
-
-    while (i < movs.length && movs[i].t < fin) {
-      // Los movimientos de un mismo documento se aplican juntos: editar o anular una compra no
-      // tiene que inventar un quiebre de un instante entre una linea y la siguiente.
-      const primero = movs[i];
-      aplicar(movs[i++]);
-      while (primero.ref && i < movs.length && movs[i].t < fin && movs[i].ref === primero.ref
-             && new Date(movs[i].t) - new Date(primero.t) < 60000) aplicar(movs[i++]);
-      mirarNegativos();
-      const ahoraSin = saldo <= EPS_STOCK;
-      if (ahoraSin && !sinStock) { veces++; episodios.push({ desde: primero.t, hasta: null }); }
-      else if (!ahoraSin && sinStock && episodios.length) episodios[episodios.length - 1].hasta = primero.t;
-      sinStock = ahoraSin;
-    }
-
-    // Dias sin stock = dias de calendario que TERMINARON sin stock (hoy: si sigue sin stock ahora).
-    // Quebrar y reponer en el mismo dia suma una vez, pero no un dia.
-    // Episodios y cierres vienen en orden: un solo recorrido de cada lista.
-    let dias = 0, racha = 0, seguidos = 0, e = 0;
-    for (const cierre of episodios.length ? cierres : []) {
-      while (e < episodios.length && episodios[e].hasta !== null && episodios[e].hasta < cierre) e++;
-      if (e < episodios.length && episodios[e].desde < cierre) {
-        dias++; seguidos++; racha = Math.max(racha, seguidos);
-      } else seguidos = 0;
-    }
-    return { veces, venia, dias, racha, negativos, huboQuiebre: episodios.length > 0 };
   }
 
   function queryQuiebresStock() {
     const sid = state.sucursalId;
     const q = (sql, p) => window.SGA_DB.query(sql, p);
-    const inicioHist = q(`
-      SELECT COALESCE(MIN(CASE WHEN id LIKE 'saldo_inicial:%' THEN fecha END), MIN(fecha)) AS f
-        FROM stock_movimientos WHERE sucursal_id = ?`, [sid])[0]?.f || null;
+    const inicioHist = inicioHistorial(sid);
     const desdeUTC = toUTC(state.desde);
     const finUTC   = toUTC(addOneDay(state.hasta));
     const ahora    = new Date().toISOString();
@@ -280,10 +215,8 @@ const Informes = (() => {
     const movs = new Map();
     q(`SELECT id, producto_id, delta, ref_id, fecha FROM stock_movimientos
         WHERE sucursal_id = ? ORDER BY fecha, rowid`, [sid]).forEach(m => {
-      // El saldo inicial es el punto de partida del historial, sea cual sea su hora exacta.
-      const t = String(m.id).startsWith('saldo_inicial:') ? inicioHist : m.fecha;
       if (!movs.has(m.producto_id)) movs.set(m.producto_id, []);
-      movs.get(m.producto_id).push({ t, delta: Number(m.delta) || 0, ref: m.ref_id, prod: m.producto_id });
+      movs.get(m.producto_id).push(leerMovimiento(m, inicioHist));
     });
 
     // Documentos (no unidades) en los que se pidio / se recibio cada producto.
