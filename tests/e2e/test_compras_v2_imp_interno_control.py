@@ -217,6 +217,7 @@ def main():
         # El interno ya está en los precios: no se vuelve a sumar en la barra.
         assert not page.locator("#cv2-summary-otros-wrap").is_visible(), "Oslé: el interno incluido no se suma aparte"
 
+        page.close()   # una sola pestaña por base: la anterior tiene que estar cerrada
         serenisima(context, errors)
 
         assert not errors, f"Errores JS no capturados en pagina: {errors}"

@@ -1801,8 +1801,43 @@
     return { synced_at: raw, id: '' };
   }
 
+  // El cursor avanza por _synced_at, que pone el reloj de la compu que SUBE. Un documento que llega a
+  // la nube con una hora anterior al cursor (reloj atrasado, subida demorada por mala conexion) no se
+  // pedia nunca mas. Por eso en cada ciclo se vuelve a leer lo de los ultimos minutos y, una vez por
+  // dia, lo de los ultimos 3 dias. Reaplicar un documento ya aplicado no cambia nada.
+  const RELEER_RECIENTE_MS = 20 * 60 * 1000;
+  const BARRIDO_MS         = 72 * 60 * 60 * 1000;
+  const BARRIDO_CADA_MS    = 24 * 60 * 60 * 1000;
+  const BARRIDO_KEY        = 'admin_monitor_barrido_at';
+
+  // Relee [desde, hasta] sin tocar el cursor. Devuelve cuantos registros NUEVOS aparecieron.
+  async function releerAtrasados(name, applyFn, desde, hasta) {
+    const existe = (id) => window.SGA_DB.query(`SELECT 1 AS x FROM ${name} WHERE id = ? LIMIT 1`, [id]).length > 0;
+    let nuevos = 0, ultimo = null, cantidad;
+    do {
+      let q = firestoreDb.collection(name)
+        .where('_synced_at', '>=', desde).where('_synced_at', '<=', hasta).orderBy('_synced_at');
+      if (ultimo) q = q.startAfter(ultimo);
+      const snap = await q.limit(200).get();
+      cantidad = snap.size;
+      for (const doc of snap.docs) {
+        try {
+          const estaba = existe(doc.id);
+          applyFn(doc.data());
+          if (!estaba && existe(doc.id)) nuevos++;
+        } catch (err) { console.warn(`Monitor relectura (${name}):`, err.message); }
+      }
+      ultimo = snap.docs[snap.docs.length - 1];
+    } while (cantidad >= 200);
+    return nuevos;
+  }
+
   async function syncMonitoringData() {
     if (!firestoreDb) return 0;
+
+    const ahoraMs = Date.now();
+    const tocaBarrido = ahoraMs - (Date.parse(localStorage.getItem(BARRIDO_KEY)) || 0) >= BARRIDO_CADA_MS;
+    let barridoCompleto = true;
 
     // Cursor propio por coleccion (antes era uno solo compartido, pisado a
     // "ahora" al final de CADA corrida sin importar si algun documento se
@@ -1830,6 +1865,12 @@
           const desde = new Date();
           desde.setDate(desde.getDate() - 90);
           cursor = { synced_at: desde.toISOString(), id: '' };
+        }
+
+        const desde = new Date(ahoraMs - (tocaBarrido ? BARRIDO_MS : RELEER_RECIENTE_MS)).toISOString();
+        if (desde < cursor.synced_at) {
+          try { total += await releerAtrasados(name, applyFn, desde, cursor.synced_at); }
+          catch (err) { barridoCompleto = false; console.warn(`Monitor relectura skip (${name}):`, err.message); }
         }
 
         // Paginar con cursor real (orderBy + avanzar al ultimo _synced_at+id visto) en
@@ -1885,6 +1926,8 @@
         console.warn(`Monitor sync skip (${name}):`, err.message);
       }
     }
+
+    if (tocaBarrido && barridoCompleto) localStorage.setItem(BARRIDO_KEY, new Date(ahoraMs).toISOString());
 
     if (total > 0) console.log(`📡 Monitor sync: ${total} registros actualizados`);
 

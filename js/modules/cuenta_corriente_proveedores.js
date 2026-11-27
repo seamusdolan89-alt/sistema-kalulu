@@ -237,6 +237,14 @@ const SGA_PagosProveedores = (() => {
     return entries;
   }
 
+  // Un pago (o NC, imputacion, anulacion) sube apenas se guarda: antes esperaba a la proxima venta o
+  // al ciclo de 5 minutos. No frena la pantalla; si no hay conexion queda pendiente y sube despues.
+  function enviarYa() {
+    return Promise.resolve()
+      .then(() => window.SGA_Sync?.pushPending?.())
+      .catch(e => { console.warn('envio inmediato:', e.message); return 0; });
+  }
+
   /**
    * Crear pago a proveedor.
    * opts: { proveedor_id, fecha, observaciones, usuario_id, metodos, imputaciones?, auto_imputar? }
@@ -348,7 +356,7 @@ const SGA_PagosProveedores = (() => {
       }
 
       db().commitBatch();
-      return { success: true, id: pagoId, credito_sobrante: Math.max(0, creditoRestante) };
+      return { success: true, id: pagoId, credito_sobrante: Math.max(0, creditoRestante), envio: enviarYa() };
 
     } catch (e) {
       db().rollbackBatch();
@@ -493,6 +501,7 @@ const SGA_PagosProveedores = (() => {
         return { success: false, error: 'No se pudo guardar la nota de crédito (revisá la consola)' };
       }
       if (!sinLote) db().commitBatch();
+      if (!sinLote) enviarYa();   // con lote ajeno, sube quien lo cierra
       return { success: true, id: pagoId, total, credito_sobrante: Math.max(0, restante) };
     } catch (e) {
       if (!sinLote) db().rollbackBatch();
@@ -675,6 +684,7 @@ const SGA_PagosProveedores = (() => {
       const ok = db().query(`SELECT nc_provisoria FROM pagos_proveedores WHERE id = ?`, [pagoId])[0]?.nc_provisoria;
       if (ok !== 0) { db().rollbackBatch(); return { success: false, error: 'No se pudo completar la nota de crédito' }; }
       db().commitBatch();
+      enviarYa();
       return { success: true, total: nuevoTotal };
     } catch (e) {
       db().rollbackBatch();
@@ -730,6 +740,7 @@ const SGA_PagosProveedores = (() => {
         `UPDATE pagos_proveedores SET sync_status='pending', updated_at=? WHERE id=?`,
         [now(), pagoId]
       );
+      enviarYa();
       return { success: true, monto_aplicado: montoImp };
     } catch (e) {
       return { success: false, error: e.message };
@@ -1021,6 +1032,7 @@ const SGA_PagosProveedores = (() => {
       return { success: false, error: e.message };
     }
 
+    enviarYa();
     return {
       success: true,
       total: r.total,
@@ -1644,7 +1656,7 @@ const CuentaCorrienteProveedores = (() => {
 
       close();
       renderDetalle(proveedorId, proveedorNombre);
-      if (window.SGA_Utils?.showToast) window.SGA_Utils.showToast('Pago imputado', 'success');
+      window.SGA_Utils?.showNotification?.('Pago imputado', 'success');
     });
   }
 
@@ -1744,8 +1756,7 @@ const CuentaCorrienteProveedores = (() => {
       window.SGA_Sync?.pushPending?.();
       renderDetalle(proveedorId, proveedorNombre);
       const msg = (res.esNC ? 'Nota de crédito anulada' : 'Pago anulado') + (res.egresosRevertidos ? ' — egreso de caja revertido' : '');
-      if (window.SGA_Utils?.showToast) window.SGA_Utils.showToast(msg, 'success');
-      else window.SGA_Utils?.showNotification?.(msg, 'success');
+      window.SGA_Utils?.showNotification?.(msg, 'success');
     });
   }
 
@@ -1881,8 +1892,7 @@ const CuentaCorrienteProveedores = (() => {
       close();
       window.SGA_Sync?.pushPending?.();
       renderDetalle(proveedorId, proveedorNombre);
-      if (window.SGA_Utils?.showToast) window.SGA_Utils.showToast('Nota de crédito completada', 'success');
-      else window.SGA_Utils?.showNotification?.('Nota de crédito completada', 'success');
+      window.SGA_Utils?.showNotification?.('Nota de crédito completada', 'success');
     });
   }
 

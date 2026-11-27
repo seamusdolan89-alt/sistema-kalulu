@@ -383,7 +383,26 @@ const SGA_PagoProveedorWizard = (() => {
     const close = () => {
       overlay.classList.add('hidden');
       overlay.innerHTML = '';
+      document.removeEventListener('keydown', onKey, true);
     };
+    // Con algo cargado, cerrar pide confirmacion: antes un clic fuera de la ventana descartaba el pago
+    // sin avisar.
+    const hayDatos = () => getTotal() > 0 || !!ge('mp-obs')?.value.trim() || !!ge('mp-tr-ref')?.value.trim() ||
+      ['mp-ef-monto', 'mp-tr-monto'].some(id => parseFloat(ge(id)?.value) > 0);
+    const cancelar = () => {
+      if (hayDatos() && !confirm('El pago NO está guardado.\n\n¿Descartarlo?')) return;
+      close();
+    };
+    let guardado = false;
+    // En fase de captura: Escape no llega a la pantalla de atras.
+    const onKey = e => {
+      if (!document.body.contains(overlay) || overlay.classList.contains('hidden')) return;
+      if (e.key !== 'Escape' && !(guardado && e.key === 'Enter')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (guardado) close(); else cancelar();
+    };
+    document.addEventListener('keydown', onKey, true);
     const getTotal = () => {
       let t = 0;
       if (ge('chk-efectivo').checked) t += parseFloat(ge('mp-ef-monto').value) || 0;
@@ -605,9 +624,52 @@ const SGA_PagoProveedorWizard = (() => {
     if (proveedorId) renderImpSection();
 
     // ── Close handlers ────────────────────────────────────────────────────────
-    ge('btn-modal-close').addEventListener('click', close);
-    ge('btn-modal-cancel').addEventListener('click', close);
-    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    // Un clic fuera de la ventana no hace nada. (onclick, no addEventListener: el overlay se reusa.)
+    ge('btn-modal-close').addEventListener('click', cancelar);
+    ge('btn-modal-cancel').addEventListener('click', cancelar);
+
+    // ── Confirmacion ──────────────────────────────────────────────────────────
+    const mostrarConfirmacion = (result, provId, metodos, total) => {
+      const prov = proveedores.find(p => p.id === provId)?.razon_social || '';
+      const nombres = { efectivo: 'Efectivo', transferencia: 'Transferencia' };
+      overlay.innerHTML = `
+        <div class="ccprov-modal" id="mp-confirmacion">
+          <div class="ccprov-modal-body" style="text-align:center;gap:8px">
+            <div style="font-size:42px;color:#2e7d32">✓</div>
+            <div style="font-size:1.15rem;font-weight:700">Pago registrado</div>
+            <div>${esc(prov)} — <strong>${fmt$(total)}</strong></div>
+            <div style="font-size:13px;color:var(--color-text-secondary)">
+              ${metodos.map(m => `${nombres[m.metodo] || esc(m.metodo)} ${fmt$(m.monto)}`).join(' + ')}
+            </div>
+            ${(result.credito_sobrante || 0) > 0.01
+              ? `<div style="font-size:13px">Quedó crédito a favor: <strong>${fmt$(result.credito_sobrante)}</strong></div>` : ''}
+            <div id="mp-envio" style="font-size:13px;color:var(--color-text-secondary)">Enviando a la otra computadora…</div>
+          </div>
+          <div class="ccprov-modal-ftr" style="justify-content:center">
+            <button class="ccprov-btn-primary" id="mp-aceptar">Aceptar</button>
+          </div>
+        </div>`;
+      ge('mp-aceptar').addEventListener('click', close);
+      ge('mp-aceptar').focus();
+
+      Promise.resolve(window.SGA_DB.flush?.()).then(() => {
+        const error = window.SGA_DB.errorDeGuardado?.();
+        if (!error || !ge('mp-envio')) return;
+        const el = document.createElement('div');
+        el.className = 'ccprov-error visible';
+        el.textContent = 'ATENCIÓN: no se pudo guardar en el disco. No cierres ni recargues esta pestaña. ' + error;
+        ge('mp-envio').before(el);
+      });
+      Promise.resolve(result.envio).then(() => {
+        const el = ge('mp-envio');
+        if (!el) return;
+        const enviado = window.SGA_DB.query(
+          `SELECT sync_status FROM pagos_proveedores WHERE id = ?`, [result.id])[0]?.sync_status === 'synced';
+        el.textContent = enviado
+          ? '✓ Enviado a la nube'
+          : '⏳ Guardado acá. Todavía no se envió: sale solo cuando haya conexión.';
+      });
+    };
 
     // ── Guardar ───────────────────────────────────────────────────────────────
     ge('btn-modal-guardar').addEventListener('click', () => {
@@ -670,6 +732,7 @@ const SGA_PagoProveedorWizard = (() => {
         }
       }
 
+      if (guardado) return;
       const result = window.SGA_PagosProveedores.crearPago({
         proveedor_id: provId,
         fecha: ge('mp-fecha').value || today(),
@@ -685,21 +748,13 @@ const SGA_PagoProveedorWizard = (() => {
         return;
       }
 
-      close();
+      guardado = true;
+      mostrarConfirmacion(result, provId, metodos, total);
 
       // Quien abrio el wizard refresca su propia pantalla: cuenta corriente
       // redibuja el detalle del proveedor, caja vuelve a su listado de egresos.
       if (typeof onSaved === 'function') {
         try { onSaved(result, provId); } catch (e) { console.warn('onSaved:', e); }
-      }
-
-      // Toast
-      if (window.SGA_Utils?.showToast) {
-        const sobrante = result.credito_sobrante || 0;
-        const msg = sobrante > 0.01
-          ? `Pago registrado. Crédito disponible: ${fmt$(sobrante)}`
-          : 'Pago registrado correctamente.';
-        window.SGA_Utils.showToast(msg, 'success');
       }
     });
   }

@@ -157,6 +157,8 @@ class FirestoreFalso:
                     return v == valor
                 if oper == ">=":
                     return v >= valor
+                if oper == "<=":
+                    return v <= valor
                 return v > valor
             docs = [d for d in docs if ok(d)]
 

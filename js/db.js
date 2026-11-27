@@ -16,6 +16,8 @@
   let fileHandle = null; // OPFS file handle
   let saveInProgress = null; // Promise of the save currently writing to disk
   let savePending = false;   // true if another save was requested mid-write
+  let sinControl = false;    // true: otra pestaña tomo el control; esta ya no puede escribir el archivo
+  let errorGuardado = null;  // mensaje del ultimo guardado fallido (null: el ultimo salio bien)
 
   const db = {
     isInitialized: false,
@@ -129,7 +131,7 @@
    * por el mismo archivo.
    */
   async function saveDatabase() {
-    if (!database) return;
+    if (!database || sinControl) return;
 
     if (saveInProgress) {
       savePending = true;
@@ -147,8 +149,10 @@
         } else {
           localStorage.setItem('sga_db', JSON.stringify(Array.from(data)));
         }
+        avisarErrorGuardado(null);
       } catch (error) {
         console.error('Failed to save database:', error);
+        avisarErrorGuardado(error && error.message ? error.message : String(error));
       } finally {
         saveInProgress = null;
         if (savePending) {
@@ -178,12 +182,110 @@
     }
   }
 
+  // Un guardado que falla deja los cambios SOLO en memoria: si se recarga, se pierden. Antes era
+  // un console.error que nadie veia; ahora queda un cartel hasta que un guardado vuelva a salir bien.
+  function avisarErrorGuardado(mensaje) {
+    errorGuardado = mensaje;
+    if (!document.body) return;
+    let cartel = document.getElementById('sga-error-guardado');
+    if (!mensaje) { if (cartel) cartel.remove(); return; }
+    if (!cartel) {
+      cartel = document.createElement('div');
+      cartel.id = 'sga-error-guardado';
+      cartel.setAttribute('role', 'alert');
+      cartel.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:100000;background:#b71c1c;color:#fff;' +
+        'padding:12px 16px;font:600 14px system-ui,sans-serif;text-align:center';
+      document.body.appendChild(cartel);
+    }
+    cartel.textContent = '⚠️ No se pudo guardar en el disco. NO cierres ni recargues esta pestaña: ' +
+      'lo último que cargaste se perdería. Avisá al administrador. (' + mensaje + ')';
+  }
+
+  // ─── Una sola pestaña por base ────────────────────────────────────────────────
+  // Cada pestaña carga su propia copia de la base y al guardar escribe el archivo ENTERO: con dos
+  // abiertas, la que guarda despues borra en silencio lo cargado en la otra. Un candado del
+  // navegador (Web Locks) deja usar una sola por archivo (POS y Admin-POS son archivos distintos).
+
+  // Resuelve true si consiguio el candado (se mantiene mientras viva la pagina).
+  function pedirCandado(nombre, opciones) {
+    return new Promise((resolve) => {
+      let obtenido = false;
+      navigator.locks.request(nombre, opciones, (candado) => {
+        if (!candado) { resolve(false); return null; }
+        obtenido = true;
+        resolve(true);
+        return new Promise(() => {});
+      }).catch((e) => {
+        if (obtenido) cederControl();   // otra pestaña lo tomo ("steal")
+        else { console.warn('candado de pestaña:', e.message); resolve(true); }
+      });
+    });
+  }
+
+  // Esta pestaña dejo de ser la activa: termina lo que estaba guardando y se recarga (corta tambien
+  // la sincronizacion de fondo, que no puede seguir aplicando datos que ya no se guardan).
+  async function cederControl() {
+    try { await flush(); } catch (_) { /* ya avisado */ }
+    sinControl = true;
+    sessionStorage.setItem('sga_pestana_cedida', '1');
+    location.reload();
+  }
+
+  let tengoCandado = false;   // si la inicializacion falla y se reintenta, no pedirlo de nuevo
+  async function asegurarPestanaUnica() {
+    if (tengoCandado || !navigator.locks || !navigator.locks.request) return;
+    const nombre = 'sga-pestana:' + (window.ADMIN_MODE ? 'sga-admin.db' : 'sga.db');
+    // Reintentos: al navegar (login -> sistema) la pagina anterior tarda un instante en soltarlo.
+    // La pestaña que acaba de ceder NO compite: la nueva suelta el candado un instante al ir al login.
+    const cedida = sessionStorage.getItem('sga_pestana_cedida') === '1';
+    sessionStorage.removeItem('sga_pestana_cedida');
+    for (let i = 0; !cedida && i < 15; i++) {
+      if (await pedirCandado(nombre, { ifAvailable: true })) { tengoCandado = true; return; }
+      await new Promise(r => setTimeout(r, 200));
+    }
+    await new Promise((continuar) => {
+      const capa = document.createElement('div');
+      capa.id = 'sga-otra-pestana';
+      capa.setAttribute('role', 'alertdialog');
+      capa.style.cssText = 'position:fixed;inset:0;z-index:100001;background:#12233a;color:#fff;display:flex;' +
+        'align-items:center;justify-content:center;padding:24px;font:15px/1.5 system-ui,sans-serif;text-align:center';
+      capa.innerHTML =
+        '<div style="max-width:520px">' +
+          '<h2 style="margin:0 0 12px">El sistema ya está abierto en otra pestaña</h2>' +
+          '<p>Para no perder datos se puede usar en una sola a la vez.<br>' +
+          '<strong>Cerrá esta y seguí trabajando en la otra.</strong></p>' +
+          '<button type="button" id="sga-usar-aca" style="margin-top:16px;padding:10px 18px;border:1px solid #fff;' +
+          'border-radius:6px;background:transparent;color:#fff;font:inherit;cursor:pointer">Usar acá en su lugar</button>' +
+        '</div>';
+      document.body.appendChild(capa);
+      const boton = capa.querySelector('#sga-usar-aca');
+      boton.addEventListener('click', async () => {
+        if (!confirm('La otra pestaña va a dejar de funcionar.\n\nLo que esté a medio cargar ahí (sin guardar) se pierde.\n\n¿Usar el sistema acá?')) return;
+        boton.disabled = true;
+        boton.textContent = 'Abriendo…';
+        await pedirCandado(nombre, { steal: true });
+        tengoCandado = true;
+        await new Promise(r => setTimeout(r, 2500));   // que la otra termine de guardar
+        capa.remove();
+        continuar();
+      });
+    });
+  }
+
   /**
    * Initialize database connection and create tables
    * 
    * @returns {Promise<void>}
    */
-  async function initialize() {
+  // Varios llamadores en paralelo (app.js, auth.js) comparten UNA sola inicializacion: antes cada uno
+  // cargaba la base por su cuenta, y con el candado de pestaña la segunda se bloqueaba a si misma.
+  let iniciando = null;
+  function initialize() {
+    if (!iniciando) iniciando = inicializar().catch((e) => { iniciando = null; throw e; });
+    return iniciando;
+  }
+
+  async function inicializar() {
     if (db.isInitialized) return;
 
     console.log('🔄 Initializing database...');
@@ -192,6 +294,9 @@
       // Load sql.js
       await loadSQL();
       
+      // Antes de leer el archivo: ninguna otra pestaña puede estar usandolo
+      await asegurarPestanaUnica();
+
       // Initialize storage
       await initializeStorage();
       
@@ -2412,6 +2517,7 @@
     rollbackBatch,
     getLastError,
     registrarEliminacion,
+    errorDeGuardado: () => errorGuardado,
     aplicarEliminacion,
     fueEliminado,
     pausaVigente,

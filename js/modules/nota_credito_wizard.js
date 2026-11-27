@@ -254,11 +254,18 @@ const SGA_NotaCreditoWizard = (() => {
 
     const modal = ge('ncw-modal');
     const close = () => { overlay.classList.add('hidden'); overlay.innerHTML = ''; document.removeEventListener('keydown', onKey, true); };
-    const onKey = e => { if (e.key === 'Escape' && !overlay.classList.contains('hidden')) { e.stopPropagation(); close(); } };
+    // Con algo cargado, cerrar pide confirmacion; un clic fuera de la ventana no hace nada.
+    let tocado = false;
+    modal.addEventListener('input', e => { if (e.target.id !== 'ncw-proveedor') tocado = true; });
+    const cancelar = () => {
+      const hayLineas = !!modal.querySelector('#ncw-prod-wrap input, #ncw-conc-wrap input');
+      if ((tocado || hayLineas) && !confirm('La nota de crédito NO está guardada.\n\n¿Descartarla?')) return;
+      close();
+    };
+    const onKey = e => { if (e.key === 'Escape' && !overlay.classList.contains('hidden')) { e.preventDefault(); e.stopPropagation(); cancelar(); } };
     document.addEventListener('keydown', onKey, true);
-    ge('ncw-close').addEventListener('click', close);
-    ge('ncw-cancel').addEventListener('click', close);
-    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    ge('ncw-close').addEventListener('click', cancelar);
+    ge('ncw-cancel').addEventListener('click', cancelar);
 
     // ── Facturas del proveedor (referencia) ─────────────────────────────────
     const llenarReferencias = () => {
@@ -574,8 +581,7 @@ const SGA_NotaCreditoWizard = (() => {
       const msg = res.credito_sobrante > 0.01
         ? `Nota de crédito registrada. Crédito disponible: ${fmt$(res.credito_sobrante)}`
         : 'Nota de crédito registrada.';
-      if (window.SGA_Utils?.showToast) window.SGA_Utils.showToast(msg, 'success');
-      else window.SGA_Utils?.showNotification?.(msg, 'success');
+      window.SGA_Utils?.showNotification?.(msg, 'success');
     });
 
     // Estado inicial
