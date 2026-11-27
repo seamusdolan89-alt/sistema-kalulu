@@ -54,6 +54,7 @@ def probar_pos_sin_boton_detalle(context):
     page.fill("#egreso-monto", "500")
     page.fill("#egreso-descripcion", "Compra de bolsas")
     page.locator("#btn-confirm-egreso").click()
+    page.locator("#caja-conf-aceptar").click()
     page.wait_for_timeout(400)
 
     page.locator("#btn-cierre-caja").click()

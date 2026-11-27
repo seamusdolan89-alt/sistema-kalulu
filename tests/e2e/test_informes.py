@@ -80,6 +80,7 @@ def main():
         page.fill("#egreso-monto", "50")
         page.fill("#egreso-descripcion", "Varios")
         page.locator("#btn-confirm-egreso").click()
+        page.locator("#caja-conf-aceptar").click()
         page.wait_for_timeout(400)
 
         print("--- Deuda de cliente $500 (para Aging CC) ---")

@@ -450,8 +450,11 @@ const Caja = (() => {
          VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
         [id, sesionId, parseFloat(monto), descripcion, tipo, now, usuarioId, now]
       );
+      if (!window.SGA_DB.query(`SELECT 1 AS x FROM egresos_caja WHERE id = ?`, [id]).length) {
+        return { success: false, error: 'No se pudo guardar (revisá la consola)' };
+      }
 
-      return { success: true };
+      return { success: true, id };
     } catch (e) {
       console.error('registrarEgreso:', e);
       return { success: false, error: e.message };
@@ -468,7 +471,10 @@ const Caja = (() => {
          VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
         [id, sesionId, parseFloat(monto), descripcion, now, usuarioId, now]
       );
-      return { success: true };
+      if (!window.SGA_DB.query(`SELECT 1 AS x FROM ingresos_caja WHERE id = ?`, [id]).length) {
+        return { success: false, error: 'No se pudo guardar (revisá la consola)' };
+      }
+      return { success: true, id };
     } catch (e) {
       console.error('registrarIngreso:', e);
       return { success: false, error: e.message };
@@ -1328,18 +1334,93 @@ case 'egresos':     renderEgresosIngresos(content);   break;
   function openModal(html) {
     const overlay = ge('caja-modal-overlay');
     if (!overlay) return;
+    soltarTeclado();
     overlay.innerHTML = `<div class="caja-modal">${html}</div>`;
     overlay.classList.remove('hidden');
-    overlay.addEventListener('click', e => {
-      if (e.target === overlay) closeModal();
-    }, { once: true });
+    // onclick (y no addEventListener): reemplaza el del modal anterior, asi una ventana protegida
+    // no hereda un "cerrar al hacer clic afuera" que haya quedado sin usar.
+    overlay.onclick = e => { if (e.target === overlay) closeModal(); };
   }
 
   function closeModal() {
+    soltarTeclado();
     const overlay = ge('caja-modal-overlay');
     if (!overlay) return;
+    overlay.onclick = null;
     overlay.classList.add('hidden');
     overlay.innerHTML = '';
+  }
+
+  // ── VENTANAS DE PLATA (egreso / ingreso) ─────────────────────────────────────
+  // Igual que el pago a proveedor: un clic afuera no las cierra, descartar lo cargado pide
+  // confirmacion, y al guardar queda un aviso visible con el estado del envio.
+
+  let teclado = null;
+  function soltarTeclado() {
+    if (teclado) document.removeEventListener('keydown', teclado, true);
+    teclado = null;
+  }
+  function capturarTeclado(alEscape, alEnter) {
+    soltarTeclado();
+    teclado = e => {
+      const fn = e.key === 'Escape' ? alEscape : e.key === 'Enter' ? alEnter : null;
+      if (!fn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      fn();
+    };
+    document.addEventListener('keydown', teclado, true);
+  }
+
+  function protegerModal({ nombre, campos, botones }) {
+    const overlay = ge('caja-modal-overlay');
+    if (overlay) overlay.onclick = null;
+    const cancelar = () => {
+      const hayDatos = campos.some(id => String(ge(id)?.value || '').trim() !== '');
+      if (hayDatos && !confirm(`El ${nombre} NO está guardado.\n\n¿Descartarlo?`)) return;
+      closeModal();
+    };
+    botones.forEach(id => ge(id).addEventListener('click', cancelar));
+    capturarTeclado(cancelar, null);
+  }
+
+  // db().run() no propaga errores: se confirma que la fila quedo antes de decir "registrado".
+  function confirmarMovimiento({ titulo, tabla, id, monto, descripcion }) {
+    const overlay = ge('caja-modal-overlay');
+    if (!overlay) return;
+    overlay.innerHTML = `
+      <div class="caja-modal" id="caja-confirmacion" style="text-align:center">
+        <div style="font-size:42px;color:#2e7d32">✓</div>
+        <h3>${titulo}</h3>
+        <div><strong>${fmtPeso(monto)}</strong>${descripcion ? ` — ${esc(descripcion)}` : ''}</div>
+        <div id="caja-conf-envio" style="font-size:13px;color:#666;margin-top:8px">Enviando a la otra computadora…</div>
+        <div class="caja-modal-footer" style="justify-content:center">
+          <button class="btn btn-primary" id="caja-conf-aceptar">Aceptar</button>
+        </div>
+      </div>`;
+    ge('caja-conf-aceptar').addEventListener('click', closeModal);
+    ge('caja-conf-aceptar').focus();
+    capturarTeclado(closeModal, closeModal);
+
+    Promise.resolve(window.SGA_DB.flush?.()).then(() => {
+      const error = window.SGA_DB.errorDeGuardado?.();
+      if (!error || !ge('caja-conf-envio')) return;
+      const el = document.createElement('div');
+      el.style.cssText = 'color:#c62828;font-weight:700;font-size:13px;margin-top:8px';
+      el.textContent = 'ATENCIÓN: no se pudo guardar en el disco. No cierres ni recargues esta pestaña. ' + error;
+      ge('caja-conf-envio').before(el);
+    });
+    Promise.resolve()
+      .then(() => window.SGA_Sync?.pushPending?.())
+      .catch(e => console.warn('envio inmediato:', e.message))
+      .then(() => {
+        const el = ge('caja-conf-envio');
+        if (!el) return;
+        const enviado = window.SGA_DB.query(`SELECT sync_status FROM ${tabla} WHERE id = ?`, [id])[0]?.sync_status === 'synced';
+        el.textContent = enviado
+          ? '✓ Enviado a la nube'
+          : '⏳ Guardado acá. Todavía no se envió: sale solo cuando haya conexión.';
+      });
   }
 
   // ── EGRESO MODAL ──────────────────────────────────────────────────────────────
@@ -1367,8 +1448,8 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       </div>
     `);
 
-    ge('btn-close-egreso').addEventListener('click', closeModal);
-    ge('btn-cancel-egreso').addEventListener('click', closeModal);
+    protegerModal({ nombre: 'egreso', campos: ['egreso-monto', 'egreso-descripcion'],
+                    botones: ['btn-close-egreso', 'btn-cancel-egreso'] });
     ge('btn-confirm-egreso').addEventListener('click', () => {
       const monto = parseFloat(ge('egreso-monto').value);
       if (!monto || monto <= 0) { showToast('Ingresá un monto válido', 'warn'); return; }
@@ -1376,9 +1457,8 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       const desc = ge('egreso-descripcion').value.trim();
       const result = registrarEgreso(state.sesion.id, monto, desc, tipo, state.user.id);
       if (result.success) {
-        showToast('Egreso registrado', 'success');
-        closeModal();
         switchTab('egresos');
+        confirmarMovimiento({ titulo: 'Egreso registrado', tabla: 'egresos_caja', id: result.id, monto, descripcion: desc });
       } else {
         showToast(result.error, 'error');
       }
@@ -1427,17 +1507,16 @@ case 'egresos':     renderEgresosIngresos(content);   break;
       </div>
     `);
 
-    ge('btn-close-ingreso').addEventListener('click', closeModal);
-    ge('btn-cancel-ingreso').addEventListener('click', closeModal);
+    protegerModal({ nombre: 'ingreso', campos: ['ingreso-monto', 'ingreso-descripcion'],
+                    botones: ['btn-close-ingreso', 'btn-cancel-ingreso'] });
     ge('btn-confirm-ingreso').addEventListener('click', () => {
       const monto = parseFloat(ge('ingreso-monto').value);
       if (!monto || monto <= 0) { showToast('Ingresá un monto válido', 'warn'); return; }
       const desc = ge('ingreso-descripcion').value.trim();
       const result = registrarIngreso(state.sesion.id, monto, desc, state.user.id);
       if (result.success) {
-        showToast('Ingreso registrado', 'success');
-        closeModal();
         switchTab('egresos');
+        confirmarMovimiento({ titulo: 'Ingreso registrado', tabla: 'ingresos_caja', id: result.id, monto, descripcion: desc });
       } else {
         showToast(result.error, 'error');
       }
@@ -2553,6 +2632,7 @@ case 'egresos':     renderEgresosIngresos(content);   break;
   // ya no es la que esta en pantalla.
   const destroy = () => {
     stopAutoRefresh();
+    soltarTeclado();
   };
 
   window.SGA_Caja = {

@@ -55,6 +55,7 @@ def main():
         page.fill("#egreso-monto", "500")
         page.fill("#egreso-descripcion", "Compra de bolsas")
         page.locator("#btn-confirm-egreso").click()
+        page.locator("#caja-conf-aceptar").click()
         page.wait_for_timeout(400)
 
         print("--- Registrar ingreso $200 ---")
@@ -63,6 +64,7 @@ def main():
         page.fill("#ingreso-monto", "200")
         page.fill("#ingreso-descripcion", "Aporte extra")
         page.locator("#btn-confirm-ingreso").click()
+        page.locator("#caja-conf-aceptar").click()
         page.wait_for_timeout(400)
 
         print("--- Verificar Resumen: saldo esperado = 0 - 500 + 200 = -$300,00 ---")
