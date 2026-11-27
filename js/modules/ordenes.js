@@ -6,6 +6,7 @@
 
 import Buscador from './buscador_productos.js';
 import GruposSustitutos from './grupos_sustitutos.js';
+import { crearCalculadorSinStock } from './quiebres.js';
 // REGLA: los grupos de sustitutos (tabla producto_sustitutos) se leen y se escriben SOLO por el
 // motor (grupos_sustitutos.js): stockDelGrupo, miembrosDe, referenciaRealDe, agruparConReferencia,
 // aplicarCambioReferencia, moverMiembro, quitarDelGrupo... Nunca con SQL propio en esta pantalla:
@@ -61,6 +62,12 @@ const Ordenes = (() => {
     return ids.reduce((total, id) => total + ventasUltimos(id, dias), 0);
   }
 
+  /** El producto, o todos los de su grupo de sustitutos. */
+  function idsDelGrupo(productoId) {
+    const miembros = GruposSustitutos.miembrosDe(productoId);
+    return miembros.length > 1 ? miembros.map(m => m.id) : [productoId];
+  }
+
   /**
    * Genera una orden de compra en estado 'borrador' para un proveedor.
    *
@@ -97,6 +104,7 @@ const Ordenes = (() => {
 
     // 3. Para cada grupo, evaluar si necesita reposición
     const items = [];
+    const diasSinStock = crearCalculadorSinStock(sucursalId, 30);
 
     const datosDe = (id) => db().query(`
       SELECT id, nombre, stock_minimo, cant_pedido, unidad_medida,
@@ -137,7 +145,7 @@ const Ordenes = (() => {
       // lo que justifica el pedido.
       const v30d   = ventasGrupoUltimos(refId, 30);
       const v6m    = ventasGrupoUltimos(refId, 180);
-      const diasSS = db().calcularDiasSinStock6m(refId, sucursalId);
+      const diasSS = diasSinStock(idsDelGrupo(refId));
 
       const cantPedido = aPedir.cant_pedido || 0;
 
@@ -149,7 +157,7 @@ const Ordenes = (() => {
         cantidadDeseada:  cantPedido,
         ventas30d:        v30d,
         ventasProm6m:     Math.round((v6m / 6) * 100) / 100,
-        diasSinStock6m:   diasSS,
+        diasSinStock30d:  diasSS,
         cantidadSugerida: cantPedido,
         unidadPedida:     aPedir.pedido_unidad || 'unidad',
       });
@@ -181,13 +189,13 @@ const Ordenes = (() => {
           INSERT INTO orden_compra_items
             (id, orden_id, producto_id, cantidad_pedida, estado,
              stock_actual, stock_minimo, cantidad_deseada,
-             ventas_30d, ventas_prom_6m, dias_sin_stock_6m,
+             ventas_30d, ventas_prom_6m, dias_sin_stock_30d,
              cantidad_sugerida, cantidad_final, unidad_pedida)
           VALUES (?, ?, ?, ?, 'pendiente', ?, ?, ?, ?, ?, ?, ?, NULL, ?)
         `, [
           uuid(), ordenId, it.productoId, it.cantidadSugerida, it.stockActual,
           it.stockMinimo, it.cantidadDeseada, it.ventas30d,
-          it.ventasProm6m, it.diasSinStock6m, it.cantidadSugerida, it.unidadPedida,
+          it.ventasProm6m, it.diasSinStock30d, it.cantidadSugerida, it.unidadPedida,
         ]);
       }
 
@@ -331,7 +339,7 @@ const Ordenes = (() => {
       INSERT INTO orden_compra_items
         (id, orden_id, producto_id, cantidad_pedida, estado,
          stock_actual, stock_minimo, cantidad_deseada,
-         ventas_30d, ventas_prom_6m, dias_sin_stock_6m,
+         ventas_30d, ventas_prom_6m, dias_sin_stock_30d,
          cantidad_sugerida, cantidad_final, unidad_pedida)
       VALUES (?, ?, ?, ?, 'pendiente', ?, ?, ?, ?, ?, ?, ?, NULL, ?)
     `, [
@@ -339,7 +347,7 @@ const Ordenes = (() => {
       stockAct, prod.stock_minimo || 0, prod.cant_pedido || 0,
       ventasGrupoUltimos(productoId, 30),
       Math.round((ventasGrupoUltimos(productoId, 180) / 6) * 100) / 100,
-      db().calcularDiasSinStock6m(productoId, sucursalId),
+      crearCalculadorSinStock(sucursalId, 30)(idsDelGrupo(productoId)),
       prod.cant_pedido || 0,
       prod.pedido_unidad || 'unidad',
     ]);
@@ -366,7 +374,7 @@ const Ordenes = (() => {
       INSERT INTO orden_compra_items
         (id, orden_id, producto_id, cantidad_pedida, estado,
          stock_actual, stock_minimo, cantidad_deseada,
-         ventas_30d, ventas_prom_6m, dias_sin_stock_6m,
+         ventas_30d, ventas_prom_6m, dias_sin_stock_30d,
          cantidad_sugerida, cantidad_final, unidad_pedida, descripcion_libre)
       VALUES (?, ?, NULL, ?, 'pendiente', NULL, NULL, NULL, NULL, NULL, NULL, ?, NULL, ?, ?)
     `, [uuid(), ordenId, 1, 1, 'unidad', desc]);
@@ -676,7 +684,7 @@ const Ordenes = (() => {
         <th style="min-width:120px">A pedir</th>
         <th>Vtas 30d</th>
         <th>Prom. 6m</th>
-        <th>Días s/stock</th>
+        <th title="Días de los últimos 30 que terminaron sin stock, contados al generar la orden">Sin stock 30d</th>
         <th style="text-align:left;min-width:140px">Notas</th>
         <th></th>
       </tr>`;
@@ -706,8 +714,8 @@ const Ordenes = (() => {
 
     tbody.innerHTML = orden.items.map(it => {
       const esLibre = !it.producto_id;
-      const dias = it.dias_sin_stock_6m || 0;
-      const diasCls = esLibre ? '' : (dias === 0 ? 'ord-dias-ok' : dias <= 5 ? 'ord-dias-warn' : 'ord-dias-crit');
+      const dias = it.dias_sin_stock_30d;   // null: orden anterior a esta cuenta, o sin historial
+      const diasCls = esLibre || dias == null ? '' : (dias === 0 ? 'ord-dias-ok' : dias <= 5 ? 'ord-dias-warn' : 'ord-dias-crit');
       const cantFinal = it.cantidad_final != null ? it.cantidad_final : it.cantidad_sugerida;
       const unidad    = it.unidad_pedida || it.prod_pedido_unidad || 'unidad';
       const nombre    = nombreItem(it) + (esLibre ? ' <span class="ord-tag-libre" title="No está en el catálogo — se pidió como novedad">nuevo</span>' : '');
@@ -746,7 +754,7 @@ const Ordenes = (() => {
           </td>
           <td>${valorGrupo('ventas30', it.ventas_30d)}</td>
           <td>${valorGrupo('ventas6m', it.ventas_prom_6m)}</td>
-          <td class="${diasCls}">${esLibre ? '—' : dias}</td>
+          <td class="${diasCls}">${esLibre || dias == null ? '—' : valorGrupo('sinstock', dias)}</td>
           <td><input class="ord-cell-input ord-cell-input-text" type="text"
             value="${esc(it.notas || '')}" placeholder="—"></td>
           <td class="ord-acciones-cell" style="white-space:nowrap;text-align:right">
@@ -825,7 +833,7 @@ const Ordenes = (() => {
   }
 
   /**
-   * Detalle de un valor compuesto (stock, ventas 30d o promedio 6m) de un
+   * Detalle de un valor compuesto (stock, ventas 30d, promedio 6m o días sin stock) de un
    * grupo de sustitutos: la fila de la orden solo muestra el total del grupo
    * (ver stockEfectivo/generarOrdenCompra) — este overlay abre el desglose
    * por miembro para que se entienda de dónde sale ese número. Solo lectura:
@@ -843,9 +851,12 @@ const Ordenes = (() => {
       stock:    'Stock actual del grupo',
       ventas30: 'Ventas de los últimos 30 días del grupo',
       ventas6m: 'Promedio mensual (6 meses) del grupo',
+      sinstock: 'Días sin stock en los últimos 30 días',
     };
 
+    const diasSinStock = tipo === 'sinstock' ? crearCalculadorSinStock(sucId, 30) : null;
     const valorDe = (id) => {
+      if (diasSinStock) return diasSinStock([id]);
       if (tipo === 'ventas30') return ventasUltimos(id, 30);
       if (tipo === 'ventas6m') return Math.round((ventasUltimos(id, 180) / 6) * 100) / 100;
       return db().query(
@@ -855,7 +866,10 @@ const Ordenes = (() => {
     };
 
     const filas = grupo.map(m => ({ ...m, valor: valorDe(m.id) }));
-    const total = filas.reduce((s, f) => s + (f.valor || 0), 0);
+    // Los dias sin stock no se suman: el grupo se queda sin stock cuando la SUMA llega a 0.
+    const total = diasSinStock
+      ? diasSinStock(grupo.map(m => m.id))
+      : filas.reduce((s, f) => s + (f.valor || 0), 0);
 
     ge('ord-grupo-titulo').textContent = TITULOS[tipo] || 'Detalle del grupo';
     ge('ord-grupo-cuerpo').innerHTML = `
@@ -865,10 +879,11 @@ const Ordenes = (() => {
           ${filas.map(f => `
             <tr${f.id === refId ? ' class="ord-grupo-fila-ref"' : ''}>
               <td>${esc(f.nombre)}${f.id === refId ? ' <span class="ord-grupo-ref-tag">se le pide a este</span>' : ''}</td>
-              <td style="text-align:right">${fmtN(f.valor)}</td>
+              <td style="text-align:right">${f.valor == null ? '—' : fmtN(f.valor)}</td>
             </tr>`).join('')}
         </tbody>
-        <tfoot><tr><td>Total del grupo</td><td style="text-align:right">${fmtN(total)}</td></tr></tfoot>
+        <tfoot><tr><td>${diasSinStock ? 'El grupo entero (sumando su stock)' : 'Total del grupo'}</td>
+          <td style="text-align:right">${total == null ? '—' : fmtN(total)}</td></tr></tfoot>
       </table>
     `;
 

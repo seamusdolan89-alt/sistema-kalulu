@@ -808,7 +808,9 @@
       "ALTER TABLE orden_compra_items ADD COLUMN cantidad_deseada REAL",
       "ALTER TABLE orden_compra_items ADD COLUMN ventas_30d REAL DEFAULT 0",
       "ALTER TABLE orden_compra_items ADD COLUMN ventas_prom_6m REAL DEFAULT 0",
-      "ALTER TABLE orden_compra_items ADD COLUMN dias_sin_stock_6m INTEGER DEFAULT 0",
+      "ALTER TABLE orden_compra_items ADD COLUMN dias_sin_stock_6m INTEGER DEFAULT 0",  // ya no se usa
+      // Sin DEFAULT a proposito: NULL = orden anterior a esta cuenta (se muestra "—", no 0).
+      "ALTER TABLE orden_compra_items ADD COLUMN dias_sin_stock_30d INTEGER",
       "ALTER TABLE orden_compra_items ADD COLUMN cantidad_sugerida REAL",
       "ALTER TABLE orden_compra_items ADD COLUMN cantidad_final REAL",
       "ALTER TABLE orden_compra_items ADD COLUMN unidad_pedida TEXT DEFAULT 'unidad'",
@@ -1933,30 +1935,6 @@
     }
   }
 
-  /**
-   * Count distinct calendar days in the last 6 months where stock was 0
-   * for a given product+branch.
-   * @param {string} productoId
-   * @param {string} sucursalId
-   * @returns {number}
-   */
-  function calcularDiasSinStock6m(productoId, sucursalId) {
-    try {
-      const rows = query(`
-        SELECT COUNT(DISTINCT DATE(registrado_en)) AS dias
-        FROM historial_stock
-        WHERE producto_id = ?
-          AND sucursal_id = ?
-          AND stock_valor = 0
-          AND registrado_en >= datetime('now', '-6 months')
-      `, [productoId, sucursalId]);
-      return rows.length ? (rows[0].dias || 0) : 0;
-    } catch(e) {
-      console.warn('calcularDiasSinStock6m error:', e.message);
-      return 0;
-    }
-  }
-
   // ─── Movimientos de stock (ledger): el UNICO punto de escritura de stock ──────
   // Ningun otro archivo escribe la tabla stock (regla estatica que corre
   // tests/e2e/test_stock_ledger.py). Cada cambio deja un movimiento inmutable y
@@ -2453,7 +2431,6 @@
     backfillSaldoInicial,
     abandonarSaldoInicialLocal,
     getMovimientosStock,
-    calcularDiasSinStock6m,
     exportarBackup,
     importarBackup,
     flush,
