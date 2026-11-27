@@ -811,6 +811,7 @@
       "ALTER TABLE orden_compra_items ADD COLUMN dias_sin_stock_6m INTEGER DEFAULT 0",  // ya no se usa
       // Sin DEFAULT a proposito: NULL = orden anterior a esta cuenta (se muestra "—", no 0).
       "ALTER TABLE orden_compra_items ADD COLUMN dias_sin_stock_30d INTEGER",
+      "ALTER TABLE orden_compra_items ADD COLUMN vencidos_30d REAL",
       "ALTER TABLE orden_compra_items ADD COLUMN cantidad_sugerida REAL",
       "ALTER TABLE orden_compra_items ADD COLUMN cantidad_final REAL",
       "ALTER TABLE orden_compra_items ADD COLUMN unidad_pedida TEXT DEFAULT 'unidad'",
