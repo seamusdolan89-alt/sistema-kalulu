@@ -64,6 +64,8 @@ const Informes = (() => {
     mobilePeriod: 'mes', // 'hoy' | 'semana' | 'mes' | 'elegir-mes' — solo Admin-POS mobile
     bajasFormato: 'promo',  // "Bajas de Precio": formato de etiqueta a imprimir ('promo' | 'normal')
     bajasSoloStock: false,
+    quiebresOcultarPausados: false, // "Quiebres de Stock": no mostrar los de reposición pausada
+    quiebresInfo: null,             // desde cuándo hay historial de movimientos
   };
 
   const ge  = (id) => document.getElementById(id);
@@ -177,47 +179,194 @@ const Informes = (() => {
     `, [sid, desde, hasta]);
   }
 
+  // Quiebre = el stock pasa de tener unidades a 0 o menos (definicion del dueño, 27/11/2026). Antes
+  // este informe listaba "pedido y no recibido", que no mira el stock. Sale del ledger
+  // (stock_movimientos), asi que no hay historia anterior a su primer movimiento.
+  // Un grupo de sustitutos es UN renglon y quiebra cuando la SUMA del grupo llega a 0; los
+  // negativos NO se toman como 0 (suelen ser una venta sin escanear): se marcan "revisar stock".
+  const EPS_STOCK = 0.0001;
+
+  function diaLocal(d) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+
+  // Momento en que se "cierra" cada dia de calendario del rango (hoy: ahora). Se calcula una sola
+  // vez por informe: se recorre por cada producto.
+  function cierresDeDias(ini, fin) {
+    const cierres = [];
+    const dia = new Date(ini);
+    dia.setHours(0, 0, 0, 0);
+    const finD = new Date(fin);
+    while (dia < finD) {
+      dia.setDate(dia.getDate() + 1);
+      cierres.push((dia < finD ? dia : finD).toISOString());
+    }
+    return cierres;
+  }
+
+  // movs: [{ t, delta, ref, prod }] ordenados por t. ini/fin: ISO. nuevo: dado de alta dentro del
+  // rango (no "venia sin stock": todavia no existia).
+  function analizarQuiebres(movs, ini, fin, cierres, nuevo) {
+    let saldo = 0, i = 0;
+    const porProd = new Map();
+    const negativos = new Set();
+    const aplicar = (m) => {
+      saldo += m.delta;
+      porProd.set(m.prod, (porProd.get(m.prod) || 0) + m.delta);
+    };
+    const mirarNegativos = () => porProd.forEach((v, id) => { if (v < -EPS_STOCK) negativos.add(id); });
+
+    while (i < movs.length && movs[i].t <= ini) aplicar(movs[i++]);
+    mirarNegativos();
+
+    const episodios = [];
+    let sinStock = saldo <= EPS_STOCK;
+    const venia = sinStock && !nuevo;
+    if (venia) episodios.push({ desde: ini, hasta: null });
+    let veces = 0;
+
+    while (i < movs.length && movs[i].t < fin) {
+      // Los movimientos de un mismo documento se aplican juntos: editar o anular una compra no
+      // tiene que inventar un quiebre de un instante entre una linea y la siguiente.
+      const primero = movs[i];
+      aplicar(movs[i++]);
+      while (primero.ref && i < movs.length && movs[i].t < fin && movs[i].ref === primero.ref
+             && new Date(movs[i].t) - new Date(primero.t) < 60000) aplicar(movs[i++]);
+      mirarNegativos();
+      const ahoraSin = saldo <= EPS_STOCK;
+      if (ahoraSin && !sinStock) { veces++; episodios.push({ desde: primero.t, hasta: null }); }
+      else if (!ahoraSin && sinStock && episodios.length) episodios[episodios.length - 1].hasta = primero.t;
+      sinStock = ahoraSin;
+    }
+
+    // Dias sin stock = dias de calendario que TERMINARON sin stock (hoy: si sigue sin stock ahora).
+    // Quebrar y reponer en el mismo dia suma una vez, pero no un dia.
+    // Episodios y cierres vienen en orden: un solo recorrido de cada lista.
+    let dias = 0, racha = 0, seguidos = 0, e = 0;
+    for (const cierre of episodios.length ? cierres : []) {
+      while (e < episodios.length && episodios[e].hasta !== null && episodios[e].hasta < cierre) e++;
+      if (e < episodios.length && episodios[e].desde < cierre) {
+        dias++; seguidos++; racha = Math.max(racha, seguidos);
+      } else seguidos = 0;
+    }
+    return { veces, venia, dias, racha, negativos, huboQuiebre: episodios.length > 0 };
+  }
+
   function queryQuiebresStock() {
-    const desde = toUTC(state.desde);
-    const hasta = toUTC(addOneDay(state.hasta));
-    const sid   = state.sucursalId;
-    return window.SGA_DB.query(`
-      SELECT
-        p.id,
-        COALESCE((SELECT codigo FROM codigos_barras
-                  WHERE producto_id = p.id AND es_principal = 1 LIMIT 1), '') AS codigo,
-        p.nombre,
-        COALESCE(pr.razon_social, '') AS proveedor,
-        COALESCE(s.cantidad, 0) AS stock_actual,
-        p.stock_minimo,
-        SUM(oci.cantidad_pedida) AS total_pedido,
-        COALESCE(SUM(oci.cantidad_recibida), 0) AS total_recibido_orden,
-        COUNT(DISTINCT oc.id) AS num_ordenes,
-        (
-          SELECT COALESCE(SUM(ci2.cantidad), 0)
-          FROM compra_items ci2
-          JOIN compras c2 ON ci2.compra_id = c2.id
-          WHERE ci2.producto_id = p.id
-            AND c2.sucursal_id = ?
-            AND COALESCE(c2.estado,'confirmada') != 'anulada'
-            AND c2.fecha >= ? AND c2.fecha < ?
-        ) AS recibido_compras,
-        (
-          SELECT COUNT(*) FROM producto_sustitutos ps
-          WHERE ps.producto_id = p.id
-        ) AS tiene_sustituto
-      FROM orden_compra_items oci
-      JOIN ordenes_compra oc ON oci.orden_id = oc.id
-        AND oc.sucursal_id = ?
-        AND oc.fecha_creacion >= ? AND oc.fecha_creacion < ?
-        AND oc.estado NOT IN ('borrador')
-      JOIN productos p ON oci.producto_id = p.id
-      LEFT JOIN proveedores pr ON p.proveedor_principal_id = pr.id
-      LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?
-      GROUP BY p.id
-      HAVING recibido_compras = 0
-      ORDER BY tiene_sustituto ASC, stock_actual ASC, p.nombre
-    `, [sid, desde, hasta, sid, desde, hasta, sid]);
+    const sid = state.sucursalId;
+    const q = (sql, p) => window.SGA_DB.query(sql, p);
+    const inicioHist = q(`
+      SELECT COALESCE(MIN(CASE WHEN id LIKE 'saldo_inicial:%' THEN fecha END), MIN(fecha)) AS f
+        FROM stock_movimientos WHERE sucursal_id = ?`, [sid])[0]?.f || null;
+    const desdeUTC = toUTC(state.desde);
+    const finUTC   = toUTC(addOneDay(state.hasta));
+    const ahora    = new Date().toISOString();
+    const ini = inicioHist && inicioHist > desdeUTC ? inicioHist : desdeUTC;
+    const fin = finUTC < ahora ? finUTC : ahora;
+    state.quiebresInfo = { inicioHist, recortado: !!inicioHist && inicioHist > desdeUTC };
+    if (!inicioHist || fin <= ini) return [];
+
+    const productos = new Map(q(`
+      SELECT p.id, p.nombre, p.activo, p.stock_minimo, p.fecha_alta,
+             p.pausa_reposicion, p.pausa_reposicion_hasta,
+             COALESCE((SELECT codigo FROM codigos_barras WHERE producto_id = p.id
+                        ORDER BY es_principal DESC LIMIT 1), '') AS codigo,
+             COALESCE(pr.razon_social, '') AS proveedor,
+             s.cantidad AS stock, s.producto_id IS NOT NULL AS tiene_stock
+        FROM productos p
+        LEFT JOIN proveedores pr ON p.proveedor_principal_id = pr.id
+        LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?`, [sid]).map(p => [p.id, p]));
+
+    const movs = new Map();
+    q(`SELECT id, producto_id, delta, ref_id, fecha FROM stock_movimientos
+        WHERE sucursal_id = ? ORDER BY fecha, rowid`, [sid]).forEach(m => {
+      // El saldo inicial es el punto de partida del historial, sea cual sea su hora exacta.
+      const t = String(m.id).startsWith('saldo_inicial:') ? inicioHist : m.fecha;
+      if (!movs.has(m.producto_id)) movs.set(m.producto_id, []);
+      movs.get(m.producto_id).push({ t, delta: Number(m.delta) || 0, ref: m.ref_id, prod: m.producto_id });
+    });
+
+    // Documentos (no unidades) en los que se pidio / se recibio cada producto.
+    const conjuntos = (filas) => {
+      const mapa = new Map();
+      filas.forEach(f => {
+        if (!mapa.has(f.producto_id)) mapa.set(f.producto_id, new Set());
+        mapa.get(f.producto_id).add(f.doc);
+      });
+      return mapa;
+    };
+    const pedidos = conjuntos(q(`
+      SELECT oci.producto_id, oc.id AS doc FROM orden_compra_items oci
+        JOIN ordenes_compra oc ON oc.id = oci.orden_id
+       WHERE oc.sucursal_id = ? AND oc.estado != 'borrador'
+         AND oc.fecha_creacion >= ? AND oc.fecha_creacion < ?`, [sid, desdeUTC, finUTC]));
+    // Recepcion = un remito, o una compra con mercaderia que no habia entrado ya por un remito
+    // (al facturar un remito la compra repite sus productos: no es otra entrega). Las fechas de
+    // compras y remitos son 'AAAA-MM-DD'.
+    const recibidos = conjuntos(q(`
+      SELECT ri.producto_id, 'r:' || r.id AS doc FROM remito_items ri
+        JOIN remitos r ON r.id = ri.remito_id
+       WHERE r.sucursal_id = ? AND substr(r.fecha, 1, 10) BETWEEN ? AND ?
+      UNION ALL
+      SELECT ci.producto_id, 'c:' || c.id AS doc FROM compra_items ci
+        JOIN compras c ON c.id = ci.compra_id
+       WHERE c.sucursal_id = ? AND COALESCE(c.estado, 'confirmada') != 'anulada'
+         AND substr(c.fecha, 1, 10) BETWEEN ? AND ?
+         AND NOT EXISTS (SELECT 1 FROM remitos r2 JOIN remito_items ri2 ON ri2.remito_id = r2.id
+                          WHERE r2.compra_id = c.id AND ri2.producto_id = ci.producto_id)`,
+      [sid, state.desde, state.hasta, sid, state.desde, state.hasta]));
+
+    const cierres = cierresDeDias(ini, fin);
+    const analizar = (ids) => {
+      const lista = ids.flatMap(id => movs.get(id) || []);
+      if (ids.length > 1) lista.sort((a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
+      const nuevo = ids.every(id => {
+        const alta = productos.get(id)?.fecha_alta;
+        return !!alta && new Date(alta) > new Date(ini);
+      });
+      return analizarQuiebres(lista, ini, fin, cierres, nuevo);
+    };
+    const contar = (mapa, ids) => new Set(ids.flatMap(id => [...(mapa.get(id) || [])])).size;
+    const pausado = (p) => !!window.SGA_DB.pausaVigente?.(p);
+
+    const vistos = new Set();
+    const rows = [];
+    for (const prod of productos.values()) {
+      if (vistos.has(prod.id)) continue;
+      // La composicion del grupo es la de HOY (el sistema no guarda la historica).
+      const grupo = GruposSustitutos.miembrosDe(prod.id).filter(m => productos.has(m.id));
+      const enGrupo = grupo.length > 1;
+      const ids = enGrupo ? grupo.map(m => m.id) : [prod.id];
+      ids.forEach(id => vistos.add(id));
+      const refId = enGrupo ? GruposSustitutos.referenciaRealDe(prod.id) : prod.id;
+      const ref = productos.get(refId) || prod;
+
+      const miembros = ids.map(id => productos.get(id));
+      if (!miembros.some(p => p.activo)) continue;
+      if (!miembros.some(p => p.tiene_stock || movs.has(p.id))) continue;   // nunca tuvo stock
+      const res = analizar(ids);
+      if (!res.huboQuiebre) continue;
+
+      const datos = (p, r, deIds) => ({
+        id: p.id, codigo: p.codigo, nombre: p.nombre, proveedor: p.proveedor,
+        veces: r.veces, venia: r.venia, dias: r.dias, racha: r.racha,
+        stock_actual: deIds.reduce((a, id) => a + (productos.get(id).stock || 0), 0),
+        stock_minimo: p.stock_minimo || 0,
+        veces_pedido: contar(pedidos, deIds), veces_recibido: contar(recibidos, deIds),
+      });
+      const fila = datos(ref, res, ids);
+      fila.en_grupo = enGrupo;
+      fila.pausado = pausado(ref);   // el grupo se pide por su referencia (igual que las ordenes)
+      fila.revisar = [...res.negativos].map(id => productos.get(id).nombre);
+      fila.miembros = !enGrupo ? [] : miembros.map(p => {
+        const r = analizar([p.id]);
+        return Object.assign(datos(p, r, [p.id]), {
+          es_ref: p.id === ref.id, activo: !!p.activo, pausado: pausado(p), revisar: res.negativos.has(p.id),
+        });
+      });
+      rows.push(fila);
+    }
+    return rows.sort((a, b) => b.veces - a.veces || b.dias - a.dias || a.nombre.localeCompare(b.nombre, 'es'));
   }
 
   function queryVentasVendedor() {
@@ -1008,6 +1157,7 @@ const Informes = (() => {
         }
         attachExportListeners();
         attachBajasListeners();
+        attachQuiebresListeners();
       } catch (e) {
         console.error('[Informes]', e);
         resultsEl.innerHTML = `<div class="inf-error">Error al generar el reporte: ${esc(e.message)}</div>`;
@@ -1539,48 +1689,120 @@ const Informes = (() => {
 
   // ── REPORT 4: Quiebres de Stock ───────────────────────────────────────────────
 
-  function renderQuiebresStock(rows) {
-    const sinSustituto = rows.filter(r => !r.tiene_sustituto);
-    const conSustituto = rows.filter(r =>  r.tiene_sustituto);
-    const thead = `<thead><tr>
-      <th>Código</th><th>Producto</th><th>Proveedor</th>
-      <th class="num">Stock actual</th><th class="num">Stock mín.</th>
-      <th class="num">Pedido (OC)</th><th class="num">Recibido</th>
-      <th class="num">Faltante</th><th class="num">Órdenes</th><th>¿Sustituto?</th>
-    </tr></thead>`;
-    const renderRows = (data) => data.map(r => `
-      <tr class="${r.stock_actual <= 0 ? 'row-danger' : ''}">
+  const filasQuiebresVisibles = (rows) =>
+    state.quiebresOcultarPausados ? rows.filter(r => !r.pausado) : rows;
+
+  const tagQ = (clase, texto, titulo = '') =>
+    `<span class="inf-q-tag ${clase}"${titulo ? ` title="${esc(titulo)}"` : ''}>${texto}</span>`;
+
+  function tagsQuiebre(r, revisarTitulo) {
+    return (r.venia ? tagQ('venia', 'Venía sin stock', 'Ya estaba sin stock al empezar el período') : '') +
+      (r.pausado ? tagQ('pausado', 'PAUSADO', 'Reposición pausada') : '') +
+      (revisarTitulo ? tagQ('revisar', '⚠ Revisar stock', revisarTitulo) : '');
+  }
+
+  function renderQuiebresStock(todas) {
+    const rows = filasQuiebresVisibles(todas);
+    const info = state.quiebresInfo || {};
+    const pausados = todas.filter(r => r.pausado).length;
+    const suma = (f) => rows.filter(f).length;
+    const num = (r, campo, extra = '') => {
+      const v = fmtNum(r[campo], Number.isInteger(r[campo]) ? 0 : 2);
+      return `<td class="num ${extra}" data-col="${campo}">${r.en_grupo
+        ? `<button class="inf-q-btn" data-q-detalle="${esc(r.id)}" data-q-col="${campo}" title="Ver el detalle por producto del grupo">${v}</button>`
+        : v}</td>`;
+    };
+    const cuerpo = rows.map(r => `
+      <tr data-q-fila="${esc(r.id)}" class="${r.stock_actual <= 0 ? 'row-danger' : ''} ${r.en_grupo ? 'inf-q-grupo' : ''}">
         <td class="mono">${esc(r.codigo)}</td>
-        <td>${esc(r.nombre)}</td>
+        <td>${esc(r.nombre)} ${tagsQuiebre(r, r.revisar.length ? 'Stock negativo en el período: ' + r.revisar.join(', ') : '')}</td>
         <td>${esc(r.proveedor)}</td>
-        <td class="num ${r.stock_actual <= 0 ? 'text-danger bold' : r.stock_actual <= r.stock_minimo ? 'text-warning' : ''}">${fmtNum(r.stock_actual)}</td>
+        ${num(r, 'veces')}
+        ${num(r, 'dias')}
+        ${num(r, 'racha')}
+        ${num(r, 'stock_actual', r.stock_actual <= 0 ? 'text-danger bold' : r.stock_actual <= r.stock_minimo ? 'text-warning' : '')}
         <td class="num">${fmtNum(r.stock_minimo)}</td>
-        <td class="num">${fmtNum(r.total_pedido)}</td>
-        <td class="num">${fmtNum(r.recibido_compras)}</td>
-        <td class="num text-danger bold">${fmtNum(r.total_pedido - r.recibido_compras)}</td>
-        <td class="num">${r.num_ordenes}</td>
-        <td>${r.tiene_sustituto ? '<span class="badge-si">Sí</span>' : '<span class="badge-no">No</span>'}</td>
+        ${num(r, 'veces_pedido')}
+        ${num(r, 'veces_recibido')}
       </tr>
     `).join('');
     return `
       ${reportHeader('Quiebres de Stock')}
+      ${info.recortado ? `<div class="inf-q-aviso">El registro de movimientos de stock empieza el
+        <strong>${esc(fmtFechaCorta(diaLocal(new Date(info.inicioHist))))}</strong>: lo anterior a esa fecha no se cuenta.</div>` : ''}
       <div class="inf-kpi-row">
-        <div class="inf-kpi"><div class="inf-kpi-label">Total quiebres</div><div class="inf-kpi-value">${rows.length}</div></div>
-        <div class="inf-kpi danger"><div class="inf-kpi-label">Sin sustituto</div><div class="inf-kpi-value text-danger">${sinSustituto.length}</div></div>
-        <div class="inf-kpi"><div class="inf-kpi-label">Con sustituto</div><div class="inf-kpi-value">${conSustituto.length}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Productos / grupos</div><div class="inf-kpi-value">${rows.length}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Quiebres en el período</div><div class="inf-kpi-value">${fmtNum(rows.reduce((s, r) => s + r.veces, 0))}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">Venían sin stock</div><div class="inf-kpi-value">${suma(r => r.venia)}</div></div>
+        <div class="inf-kpi danger"><div class="inf-kpi-label">Sin stock hoy</div><div class="inf-kpi-value text-danger">${suma(r => r.stock_actual <= 0)}</div></div>
+        <div class="inf-kpi"><div class="inf-kpi-label">A revisar stock</div><div class="inf-kpi-value">${suma(r => r.revisar.length > 0)}</div></div>
       </div>
-      ${rows.length === 0 ? `<div class="inf-empty">No se encontraron quiebres en el período.<br>
-        <span class="text-muted" style="font-size:12px">Se detectan cuando un producto fue pedido en una OC confirmada pero el proveedor no realizó entrega en el período.</span></div>` : `
-        ${sinSustituto.length > 0 ? `
-          <div class="inf-section-label danger">🔴 Sin sustituto — requieren acción (${sinSustituto.length})</div>
-          <div class="inf-table-wrap"><table class="inf-table">${thead}<tbody>${renderRows(sinSustituto)}</tbody></table></div>
-        ` : ''}
-        ${conSustituto.length > 0 ? `
-          <div class="inf-section-label">🟡 Con sustituto disponible (${conSustituto.length})</div>
-          <div class="inf-table-wrap"><table class="inf-table">${thead}<tbody>${renderRows(conSustituto)}</tbody></table></div>
-        ` : ''}
+      <div class="inf-q-barra">
+        <label><input type="checkbox" id="inf-q-pausados" ${state.quiebresOcultarPausados ? 'checked' : ''}> Ocultar pausados (${pausados})</label>
+        <span class="text-muted">Quiebre: el stock llega a 0. Días: cuántos terminaron sin stock. Pedido / recibido: cantidad de órdenes y de entregas. En negrita: grupo de sustitutos (clic en un número para ver cada producto).</span>
+      </div>
+      ${rows.length === 0 ? `<div class="inf-empty">No se encontraron quiebres en el período.</div>` : `
+        <div class="inf-table-wrap"><table class="inf-table" id="inf-q-tabla">
+          <thead><tr>
+            <th>Código</th><th>Producto</th><th>Proveedor</th>
+            <th class="num">Veces que quebró</th><th class="num">Días sin stock</th><th class="num">Racha más larga</th>
+            <th class="num">Stock actual</th><th class="num">Stock mín.</th>
+            <th class="num">Veces pedido</th><th class="num">Veces recibido</th>
+          </tr></thead>
+          <tbody>${cuerpo}</tbody>
+        </table></div>
       `}
     `;
+  }
+
+  function attachQuiebresListeners() {
+    if (state.reporte !== 'quiebres_stock') return;
+    ge('inf-q-pausados')?.addEventListener('change', (e) => {
+      state.quiebresOcultarPausados = e.target.checked;
+      ge('inf-results').innerHTML = renderQuiebresStock(state.data);
+      attachExportListeners();
+      attachQuiebresListeners();
+    });
+    document.querySelectorAll('[data-q-detalle]').forEach(btn =>
+      btn.addEventListener('click', () => abrirDetalleQuiebre(btn.dataset.qDetalle, btn.dataset.qCol)));
+  }
+
+  function abrirDetalleQuiebre(refId, columna) {
+    const r = (state.data || []).find(x => x.id === refId);
+    if (!r) return;
+    const cols = [['veces', 'Veces que quebró'], ['dias', 'Días sin stock'], ['racha', 'Racha más larga'],
+      ['stock_actual', 'Stock actual'], ['veces_pedido', 'Veces pedido'], ['veces_recibido', 'Veces recibido']];
+    const celdas = (x) => cols.map(([c]) =>
+      `<td class="num ${c === columna ? 'inf-q-col' : ''} ${c === 'stock_actual' && x[c] < 0 ? 'text-danger bold' : ''}">${fmtNum(x[c], Number.isInteger(x[c]) ? 0 : 2)}</td>`).join('');
+    const overlay = document.createElement('div');
+    overlay.id = 'inf-q-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    overlay.innerHTML = `
+      <div role="dialog" aria-label="Detalle del grupo" class="inf-q-modal">
+        <div class="inf-q-modal-titulo">Detalle del grupo — ${esc(r.nombre)}</div>
+        <div class="inf-q-modal-cuerpo">
+          <table class="inf-table">
+            <thead><tr><th>Producto</th>${cols.map(([c, t]) => `<th class="num ${c === columna ? 'inf-q-col' : ''}">${t}</th>`).join('')}</tr></thead>
+            <tbody>${r.miembros.map(m => `
+              <tr>
+                <td>${esc(m.nombre)} ${m.es_ref ? tagQ('ref', 'Referencia') : ''} ${m.activo ? '' : tagQ('pausado', 'Inactivo')}
+                  ${tagsQuiebre(m, m.revisar ? 'Tuvo stock negativo en el período' : '')}
+                  <div class="text-muted" style="font-size:11px">${esc(m.proveedor)}</div></td>
+                ${celdas(m)}
+              </tr>`).join('')}</tbody>
+            <tfoot><tr><td><strong>Grupo</strong></td>${celdas(r)}</tr></tfoot>
+          </table>
+          <p class="text-muted" style="font-size:12px">El grupo quiebra cuando la <strong>suma</strong> de sus productos llega a 0: sus quiebres y días no son la suma de los de cada uno.</p>
+        </div>
+        <div class="inf-q-modal-pie"><button class="btn btn-sm" id="inf-q-cerrar">Cerrar</button></div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cerrar(); } };
+    const cerrar = () => { document.removeEventListener('keydown', onKey, true); overlay.remove(); };
+    document.addEventListener('keydown', onKey, true);
+    overlay.querySelector('#inf-q-cerrar').addEventListener('click', cerrar);
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) cerrar(); });
+    overlay.querySelector('#inf-q-cerrar').focus();
   }
 
   // ── REPORT 5: Ventas por Vendedor ─────────────────────────────────────────────
@@ -2788,11 +3010,12 @@ const Informes = (() => {
       return { title, periodo, headers, data };
     }
     if (rep === 'quiebres_stock') {
-      const headers = ['Código','Producto','Proveedor','Stock actual','Stock mín.',
-                       'Pedido (OC)','Recibido','Faltante','N° Órdenes','¿Sustituto?'];
-      const data = rows.map(r => [r.codigo, r.nombre, r.proveedor, r.stock_actual, r.stock_minimo,
-        r.total_pedido, r.recibido_compras, r.total_pedido - r.recibido_compras,
-        r.num_ordenes, r.tiene_sustituto ? 'Sí' : 'No']);
+      const headers = ['Código','Producto','Proveedor','Grupo de sustitutos','Veces que quebró','Venía sin stock',
+                       'Días sin stock','Racha más larga (días)','Stock actual','Stock mín.',
+                       'Veces pedido','Veces recibido','Pausado','Revisar stock'];
+      const data = filasQuiebresVisibles(rows).map(r => [r.codigo, r.nombre, r.proveedor, r.en_grupo ? 'Sí' : 'No',
+        r.veces, r.venia ? 'Sí' : 'No', r.dias, r.racha, r.stock_actual, r.stock_minimo,
+        r.veces_pedido, r.veces_recibido, r.pausado ? 'Sí' : 'No', r.revisar.join(' | ')]);
       return { title, periodo, headers, data };
     }
     if (rep === 'aging_cc') {
